@@ -32,9 +32,9 @@
 namespace icts::clock_sizing_optimization {
 
 auto FirstClockSizingEditBufferIndex(const std::vector<ClockSizingEdit>& edits) -> std::size_t;
-auto CaptureState(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
+auto CaptureState(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
                   const std::vector<ClockSizingSlewLimit>& slew_baseline) -> ClockSizingTimingState;
-auto CaptureStateWithArea(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
+auto CaptureStateWithArea(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
                           const std::vector<ClockSizingSlewLimit>& slew_baseline, double area_um2) -> ClockSizingTimingState;
 auto TargetMet(const ClockSizingTimingState& state, double target_skew_ns) -> bool;
 auto StateImproves(const ClockSizingTimingState& current, const ClockSizingTimingState& candidate, double target_skew_ns) -> bool;

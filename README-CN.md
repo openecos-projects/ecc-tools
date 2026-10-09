@@ -140,9 +140,9 @@ Roadmap -->
 
 ## 贡献指南
 
-Fork 此 iEDA 仓库，修改代码后提交 [Pull Request](https://gitee.com/oscc-project/iEDA/pulls)。
-
-请注意 iEDA 使用的[编程规范][Code-conduct-md]。
+请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，了解分支、提交消息、Pull
+Request、格式检查和验证要求。Pull Request 应提交到 `main` 分支，并使用
+[.github/pull_request_template.md](.github/pull_request_template.md) 模板。
 
 ## **论文引用**
 ```

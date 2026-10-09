@@ -54,39 +54,35 @@ auto makeLocationKey(const FastStaPoint& point) -> std::pair<int, int>
   return {point.x_dbu, point.y_dbu};
 }
 
-auto makeNodeKind(const Clock& clock, const Pin* pin) -> FastStaNodeKind
+struct ClockPinState
 {
-  if (pin == clock.get_clock_source()) {
-    return FastStaNodeKind::kSource;
-  }
-  const auto* arc = clock.findPropagationArc(pin);
-  if (arc != nullptr) {
-    if (pin == arc->input_pin) {
-      return FastStaNodeKind::kBufferInput;
-    }
-    if (pin == arc->output_pin) {
-      return FastStaNodeKind::kBufferOutput;
-    }
-  }
-  return FastStaNodeKind::kSink;
-}
+  FastStaNodeKind kind = FastStaNodeKind::kSink;
+  FastStaNodeId node_id = kInvalidFastStaNodeId;
+};
 
-auto appendPinNode(const Clock& clock, Pin* pin, FastStaClockContext& context) -> FastStaNodeId
+using ClockPinStates = std::unordered_map<const Pin*, ClockPinState>;
+
+auto appendPinNode(ClockPinStates& pin_states, Pin* pin, FastStaContext& context) -> FastStaNodeId
 {
   if (pin == nullptr) {
     return kInvalidFastStaNodeId;
   }
+  auto& pin_state = pin_states[pin];
+  if (pin_state.node_id != kInvalidFastStaNodeId) {
+    return pin_state.node_id;
+  }
   const auto node_name = makeNodeName(pin);
-  if (const auto iter = context.node_id_by_name.find(node_name); iter != context.node_id_by_name.end()) {
-    return iter->second;
+  const auto [node_iter, inserted] = context.node_id_by_name.try_emplace(node_name, context.nodes.size());
+  pin_state.node_id = node_iter->second;
+  if (!inserted) {
+    return node_iter->second;
   }
 
   const auto* inst = pin->get_inst();
   const auto location = FastStaPoint{.x_dbu = pin->get_location().get_x(), .y_dbu = pin->get_location().get_y()};
-  const auto node_id = context.nodes.size();
-  context.node_id_by_name[node_name] = node_id;
+  const auto node_id = node_iter->second;
   context.node_id_by_location.emplace(makeLocationKey(location), node_id);
-  const auto node_kind = makeNodeKind(clock, pin);
+  const auto node_kind = pin_state.kind;
   const auto inst_name = inst != nullptr ? inst->get_name() : std::string{};
   context.nodes.push_back(FastStaNode{
       .kind = node_kind,
@@ -97,6 +93,15 @@ auto appendPinNode(const Clock& clock, Pin* pin, FastStaClockContext& context) -
       .location = location,
       .output_net_ids = {},
       .timing = {},
+      .early_timing = {},
+      .late_timing = {},
+      .arrival_seed_early_ns = 0.0,
+      .arrival_seed_late_ns = 0.0,
+      .slew_seed_early_ns = 0.0,
+      .slew_seed_late_ns = 0.0,
+      .clock_arrival_early_ns = 0.0,
+      .clock_arrival_late_ns = 0.0,
+      .domain = FastStaNodeDomain::kClock,
   });
   if (!inst_name.empty()) {
     if (node_kind == FastStaNodeKind::kBufferInput) {
@@ -108,7 +113,7 @@ auto appendPinNode(const Clock& clock, Pin* pin, FastStaClockContext& context) -
   return node_id;
 }
 
-auto appendRouteGeometry(const FastStaClockNetRouteGeometry& clock_net_route, FastStaClockContext& context) -> void
+auto appendRouteGeometry(const FastStaClockNetRouteGeometry& clock_net_route, FastStaContext& context) -> void
 {
   const auto net_iter = context.net_id_by_name.find(clock_net_route.net_name);
   if (net_iter == context.net_id_by_name.end() || net_iter->second >= context.nets.size()) {
@@ -129,40 +134,66 @@ auto appendRouteGeometry(const FastStaClockNetRouteGeometry& clock_net_route, Fa
 
 }  // namespace
 
-auto FastStaClockTree::buildFromClock(const Clock& clock) -> FastStaClockContext
+auto FastStaClockTree::buildFromClock(const Clock& clock) -> FastStaContext
 {
-  FastStaClockContext context;
+  FastStaContext context;
+  auto pin_count = clock.get_loads().size() + static_cast<std::size_t>(clock.get_clock_source() != nullptr);
+  for (const auto* inst : clock.get_insts()) {
+    if (inst != nullptr) {
+      pin_count += inst->get_pins().size();
+    }
+  }
+  ClockPinStates pin_states;
+  pin_states.reserve(pin_count);
+  pin_states.emplace(clock.get_clock_source(), ClockPinState{.kind = FastStaNodeKind::kSource});
+  for (const auto& arc : clock.get_propagation_arcs()) {
+    // Preserve source priority and the first matching propagation arc. Node IDs
+    // are reused only during this construction over the same immutable Clock.
+    pin_states.try_emplace(arc.input_pin, ClockPinState{.kind = FastStaNodeKind::kBufferInput});
+    pin_states.try_emplace(arc.output_pin, ClockPinState{.kind = FastStaNodeKind::kBufferOutput});
+  }
+  context.nodes.reserve(pin_count);
+  context.node_id_by_name.reserve(pin_count);
+  context.buffer_input_node_id_by_inst.reserve(clock.get_propagation_arcs().size());
+  context.buffer_output_node_id_by_inst.reserve(clock.get_propagation_arcs().size());
+  const auto net_count = clock.get_nets().size() + static_cast<std::size_t>(clock.get_clock_source_net() != nullptr);
+  context.nets.reserve(net_count);
+  context.net_id_by_name.reserve(net_count);
   context.clock_name = clock.get_clock_name();
   context.clock_net_name = clock.get_clock_net_name();
   context.clock_period_ns = clock.get_clock_period_ns();
-  context.source_node_id = appendPinNode(clock, clock.get_clock_source(), context);
+  context.source_node_id = appendPinNode(pin_states, clock.get_clock_source(), context);
 
   for (auto* pin : clock.get_loads()) {
-    (void) appendPinNode(clock, pin, context);
+    (void) appendPinNode(pin_states, pin, context);
   }
   for (auto* inst : clock.get_insts()) {
     if (inst == nullptr) {
       continue;
     }
     for (auto* pin : inst->get_pins()) {
-      (void) appendPinNode(clock, pin, context);
+      (void) appendPinNode(pin_states, pin, context);
     }
   }
 
   const auto append_net = [&](Net* net) -> void {
-    if (net == nullptr || context.net_id_by_name.contains(net->get_name())) {
+    if (net == nullptr) {
       return;
     }
-    const auto net_id = context.nets.size();
-    context.net_id_by_name[net->get_name()] = net_id;
+    const auto [net_iter, inserted] = context.net_id_by_name.try_emplace(net->get_name(), context.nets.size());
+    if (!inserted) {
+      return;
+    }
+    const auto net_id = net_iter->second;
     FastStaNet fast_net;
     fast_net.name = net->get_name();
-    fast_net.driver_node_id = appendPinNode(clock, net->get_driver(), context);
+    fast_net.load_node_ids.reserve(net->get_loads().size());
+    fast_net.driver_node_id = appendPinNode(pin_states, net->get_driver(), context);
     if (fast_net.driver_node_id != kInvalidFastStaNodeId) {
       context.nodes.at(fast_net.driver_node_id).output_net_ids.push_back(net_id);
     }
     for (auto* load : net->get_loads()) {
-      const auto load_node_id = appendPinNode(clock, load, context);
+      const auto load_node_id = appendPinNode(pin_states, load, context);
       if (load_node_id == kInvalidFastStaNodeId) {
         continue;
       }
@@ -179,14 +210,14 @@ auto FastStaClockTree::buildFromClock(const Clock& clock) -> FastStaClockContext
   return context;
 }
 
-auto FastStaClockTree::buildFromClockRouteGeometry(const Clock& clock, const FastStaClockRouteGeometry& route_geometry) -> FastStaClockContext
+auto FastStaClockTree::buildFromClockRouteGeometry(const Clock& clock, const FastStaClockRouteGeometry& route_geometry) -> FastStaContext
 {
   auto context = buildFromClock(clock);
   context.dbu_per_um = route_geometry.design_dbu_per_um;
   return context;
 }
 
-auto FastStaClockTree::applyRouteGeometry(FastStaClockContext& context, const FastStaClockRouteGeometry& route_geometry) -> void
+auto FastStaClockTree::applyRouteGeometry(FastStaContext& context, const FastStaClockRouteGeometry& route_geometry) -> void
 {
   const auto route_geometry_dbu_per_um = route_geometry.design_dbu_per_um;
   if (route_geometry_dbu_per_um <= 0) {

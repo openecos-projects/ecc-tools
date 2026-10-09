@@ -1,11 +1,13 @@
 #pragma once
 
 #include "GeometryDesignMetadata.h"
+#include "GeometryDrc.h"
 #include "GeometryLayerMetadata.h"
 #include "GeometryStore.h"
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,7 @@ struct SnapshotWriteOptions
   std::vector<GeometryNetMetadata> nets;
   std::vector<GeometryBusMetadata> buses;
   std::vector<GeometryGroupMetadata> groups;
+  std::optional<GeometryDrcDistribution> drc;
   std::string design_name;
   std::string design_version;
   int32_t dbu_per_micron = 0;

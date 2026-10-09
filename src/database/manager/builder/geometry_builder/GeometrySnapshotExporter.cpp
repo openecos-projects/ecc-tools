@@ -24,7 +24,8 @@ void populate_design_metadata(SnapshotWriteOptions& options, idb::IdbDesign& des
 }  // namespace
 
 SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout,
-                                             const std::filesystem::path& output_dir)
+                                             const std::filesystem::path& output_dir,
+                                             std::optional<GeometryDrcDistribution> drc)
 {
   if (output_dir.empty()) {
     return {};
@@ -35,6 +36,7 @@ SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLay
   builder.rebuild_from_design(design, layout, store);
 
   SnapshotWriteOptions options{output_dir};
+  options.drc = std::move(drc);
   options.layers = builder.collect_layer_metadata(layout);
   options.sites = builder.collect_site_metadata(layout);
   options.masters = builder.collect_master_metadata(layout);

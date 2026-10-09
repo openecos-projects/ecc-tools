@@ -194,11 +194,11 @@ int LefRead::propDefCB(lefrCallbackType_e c, lefiProp* prop, lefiUserData data)
 
 int LefRead::parse_property_definition(lefiProp* prop)
 {
-  IdbLayout* layout = _lef_service->get_layout();
+  // IdbLayout* layout = _lef_service->get_layout();
 
-  auto property_type = prop->lefiProp::propType();
+  // auto property_type = prop->lefiProp::propType();
   std::string name = prop->lefiProp::propName();
-  auto data_type = prop->lefiProp::dataType();
+  // auto data_type = prop->lefiProp::dataType();
 
   // set max via stack
   if (name == "LEF58_MAXVIASTACK" && prop->lefiProp::hasString()) {

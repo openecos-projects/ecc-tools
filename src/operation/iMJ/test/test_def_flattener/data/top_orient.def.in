@@ -1,0 +1,19 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN top_orient ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100000 100000 ) ;
+
+COMPONENTS 8 ;
+  - u_child_n CHILD + FIXED ( 10000 10000 ) N ;
+  - u_child_w CHILD + FIXED ( 30000 10000 ) W ;
+  - u_child_s CHILD + FIXED ( 50000 10000 ) S ;
+  - u_child_e CHILD + FIXED ( 70000 10000 ) E ;
+  - u_child_fn CHILD + FIXED ( 10000 40000 ) FN ;
+  - u_child_fs CHILD + FIXED ( 30000 40000 ) FS ;
+  - u_child_fw CHILD + FIXED ( 50000 40000 ) FW ;
+  - u_child_fe CHILD + FIXED ( 70000 40000 ) FE ;
+END COMPONENTS
+
+END DESIGN

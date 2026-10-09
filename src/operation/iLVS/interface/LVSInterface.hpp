@@ -38,7 +38,7 @@ namespace ilvs {
 enum class ConnectType;
 class DefData;
 class DesignData;
-class NetRoutingData;
+class NetRoutingGraph;
 class NetlistData;
 class Net;
 class RoutingShape;
@@ -82,17 +82,23 @@ class LVSInterface
   void wrapInstanceList(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapInstance(idb::IdbInstance* idb_instance, DesignData& design_data);
   void wrapIOPinList(idb::IdbDesign* idb_design, DesignData& design_data);
-  std::string wrapDesignTerminal(idb::IdbPin* idb_pin, DesignData& design_data);
+  std::string wrapDesignTerminal(idb::IdbPin* idb_pin);
   void wrapNetList(idb::IdbDesign* idb_design, DesignData& design_data);
-  void wrapNetPinList(idb::IdbPins* idb_pin_list, Net& net, DesignData& design_data);
+  void wrapNetPinList(idb::IdbPins* idb_pin_list, Net& net);
   void wrapPowerGroundTerminal(idb::IdbDesign* idb_design, DesignData& design_data);
   void wrapPowerGroundPin(idb::IdbPin* idb_pin, DesignData& design_data, ConnectType connect_type, std::unordered_set<idb::IdbPin*>& idb_pin_set);
   void wrapDefRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
-  void wrapNetRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
-  void wrapRoutingDataPin(const std::string& net_name, idb::IdbPin* idb_pin, bool is_power_net, bool is_ground_net, DefData& def_data);
+  void wrapNetTerminalData(idb::IdbDesign* idb_design, DefData& def_data);
+  void wrapNetWireData(idb::IdbDesign* idb_design, DefData& def_data);
+  void wrapNetViaData(idb::IdbDesign* idb_design, DefData& def_data);
+  void wrapRoutingDataPin(const std::string& net_name, int32_t net_id, const std::string& terminal_name, idb::IdbPin* idb_pin,
+                          bool is_power_net, bool is_ground_net, DefData& def_data);
   RoutingShape wrapRoutingDataShape(idb::IdbLayer* idb_layer, const idb::IdbRect& idb_rect);
-  void wrapRoutingDataVia(idb::IdbVia* idb_via, NetRoutingData& net_routing_data);
-  void wrapSpecialNetRoutingData(idb::IdbDesign* idb_design, DefData& def_data);
+  int32_t appendRoutingShape(NetRoutingGraph& net_routing_graph, RoutingShape routing_shape);
+  void wrapRoutingDataVia(idb::IdbVia* idb_via, NetRoutingGraph& net_routing_graph);
+  void wrapSpecialNetTerminalData(idb::IdbDesign* idb_design, DefData& def_data);
+  void wrapSpecialNetWireData(idb::IdbDesign* idb_design, DefData& def_data);
+  void wrapSpecialNetViaData(idb::IdbDesign* idb_design, DefData& def_data);
   Shape wrapShape(int32_t layer_idx, idb::IdbRect idb_rect);
   idb::IdbRect getPhysicalSegmentRect(idb::IdbRegularWireSegment* idb_segment);
   std::string getTerminalName(idb::IdbPin* idb_pin);

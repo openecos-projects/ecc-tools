@@ -44,6 +44,15 @@ namespace icts::clock_sizing_optimization {
 
 namespace {
 
+auto ChangeFastStaMasters(FastSTA& fast_sta, FastStaContextId context_id, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+{
+  if (!fast_sta.changeBufferMasters(context_id, changes)) {
+    return false;
+  }
+  const auto analysis_status = fast_sta.queryAnalysisStatus(context_id);
+  return analysis_status.has_value() && analysis_status->timing_valid && analysis_status->power_valid;
+}
+
 auto ClockSizingEditDriveMagnitude(const std::vector<ClockSizingEdit>& edits) -> int
 {
   int magnitude = 0;
@@ -102,22 +111,46 @@ auto PreferTrial(const ClockSizingEditBatch& candidate, const ClockSizingEditBat
   return FirstClockSizingEditBufferIndex(candidate.edits) < FirstClockSizingEditBufferIndex(incumbent.edits);
 }
 
-auto ChangeFastStaMasters(FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+auto CaptureRejectedSlewStage(const FastSTA& fast_sta, FastStaContextId context_id, const ClockSizingTimingState& state)
+    -> std::optional<FastStaTimingStageFact>
 {
-  if (!fast_sta.changeBufferMasters(clock_id, changes)) {
-    return false;
+  if (!state.slew.worst_violation.has_value()) {
+    return std::nullopt;
   }
-  const auto analysis_status = fast_sta.queryClockAnalysisStatus(clock_id);
-  return analysis_status.has_value() && analysis_status->timing_valid && analysis_status->power_valid;
+  const auto& worst = *state.slew.worst_violation;
+  for (const auto& stage : fast_sta.collectTimingStageFacts(context_id, worst.node_id)) {
+    if (stage.pin_name == worst.node_name && stage.slew_ns == worst.slew_ns) {
+      return stage;
+    }
+  }
+  return std::nullopt;
 }
 
-auto ChangeFastStaMastersTimingOnly(FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+auto CaptureRestoredSlewStage(const FastSTA& fast_sta, FastStaContextId context_id, const ClockSizingTimingState& rejected_state,
+                              const std::optional<FastStaTimingStageFact>& rejected) -> std::optional<FastStaTimingStageFact>
 {
-  if (!fast_sta.changeBufferMastersTimingOnly(clock_id, changes)) {
-    return false;
+  if (!rejected.has_value() || !rejected_state.slew.worst_violation.has_value()) {
+    return std::nullopt;
   }
-  const auto analysis_status = fast_sta.queryClockAnalysisStatus(clock_id);
-  return analysis_status.has_value() && analysis_status->timing_valid;
+  for (const auto& stage : fast_sta.collectTimingStageFacts(context_id, rejected_state.slew.worst_violation->node_id)) {
+    if (stage.pin_name == rejected->pin_name && stage.analysis == rejected->analysis && stage.transition == rejected->transition) {
+      return stage;
+    }
+  }
+  return std::nullopt;
+}
+
+auto RememberRejectedTrial(ClockSizingSummary& summary, const ClockSizingEditBatch& trial, const std::vector<ClockSizingBuffer>& buffers) -> void
+{
+  summary.rejected_state = trial.state;
+  summary.rejected_slew_stage = trial.rejected_slew_stage;
+  summary.restored_slew_stage = trial.restored_slew_stage;
+  summary.rejected_edits.clear();
+  for (const auto& edit : trial.edits) {
+    if (edit.buffer_index < buffers.size()) {
+      summary.rejected_edits.emplace_back(buffers.at(edit.buffer_index).inst_name, edit);
+    }
+  }
 }
 
 auto BuildMasterChanges(const std::vector<ClockSizingBuffer>& buffers, const std::vector<ClockSizingEdit>& edits, bool restore)
@@ -146,7 +179,7 @@ auto ClockSizingEditAreaDelta(const std::vector<ClockSizingEdit>& edits) -> doub
   return area_delta_um2;
 }
 
-auto EvaluateClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto EvaluateClockSizingEditBatch(FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                                   const std::vector<ClockSizingEdit>& edits, const ClockSizingTimingState& current,
                                   const std::vector<ClockSizingCapLimit>& cap_baseline, const std::vector<ClockSizingSlewLimit>& slew_baseline,
                                   double target_skew_ns) -> ClockSizingEditBatch
@@ -157,18 +190,25 @@ auto EvaluateClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, co
     return trial;
   }
 
-  if (!ChangeFastStaMasters(fast_sta, clock_id, BuildMasterChanges(buffers, trial.edits, false))) {
+  if (!fast_sta.beginBufferMastersClockTrial(context_id, BuildMasterChanges(buffers, trial.edits, false))) {
     return trial;
   }
-  trial.state = CaptureState(fast_sta, clock_id, cap_baseline, slew_baseline);
+  trial.state = CaptureState(fast_sta, context_id, cap_baseline, slew_baseline);
   trial.valid = StateImproves(current, trial.state, target_skew_ns);
-  if (!ChangeFastStaMasters(fast_sta, clock_id, BuildMasterChanges(buffers, trial.edits, true))) {
+  const bool capture_slew_diagnostic = !trial.valid && !trial.state.slew.legal;
+  if (capture_slew_diagnostic) {
+    trial.rejected_slew_stage = CaptureRejectedSlewStage(fast_sta, context_id, trial.state);
+  }
+  if (!fast_sta.restoreBufferMastersClockTrial(context_id)) {
     CTSLOG.error(Loc::current(), "Optimization: failed to restore fast STA batch trial.");
+  }
+  if (capture_slew_diagnostic) {
+    trial.restored_slew_stage = CaptureRestoredSlewStage(fast_sta, context_id, trial.state, trial.rejected_slew_stage);
   }
   return trial;
 }
 
-auto EvaluateClockSizingEditBatchTimingOnly(FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto EvaluateClockSizingEditBatchTimingOnly(FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                                             const std::vector<ClockSizingEdit>& edits, const ClockSizingTimingState& current,
                                             const std::vector<ClockSizingCapLimit>& cap_baseline, const std::vector<ClockSizingSlewLimit>& slew_baseline,
                                             double target_skew_ns) -> ClockSizingEditBatch
@@ -179,25 +219,32 @@ auto EvaluateClockSizingEditBatchTimingOnly(FastSTA& fast_sta, FastStaClockId cl
     return trial;
   }
 
-  if (!ChangeFastStaMastersTimingOnly(fast_sta, clock_id, BuildMasterChanges(buffers, trial.edits, false))) {
+  if (!fast_sta.beginBufferMastersClockTrial(context_id, BuildMasterChanges(buffers, trial.edits, false))) {
     return trial;
   }
-  trial.state = CaptureStateWithArea(fast_sta, clock_id, cap_baseline, slew_baseline, current.power.area_um2 + ClockSizingEditAreaDelta(trial.edits));
+  trial.state = CaptureStateWithArea(fast_sta, context_id, cap_baseline, slew_baseline, current.power.area_um2 + ClockSizingEditAreaDelta(trial.edits));
   trial.valid = StateImproves(current, trial.state, target_skew_ns);
-  if (!ChangeFastStaMastersTimingOnly(fast_sta, clock_id, BuildMasterChanges(buffers, trial.edits, true))) {
+  const bool capture_slew_diagnostic = !trial.valid && !trial.state.slew.legal;
+  if (capture_slew_diagnostic) {
+    trial.rejected_slew_stage = CaptureRejectedSlewStage(fast_sta, context_id, trial.state);
+  }
+  if (!fast_sta.restoreBufferMastersClockTrial(context_id)) {
     CTSLOG.error(Loc::current(), "Optimization: failed to restore fast STA timing-only batch trial.");
+  }
+  if (capture_slew_diagnostic) {
+    trial.restored_slew_stage = CaptureRestoredSlewStage(fast_sta, context_id, trial.state, trial.rejected_slew_stage);
   }
   return trial;
 }
 
-auto FindBestClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto FindBestClockSizingEditBatch(FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                                   const ClockSizingTopologyIndex& topology, const ClockSizingTimingState& current,
                                   const std::vector<ClockSizingCapLimit>& cap_baseline, const std::vector<ClockSizingSlewLimit>& slew_baseline,
                                   double target_skew_ns, ClockSizingSummary& summary) -> ClockSizingEditBatch
 {
   ClockSizingEditBatch best;
   const auto candidate_start = std::chrono::steady_clock::now();
-  const auto candidates = GenerateClockSizingEditBatches(fast_sta, clock_id, buffers, topology, current);
+  const auto candidates = GenerateClockSizingEditBatches(fast_sta, context_id, buffers, topology, current);
   summary.profile.generate_batch_candidates_s += Utility::getElapsedSeconds(candidate_start);
   summary.profile.generated_candidate_count += candidates.size();
   for (const auto& edits : candidates) {
@@ -207,7 +254,7 @@ auto FindBestClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, co
     ++summary.trial_count;
     ++summary.batch_trial_count;
     const auto trial_start = std::chrono::steady_clock::now();
-    auto trial = EvaluateClockSizingEditBatch(fast_sta, clock_id, buffers, edits, current, cap_baseline, slew_baseline, target_skew_ns);
+    auto trial = EvaluateClockSizingEditBatch(fast_sta, context_id, buffers, edits, current, cap_baseline, slew_baseline, target_skew_ns);
     const double trial_runtime_s = Utility::getElapsedSeconds(trial_start);
     summary.profile.batch_trial_eval_s += trial_runtime_s;
     if (!trial.state.cap.legal) {
@@ -218,6 +265,9 @@ auto FindBestClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, co
     }
     if (!trial.valid) {
       ++summary.rejected_candidate_count;
+      if (!trial.state.cap.legal || !trial.state.slew.legal) {
+        RememberRejectedTrial(summary, trial, buffers);
+      }
       continue;
     }
     if (PreferTrial(trial, best, current, target_skew_ns)) {
@@ -230,14 +280,14 @@ auto FindBestClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, co
   return best;
 }
 
-auto FindBestScalableClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto FindBestScalableClockSizingEditBatch(FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                                           const ClockSizingTopologyIndex& topology, const ClockSizingTimingState& current,
                                           const std::vector<ClockSizingCapLimit>& cap_baseline, const std::vector<ClockSizingSlewLimit>& slew_baseline,
                                           double target_skew_ns, ClockSizingSummary& summary) -> ClockSizingEditBatch
 {
   ClockSizingEditBatch best;
   const auto candidate_start = std::chrono::steady_clock::now();
-  const auto candidates = GenerateScalableClockSizingEditBatches(fast_sta, clock_id, buffers, topology, current, target_skew_ns);
+  const auto candidates = GenerateScalableClockSizingEditBatches(fast_sta, context_id, buffers, topology, current, target_skew_ns);
   summary.profile.generate_batch_candidates_s += Utility::getElapsedSeconds(candidate_start);
   summary.profile.generated_candidate_count += candidates.size();
   const auto exact_trial_count = std::min(DefaultOptimizationPolicy().max_scalable_exact_trials_per_iteration, candidates.size());
@@ -249,7 +299,7 @@ auto FindBestScalableClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId cloc
     ++summary.trial_count;
     ++summary.batch_trial_count;
     const auto trial_start = std::chrono::steady_clock::now();
-    auto trial = EvaluateClockSizingEditBatchTimingOnly(fast_sta, clock_id, buffers, candidate.edits, current, cap_baseline, slew_baseline, target_skew_ns);
+    auto trial = EvaluateClockSizingEditBatchTimingOnly(fast_sta, context_id, buffers, candidate.edits, current, cap_baseline, slew_baseline, target_skew_ns);
     const double trial_runtime_s = Utility::getElapsedSeconds(trial_start);
     summary.profile.batch_trial_eval_s += trial_runtime_s;
     if (!trial.state.cap.legal) {
@@ -260,6 +310,9 @@ auto FindBestScalableClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId cloc
     }
     if (!trial.valid) {
       ++summary.rejected_candidate_count;
+      if (!trial.state.cap.legal || !trial.state.slew.legal) {
+        RememberRejectedTrial(summary, trial, buffers);
+      }
       continue;
     }
     if (PreferTrial(trial, best, current, target_skew_ns)) {
@@ -271,13 +324,13 @@ auto FindBestScalableClockSizingEditBatch(FastSTA& fast_sta, FastStaClockId cloc
 
 }  // namespace
 
-auto SolveClock(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSizingBuffer>& buffers, const std::vector<ClockSizingCapLimit>& cap_baseline,
+auto SolveClock(FastSTA& fast_sta, FastStaContextId context_id, std::vector<ClockSizingBuffer>& buffers, const std::vector<ClockSizingCapLimit>& cap_baseline,
                 const std::vector<ClockSizingSlewLimit>& slew_baseline, double target_skew_ns) -> ClockSizingSummary
 {
   ClockSizingSummary summary;
   summary.solve_mode = "exact_full_power_batch";
   auto stage_start = std::chrono::steady_clock::now();
-  summary.before = CaptureState(fast_sta, clock_id, cap_baseline, slew_baseline);
+  summary.before = CaptureState(fast_sta, context_id, cap_baseline, slew_baseline);
   summary.profile.capture_initial_state_s = Utility::getElapsedSeconds(stage_start);
   if (!summary.before.valid) {
     if (!summary.before.skew.valid) {
@@ -294,7 +347,7 @@ auto SolveClock(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSiz
   stage_start = std::chrono::steady_clock::now();
   const auto topology = BuildClockSizingTopologyIndex(ClockSizingTopologyIndexInput{
       .fast_sta = &fast_sta,
-      .clock_id = clock_id,
+      .context_id = context_id,
       .buffers = &buffers,
   });
   summary.profile.build_topology_index_s = Utility::getElapsedSeconds(stage_start);
@@ -307,17 +360,17 @@ auto SolveClock(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSiz
     return summary;
   }
   while (summary.iteration_count < DefaultOptimizationPolicy().max_iterations && summary.trial_count < DefaultOptimizationPolicy().max_trials) {
-    auto best = FindBestClockSizingEditBatch(fast_sta, clock_id, buffers, topology, current, cap_baseline, slew_baseline, target_skew_ns, summary);
+    auto best = FindBestClockSizingEditBatch(fast_sta, context_id, buffers, topology, current, cap_baseline, slew_baseline, target_skew_ns, summary);
     if (!best.valid) {
       summary.stop_reason = summary.trial_count >= DefaultOptimizationPolicy().max_trials ? "trial_limit" : "no_improving_candidate";
       break;
     }
     stage_start = std::chrono::steady_clock::now();
-    if (!ChangeFastStaMasters(fast_sta, clock_id, BuildMasterChanges(buffers, best.edits, false))) {
+    if (!ChangeFastStaMasters(fast_sta, context_id, BuildMasterChanges(buffers, best.edits, false))) {
       summary.stop_reason = "accepted_edit_apply_failed";
       break;
     }
-    current = CaptureState(fast_sta, clock_id, cap_baseline, slew_baseline);
+    current = CaptureState(fast_sta, context_id, cap_baseline, slew_baseline);
     summary.profile.apply_accepted_batch_s += Utility::getElapsedSeconds(stage_start);
     for (const auto& edit : best.edits) {
       if (edit.buffer_index >= buffers.size()) {
@@ -347,14 +400,14 @@ auto SolveClock(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSiz
   return summary;
 }
 
-auto SolveClockScalable(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSizingBuffer>& buffers,
+auto SolveClockScalable(FastSTA& fast_sta, FastStaContextId context_id, std::vector<ClockSizingBuffer>& buffers,
                         const std::vector<ClockSizingCapLimit>& cap_baseline, const std::vector<ClockSizingSlewLimit>& slew_baseline, double target_skew_ns)
     -> ClockSizingSummary
 {
   ClockSizingSummary summary;
   summary.solve_mode = "scalable_timing_only_batch";
   auto stage_start = std::chrono::steady_clock::now();
-  summary.before = CaptureState(fast_sta, clock_id, cap_baseline, slew_baseline);
+  summary.before = CaptureState(fast_sta, context_id, cap_baseline, slew_baseline);
   summary.profile.capture_initial_state_s = Utility::getElapsedSeconds(stage_start);
   if (!summary.before.valid) {
     if (!summary.before.skew.valid) {
@@ -371,27 +424,44 @@ auto SolveClockScalable(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<
   stage_start = std::chrono::steady_clock::now();
   const auto topology = BuildClockSizingTopologyIndex(ClockSizingTopologyIndexInput{
       .fast_sta = &fast_sta,
-      .clock_id = clock_id,
+      .context_id = context_id,
       .buffers = &buffers,
   });
   summary.profile.build_topology_index_s = Utility::getElapsedSeconds(stage_start);
   auto current = summary.before;
   while (summary.iteration_count < DefaultOptimizationPolicy().max_iterations && summary.trial_count < DefaultOptimizationPolicy().max_trials) {
-    auto best = FindBestScalableClockSizingEditBatch(fast_sta, clock_id, buffers, topology, current, cap_baseline, slew_baseline, target_skew_ns, summary);
+    auto best = FindBestScalableClockSizingEditBatch(fast_sta, context_id, buffers, topology, current, cap_baseline, slew_baseline, target_skew_ns, summary);
     if (!best.valid) {
       summary.stop_reason = summary.trial_count >= DefaultOptimizationPolicy().max_trials ? "trial_limit" : "no_improving_candidate";
       break;
     }
 
     stage_start = std::chrono::steady_clock::now();
-    if (!ChangeFastStaMastersTimingOnly(fast_sta, clock_id, BuildMasterChanges(buffers, best.edits, false))) {
+    const auto accepted_state = current;
+    if (!fast_sta.beginBufferMastersClockTrial(context_id, BuildMasterChanges(buffers, best.edits, false))) {
       summary.stop_reason = "accepted_edit_apply_failed";
       break;
     }
-    current = CaptureStateWithArea(fast_sta, clock_id, cap_baseline, slew_baseline, current.power.area_um2 + ClockSizingEditAreaDelta(best.edits));
+    current = CaptureStateWithArea(fast_sta, context_id, cap_baseline, slew_baseline, current.power.area_um2 + ClockSizingEditAreaDelta(best.edits));
     summary.profile.apply_accepted_batch_s += Utility::getElapsedSeconds(stage_start);
     if (!current.valid) {
       summary.stop_reason = !current.cap.legal ? "accepted_edit_cap_violation" : "accepted_edit_slew_violation";
+      auto rejected
+          = ClockSizingEditBatch{.edits = best.edits, .state = current, .rejected_slew_stage = CaptureRejectedSlewStage(fast_sta, context_id, current)};
+      stage_start = std::chrono::steady_clock::now();
+      if (!fast_sta.restoreBufferMastersClockTrial(context_id)) {
+        summary.stop_reason = "rejected_edit_restore_failed";
+      } else {
+        current = accepted_state;
+        rejected.restored_slew_stage = CaptureRestoredSlewStage(fast_sta, context_id, rejected.state, rejected.rejected_slew_stage);
+      }
+      RememberRejectedTrial(summary, rejected, buffers);
+      summary.profile.apply_accepted_batch_s += Utility::getElapsedSeconds(stage_start);
+      break;
+    }
+
+    if (!fast_sta.commitBufferMastersClockTrial(context_id)) {
+      summary.stop_reason = "accepted_edit_commit_failed";
       break;
     }
 
@@ -409,16 +479,20 @@ auto SolveClockScalable(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<
     ++summary.iteration_count;
   }
 
-  if (!fast_sta.updatePower(clock_id)) {
+  // Accepted clock trials intentionally invalidate the published logic
+  // analysis. Rebuild complete timing once before reporting the solver result;
+  // candidate screening remains clock-only, while the returned state is safe
+  // for DataManager publication and power evaluation.
+  if (!fast_sta.updateTiming(context_id) || !fast_sta.updatePower(context_id)) {
     summary.after = current;
     summary.valid = false;
     if (summary.stop_reason.empty()) {
-      summary.stop_reason = "final_power_update_failed";
+      summary.stop_reason = "final_timing_or_power_update_failed";
     }
     return summary;
   }
 
-  summary.after = CaptureState(fast_sta, clock_id, cap_baseline, slew_baseline);
+  summary.after = CaptureState(fast_sta, context_id, cap_baseline, slew_baseline);
   summary.valid = summary.before.valid && summary.after.valid;
   summary.changed = !summary.accepted_edits.empty();
   summary.target_met = TargetMet(summary.after, target_skew_ns);
@@ -436,11 +510,17 @@ auto ShouldUseScalableSolver(const ScalableSolverDecisionInput& input) -> bool
   if (input.buffers == nullptr) {
     CTSLOG.error(Loc::current(), "Optimization: scalable solver decision requires buffers.");
   }
-  const auto graph_profile = input.fast_sta->queryClockGraphProfile(input.clock_id);
+  const auto graph_profile = input.fast_sta->queryGraphProfile(input.context_id);
   if (!graph_profile.has_value()) {
     return false;
   }
-  return graph_profile->node_count >= DefaultOptimizationPolicy().scalable_node_threshold
+  // The FastSTA context may include the complete design graph so that it can
+  // publish one timing authority for all clocks.  Solver selection remains a
+  // clock-sizing policy decision, however, and must use the same clock-local
+  // scope that the baseline solver used.  The owned-clock count is the
+  // corresponding input-derived quantity; the complete graph's logic fanout
+  // must not switch the downstream solver mode as a side effect of FastSTA.
+  return graph_profile->owned_clock_node_count >= DefaultOptimizationPolicy().scalable_node_threshold
          || input.buffers->size() >= DefaultOptimizationPolicy().scalable_buffer_threshold;
 }
 

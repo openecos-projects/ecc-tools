@@ -27,6 +27,8 @@
 #include "PlanarRect.hpp"
 #include "RoutingLayer.hpp"
 
+#include <unordered_map>
+
 namespace ifp {
 
 #define FPPG (ifp::PDNGenerator::getInst())
@@ -81,6 +83,9 @@ class PDNGenerator
 
   void buildMacroConnect(PGModel& pg_model);
   void connectMacroPin(PGModel& pg_model, PGNet& pg_net, InstancePinShape& pin_shape);
+
+  std::vector<Instance*> _placed_macro_list;
+  std::unordered_map<const Instance*, int32_t> _macro_top_layer_order;
 };
 
 }  // namespace ifp

@@ -33,13 +33,13 @@ namespace icts::clock_sizing_optimization {
 struct ScalableSolverDecisionInput
 {
   const FastSTA* fast_sta = nullptr;
-  FastStaClockId clock_id = kInvalidFastStaClockId;
+  FastStaContextId context_id = kInvalidFastStaContextId;
   const std::vector<ClockSizingBuffer>* buffers = nullptr;
 };
 
-auto SolveClock(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSizingBuffer>& buffers, const std::vector<ClockSizingCapLimit>& cap_baseline,
+auto SolveClock(FastSTA& fast_sta, FastStaContextId context_id, std::vector<ClockSizingBuffer>& buffers, const std::vector<ClockSizingCapLimit>& cap_baseline,
                 const std::vector<ClockSizingSlewLimit>& slew_baseline, double target_skew_ns) -> ClockSizingSummary;
-auto SolveClockScalable(FastSTA& fast_sta, FastStaClockId clock_id, std::vector<ClockSizingBuffer>& buffers,
+auto SolveClockScalable(FastSTA& fast_sta, FastStaContextId context_id, std::vector<ClockSizingBuffer>& buffers,
                         const std::vector<ClockSizingCapLimit>& cap_baseline, const std::vector<ClockSizingSlewLimit>& slew_baseline, double target_skew_ns)
     -> ClockSizingSummary;
 auto ShouldUseScalableSolver(const ScalableSolverDecisionInput& input) -> bool;

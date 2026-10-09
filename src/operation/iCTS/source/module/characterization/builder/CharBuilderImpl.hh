@@ -68,6 +68,10 @@ struct BuildProgress
   std::size_t evaluated_patterns = 0;
   std::size_t feasible_patterns = 0;
   std::size_t skipped_patterns_infeasible = 0;
+  std::size_t wire_only_patterns = 0;
+  std::size_t leaf_buffered_patterns = 0;
+  std::size_t terminal_branch_patterns = 0;
+  std::size_t mixed_master_patterns = 0;
   std::size_t skipped_load_points = 0;
   std::size_t skipped_sta_samples = 0;
   std::size_t executed_sta_samples = 0;
@@ -80,10 +84,7 @@ struct BuildProgress
   unsigned max_observed_driven_cap_idx = 0;
 };
 
-struct TopologyBits
-{
-  std::uint64_t value = 0U;
-};
+using TopologySlotSelection = std::vector<std::uint8_t>;
 
 struct TopologyDesc
 {
@@ -153,6 +154,7 @@ class CharBuilderImpl
   auto wirelengthUnitSource() const -> const std::string& { return _wirelength_unit_source; }
   auto wirelengthUnitDetail() const -> const std::string& { return _wirelength_unit_detail; }
   auto wirelengthIterations() const -> unsigned { return _wirelength_iterations; }
+  auto usesBoundaryPrimitivePatterns() const -> bool { return _use_boundary_primitive_patterns; }
   auto maxSlew() const -> double { return _max_slew; }
   auto maxCap() const -> double { return _max_cap; }
   auto slewSteps() const -> unsigned { return _slew_steps; }
@@ -162,6 +164,14 @@ class CharBuilderImpl
   auto clockRouteSegmentRc() const -> const ::icts::ClockRouteSegmentRc& { return _clock_route_segment_rc; }
   auto characterizationBufferCells() const -> const std::vector<::icts::CharacterizationBufferCell>& { return _sorted_buffers; }
   auto executedStaSamples() const -> std::size_t { return _executed_sta_samples; }
+  auto evaluatedPatterns() const -> std::size_t { return _evaluated_patterns; }
+  auto feasiblePatterns() const -> std::size_t { return _feasible_patterns; }
+  auto skippedPatternsInfeasible() const -> std::size_t { return _skipped_patterns_infeasible; }
+  auto wireOnlyPatterns() const -> std::size_t { return _wire_only_patterns; }
+  auto leafBufferedPatterns() const -> std::size_t { return _leaf_buffered_patterns; }
+  auto terminalBranchPatterns() const -> std::size_t { return _terminal_branch_patterns; }
+  auto mixedMasterPatterns() const -> std::size_t { return _mixed_master_patterns; }
+  auto skippedLoadPoints() const -> std::size_t { return _skipped_load_points; }
   auto skippedStaSamples() const -> std::size_t { return _skipped_sta_samples; }
   auto outputSlewOverflowSamples() const -> std::size_t { return _output_slew_overflow_samples; }
   auto drivenCapOverflowSamples() const -> std::size_t { return _driven_cap_overflow_samples; }
@@ -194,6 +204,7 @@ class CharBuilderImpl
   unsigned _slew_steps = 15;
   unsigned _cap_steps = 15;
   unsigned _wirelength_iterations = 3;
+  bool _use_boundary_primitive_patterns = false;
 
   std::string _source_inst_name;
   std::string _source_in_pin;
@@ -213,6 +224,14 @@ class CharBuilderImpl
   std::vector<::icts::BufferingPattern> _buffering_patterns;
   unsigned _next_pattern_id = 0;
   std::string _build_failure_reason;
+  std::size_t _evaluated_patterns = 0;
+  std::size_t _feasible_patterns = 0;
+  std::size_t _skipped_patterns_infeasible = 0;
+  std::size_t _wire_only_patterns = 0;
+  std::size_t _leaf_buffered_patterns = 0;
+  std::size_t _terminal_branch_patterns = 0;
+  std::size_t _mixed_master_patterns = 0;
+  std::size_t _skipped_load_points = 0;
   std::size_t _executed_sta_samples = 0;
   std::size_t _skipped_sta_samples = 0;
   std::size_t _output_slew_overflow_samples = 0;

@@ -34,3 +34,32 @@ target_include_directories(tcl
 install(TARGETS tcl
     LIBRARY DESTINATION ${ECC_INSTALL_LIB_DIR}
     RUNTIME DESTINATION ${ECC_INSTALL_LIB_DIR})
+
+# Bundle the Tcl script library into the python wheel: the embedded SDC
+# interpreter's Tcl_Init needs init.tcl, whose compiled-in search paths only
+# exist on RHEL-like distros. SdcCommand finds this directory next to the
+# ecc_py module at runtime.
+if(BUILD_PYTHON)
+  if(NOT ECC_TCL_SCRIPT_DIR)
+    # Prefer the scripts beside the library selected by FindTCL. TCL_TCLSH can
+    # resolve to another Tcl installation through PATH.
+    get_filename_component(ECC_TCL_LIBRARY_DIR "${TCL_LIBRARY}" DIRECTORY)
+    set(ECC_TCL_SCRIPT_DIR "${ECC_TCL_LIBRARY_DIR}/tcl8.6")
+    if(NOT EXISTS "${ECC_TCL_SCRIPT_DIR}/init.tcl")
+      # Fall back to the script library reported by tclsh when the library
+      # installation does not place scripts in lib/tcl8.6.
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E echo "puts $tcl_library"
+        COMMAND ${TCL_TCLSH}
+        OUTPUT_VARIABLE ECC_TCL_SCRIPT_DIR
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET)
+    endif()
+  endif()
+  if(NOT EXISTS "${ECC_TCL_SCRIPT_DIR}/init.tcl")
+    message(FATAL_ERROR
+      "Tcl script library not found; pass -DECC_TCL_SCRIPT_DIR=<dir containing init.tcl>")
+  endif()
+  message(STATUS "Bundling Tcl script library from ${ECC_TCL_SCRIPT_DIR}")
+  install(DIRECTORY "${ECC_TCL_SCRIPT_DIR}/" DESTINATION ecc_tools_bin/tcl8.6)
+endif()

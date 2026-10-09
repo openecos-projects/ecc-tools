@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <deque>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <string>
@@ -55,6 +56,21 @@ auto CollectOutputPins(idb::IdbInstance* inst) -> std::vector<idb::IdbPin*>
   }
   for (auto* pin : inst->get_pin_list()->get_pin_list()) {
     if (IsOutputLike(pin)) {
+      outputs.push_back(pin);
+    }
+  }
+  return outputs;
+}
+
+auto CollectClockGateOutputPins(idb::IdbInstance* inst, idb::LibCell* lib_cell) -> std::vector<idb::IdbPin*>
+{
+  std::vector<idb::IdbPin*> outputs;
+  if (inst == nullptr || inst->get_pin_list() == nullptr || lib_cell == nullptr) {
+    return outputs;
+  }
+  for (auto* pin : inst->get_pin_list()->get_pin_list()) {
+    auto* port = FindLibPort(lib_cell, pin);
+    if (port != nullptr && port->isOutput() != 0U) {
       outputs.push_back(pin);
     }
   }
@@ -153,9 +169,27 @@ auto OutputFunctionUsesInput(idb::LibCell* lib_cell, idb::IdbPin* output_pin, id
   return LibertyExpressionUsesPort(output_port->get_func_expr(), TermName(input_pin));
 }
 
+auto HasDirectClockGateSink(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net) -> bool
+{
+  for (auto* pin : CollectNetPins(net).loads) {
+    if (pin == nullptr || pin->is_io_pin() || !IsInputLike(pin)) {
+      continue;
+    }
+    auto* lib_cell = FindLibCell(liberty_cell_lookup, pin->get_instance());
+    if (lib_cell == nullptr) {
+      continue;
+    }
+    auto* lib_port = FindLibPort(lib_cell, pin);
+    if (lib_port != nullptr && (lib_port->get_clock_gate_clock_pin() || lib_port->isClock()) && lib_cell->isICG()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 auto NetHasDirectClockSinks(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net) -> bool
 {
-  return net != nullptr && IsClockTarget(CountDirectClockSinks(liberty_cell_lookup, net));
+  return net != nullptr && (IsClockTarget(CountDirectClockSinks(liberty_cell_lookup, net)) || HasDirectClockGateSink(liberty_cell_lookup, net));
 }
 
 auto CountInputPinsOnNet(idb::IdbInstance* inst, idb::IdbNet* net) -> std::size_t
@@ -191,6 +225,49 @@ auto LibertyMarksClockInput(idb::IdbPin* input_pin, idb::LibCell* lib_cell) -> b
   }
   auto* lib_port = FindLibPort(lib_cell, input_pin);
   return lib_port != nullptr && (lib_port->isClock() || lib_port->get_clock_gate_clock_pin());
+}
+
+auto HasUniqueClockGateArc(idb::LibCell* lib_cell, idb::IdbPin* input_pin, idb::IdbPin* output_pin) -> bool
+{
+  auto* input_port = FindLibPort(lib_cell, input_pin);
+  auto* output_port = FindLibPort(lib_cell, output_pin);
+  if (lib_cell == nullptr || input_port == nullptr || output_port == nullptr || !LibertyMarksClockInput(input_pin, lib_cell) || output_port->isOutput() == 0U) {
+    return false;
+  }
+
+  const auto input_name = TermName(input_pin);
+  const auto output_name = TermName(output_pin);
+  std::set<std::string> clock_sources;
+  bool has_usable_arc = false;
+  bool has_unsupported_arc = false;
+  for (const auto& arc_set : lib_cell->get_cell_arcs()) {
+    if (arc_set == nullptr) {
+      continue;
+    }
+    for (const auto& arc_holder : arc_set->get_arcs()) {
+      auto* arc = arc_holder.get();
+      if (arc == nullptr || arc->isDisableArc() != 0U || std::string(arc->get_snk_port()) != output_name) {
+        continue;
+      }
+      const auto timing_type = arc->get_timing_type();
+      if (timing_type != idb::LibArc::TimingType::kComb && timing_type != idb::LibArc::TimingType::kCombRise
+          && timing_type != idb::LibArc::TimingType::kCombFall) {
+        continue;
+      }
+      auto* source_port = lib_cell->get_cell_port_or_port_bus(arc->get_src_port());
+      if (source_port == nullptr || (!source_port->isClock() && !source_port->get_clock_gate_clock_pin())) {
+        continue;
+      }
+      clock_sources.insert(arc->get_src_port());
+      if (arc->isUnateArc() == 0U) {
+        has_unsupported_arc = true;
+      }
+      if (input_name == arc->get_src_port() && arc->isUnateArc() != 0U) {
+        has_usable_arc = true;
+      }
+    }
+  }
+  return has_usable_arc && !has_unsupported_arc && clock_sources.size() == 1U;
 }
 
 auto OtherInputsAreControlCandidates(idb::IdbInstance* inst, idb::IdbPin* clock_input_pin, idb::LibCell* lib_cell, const CaseConstraintSet& case_constraints,
@@ -234,7 +311,7 @@ auto AddOutputTransition(std::vector<TraceTransition>& transitions, idb::IdbPin*
         .input_net_name = input_pin->get_net()->get_net_name(),
         .output_net_name = output_pin->get_net()->get_net_name(),
         .kind = *propagation_kind,
-        .ownership_reason = "liberty_buffer_transition",
+        .ownership_reason = *propagation_kind == ClockTracePropagationKind::kClockGate ? "liberty_clock_gate_transition" : "liberty_buffer_transition",
     };
   }
   transitions.push_back(std::move(transition));
@@ -295,8 +372,12 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
       const bool is_clock_gate_clock_pin = input_port != nullptr && (input_port->get_clock_gate_clock_pin() || input_port->isClock());
       auto* term = load_pin->get_term();
       if (is_clock_gate_clock_pin || (term != nullptr && term->get_type() == idb::IdbConnectType::kClock)) {
-        for (auto* output_pin : CollectOutputPins(inst)) {
-          AddOutputTransition(transitions, load_pin, output_pin, "clock_gate");
+        const auto outputs = CollectClockGateOutputPins(inst, lib_cell);
+        const auto usable_outputs
+            = std::ranges::count_if(outputs, [&](auto* output_pin) -> bool { return HasUniqueClockGateArc(lib_cell, load_pin, output_pin); });
+        for (auto* output_pin : outputs) {
+          const bool usable = usable_outputs == 1 && HasUniqueClockGateArc(lib_cell, load_pin, output_pin);
+          AddOutputTransition(transitions, load_pin, output_pin, "clock_gate", usable ? std::optional{ClockTracePropagationKind::kClockGate} : std::nullopt);
         }
       }
       continue;
@@ -532,8 +613,11 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
     }
 
     const auto stats = CountDirectClockSinks(liberty_cell_lookup, node.net);
-    if (IsClockTarget(stats)) {
-      auto accepted = MakeTraceRecord(clock.clock_name, node.net->get_net_name(), "accepted", TargetKind(stats), stats.sequential_clock_sinks,
+    const bool regular_target = IsClockTarget(stats);
+    const bool clock_gate_target = !regular_target && HasDirectClockGateSink(liberty_cell_lookup, node.net);
+    if (regular_target || clock_gate_target) {
+      const auto target_kind = clock_gate_target ? std::string{"clock_gate_ck"} : TargetKind(stats);
+      auto accepted = MakeTraceRecord(clock.clock_name, node.net->get_net_name(), "accepted", target_kind, stats.sequential_clock_sinks,
                                       stats.macro_clock_sinks, node.path, "sdc_reachable_clock_sink_net");
       accepted.propagation_steps = node.propagation_steps;
       for (auto& step : accepted.propagation_steps) {

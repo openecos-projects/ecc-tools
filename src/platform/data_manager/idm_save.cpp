@@ -116,12 +116,12 @@ void DataManager::saveVerilog(string verilog_path, std::set<std::string>&& exclu
   return _idb_builder->saveVerilog(verilog_path, exclude_cell_names, is_add_space_for_escape_name);
 }
 
-bool DataManager::saveGDSII(string path, bool is_hardened /* = false */)
+bool DataManager::saveGDSII(string path, string layer_map_path /* = "" */)
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
     return false;
   }
-  return _idb_builder->saveGDSII(path, is_hardened);
+  return _idb_builder->saveGDSII(path, layer_map_path);
 }
 bool DataManager::saveJSON(string path, string options)
 {
@@ -129,22 +129,6 @@ bool DataManager::saveJSON(string path, string options)
     return false;
   }
   return _idb_builder->saveJSON(path, options);
-}
-
-bool DataManager::saveViewJson(string output_dir, ViewJsonWriteOptions options)
-{
-  if (_idb_builder == nullptr || _idb_def_service == nullptr || _layout == nullptr) {
-    return false;
-  }
-  return _idb_builder->saveViewJson(output_dir, options);
-}
-
-bool DataManager::applyViewJsonEdits(string edits_path, bool compressed_hint)
-{
-  if (_idb_builder == nullptr || _idb_def_service == nullptr || _layout == nullptr) {
-    return false;
-  }
-  return _idb_builder->applyViewJsonEdits(edits_path, compressed_hint);
 }
 
 bool DataManager::saveData(string data_path)

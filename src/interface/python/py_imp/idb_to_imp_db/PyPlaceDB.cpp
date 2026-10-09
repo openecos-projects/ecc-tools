@@ -52,7 +52,8 @@ bool isInvailidNet(IdbNet* net)
          || net->get_instance_pin_list()->get_pin_list().size() == 0;
 }
 
-void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta)
+void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density)
 {
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
@@ -67,13 +68,22 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   IdbDesign* db_deisgn = db->get_idb_design();
   db_deisgn->m_instID2Name.clear();
   num_terminal_NIs = 0;  // IO pins
+  m2_pg_rail_blockage_rects = 0;
+  m2_pg_rail_boxes = pybind11::list();
+  m2_pg_rail_density_boxes = pybind11::list();
   dbu = db_deisgn->get_layout()->get_units()->get_micron_dbu();
 
   if (with_sta) {
     throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
   }
 
-  double total_fixed_node_area = 0;  // sum of fixed body and synthetic obstacle rectangles
+  double total_fixed_terminal_area = 0;  // sum of fixed body and synthetic obstacle rectangles
+  clock_net_names = pybind11::list();
+  for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
+    if (net->is_clock()) {
+      clock_net_names.append(pybind11::str(net->get_net_name()));
+    }
+  }
   // Collect the rectangles used by DreamPlace and the corresponding unioned geometry
   // separately.  Fixed instances retain their body rectangle for pin/write-back
   // identity, while halos and blockages become pin-less synthetic terminals.
@@ -227,7 +237,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
                      node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
       }
       num_terminals += 1;
-      total_fixed_node_area += body_box.area();
+      total_fixed_terminal_area += body_box.area();
 
       fixed_body_boxes.emplace_back(body_box.xl, body_box.yl, body_box.xh, body_box.yh);
       if (node->get_halo()) {
@@ -250,6 +260,47 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
     blockage_ps_list += ps;
   }
+  PolygonSet rail_ps;
+  PolygonSet rail_density_ps;
+  if (include_m2_pg_rail_blockage || include_m2_pg_rail_density) {
+    auto routing_layers = db->get_idb_layout()->get_layers()->get_routing_layers();
+    auto* special_net_list = db_deisgn->get_special_net_list();
+    if (routing_layers.size() > 1 && special_net_list != nullptr) {
+      auto* second_routing_layer = routing_layers.at(1);
+      auto* second_idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(second_routing_layer);
+      for (auto* special_net : special_net_list->get_net_list()) {
+        if (special_net == nullptr || (!special_net->is_vdd() && !special_net->is_vss())) {
+          continue;
+        }
+        for (auto* wire : special_net->get_wire_list()->get_wire_list()) {
+          for (auto* segment : wire->get_segment_list()) {
+            if (!segment->is_line() || segment->get_layer() != second_idb_routing_layer) {
+              continue;
+            }
+            auto* rect = segment->get_bounding_box();
+            if (rect == nullptr || rect->get_high_x() <= rect->get_low_x() || rect->get_high_y() <= rect->get_low_y()) {
+              continue;
+            }
+            Box box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+            rail_ps += gtl::rectangle_data<coordinate_type>(box.xl, box.yl, box.xh, box.yh);
+            pybind11::list py_box;
+            py_box.append(box.xl);
+            py_box.append(box.yl);
+            py_box.append(box.xh);
+            py_box.append(box.yh);
+            m2_pg_rail_boxes.append(py_box);
+            ++m2_pg_rail_blockage_rects;
+          }
+        }
+      }
+    }
+    if (include_m2_pg_rail_blockage) {
+      blockage_ps_list += rail_ps;
+    } else if (include_m2_pg_rail_density) {
+      rail_density_ps += rail_ps;
+    }
+  }
+
   auto core = db->get_idb_layout()->get_core();
   IdbRect* core_rect = core->get_bounding_box();
   auto core_box = gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
@@ -265,40 +316,31 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   no_row_ps.insert(core_box);
   no_row_ps -= row_ps;
   row_height = db->get_idb_layout()->get_rows()->get_row_height();
-  auto second_routing_layer = db->get_idb_layout()->get_layers()->get_routing_layers().at(1);
-  assert(second_routing_layer->get_name().find("2") != std::string::npos);
-  idb::IdbLayerRouting* second_idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(second_routing_layer);
-#if 1
-  for (auto* special_net : db_deisgn->get_special_net_list()->get_net_list()) {
-    if (special_net->is_vdd() || special_net->is_vss()) {
-      for (auto segment : special_net->get_wire_list()->get_wire_list()) {
-        for (auto* seg : segment->get_segment_list()) {
-          if (seg->is_line()) {
-            auto layer = seg->get_layer();
-            PolygonSet ps;
-            if (layer->is_routing() && layer == second_idb_routing_layer) {
-              auto rect = seg->get_bounding_box();
 
-              coordinate_type orig_xl = rect->get_low_x();
-              coordinate_type orig_yl = rect->get_low_y();
-              coordinate_type orig_xh = rect->get_high_x();
-              coordinate_type orig_yh = rect->get_high_y();
-              Box box(orig_xl, orig_yl, orig_xh, orig_yh);
-              ps.insert(gtl::rectangle_data<coordinate_type>(box.xl, box.yl, box.xh, box.yh));
-              blockage_ps_list += ps;
-            }
-          }
-        }
-      }
+  PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+  PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+  rail_density_ps -= fixed_body_ps;
+  rail_density_ps -= fixed_halo_ps;
+  rail_density_ps -= blockage_ps_list;
+  std::vector<gtl::rectangle_data<coordinate_type>> rail_density_rects;
+  rail_density_ps.get_rectangles(rail_density_rects);
+  for (auto const& rect : rail_density_rects) {
+    Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
+    if (box.width() <= 0 || box.height() <= 0) {
+      continue;
     }
+    pybind11::list py_box;
+    py_box.append(box.xl);
+    py_box.append(box.yl);
+    py_box.append(box.xh);
+    py_box.append(box.yh);
+    m2_pg_rail_density_boxes.append(py_box);
   }
-#endif
+
   // Union all hard obstacles before decomposition.  Areas inside the core
   // without placement rows are unavailable even when the DEF has no explicit
   // HALO or placement blockage.  Subtract fixed bodies because they are
   // already represented by their real instance terminals.
-  PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
-  PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
   PolygonSet obstacle_ps = blockage_ps_list;
   obstacle_ps += fixed_halo_ps;
   obstacle_ps += no_row_ps;
@@ -314,7 +356,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
                  box.xh, ", ", box.yh, ").");
     addNode("R0", block_name, box, true, false, false, nullptr);
-    total_fixed_node_area += 1LL * box.area();
+    total_fixed_terminal_area += 1LL * box.area();
   }
   num_terminals += vRect.size();
   ext_blockage_num += vRect.size();
@@ -349,6 +391,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   // critical to make sure only overlap with the die area is computed
   ps &= core_box;
   double total_fixed_geometry_area = gtl::area(ps);
+  total_fixed_node_area = total_fixed_geometry_area;
   total_space_area = core_rect->get_area() - total_fixed_geometry_area;
 
   PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
@@ -360,7 +403,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps), ", halo_union_area ",
               gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
               gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
-              total_fixed_node_area, ", synthetic_rectangles ", ext_blockage_num, ".");
+              total_fixed_terminal_area, ", synthetic_rectangles ", ext_blockage_num, ".");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
@@ -585,17 +628,16 @@ std::size_t PyPlaceDB::writeMacroPlacementBack(
   if (_db == nullptr || _design == nullptr || _db->get_idb_design() != _design) {
     throw std::runtime_error("Macro placement snapshot no longer matches the active iDB design");
   }
-
-  const auto* node_x = static_cast<const float*>(x.ptr);
-  const auto* node_y = static_cast<const float*>(y.ptr);
+  const auto* node_x_ptr = static_cast<const float*>(x.ptr);
+  const auto* node_y_ptr = static_cast<const float*>(y.ptr);
   std::vector<idm::InstancePlacementUpdate> updates;
   updates.reserve(_macro_writeback_candidates.size());
   for (const auto& candidate : _macro_writeback_candidates) {
     if (candidate.node_id < 0 || candidate.node_id >= num_movable_nodes) {
       throw std::runtime_error("Frozen macro candidate is outside the movable node range");
     }
-    const float candidate_x = node_x[candidate.node_id];
-    const float candidate_y = node_y[candidate.node_id];
+    const float candidate_x = node_x_ptr[candidate.node_id];
+    const float candidate_y = node_y_ptr[candidate.node_id];
     const double checked_x = static_cast<double>(candidate_x);
     const double checked_y = static_cast<double>(candidate_y);
     if (!std::isfinite(candidate_x) || !std::isfinite(candidate_y)

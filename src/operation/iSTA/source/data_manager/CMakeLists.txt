@@ -1,5 +1,6 @@
 add_library(ista_data_manager
     ${ISTA_DATA_MANAGER}/DataManager.cpp
+    ${ISTA_DATA_MANAGER}/constraint/TimingCaseAnalysis.cpp
 )
 
 target_link_libraries(ista_data_manager
@@ -13,5 +14,6 @@ target_include_directories(ista_data_manager
     ${ISTA_DATA_MANAGER}/advance
     ${ISTA_DATA_MANAGER}/basic
     ${ISTA_DATA_MANAGER}
-    ${ISTA_MODULE}/sdc_command/sdc_commands
+    ${ISTA_DATA_MANAGER}/constraint
+    ${ISTA_MODULE}/sdc_command
 )

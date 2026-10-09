@@ -144,6 +144,37 @@ IdbCore* IdbLayout::get_core()
   return _core;
 }
 
+void IdbLayout::resetDefData()
+{
+  if (_die != nullptr) {
+    _die->reset();
+  }
+  if (_core != nullptr) {
+    _core->set_bounding_box(0, 0, 0, 0);
+  }
+  if (_rows != nullptr) {
+    _rows->reset();
+  }
+  if (_gcell_grid_list != nullptr) {
+    _gcell_grid_list->clear();
+  }
+  if (_layers != nullptr) {
+    for (IdbLayer* layer : _layers->get_routing_layers()) {
+      IdbLayerRouting* routing_layer = dynamic_cast<IdbLayerRouting*>(layer);
+      if (routing_layer != nullptr) {
+        routing_layer->get_track_grid_list().clear();
+      }
+    }
+  }
+  if (_track_grid_list != nullptr) {
+    _track_grid_list->reset();
+  }
+  if (_max_via_stack != nullptr) {
+    delete _max_via_stack;
+    _max_via_stack = nullptr;
+  }
+}
+
 void IdbLayout::initDie(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)
 {
   if (_die == nullptr) {

@@ -65,7 +65,7 @@ auto BuildClockSizingTopologyIndex(const ClockSizingTopologyIndexInput& input) -
   const auto& fast_sta = *input.fast_sta;
   const auto& buffers = *input.buffers;
   ClockSizingTopologyIndex topology;
-  const auto clock_tree_topology = fast_sta.queryClockTreeTopology(input.clock_id);
+  const auto clock_tree_topology = fast_sta.queryClockTreeTopology(input.context_id);
   if (!clock_tree_topology.has_value()) {
     return topology;
   }
@@ -90,7 +90,7 @@ auto BuildClockSizingTopologyIndex(const ClockSizingTopologyIndexInput& input) -
 
 namespace {
 
-auto CollectFrontierSinks(const FastSTA& fast_sta, FastStaClockId clock_id, const ClockSizingTimingState& current, ClockSizingFrontierSide side)
+auto CollectFrontierSinks(const FastSTA& fast_sta, FastStaContextId context_id, const ClockSizingTimingState& current, ClockSizingFrontierSide side)
     -> std::vector<FastStaNodeId>
 {
   std::vector<std::pair<FastStaNodeId, double>> sinks;
@@ -98,14 +98,14 @@ auto CollectFrontierSinks(const FastSTA& fast_sta, FastStaClockId clock_id, cons
     return {};
   }
 
-  const auto sink_arrivals = fast_sta.collectClockSinkArrivals(clock_id);
+  const auto sink_arrivals = fast_sta.collectClockSinkArrivals(context_id);
   sinks.reserve(sink_arrivals.size());
   for (const auto& sink_arrival : sink_arrivals) {
     sinks.emplace_back(sink_arrival.node_id, sink_arrival.arrival_ns);
   }
   if (sinks.empty()) {
     const auto skew_extreme_sink_id = side == ClockSizingFrontierSide::kLate ? current.skew.max_sink_node_id : current.skew.min_sink_node_id;
-    if (const auto arrival = fast_sta.queryClockNodeArrival(clock_id, skew_extreme_sink_id); arrival.has_value()) {
+    if (const auto arrival = fast_sta.queryClockNodeArrival(context_id, skew_extreme_sink_id); arrival.has_value()) {
       sinks.emplace_back(skew_extreme_sink_id, *arrival);
     }
   }
@@ -299,7 +299,7 @@ auto GenerateFrontierPrefixBatches(const std::vector<ClockSizingBuffer>& buffers
 
 }  // namespace
 
-auto GenerateClockSizingEditBatches(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingBuffer>& buffers,
+auto GenerateClockSizingEditBatches(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingBuffer>& buffers,
                                     const ClockSizingTopologyIndex& topology, const ClockSizingTimingState& current)
     -> std::vector<std::vector<ClockSizingEdit>>
 {
@@ -307,7 +307,7 @@ auto GenerateClockSizingEditBatches(const FastSTA& fast_sta, FastStaClockId cloc
   std::unordered_set<std::string> seen;
   const auto& rank_steps = DefaultOptimizationPolicy().rank_steps;
   for (const auto side : {ClockSizingFrontierSide::kLate, ClockSizingFrontierSide::kEarly}) {
-    const auto frontier_sinks = CollectFrontierSinks(fast_sta, clock_id, current, side);
+    const auto frontier_sinks = CollectFrontierSinks(fast_sta, context_id, current, side);
     std::vector<std::vector<std::size_t>> paths;
     paths.reserve(frontier_sinks.size());
     for (const auto sink_id : frontier_sinks) {

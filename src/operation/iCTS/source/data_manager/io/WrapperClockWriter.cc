@@ -318,6 +318,20 @@ class Wrapper::CtsClockIdbWriter
       return nullptr;
     }
 
+    if (inst->is_clock_gate()) {
+      auto* idb_inst = _wrapper->_idb_design->get_instance_list()->find_instance(inst->get_name());
+      if (idb_inst == nullptr || idb_inst->get_cell_master() == nullptr || idb_inst->get_cell_master()->get_name() != inst->get_cell_master()) {
+        CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed: existing clock gate \"", inst->get_name(),
+                    "\" is unavailable or changed master.");
+        return nullptr;
+      }
+      if (!_wrapper->_cts2idb_inst_map.contains(inst)) {
+        _wrapper->crossRef(idb_inst, inst);
+      }
+      bindClockTreeInstPins(idb_inst, inst);
+      return idb_inst;
+    }
+
     if (_wrapper->_cts2idb_inst_map.contains(inst)) {
       auto* idb_inst = _wrapper->_cts2idb_inst_map.at(inst);
       if (idb_inst == nullptr) {

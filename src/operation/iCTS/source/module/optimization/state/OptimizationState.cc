@@ -37,16 +37,23 @@ namespace icts::clock_sizing_optimization {
 
 namespace {
 
-auto CheckCapLegality(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingCapLimit>& baseline) -> ClockSizingCapCheck
+auto CheckCapLegality(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingCapLimit>& baseline) -> ClockSizingCapCheck
 {
   ClockSizingCapCheck result;
-  const auto graph_profile = fast_sta.queryClockGraphProfile(clock_id);
-  if (!graph_profile.has_value()) {
+  const auto scope = fast_sta.queryClockElectricalScope(context_id);
+  if (!scope.has_value() || scope->net_ids.size() != baseline.size()) {
     result.legal = false;
     return result;
   }
-  for (FastStaNetId net_id = 0U; net_id < graph_profile->net_count; ++net_id) {
-    const auto cap_status = fast_sta.queryCapStatus(clock_id, net_id);
+  for (std::size_t index = 0U; index < baseline.size(); ++index) {
+    const auto& limit = baseline.at(index);
+    const auto net_id = scope->net_ids.at(index);
+    if (limit.net_id != net_id) {
+      result.legal = false;
+      ++result.violation_count;
+      continue;
+    }
+    const auto cap_status = fast_sta.queryCapStatus(context_id, net_id);
     if (!cap_status.has_value()) {
       result.legal = false;
       ++result.violation_count;
@@ -55,8 +62,8 @@ auto CheckCapLegality(const FastSTA& fast_sta, FastStaClockId clock_id, const st
     if (cap_status->max_cap_pf <= 0.0) {
       continue;
     }
-    const auto baseline_load = net_id < baseline.size() ? baseline.at(net_id).load_cap_pf : 0.0;
-    const auto baseline_violated = net_id < baseline.size() && baseline.at(net_id).violated;
+    const auto baseline_load = limit.load_cap_pf;
+    const auto baseline_violated = limit.violated;
     const bool legal = baseline_violated ? cap_status->load_cap_pf <= baseline_load + kClockSizingEpsilon : !cap_status->violated;
     if (!legal) {
       result.legal = false;
@@ -64,18 +71,6 @@ auto CheckCapLegality(const FastSTA& fast_sta, FastStaClockId clock_id, const st
     }
   }
   return result;
-}
-
-auto ResolveSlewRole(const std::optional<FastStaSlewStatus>& slew_status, FastStaNodeId node_id, const std::vector<ClockSizingSlewLimit>& baseline)
-    -> FastStaSlewRole
-{
-  if (slew_status.has_value()) {
-    return slew_status->role;
-  }
-  if (node_id < baseline.size()) {
-    return baseline.at(node_id).role;
-  }
-  return FastStaSlewRole::kUnknown;
 }
 
 auto CountSlewViolationRole(ClockSizingSlewCheck& result, FastStaSlewRole role) -> void
@@ -93,38 +88,53 @@ auto CountSlewViolationRole(ClockSizingSlewCheck& result, FastStaSlewRole role) 
   }
 }
 
-auto CheckSlewLegality(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingSlewLimit>& baseline) -> ClockSizingSlewCheck
+auto CheckSlewLegality(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingSlewLimit>& baseline) -> ClockSizingSlewCheck
 {
   ClockSizingSlewCheck result;
-  const auto graph_profile = fast_sta.queryClockGraphProfile(clock_id);
-  if (!graph_profile.has_value()) {
+  const auto scope = fast_sta.queryClockElectricalScope(context_id);
+  if (!scope.has_value() || scope->node_ids.size() != baseline.size()) {
     result.legal = false;
     return result;
   }
-  for (FastStaNodeId node_id = 0U; node_id < graph_profile->node_count; ++node_id) {
-    const auto slew_status = fast_sta.querySlewStatus(clock_id, node_id);
-    const auto baseline_available = node_id < baseline.size() && baseline.at(node_id).available;
+  for (std::size_t index = 0U; index < baseline.size(); ++index) {
+    const auto& limit = baseline.at(index);
+    const auto node_id = scope->node_ids.at(index);
+    if (limit.node_id != node_id) {
+      result.legal = false;
+      ++result.unavailable_count;
+      CountSlewViolationRole(result, limit.role);
+      continue;
+    }
+    const auto slew_status = fast_sta.querySlewStatus(context_id, node_id);
+    const auto baseline_available = limit.available;
     auto max_slew_ns = 0.0;
     if (slew_status.has_value()) {
       max_slew_ns = slew_status->max_slew_ns;
     } else if (baseline_available) {
-      max_slew_ns = baseline.at(node_id).max_slew_ns;
+      max_slew_ns = limit.max_slew_ns;
     }
     if (max_slew_ns <= 0.0) {
       continue;
     }
-    const auto role = ResolveSlewRole(slew_status, node_id, baseline);
+    const auto role = slew_status.has_value() ? slew_status->role : limit.role;
     if (!slew_status.has_value()) {
       result.legal = false;
+      ++result.unavailable_count;
       CountSlewViolationRole(result, role);
       continue;
     }
-    const auto baseline_slew = baseline_available ? baseline.at(node_id).slew_ns : 0.0;
-    const auto baseline_violated = baseline_available && baseline.at(node_id).violated;
+    const auto baseline_slew = baseline_available ? limit.slew_ns : 0.0;
+    const auto baseline_violated = baseline_available && limit.violated;
     const bool legal = baseline_violated ? slew_status->slew_ns <= baseline_slew + kClockSizingEpsilon : !slew_status->violated;
     if (!legal) {
       result.legal = false;
       CountSlewViolationRole(result, role);
+      const auto allowed_slew_ns = baseline_violated ? baseline_slew : max_slew_ns;
+      if (!result.worst_violation.has_value() || slew_status->slew_ns - allowed_slew_ns > result.worst_violation->slew_ns - result.worst_allowed_slew_ns) {
+        result.worst_violation = slew_status;
+        result.worst_baseline_slew_ns = baseline_slew;
+        result.worst_allowed_slew_ns = allowed_slew_ns;
+      }
     }
   }
   return result;
@@ -141,26 +151,33 @@ auto FirstClockSizingEditBufferIndex(const std::vector<ClockSizingEdit>& edits) 
   return first_index;
 }
 
-auto CaptureState(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
+auto CaptureState(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
                   const std::vector<ClockSizingSlewLimit>& slew_baseline) -> ClockSizingTimingState
 {
   ClockSizingTimingState state;
-  state.skew = fast_sta.querySkew(clock_id);
-  const auto power = fast_sta.queryPower(clock_id);
+  state.skew = fast_sta.querySkew(context_id);
+  const auto power = fast_sta.queryPower(context_id);
   if (power.has_value()) {
     state.power = *power;
   }
-  state.cap = CheckCapLegality(fast_sta, clock_id, cap_baseline);
-  state.slew = CheckSlewLegality(fast_sta, clock_id, slew_baseline);
-  state.valid = state.skew.valid && power.has_value() && state.cap.legal && state.slew.legal;
+  state.cap = CheckCapLegality(fast_sta, context_id, cap_baseline);
+  state.slew = CheckSlewLegality(fast_sta, context_id, slew_baseline);
+  const auto analysis_status = fast_sta.queryAnalysisStatus(context_id);
+  const bool timing_available = analysis_status.has_value() && (analysis_status->timing_valid || analysis_status->clock_timing_valid);
+  state.valid = timing_available && state.skew.valid && power.has_value() && state.cap.legal && state.slew.legal;
   return state;
 }
 
-auto CaptureStateWithArea(const FastSTA& fast_sta, FastStaClockId clock_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
+auto CaptureStateWithArea(const FastSTA& fast_sta, FastStaContextId context_id, const std::vector<ClockSizingCapLimit>& cap_baseline,
                           const std::vector<ClockSizingSlewLimit>& slew_baseline, double area_um2) -> ClockSizingTimingState
 {
-  auto state = CaptureState(fast_sta, clock_id, cap_baseline, slew_baseline);
+  ClockSizingTimingState state;
+  state.skew = fast_sta.querySkew(context_id);
+  state.cap = CheckCapLegality(fast_sta, context_id, cap_baseline);
+  state.slew = CheckSlewLegality(fast_sta, context_id, slew_baseline);
   state.power.area_um2 = area_um2;
+  const auto analysis_status = fast_sta.queryAnalysisStatus(context_id);
+  state.valid = analysis_status.has_value() && analysis_status->clock_timing_valid && state.skew.valid && state.cap.legal && state.slew.legal;
   return state;
 }
 

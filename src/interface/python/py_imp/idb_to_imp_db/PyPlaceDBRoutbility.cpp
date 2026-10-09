@@ -66,21 +66,62 @@ void PyPlaceDB::init_routability(idm::DataManager* db, std::vector<IdbInstance*>
   routing_grid_xh = routing_grid_xl + num_routing_grids_x * routing_grids_size_x;
   routing_grid_yh = routing_grid_yl + num_routing_grids_y * routing_grids_size_y;
 
+  min_wire_widths = pybind11::list();
+  min_wire_spacings = pybind11::list();
   for (index_type layer_idx = 0; layer_idx < db->get_idb_layout()->get_layers()->get_routing_layers_number(); ++layer_idx) {
     auto idb_layer = db->get_idb_layout()->get_layers()->get_routing_layers().at(layer_idx);
     idb::IdbLayerRouting* idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(idb_layer);
-    if (idb_routing_layer->get_track_grid_list().empty()) {
-      continue;
-    }
-    for (IdbTrackGrid* track_grid : idb_routing_layer->get_track_grid_list()) {
-      auto idb_track_grid = track_grid->get_track();
-
-      int track_num = track_grid->get_track_num();
-      if (idb_track_grid->get_direction() == idb::IdbTrackDirection::kDirectionX) {
-        unit_vertical_capacities.append(1. * track_num / routing_grids_size_x);
-      } else if (idb_track_grid->get_direction() == idb::IdbTrackDirection::kDirectionY) {
-        unit_horizontal_capacities.append(1. * track_num / routing_grids_size_y);
+    if (idb_routing_layer != nullptr) {
+      int32_t min_w = idb_routing_layer->get_min_width();
+      if (min_w <= 0) {
+        min_w = idb_routing_layer->get_width();
       }
+      if (min_w <= 0 && !idb_routing_layer->get_track_grid_list().empty()) {
+        auto* track = idb_routing_layer->get_track_grid_list().front()->get_track();
+        if (track) {
+          min_w = track->get_width();
+        }
+      }
+      min_wire_widths.append(min_w);
+
+      int32_t min_sp = 0;
+      if (min_w > 0) {
+        min_sp = idb_routing_layer->get_spacing(min_w);
+      }
+      if (min_sp <= 0 && !idb_routing_layer->get_track_grid_list().empty()) {
+        auto* track = idb_routing_layer->get_track_grid_list().front()->get_track();
+        if (track) {
+          int32_t pitch = track->get_pitch();
+          if (pitch > min_w) {
+            min_sp = pitch - min_w;
+          }
+        }
+      }
+      min_wire_spacings.append(min_sp);
+
+      int64_t track_num_x = 0;
+      int64_t track_num_y = 0;
+      for (IdbTrackGrid* track_grid : idb_routing_layer->get_track_grid_list()) {
+        auto idb_track_grid = track_grid->get_track();
+        int track_num = track_grid->get_track_num();
+        if (idb_track_grid->is_track_vertical()) {
+          track_num_x += track_num;
+        } else if (idb_track_grid->is_track_horizontal()) {
+          track_num_y += track_num;
+        }
+      }
+
+      double total_x = routing_grid_xh - routing_grid_xl;
+      double total_y = routing_grid_yh - routing_grid_yl;
+      double unit_h = (total_y > 0) ? (1.0 * track_num_y / total_y) : 0.0;
+      double unit_v = (total_x > 0) ? (1.0 * track_num_x / total_x) : 0.0;
+      unit_horizontal_capacities.append(unit_h);
+      unit_vertical_capacities.append(unit_v);
+    } else {
+      min_wire_widths.append(0);
+      min_wire_spacings.append(0);
+      unit_horizontal_capacities.append(0.0);
+      unit_vertical_capacities.append(0.0);
     }
   }
   // this is slightly different from db.routingGridOrigin

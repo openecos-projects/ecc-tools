@@ -41,7 +41,7 @@
 
 namespace idb {
 
-bool Lib::_silent_output = false;
+std::atomic_bool Lib::_silent_output = false;
 
 namespace {
 
@@ -880,8 +880,14 @@ LibPort::LibPort(const char* port_name) : _port_name(port_name)
 }
 
 LibPort::LibPort(LibPort&& other) noexcept
-    : _port_name(std::move(other._port_name)), _ower_cell(other._ower_cell), _port_type(other._port_type)
+    : _port_name(std::move(other._port_name)), _ower_cell(other._ower_cell), _port_type(other._port_type),
+      _is_clock_pin(other._is_clock_pin), _clock_gate_clock_pin(other._clock_gate_clock_pin),
+      _clock_gate_enable_pin(other._clock_gate_enable_pin), _clock_gate_test_pin(other._clock_gate_test_pin),
+      _clock_gate_out_pin(other._clock_gate_out_pin), _is_clock(other._is_clock)
 {
+  _port_cap = other._port_cap;
+  _has_port_cap = other._has_port_cap;
+  _port_caps = std::move(other._port_caps);
 }
 
 LibPort& LibPort::operator=(LibPort&& rhs) noexcept
@@ -890,6 +896,15 @@ LibPort& LibPort::operator=(LibPort&& rhs) noexcept
     _port_name = std::move(rhs._port_name);
     _ower_cell = rhs._ower_cell;
     _port_type = rhs._port_type;
+    _is_clock_pin = rhs._is_clock_pin;
+    _clock_gate_clock_pin = rhs._clock_gate_clock_pin;
+    _clock_gate_enable_pin = rhs._clock_gate_enable_pin;
+    _clock_gate_test_pin = rhs._clock_gate_test_pin;
+    _clock_gate_out_pin = rhs._clock_gate_out_pin;
+    _is_clock = rhs._is_clock;
+    _port_cap = rhs._port_cap;
+    _has_port_cap = rhs._has_port_cap;
+    _port_caps = std::move(rhs._port_caps);
   }
 
   return *this;
@@ -905,6 +920,11 @@ void LibPort::inheritBusAttributes(const LibPort& bus)
   _func_expr = bus._func_expr;
   _func_expr_str = bus._func_expr_str;
   _port_cap = bus._port_cap;
+  // A bus that declares a single `capacitance` records the value here and raises this
+  // flag. Bits inherit the value, so they must inherit the flag as well; without it a
+  // bit reports no capacitance at all, and every reader that falls back from the split
+  // caps to the scalar one skips the value it just received.
+  _has_port_cap = bus._has_port_cap;
   _port_caps = bus._port_caps;
   _cap_limits = bus._cap_limits;
   _slew_limits = bus._slew_limits;
@@ -1786,6 +1806,11 @@ LibCell::~LibCell()
 
 LibCell::LibCell(LibCell&& other) noexcept
     : _cell_name(std::move(other._cell_name)),
+      _cell_leakage_power(other._cell_leakage_power),
+      _has_cell_leakage_power(other._has_cell_leakage_power),
+      _clock_gating_integrated_cell(std::move(other._clock_gating_integrated_cell)),
+      _is_clock_gating_integrated_cell(other._is_clock_gating_integrated_cell),
+      _latches(std::move(other._latches)),
       _cell_ports(std::move(other._cell_ports)),
       _cell_arcs(std::move(other._cell_arcs)),
       _cell_power_arcs(std::move(other._cell_power_arcs)),
@@ -1797,6 +1822,11 @@ LibCell& LibCell::operator=(LibCell&& rhs) noexcept
 {
   if (this != &rhs) {
     _cell_name = std::move(rhs._cell_name);
+    _cell_leakage_power = rhs._cell_leakage_power;
+    _has_cell_leakage_power = rhs._has_cell_leakage_power;
+    _clock_gating_integrated_cell = std::move(rhs._clock_gating_integrated_cell);
+    _is_clock_gating_integrated_cell = rhs._is_clock_gating_integrated_cell;
+    _latches = std::move(rhs._latches);
     _cell_ports = std::move(rhs._cell_ports);
     _cell_arcs = std::move(rhs._cell_arcs);
     _cell_power_arcs = std::move(rhs._cell_power_arcs);
@@ -2060,6 +2090,9 @@ bool LibCell::isSequentialCell()
  */
 bool LibCell::isICG()
 {
+  if (_is_clock_gating_integrated_cell) {
+    return true;
+  }
   bool has_check_arc = false;
   bool has_combinational_clock_to_output_arc = false;
   for (auto& liberty_arc_set : _cell_arcs) {

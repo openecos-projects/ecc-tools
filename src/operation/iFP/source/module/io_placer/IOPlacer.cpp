@@ -108,6 +108,7 @@ void IOPlacer::place()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
+  buildNetIOPinIndex();
   resetIOPinPlacement();
   placeIOPin();
 
@@ -119,6 +120,7 @@ void IOPlacer::placeAuto()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
+  buildNetIOPinIndex();
   resetIOPinPlacement();
   Config& config = FPDM.getConfig();
   if (!config.io_pin_layer_name_list.empty()) {
@@ -266,7 +268,7 @@ void IOPlacer::placeIOPinsFromFile(const std::string& file_path)
       FPLOG.error(Loc::current(), "IO pin '", pin_name, "' is outside the legal core-edge range at line ", line_num, "!");
     }
 
-    int32_t depth = calculatePinDepth(edge_type, width, vertical_edge ? vertical_layer_name : horizontal_layer_name);
+    int32_t depth = calculatePinDepth(edge_type, width, layer_name, vertical_edge ? vertical_layer_name : horizontal_layer_name);
     placement_list.push_back({pin_iter->second, line_num, edge_type, along_coord, width, depth, layer_name});
   }
 
@@ -414,7 +416,8 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     const PinSlot& slot = slot_list[pin_idx];
     bool vertical_edge = slot.edge_type == IOEdgeType::kLeft || slot.edge_type == IOEdgeType::kRight;
     int32_t width = vertical_edge ? horizontal_width : vertical_width;
-    int32_t depth = calculatePinDepth(slot.edge_type, width, vertical_edge ? vertical_layer_name : horizontal_layer_name);
+    int32_t depth = calculatePinDepth(slot.edge_type, width, vertical_edge ? horizontal_layer_name : vertical_layer_name,
+                                      vertical_edge ? vertical_layer_name : horizontal_layer_name);
     int32_t x = vertical_edge ? (slot.edge_type == IOEdgeType::kLeft ? die.get_ll_x() + depth / 2 : die.get_ur_x() - depth / 2)
                              : slot.coord;
     int32_t y = vertical_edge ? slot.coord
@@ -431,6 +434,16 @@ int32_t IOPlacer::getLayerMinWidth(std::string layer_name)
     return 0;
   }
   return database.get_routing_layer_list()[iter->second].get_min_width();
+}
+
+int32_t IOPlacer::getLayerMinArea(std::string layer_name)
+{
+  Database& database = FPDM.getDatabase();
+  auto iter = database.get_routing_layer_name_to_idx_map().find(layer_name);
+  if (iter == database.get_routing_layer_name_to_idx_map().end()) {
+    return 0;
+  }
+  return database.get_routing_layer_list()[iter->second].get_min_area();
 }
 
 int32_t IOPlacer::getTrackPitch(std::string layer_name)
@@ -459,7 +472,8 @@ int32_t IOPlacer::getTrackOffset(std::string layer_name)
   return std::max(database.get_routing_layer_list()[iter->second].get_prefer_track_offset(), 0);
 }
 
-int32_t IOPlacer::calculatePinDepth(IOEdgeType edge_type, int32_t width, const std::string& access_layer_name)
+int32_t IOPlacer::calculatePinDepth(IOEdgeType edge_type, int32_t width, const std::string& pin_layer_name,
+                                    const std::string& access_layer_name)
 {
   bool x_depth = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kRight;
   if (!x_depth && edge_type != IOEdgeType::kBottom && edge_type != IOEdgeType::kTop) {
@@ -477,9 +491,11 @@ int32_t IOPlacer::calculatePinDepth(IOEdgeType edge_type, int32_t width, const s
   bool increasing = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kBottom;
   int64_t boundary = increasing ? low : high;
   int64_t half_width = (static_cast<int64_t>(width) + 1) / 2;
-  // The final depth includes the inward half-width margin. Keep the same margin
-  // on the die-boundary side of the access point, then choose the nearest track.
-  int64_t min_distance = std::max(half_width, 2 * pitch - half_width);
+  int64_t min_area = getLayerMinArea(pin_layer_name);
+  int64_t min_area_depth = min_area > 0 ? (min_area + width - 1) / width : 0;
+  // Reach the nearest legal access track, keep a half-width margin inside the pin,
+  // and extend the pin only as far as the layer minimum-area rule requires.
+  int64_t min_distance = std::max(half_width, min_area_depth - half_width);
   int64_t target = boundary + (increasing ? min_distance : -min_distance);
   int64_t remainder = (target - offset) % pitch;
   if (remainder < 0) {
@@ -490,11 +506,11 @@ int32_t IOPlacer::calculatePinDepth(IOEdgeType edge_type, int32_t width, const s
   int64_t depth = distance + half_width;
 
   if (depth > std::numeric_limits<int32_t>::max()) {
-    FPLOG.error(Loc::current(), "IO pin depth is outside the supported DBU range for layer '", access_layer_name, "'!");
+    FPLOG.error(Loc::current(), "IO pin depth is outside the supported DBU range for pin layer '", pin_layer_name, "'!");
   }
   if (high <= low || depth > high - low) {
     FPLOG.error(Loc::current(), "Cannot fit IO pin depth ", depth, " inside die on edge ", static_cast<int>(edge_type),
-                " with access layer '", access_layer_name, "'!");
+                " with pin layer '", pin_layer_name, "' and access layer '", access_layer_name, "'!");
   }
   return static_cast<int32_t>(depth);
 }
@@ -504,7 +520,7 @@ void IOPlacer::placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pi
 {
   Die& die = FPDM.getDatabase().get_die();
   Core& core = FPDM.getDatabase().get_core();
-  int32_t depth = calculatePinDepth(edge_type, width, access_layer_name);
+  int32_t depth = calculatePinDepth(edge_type, width, layer_name, access_layer_name);
   int32_t io_pin_num = static_cast<int32_t>(io_pin_list.size());
   int32_t side_pin_num = std::min(edge_pin_num, io_pin_num - io_pin_idx);
 
@@ -615,15 +631,27 @@ void IOPlacer::syncPinLocation(IOPin& io_pin, IOPort& io_port, int32_t x, int32_
   io_pin.set_orient(PlacementOrientation::kN);
 }
 
-void IOPlacer::updateNetIOPin(IOPin& io_pin)
+void IOPlacer::buildNetIOPinIndex()
 {
+  _io_pin_to_net_pin_map.clear();
   for (Net& net : FPDM.getDatabase().get_net_list()) {
     for (NetPin& net_pin : net.get_net_pin_list()) {
-      if (net_pin.get_io() && net_pin.get_pin_name() == io_pin.get_name()) {
-        net_pin.set_coord(io_pin.get_x(), io_pin.get_y());
-        net_pin.set_placed(io_pin.get_placed());
+      if (net_pin.get_io()) {
+        _io_pin_to_net_pin_map[net_pin.get_pin_name()].push_back(&net_pin);
       }
     }
+  }
+}
+
+void IOPlacer::updateNetIOPin(IOPin& io_pin)
+{
+  auto iter = _io_pin_to_net_pin_map.find(io_pin.get_name());
+  if (iter == _io_pin_to_net_pin_map.end()) {
+    return;
+  }
+  for (NetPin* net_pin : iter->second) {
+    net_pin->set_coord(io_pin.get_x(), io_pin.get_y());
+    net_pin->set_placed(io_pin.get_placed());
   }
 }
 

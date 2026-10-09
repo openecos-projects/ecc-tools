@@ -677,11 +677,10 @@ int32_t DefWrite::write_pin()
           for (IdbRect* rect : layer_shape->get_rect_list()) {
             writestr("( %d %d ) ( %d %d ) ", rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
           }
-
-          if (port->is_placed()) {
-            writestr("+ %s ( %d %d ) %s", status.c_str(), port->get_coordinate()->get_x(), port->get_coordinate()->get_y(), orient.c_str());
-          }
           writestr("\n");
+        }
+        if (port->is_placed()) {
+          writestr("   + %s ( %d %d ) %s\n", status.c_str(), port->get_coordinate()->get_x(), port->get_coordinate()->get_y(), orient.c_str());
         }
       }
     } else {
@@ -693,13 +692,12 @@ int32_t DefWrite::write_pin()
           for (IdbRect* rect : layer_shape->get_rect_list()) {
             writestr("( %d %d ) ( %d %d ) ", rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
           }
-
-          if (pin->get_term()->is_placed()) {
-            writestr("+ %s ( %d %d ) %s", status.c_str(), pin->get_location()->get_x(), pin->get_location()->get_y(), orient.c_str());
-          }
+          writestr("\n");
         }
       }
-      writestr("\n");
+      if (pin->get_term()->is_placed()) {
+        writestr(" + %s ( %d %d ) %s\n", status.c_str(), pin->get_location()->get_x(), pin->get_location()->get_y(), orient.c_str());
+      }
     }
 
     writestr(";\n");

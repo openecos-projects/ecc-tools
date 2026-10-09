@@ -27,8 +27,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <ostream>
+#include <ranges>
 #include <string>
 #include <vector>
 
@@ -55,6 +57,16 @@ auto CharStaSampler::characterizeTopology(unsigned length_idx, const TopologyDes
                                           BuildProgress& build_progress) -> void
 {
   ++build_progress.evaluated_patterns;
+  if (buf_masters.empty()) {
+    ++build_progress.wire_only_patterns;
+  } else if (topo.has_terminal_branch_buffer) {
+    ++build_progress.terminal_branch_patterns;
+  } else {
+    ++build_progress.leaf_buffered_patterns;
+  }
+  if (std::ranges::adjacent_find(buf_masters, std::not_equal_to<>()) != buf_masters.end()) {
+    ++build_progress.mixed_master_patterns;
+  }
 
   double total_length_um = 0.0;
   for (const double seg_len : topo.wire_segments_um) {

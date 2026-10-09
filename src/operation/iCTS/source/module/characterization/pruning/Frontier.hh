@@ -29,6 +29,7 @@
 #include <functional>
 #include <limits>
 #include <ranges>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -45,11 +46,37 @@ enum class TerminalSemantic : unsigned
   kBranchBuffered = 1U,
 };
 
+struct PatternGeometryState
+{
+  bool has_buffer = false;
+  double source_buffer_position = 0.0;
+  std::string source_buffer_master;
+  double sink_buffer_position = 0.0;
+  std::string sink_buffer_master;
+  std::size_t source_unbuffered_level_count = 1U;
+  std::size_t sink_unbuffered_level_count = 1U;
+
+  auto operator==(const PatternGeometryState& rhs) const -> bool = default;
+};
+
+inline auto HashPatternGeometryState(const PatternGeometryState& state) -> std::size_t
+{
+  std::size_t seed = std::hash<bool>{}(state.has_buffer);
+  seed ^= std::hash<double>{}(state.source_buffer_position) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<std::string>{}(state.source_buffer_master) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<double>{}(state.sink_buffer_position) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<std::string>{}(state.sink_buffer_master) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<std::size_t>{}(state.source_unbuffered_level_count) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  seed ^= std::hash<std::size_t>{}(state.sink_unbuffered_level_count) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+  return seed;
+}
+
 struct PatternCompositionState
 {
   TerminalSemantic terminal_semantic = TerminalSemantic::kLeafUnbuffered;
   MonotonicBoundaryState monotonic_boundary_state{};
   std::size_t source_exposed_load_count = 1U;
+  PatternGeometryState geometry_state{};
 
   auto operator==(const PatternCompositionState& rhs) const -> bool = default;
 };
@@ -74,6 +101,7 @@ struct SegmentFrontierStateKey
   TerminalSemantic terminal_semantic = TerminalSemantic::kLeafUnbuffered;
   MonotonicBoundaryState monotonic_boundary_state{};
   std::size_t source_exposed_load_count = 1U;
+  PatternGeometryState geometry_state{};
 
   auto operator==(const SegmentFrontierStateKey& rhs) const -> bool = default;
 };
@@ -93,6 +121,7 @@ struct SegmentFrontierStateKeyHash
     seed ^= std::hash<bool>{}(key.monotonic_boundary_state.sink.has_buffer) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     seed ^= std::hash<unsigned>{}(key.monotonic_boundary_state.sink.strength_rank) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     seed ^= std::hash<std::size_t>{}(key.source_exposed_load_count) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+    seed ^= HashPatternGeometryState(key.geometry_state) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     return seed;
   }
 };
@@ -108,6 +137,7 @@ struct HTreeFrontierStateKey
   TerminalSemantic terminal_semantic = TerminalSemantic::kLeafUnbuffered;
   MonotonicBoundaryState monotonic_boundary_state{};
   std::size_t source_exposed_load_count = 1U;
+  PatternGeometryState geometry_state{};
 
   auto operator==(const HTreeFrontierStateKey& rhs) const -> bool = default;
 };
@@ -128,6 +158,7 @@ struct HTreeFrontierStateKeyHash
     seed ^= std::hash<bool>{}(key.monotonic_boundary_state.sink.has_buffer) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     seed ^= std::hash<unsigned>{}(key.monotonic_boundary_state.sink.strength_rank) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     seed ^= std::hash<std::size_t>{}(key.source_exposed_load_count) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
+    seed ^= HashPatternGeometryState(key.geometry_state) + 0x9e3779b9U + (seed << 6U) + (seed >> 2U);
     return seed;
   }
 };
@@ -233,6 +264,7 @@ inline auto MakeSegmentStateFrontierPruner(StateResolverT state_resolver)
         .terminal_semantic = state.terminal_semantic,
         .monotonic_boundary_state = state.monotonic_boundary_state,
         .source_exposed_load_count = state.source_exposed_load_count,
+        .geometry_state = state.geometry_state,
     };
   };
   return StateFrontierPruner<SegmentChar, SegmentFrontierStateKey, SegmentFrontierStateKeyHash, decltype(key_builder)>(std::move(key_builder));
@@ -253,6 +285,7 @@ inline auto MakeHTreeStateFrontierPruner(StateResolverT state_resolver)
         .terminal_semantic = state.terminal_semantic,
         .monotonic_boundary_state = state.monotonic_boundary_state,
         .source_exposed_load_count = state.source_exposed_load_count,
+        .geometry_state = state.geometry_state,
     };
   };
   return StateFrontierPruner<HTreeTopologyChar, HTreeFrontierStateKey, HTreeFrontierStateKeyHash, decltype(key_builder)>(std::move(key_builder));

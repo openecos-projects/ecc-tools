@@ -729,17 +729,15 @@ void DRCInterface::outputViolationFile(std::map<std::string, std::vector<ids::Vi
 void DRCInterface::outputTofeature(std::map<std::string, std::vector<ids::Violation>>& type_violation_map)
 {
   std::vector<RoutingLayer>& routing_layer_list = DRCDM.getDatabase().get_routing_layer_list();
-  std::vector<CutLayer>& cut_layer_list = DRCDM.getDatabase().get_cut_layer_list();
-
   featureInst->get_type_layer_violation_map().clear();
   for (auto& [type, violation_list] : type_violation_map) {
     for (ids::Violation& violation : violation_list) {
-      std::string layer_name;
-      if (violation.is_routing) {
-        layer_name = routing_layer_list[violation.layer_idx].get_layer_name();
-      } else {
-        layer_name = cut_layer_list[violation.layer_idx].get_layer_name();
+      int32_t layer_idx = violation.layer_idx;
+      if (!violation.is_routing) {
+        const auto& adjacent_layers = DRCDM.getAdjacentRoutingLayerIdxList(layer_idx);
+        layer_idx = *std::min_element(adjacent_layers.begin(), adjacent_layers.end());
       }
+      const std::string& layer_name = routing_layer_list[layer_idx].get_layer_name();
       featureInst->get_type_layer_violation_map()[type][layer_name].push_back(violation);
     }
   }

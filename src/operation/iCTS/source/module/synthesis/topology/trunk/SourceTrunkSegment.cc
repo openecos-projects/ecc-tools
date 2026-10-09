@@ -235,12 +235,15 @@ auto SelectBestSegmentEntry(const std::vector<SegmentChar>& entries) -> std::opt
   return pareto_front.at((pareto_front.size() - 1U) / 2U);
 }
 
-auto FilterSegmentEntries(const std::vector<SegmentChar>& entries, unsigned required_load_cap_idx, unsigned source_drive_cap_idx,
+auto FilterSegmentEntries(const std::vector<SegmentChar>& entries, unsigned required_length_idx, unsigned required_load_cap_idx, unsigned source_drive_cap_idx,
                           const std::optional<unsigned>& min_input_slew_idx) -> std::vector<SegmentChar>
 {
   std::vector<SegmentChar> filtered_entries;
   filtered_entries.reserve(entries.size());
   for (const auto& entry : entries) {
+    if (entry.get_length_idx() != required_length_idx) {
+      continue;
+    }
     if (entry.get_load_cap_idx() < required_load_cap_idx) {
       continue;
     }
@@ -294,19 +297,24 @@ auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::Build& result, Net& sour
   return true;
 }
 
-auto ConfigureCharConfig(const CharBuilder::Config& base_config, const std::vector<double>& requested_lengths_um) -> CharBuilder::Config
+auto ConfigureCharConfig(const CharBuilder::Input& base_input, const CharBuilder::Config& base_config, const std::vector<double>& requested_lengths_um)
+    -> CharBuilder::Config
 {
   auto char_config = base_config;
-  const auto char_grid_plan = htree::ResolveCharacterizationGridPlan(base_config, requested_lengths_um);
+  const auto unit_limits = ResolveCharacterizationWirelengthUnitLimits(base_input, base_config);
+  const auto char_grid_plan = htree::ResolveCharacterizationGridPlan(base_config, requested_lengths_um, unit_limits);
   if (!char_grid_plan.adapted) {
     return char_config;
   }
 
   char_config.wirelength_unit_um = char_grid_plan.wirelength_unit_um;
-  char_config.wirelength_iterations = char_grid_plan.wirelength_iterations;
-  auto direct_indices = htree::ResolveDirectCharacterizationLengthIndices(requested_lengths_um, char_grid_plan);
-  if (!direct_indices.empty()) {
-    char_config.wirelength_indices = std::move(direct_indices);
+  if (!char_grid_plan.preserves_explicit_indices) {
+    char_config.wirelength_iterations = char_grid_plan.wirelength_iterations;
+    char_config.use_boundary_primitive_patterns = char_grid_plan.uses_primitive_characterization;
+    auto direct_indices = htree::ResolveDirectCharacterizationLengthIndices(requested_lengths_um, char_grid_plan);
+    if (!direct_indices.empty()) {
+      char_config.wirelength_indices = std::move(direct_indices);
+    }
   }
   return char_config;
 }
@@ -364,7 +372,8 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
 
   const std::vector<double> requested_lengths_um{result.summary.length_um};
   CharacterizationLibrary direct_char_library;
-  const auto direct_ensure = direct_char_library.ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
+  const auto direct_ensure = direct_char_library.ensure(input.characterization_input,
+                                                        ConfigureCharConfig(input.characterization_input, input.characterization_config, requested_lengths_um));
   std::string direct_failure_reason = direct_ensure.failure_reason;
   if (direct_ensure.success) {
     const auto& direct_builder = direct_char_library.getCharBuilder();
@@ -380,14 +389,14 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
         || direct_required_load_cap_idx > direct_builder.get_cap_steps()) {
       direct_failure_reason = "direct_characterization_boundary_indices_unavailable";
     } else {
-      auto direct_strict_entries
-          = FilterSegmentEntries(direct_builder.get_segment_chars(), direct_required_load_cap_idx, direct_source_drive_cap_idx, direct_min_input_slew_idx);
+      auto direct_strict_entries = FilterSegmentEntries(direct_builder.get_segment_chars(), direct_length_idx, direct_required_load_cap_idx,
+                                                        direct_source_drive_cap_idx, direct_min_input_slew_idx);
       auto direct_best_char = SelectBestSegmentEntry(direct_strict_entries);
       std::vector<SegmentChar> direct_relaxed_entries;
       bool direct_used_boundary_relaxation = false;
       if (!direct_best_char.has_value() && direct_min_input_slew_idx.has_value()) {
-        direct_relaxed_entries
-            = FilterSegmentEntries(direct_builder.get_segment_chars(), direct_required_load_cap_idx, direct_source_drive_cap_idx, std::nullopt);
+        direct_relaxed_entries = FilterSegmentEntries(direct_builder.get_segment_chars(), direct_length_idx, direct_required_load_cap_idx,
+                                                      direct_source_drive_cap_idx, std::nullopt);
         direct_best_char = SelectBestSegmentEntry(direct_relaxed_entries);
         direct_used_boundary_relaxation = direct_best_char.has_value();
       }
@@ -427,10 +436,10 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
   CTSLOG.warn(Loc::current(), "SourceTrunkSegment: direct target-length characterization unavailable; using label-DP fallback: ",
               direct_failure_reason.empty() ? "unknown_direct_characterization_failure" : direct_failure_reason);
 
-  CharacterizationLibrary local_char_library;
-  auto* char_library = input.characterization_library == nullptr ? &local_char_library : input.characterization_library;
+  auto* char_library = input.characterization_library == nullptr ? &direct_char_library : input.characterization_library;
   if (!char_library->isReady()) {
-    const auto ensure_result = char_library->ensure(input.characterization_input, ConfigureCharConfig(input.characterization_config, requested_lengths_um));
+    const auto ensure_result = char_library->ensure(input.characterization_input,
+                                                    ConfigureCharConfig(input.characterization_input, input.characterization_config, requested_lengths_um));
     if (!ensure_result.success) {
       result.summary.failure_reason = ensure_result.failure_reason.empty() ? "characterization_library_failed" : ensure_result.failure_reason;
       return result;

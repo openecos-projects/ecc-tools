@@ -62,6 +62,14 @@ void PhyPlacer::place()
 
 void PhyPlacer::placePhyCell(PPModel& pp_model)
 {
+  _placed_macro_list.clear();
+  _occupied_region_indices.clear();
+  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (instance.get_macro() && instance.get_placed()) {
+      _placed_macro_list.push_back(&instance);
+    }
+  }
+
   Config& config = FPDM.getConfig();
   if (config.tap_distance_micron <= 0.0 || config.boundary_tap_rule_micron <= 0.0 || config.tapcell_name.empty() || config.left_endcap_name.empty()
       || config.right_endcap_name.empty() || config.top_endcap_name_list.empty() || config.bottom_endcap_name_list.empty()
@@ -151,10 +159,8 @@ std::vector<std::pair<int32_t, int32_t>> PhyPlacer::getMacroBlockageIntervalList
   Database& database = FPDM.getDatabase();
   Site& site = database.get_site_map()[row.get_site_name()];
   std::vector<std::pair<int32_t, int32_t>> macro_blockage_interval_list;
-  for (Instance& instance : database.get_instance_list()) {
-    if (!instance.get_macro() || !instance.get_placed()) {
-      continue;
-    }
+  for (Instance* instance_ptr : _placed_macro_list) {
+    Instance& instance = *instance_ptr;
     PlanarRect& placement_halo_rect = instance.get_placement_halo_rect();
     if (row.get_ur_y() <= placement_halo_rect.get_ll_y() || placement_halo_rect.get_ur_y() <= row.get_ll_y()) {
       continue;
@@ -247,10 +253,8 @@ void PhyPlacer::addPPBoundaryRegion(PPModel& pp_model, PPRegion& pp_region, int3
 void PhyPlacer::addMacroPPBoundaryRegion(PPModel& pp_model)
 {
   Database& database = FPDM.getDatabase();
-  for (Instance& instance : database.get_instance_list()) {
-    if (!instance.get_macro() || !instance.get_placed()) {
-      continue;
-    }
+  for (Instance* instance_ptr : _placed_macro_list) {
+    Instance& instance = *instance_ptr;
     PlanarRect& placement_halo_rect = instance.get_placement_halo_rect();
     int32_t top_boundary_y_coord = INT32_MAX;
     int32_t bottom_boundary_y_coord = INT32_MIN;
@@ -353,7 +357,9 @@ void PhyPlacer::addPhyCell(PPModel& pp_model, PPRegion& pp_region, std::string i
   occupied_region.set_site_height(pp_region.get_site_height());
   occupied_region.set_y_coord(pp_region.get_y_coord());
   occupied_region.set_orient(pp_region.get_orient());
+  size_t occupied_region_idx = pp_model.get_occupied_region_list().size();
   pp_model.get_occupied_region_list().push_back(occupied_region);
+  _occupied_region_indices[occupied_region.get_y_coord()].push_back(occupied_region_idx);
 }
 
 bool PhyPlacer::isPhyCellOnSite(PPRegion& pp_region, CellMaster& cell_master, int32_t x_coord)
@@ -425,8 +431,14 @@ int32_t PhyPlacer::getAvailableCellCoord(PPModel& pp_model, PPRegion& pp_region,
 
 bool PhyPlacer::isCellAvailable(PPModel& pp_model, int32_t start_coord, int32_t end_coord, int32_t y_coord)
 {
-  for (PPRegion& occupied_region : pp_model.get_occupied_region_list()) {
-    if (occupied_region.get_y_coord() != y_coord || end_coord <= occupied_region.get_start_coord() || occupied_region.get_end_coord() <= start_coord) {
+  auto iter = _occupied_region_indices.find(y_coord);
+  if (iter == _occupied_region_indices.end()) {
+    return true;
+  }
+  std::vector<PPRegion>& occupied_region_list = pp_model.get_occupied_region_list();
+  for (size_t occupied_region_idx : iter->second) {
+    PPRegion& occupied_region = occupied_region_list[occupied_region_idx];
+    if (end_coord <= occupied_region.get_start_coord() || occupied_region.get_end_coord() <= start_coord) {
       continue;
     }
     return false;
@@ -485,14 +497,19 @@ std::vector<std::string>& PhyPlacer::getEdgeEndcapNameList(PPBoundaryType bounda
 std::vector<PPRegion> PhyPlacer::getEmptyPPRegionList(PPModel& pp_model, PPRegion& boundary_region)
 {
   std::vector<std::pair<int32_t, int32_t>> occupied_interval_list;
-  for (PPRegion& occupied_region : pp_model.get_occupied_region_list()) {
-    if (occupied_region.get_y_coord() != boundary_region.get_y_coord() || occupied_region.get_end_coord() <= boundary_region.get_start_coord()
-        || boundary_region.get_end_coord() <= occupied_region.get_start_coord()) {
-      continue;
+  auto iter = _occupied_region_indices.find(boundary_region.get_y_coord());
+  if (iter != _occupied_region_indices.end()) {
+    std::vector<PPRegion>& occupied_region_list = pp_model.get_occupied_region_list();
+    for (size_t occupied_region_idx : iter->second) {
+      PPRegion& occupied_region = occupied_region_list[occupied_region_idx];
+      if (occupied_region.get_end_coord() <= boundary_region.get_start_coord()
+          || boundary_region.get_end_coord() <= occupied_region.get_start_coord()) {
+        continue;
+      }
+      int32_t start_coord = std::max(occupied_region.get_start_coord(), boundary_region.get_start_coord());
+      int32_t end_coord = std::min(occupied_region.get_end_coord(), boundary_region.get_end_coord());
+      occupied_interval_list.emplace_back(start_coord, end_coord);
     }
-    int32_t start_coord = std::max(occupied_region.get_start_coord(), boundary_region.get_start_coord());
-    int32_t end_coord = std::min(occupied_region.get_end_coord(), boundary_region.get_end_coord());
-    occupied_interval_list.emplace_back(start_coord, end_coord);
   }
   std::sort(occupied_interval_list.begin(), occupied_interval_list.end());
 

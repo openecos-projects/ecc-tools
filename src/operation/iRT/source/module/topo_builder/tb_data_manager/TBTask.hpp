@@ -23,6 +23,7 @@
 namespace irt {
 
 using TBSegmentCostQuery = std::function<double(const PlanarCoord&, const PlanarCoord&)>;
+using TBPointLegalQuery = std::function<bool(const PlanarCoord&)>;
 using TBShiftEdgeFilter = std::function<bool(const PlanarCoord&, const PlanarCoord&)>;
 
 enum class TBTopoMode
@@ -43,6 +44,7 @@ class TBTask
   const PlanarRect& get_planar_search_region() const { return _planar_search_region; }
   bool has_planar_search_region() const { return _has_planar_search_region; }
   bool has_segment_cost_query() const { return static_cast<bool>(_segment_cost_query); }
+  bool has_point_legal_query() const { return static_cast<bool>(_point_legal_query); }
   bool has_shift_edge_filter() const { return static_cast<bool>(_shift_edge_filter); }
   TBTopoMode get_topo_mode() const { return _topo_mode; }
   bool is_cost_refine_enabled() const { return _topo_mode != TBTopoMode::kGeometry; }
@@ -50,6 +52,7 @@ class TBTask
   // setter
   void set_planar_coord_list(std::vector<PlanarCoord> planar_coord_list) { _planar_coord_list = std::move(planar_coord_list); }
   void set_segment_cost_query(TBSegmentCostQuery query) { _segment_cost_query = std::move(query); }
+  void set_point_legal_query(TBPointLegalQuery query) { _point_legal_query = std::move(query); }
   void set_shift_edge_filter(TBShiftEdgeFilter filter) { _shift_edge_filter = std::move(filter); }
   void set_topo_mode(TBTopoMode topo_mode) { _topo_mode = topo_mode; }
   void set_congestion_driven(bool congestion_driven)
@@ -63,11 +66,13 @@ class TBTask
   }
   // function
   double get_segment_cost(const PlanarCoord& first, const PlanarCoord& second) const { return _segment_cost_query(first, second); }
+  bool is_point_legal(const PlanarCoord& coord) const { return !_point_legal_query || _point_legal_query(coord); }
   bool should_shift_edge(const PlanarCoord& first, const PlanarCoord& second) const { return _shift_edge_filter(first, second); }
 
  private:
   std::vector<PlanarCoord> _planar_coord_list;
   TBSegmentCostQuery _segment_cost_query;
+  TBPointLegalQuery _point_legal_query;
   TBShiftEdgeFilter _shift_edge_filter;
   PlanarRect _planar_search_region;
   bool _has_planar_search_region = false;

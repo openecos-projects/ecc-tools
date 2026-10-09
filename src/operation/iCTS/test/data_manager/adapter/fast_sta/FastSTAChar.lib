@@ -1,0 +1,63 @@
+/* Characterization preparation fixture with distinct transition/cap states
+ * and load/slew-dependent timing and power. Values are explicit test inputs. */
+library(FastSTAChar) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  capacitive_load_unit(1, pf);
+  voltage_unit : "1V";
+  current_unit : "1mA";
+  leakage_power_unit : "1nW";
+  nom_voltage : 1;
+  input_threshold_pct_rise : 50;
+  input_threshold_pct_fall : 50;
+  output_threshold_pct_rise : 50;
+  output_threshold_pct_fall : 50;
+  slew_lower_threshold_pct_rise : 20;
+  slew_upper_threshold_pct_rise : 80;
+  slew_lower_threshold_pct_fall : 20;
+  slew_upper_threshold_pct_fall : 80;
+  lu_table_template(delay) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1("0.01, 1");
+    index_2("0.01, 1");
+  }
+  power_lut_template(power) {
+    variable_1 : input_transition_time;
+    variable_2 : total_output_net_capacitance;
+    index_1("0.01, 1");
+    index_2("0.01, 1");
+  }
+  cell(CHARBUF) {
+    area : 1;
+    cell_leakage_power : 1;
+    pin(A) {
+      direction : input;
+      capacitance : 0.02;
+      rise_capacitance : 0.02;
+      fall_capacitance : 0.04;
+      rise_capacitance_range(0.01, 0.03);
+      fall_capacitance_range(0.02, 0.06);
+      max_transition : 1;
+    }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 1;
+      timing() {
+        related_pin : "A";
+        timing_sense : positive_unate;
+        timing_type : combinational;
+        cell_rise(delay) { values("0.01, 0.02", "0.02, 0.03"); }
+        cell_fall(delay) { values("0.02, 0.04", "0.03, 0.05"); }
+        rise_transition(delay) { values("0.02, 0.03", "0.03, 0.04"); }
+        fall_transition(delay) { values("0.04, 0.06", "0.05, 0.07"); }
+      }
+      internal_power() {
+        related_pin : "A";
+        rise_power(power) { values("0.001, 0.002", "0.002, 0.003"); }
+        fall_power(power) { values("0.002, 0.004", "0.003, 0.005"); }
+      }
+    }
+  }
+}

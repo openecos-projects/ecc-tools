@@ -186,6 +186,14 @@ LAYER M1
   RESISTANCE RPERSQ 0.10 ;
   CAPACITANCE CPERSQDIST 0.001 ;
 END M1
+LAYER M2
+  TYPE ROUTING ;
+  DIRECTION VERTICAL ;
+  PITCH 0.10 ;
+  WIDTH 0.05 ;
+  RESISTANCE RPERSQ 0.10 ;
+  CAPACITANCE CPERSQDIST 0.001 ;
+END M2
 END LIBRARY
 )lef";
     constexpr auto cell_lef = R"lef(VERSION 5.8 ;
@@ -358,7 +366,7 @@ END COMPONENTS
 PINS 1 ;
 - clk_in + NET clk_net + DIRECTION INPUT + USE CLOCK
   + LAYER M1 ( 0 0 ) ( 10 10 )
-  + PLACED ( 500 500 ) N ;
+  + PLACED ( 595 995 ) N ;
 END PINS
 NETS 1 ;
 - clk_net ( PIN clk_in ) ( sink CLK ) ( boundary_buf A ) ( boundary_inv A ) + USE CLOCK ;
@@ -391,7 +399,7 @@ END COMPONENTS
 PINS 1 ;
 - clk_in + NET clk_net + DIRECTION INPUT + USE CLOCK
   + LAYER M1 ( 0 0 ) ( 10 10 )
-  + PLACED ( 500 500 ) N ;
+  + PLACED ( 595 995 ) N ;
 END PINS
 NETS 2 ;
 - clk_net ( PIN clk_in ) ( boundary_buf A ) ( boundary_inv A ) + USE CLOCK ;
@@ -412,24 +420,53 @@ NETS 2 ;
 END NETS
 END DESIGN
 )def";
+    constexpr auto fully_traced_design_def = R"def(VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN icts_native_fully_traced ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 2000 2000 ) ;
+COMPONENTS 2 ;
+- sink DFF_X1 + PLACED ( 500 500 ) N ;
+- boundary_buf BUF_X1 + PLACED ( 500 500 ) N ;
+END COMPONENTS
+PINS 1 ;
+- clk_in + NET clk_net + DIRECTION INPUT + USE CLOCK
+  + LAYER M1 ( 0 0 ) ( 10 10 )
+  + PLACED ( 595 995 ) N ;
+END PINS
+NETS 2 ;
+- clk_net ( PIN clk_in ) ( boundary_buf A ) + USE CLOCK ;
+- fully_covered_leaf ( boundary_buf Y ) ( sink CLK ) + USE CLOCK ;
+END NETS
+END DESIGN
+)def";
     constexpr auto sdc = "create_clock -name native_clk -period 10 [get_nets clk_net]\n";
     const bool partial_trace_fixture = label == "partial_traced_frontier";
+    const auto* selected_def = design_def;
+    if (partial_trace_fixture) {
+      selected_def = partial_trace_design_def;
+    } else if (label == "fully_covered_traced") {
+      selected_def = fully_traced_design_def;
+    }
 
     dmInst->reset();
     _ready = WriteTextFile(_config_path, config) && WriteTextFile(tech_lef_path, tech_lef) && WriteTextFile(cell_lef_path, cell_lef)
-             && WriteTextFile(liberty_path, liberty) && WriteTextFile(def_path, partial_trace_fixture ? partial_trace_design_def : design_def)
-             && WriteTextFile(sdc_path, sdc) && dmInst->readLef(std::vector<std::string>{tech_lef_path.string()}, true)
+             && WriteTextFile(liberty_path, liberty) && WriteTextFile(def_path, selected_def) && WriteTextFile(sdc_path, sdc)
+             && dmInst->readLef(std::vector<std::string>{tech_lef_path.string()}, true)
              && dmInst->readLef(std::vector<std::string>{cell_lef_path.string()}, false) && dmInst->readDef(def_path.string());
     if (!_ready) {
       return;
     }
     auto* idb_layout = dmInst->get_idb_layout();
-    auto* routing_layer = idb_layout == nullptr ? nullptr : dynamic_cast<idb::IdbLayerRouting*>(idb_layout->get_layers()->find_layer("M1"));
-    if (routing_layer == nullptr) {
-      _ready = false;
-      return;
+    for (const auto* layer_name : {"M1", "M2"}) {
+      auto* routing_layer = idb_layout == nullptr ? nullptr : dynamic_cast<idb::IdbLayerRouting*>(idb_layout->get_layers()->find_layer(layer_name));
+      if (routing_layer == nullptr) {
+        _ready = false;
+        return;
+      }
+      routing_layer->set_edge_capacitance(0.00004);
     }
-    routing_layer->set_edge_capacitance(0.00004);
 
     auto* idb_design = dmInst->get_idb_design();
     std::vector<std::string> flip_flop_names{"sink"};
@@ -446,6 +483,7 @@ END DESIGN
       }
       sink->set_as_flip_flop_flag();
     }
+    dmInst->get_config().set_routing_layer_1st("M1");
     dmInst->get_config().set_lib_paths({liberty_path.string()});
     dmInst->get_config().set_sdc_path(sdc_path.string());
   }
@@ -646,6 +684,17 @@ TEST(CTSAPILifecycleTest, NativeNonNoOpFlowConvergesPlannedCommittedWrittenAndEv
   ASSERT_EQ(init_status.code, icts::CTSStatusCode::kOk) << init_status.message;
   ASSERT_EQ(CTSDM.getState(), icts::CTSRunState::kInputReady);
   ASSERT_EQ(CTSDM.getDesign().get_clocks().size(), 1U);
+  auto& fast_sta = CTSDM.getFastSTA();
+  const auto initial_timing = CTSDM.getClockTimingContext("native_clk", "clk_net");
+  if (!initial_timing.has_value()) {
+    FAIL() << "Expected initial_timing to have a value.";
+  }
+  const auto initial_status = fast_sta.queryAnalysisStatus(*initial_timing);
+  if (!initial_status.has_value()) {
+    FAIL() << "Expected initial timing status.";
+  }
+  EXPECT_TRUE(initial_status->timing_valid);
+  EXPECT_TRUE(initial_status->power_valid);
 
   auto* input_clock = CTSDM.getDesign().get_clocks().front();
   ASSERT_NE(input_clock, nullptr);
@@ -661,7 +710,6 @@ TEST(CTSAPILifecycleTest, NativeNonNoOpFlowConvergesPlannedCommittedWrittenAndEv
   EXPECT_EQ(input_clock->findPropagationArc(boundary_buf), nullptr);
   EXPECT_EQ(input_clock->findPropagationArc(boundary_inv), nullptr);
   ASSERT_NE(input_clock->get_clock_source(), nullptr);
-  input_clock->get_clock_source()->set_location(input_clock->get_loads().front()->get_location());
   const std::size_t input_inst_count = CTSDM.getDesign().get_insts().size();
   const std::size_t input_net_count = CTSDM.getDesign().get_nets().size();
 
@@ -680,10 +728,69 @@ TEST(CTSAPILifecycleTest, NativeNonNoOpFlowConvergesPlannedCommittedWrittenAndEv
   EXPECT_EQ(committed_clock->findPropagationArc(CTSDM.getDesign().findInst("boundary_inv")), nullptr);
   EXPECT_TRUE(CTSDM.getDesign().rebuildClockDAG());
 
+  const auto synthesized_timing = CTSDM.getClockTimingContext("native_clk", "clk_net");
+  if (!synthesized_timing.has_value()) {
+    FAIL() << "Expected synthesized_timing to have a value.";
+  }
+  EXPECT_NE(synthesized_timing, initial_timing);
+  EXPECT_FALSE(fast_sta.queryAnalysisStatus(*initial_timing).has_value());
+  const auto synthesized_summary = fast_sta.queryTimingSummary(*synthesized_timing);
+  if (!synthesized_summary.has_value()) {
+    FAIL() << "Expected synthesized_summary to have a value.";
+  }
+  const auto synthesized_runtime_s = synthesized_summary->runtime_s;
+  const auto synthesized_points = fast_sta.collectTimingPointFacts(*synthesized_timing);
+  ASSERT_FALSE(synthesized_points.empty());
+  const auto expect_reused_points = [&](icts::FastStaContextId id) -> void {
+    const auto points = fast_sta.collectTimingPointFacts(id);
+    ASSERT_EQ(points.size(), synthesized_points.size());
+    for (std::size_t index = 0U; index < points.size(); ++index) {
+      EXPECT_EQ(points.at(index).pin_name, synthesized_points.at(index).pin_name);
+      EXPECT_EQ(points.at(index).transition, synthesized_points.at(index).transition);
+      EXPECT_EQ(points.at(index).analysis, synthesized_points.at(index).analysis);
+      EXPECT_DOUBLE_EQ(points.at(index).arrival_ns, synthesized_points.at(index).arrival_ns);
+      EXPECT_DOUBLE_EQ(points.at(index).slew_ns, synthesized_points.at(index).slew_ns);
+    }
+    const auto summary = fast_sta.queryTimingSummary(id);
+    if (!summary.has_value()) {
+      FAIL() << "Expected reused timing summary.";
+    }
+    EXPECT_DOUBLE_EQ(summary->runtime_s, synthesized_runtime_s);
+  };
+  auto no_edit_candidate = CTSDM.cloneDesign();
+  ASSERT_TRUE(CTSDM.beginOptimizationTiming(*no_edit_candidate, CTSDM.getClockLayout()).ok());
+  const auto no_edit_timing = CTSDM.getOptimizationTimingContext("native_clk", "clk_net");
+  if (!no_edit_timing.has_value()) {
+    FAIL() << "Expected no_edit_timing to have a value.";
+  }
+  expect_reused_points(*no_edit_timing);
+  expect_reused_points(*synthesized_timing);
+  const auto sizing = CTSDM.buildClockSizingContext(*no_edit_candidate, CTSDM.getClockLayout(), 0U);
+  if (!sizing.context_id.has_value()) {
+    FAIL() << sizing.failure_reason;
+  }
+  EXPECT_DOUBLE_EQ(fast_sta.querySkew(*sizing.context_id).skew_ns, fast_sta.querySkew(*synthesized_timing).skew_ns);
+  ASSERT_TRUE(fast_sta.eraseContext(*sizing.context_id));
+  CTSDM.discardOptimizationTiming();
+  EXPECT_FALSE(fast_sta.queryAnalysisStatus(*no_edit_timing).has_value());
+  expect_reused_points(*synthesized_timing);
+  auto* changed_inst = no_edit_candidate->findInst(committed_clock->get_propagation_arcs().front().inst->get_name());
+  ASSERT_NE(changed_inst, nullptr);
+  changed_inst->set_cell_master("unavailable_candidate");
+  EXPECT_FALSE(CTSDM.beginOptimizationTiming(*no_edit_candidate, CTSDM.getClockLayout()).ok());
+  EXPECT_FALSE(CTSDM.getOptimizationTimingContext("native_clk", "clk_net").has_value());
+  expect_reused_points(*synthesized_timing);
+
   CTSDM.getConfig().set_buffer_types({});
   const auto optimization = icts::Optimization::run();
   ASSERT_TRUE(optimization.success) << optimization.reason;
   ASSERT_EQ(CTSDM.getState(), icts::CTSRunState::kOptimizationCommitted);
+  const auto optimized_timing = CTSDM.getClockTimingContext("native_clk", "clk_net");
+  if (!optimized_timing.has_value()) {
+    FAIL() << "Expected optimized_timing to have a value.";
+  }
+  EXPECT_FALSE(fast_sta.queryAnalysisStatus(*synthesized_timing).has_value());
+  expect_reused_points(*optimized_timing);
 
   const auto instantiation = icts::Instantiation::run();
   ASSERT_TRUE(instantiation.success) << instantiation.failure_reason;
@@ -769,7 +876,6 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   auto* source_net = input_clock->get_clock_source_net();
   ASSERT_NE(source_net, nullptr);
   ASSERT_NE(input_clock->get_clock_source(), nullptr);
-  input_clock->get_clock_source()->set_location(boundary_pin->get_location());
   const auto* input_arc = input_clock->findPropagationArc(input_buffer);
   ASSERT_NE(input_arc, nullptr);
   EXPECT_EQ(input_arc->input_pin, input_pin);
@@ -872,7 +978,9 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   EXPECT_EQ(repeated_traced_arc->origin, icts::ClockPropagationOrigin::kTracedInput);
   EXPECT_EQ(repeated_traced_arc->path_buffer_weight, 1);
   const auto exact_input_cap_pf = CTSDM.getWrapper().queryPinCapacitance(repeated_traced_arc->input_pin);
-  ASSERT_TRUE(exact_input_cap_pf.has_value());
+  if (!exact_input_cap_pf.has_value()) {
+    FAIL() << "Expected exact_input_cap_pf to have a value.";
+  }
   EXPECT_DOUBLE_EQ(exact_input_cap_pf.value_or(-1.0), 0.01);
   EXPECT_FALSE(CTSDM.getWrapper().queryPinCapacitance(repeated_traced_arc->output_pin).has_value());
   icts::Qor exact_arc_statistics;
@@ -881,7 +989,9 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   EXPECT_TRUE(exact_arc_metric_status.ok());
   const auto exact_buffer_stats = exact_arc_statistics.cell_stats.find("Buffer");
   ASSERT_NE(exact_buffer_stats, exact_arc_statistics.cell_stats.end());
-  ASSERT_TRUE(exact_buffer_stats->second.total_cap_pf.has_value());
+  if (!exact_buffer_stats->second.total_cap_pf.has_value()) {
+    FAIL() << "Expected exact_buffer_stats->second.total_cap_pf to have a value.";
+  }
   EXPECT_DOUBLE_EQ(exact_buffer_stats->second.total_cap_pf.value_or(-1.0), 0.01);
   icts::Qor rejected_arc_statistics;
   const auto missing_arc_metric_status
@@ -924,7 +1034,9 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   const auto buffer_stats = evaluation.output.state.statistics.cell_stats.find("Buffer");
   ASSERT_NE(buffer_stats, evaluation.output.state.statistics.cell_stats.end());
   EXPECT_EQ(buffer_stats->second.count, static_cast<std::size_t>(expected_buffer_count));
-  ASSERT_TRUE(buffer_stats->second.total_cap_pf.has_value());
+  if (!buffer_stats->second.total_cap_pf.has_value()) {
+    FAIL() << "Expected buffer_stats->second.total_cap_pf to have a value.";
+  }
   EXPECT_NEAR(buffer_stats->second.total_cap_pf.value_or(-1.0), 0.01 * static_cast<double>(expected_buffer_count), 1e-12);
   EXPECT_EQ(evaluation.output.state.summary.path_depth_metric_status, "available");
   EXPECT_EQ(evaluation.output.state.summary.clock_path_min_buffer, 2);
@@ -942,41 +1054,21 @@ TEST(CTSAPILifecycleTest, FullyCoveredTracedTopologyRemainsZeroInsertionAcrossRe
   auto* input_clock = input_design.findClock("native_clk", "clk_net");
   auto* input_buffer = input_design.findInst("boundary_buf");
   auto* input_pin = input_design.findPin("boundary_buf/A");
-  auto* boundary_pin = input_design.findPin("boundary_inv/A");
   auto* sink_pin = input_design.findPin("sink/CLK");
   ASSERT_NE(input_clock, nullptr);
   ASSERT_NE(input_buffer, nullptr);
   ASSERT_NE(input_pin, nullptr);
-  ASSERT_NE(boundary_pin, nullptr);
   ASSERT_NE(sink_pin, nullptr);
   auto* source_net = input_clock->get_clock_source_net();
   ASSERT_NE(source_net, nullptr);
-  auto* output_pin = input_design.makePin("Y");
+  auto* output_pin = input_design.findPin("boundary_buf/Y");
   ASSERT_NE(output_pin, nullptr);
-  output_pin->set_type(icts::PinType::kOut);
-  output_pin->set_location(input_buffer->get_location());
-  output_pin->set_inst(input_buffer);
-  input_buffer->add_pin(output_pin);
-  ASSERT_TRUE(input_design.indexPin(output_pin));
-  auto* leaf_net = input_design.makeNet("fully_covered_leaf");
+  auto* leaf_net = input_design.findNet("fully_covered_leaf");
   ASSERT_NE(leaf_net, nullptr);
-  source_net->set_loads({input_pin});
-  input_pin->set_net(source_net);
-  boundary_pin->set_net(nullptr);
-  leaf_net->set_driver(output_pin);
-  leaf_net->set_loads({sink_pin});
-  output_pin->set_net(leaf_net);
-  sink_pin->set_net(leaf_net);
-  input_clock->set_loads({sink_pin});
-  input_clock->add_net(leaf_net);
-  ASSERT_TRUE(input_clock
-                  ->addPropagationArc({.inst = input_buffer,
-                                       .input_pin = input_pin,
-                                       .output_pin = output_pin,
-                                       .kind = icts::ClockPropagationKind::kBuffer,
-                                       .origin = icts::ClockPropagationOrigin::kTracedInput,
-                                       .path_buffer_weight = 1})
-                  .ok());
+  EXPECT_EQ(source_net->get_loads(), std::vector<icts::Pin*>({input_pin}));
+  EXPECT_EQ(leaf_net->get_driver(), output_pin);
+  EXPECT_EQ(leaf_net->get_loads(), std::vector<icts::Pin*>({sink_pin}));
+  ASSERT_NE(input_clock->findPropagationArc(input_buffer), nullptr);
   ASSERT_TRUE(input_design.rebuildClockDAG());
   const auto input_inst_count = input_design.get_insts().size();
   const auto input_net_count = input_design.get_nets().size();
@@ -1077,7 +1169,9 @@ TEST(CTSAPILifecycleTest, TenCyclesRemainWithinApprovedPostDestroyRssThreshold)
     ASSERT_TRUE(icts::CTSAPI::destroyCTS().ok());
     ASSERT_TRUE(icts::CTSAPI::destroyCTS().ok());
     const auto rss_mb = icts::Utility::currentRssMb();
-    ASSERT_TRUE(rss_mb.has_value());
+    if (!rss_mb.has_value()) {
+      FAIL() << "Expected rss_mb to have a value.";
+    }
     post_destroy_rss_mb.at(cycle) = rss_mb.value_or(0.0);
   }
 

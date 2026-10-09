@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace icts {
@@ -38,6 +39,7 @@ enum class ClockPropagationKind
 {
   kBuffer,
   kInverter,
+  kClockGate,
 };
 
 enum class ClockPropagationOrigin
@@ -86,6 +88,7 @@ class Clock
   auto get_clock_net_name() const -> const std::string& { return _clock_net_name; }
   auto get_clock_period_ns() const -> double { return _clock_period_ns; }
   auto get_clock_period_source() const -> const std::string& { return _clock_period_source; }
+  auto get_synthesis_region_suffix() const -> const std::string& { return _synthesis_region_suffix; }
   auto get_clock_source() const -> Pin* { return _clock_source; }
   auto get_clock_source_net() const -> Net* { return _clock_source_net; }
   auto get_loads() const -> const std::vector<Pin*>& { return _loads; }
@@ -100,6 +103,7 @@ class Clock
   // Setter
   auto set_clock_period_ns(double clock_period_ns) -> void { _clock_period_ns = clock_period_ns; }
   auto set_clock_period_source(const std::string& clock_period_source) -> void { _clock_period_source = clock_period_source; }
+  auto set_synthesis_region_suffix(std::string suffix) -> void { _synthesis_region_suffix = std::move(suffix); }
   auto set_clock_source(Pin* clock_source) -> void { _clock_source = clock_source; }
   auto set_clock_source_net(Net* clock_source_net) -> void { _clock_source_net = clock_source_net; }
   auto set_preclustered_sink_reuse(bool preclustered_sink_reuse) -> void { _preclustered_sink_reuse = preclustered_sink_reuse; }
@@ -151,6 +155,7 @@ class Clock
   std::string _clock_net_name = "";
   double _clock_period_ns = 0.0;
   std::string _clock_period_source = "";
+  std::string _synthesis_region_suffix;
   Pin* _clock_source = nullptr;
   Net* _clock_source_net = nullptr;
   std::vector<Pin*> _loads;

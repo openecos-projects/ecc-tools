@@ -73,6 +73,7 @@ auto CharacterizationLibrary::makeCharacterizationCacheKey(const CharBuilder::In
       .wirelength_unit_um = config.wirelength_unit_um,
       .wirelength_iterations = config.wirelength_iterations,
       .wirelength_indices = config.wirelength_indices,
+      .use_boundary_primitive_patterns = config.use_boundary_primitive_patterns,
       .max_slew_ns = config.max_slew_ns,
       .max_cap_pf = config.max_cap_pf,
       .buffer_types = input.buffer_types,

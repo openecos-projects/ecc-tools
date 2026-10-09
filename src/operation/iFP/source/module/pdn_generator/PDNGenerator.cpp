@@ -54,6 +54,14 @@ void PDNGenerator::generate()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
+  _placed_macro_list.clear();
+  _macro_top_layer_order.clear();
+  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (instance.get_macro() && instance.get_placed()) {
+      _placed_macro_list.push_back(&instance);
+    }
+  }
+
   PGModel pg_model;
   generatePDN(pg_model);
 
@@ -292,8 +300,9 @@ std::vector<std::pair<int32_t, int32_t>> PDNGenerator::getMacroBlockageIntervalL
   int32_t line_end = horizontal ? std::max(start_x, end_x) : std::max(start_y, end_y);
   int32_t line_coord = horizontal ? start_y : start_x;
   int32_t half_width = width / 2;
-  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-    if (!instance.get_macro() || !instance.get_placed() || routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
+  for (Instance* instance_ptr : _placed_macro_list) {
+    Instance& instance = *instance_ptr;
+    if (routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
       continue;
     }
     PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
@@ -324,6 +333,10 @@ std::vector<std::pair<int32_t, int32_t>> PDNGenerator::getMacroBlockageIntervalL
 
 int32_t PDNGenerator::getMacroTopLayerOrder(Instance& instance)
 {
+  auto iter = _macro_top_layer_order.find(&instance);
+  if (iter != _macro_top_layer_order.end()) {
+    return iter->second;
+  }
   int32_t top_layer_order = -1;
   for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
     RoutingLayer* routing_layer = findRoutingLayer(pin_shape.get_layer_name());
@@ -331,6 +344,7 @@ int32_t PDNGenerator::getMacroTopLayerOrder(Instance& instance)
       top_layer_order = std::max(top_layer_order, routing_layer->get_order());
     }
   }
+  _macro_top_layer_order[&instance] = top_layer_order;
   return top_layer_order;
 }
 
@@ -420,8 +434,9 @@ void PDNGenerator::alignStripeSegment(PGSegment& stripe_segment)
 
   bool vertical = stripe_segment.is_vertical();
   int32_t half_width = stripe_segment.get_width() / 2;
-  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-    if (!instance.get_macro() || !instance.get_placed() || routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
+  for (Instance* instance_ptr : _placed_macro_list) {
+    Instance& instance = *instance_ptr;
+    if (routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
       continue;
     }
 
@@ -735,10 +750,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   Database& database = FPDM.getDatabase();
   int32_t macro_pin_num = 0;
   for (PGNet& pg_net : database.get_pg_net_list()) {
-    for (Instance& instance : database.get_instance_list()) {
-      if (!instance.get_macro() || !instance.get_placed()) {
-        continue;
-      }
+    for (Instance* instance_ptr : _placed_macro_list) {
+      Instance& instance = *instance_ptr;
       for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
         if (std::find(pg_net.get_instance_pin_name_list().begin(), pg_net.get_instance_pin_name_list().end(), pin_shape.get_pin_name())
             != pg_net.get_instance_pin_name_list().end()) {
@@ -752,10 +765,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   int32_t processed_macro_pin_num = 0;
   Monitor stage_monitor;
   for (PGNet& pg_net : database.get_pg_net_list()) {
-    for (Instance& instance : database.get_instance_list()) {
-      if (!instance.get_macro() || !instance.get_placed()) {
-        continue;
-      }
+    for (Instance* instance_ptr : _placed_macro_list) {
+      Instance& instance = *instance_ptr;
       for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
         if (std::find(pg_net.get_instance_pin_name_list().begin(), pg_net.get_instance_pin_name_list().end(), pin_shape.get_pin_name())
             == pg_net.get_instance_pin_name_list().end()) {

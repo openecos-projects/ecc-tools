@@ -26,6 +26,10 @@ namespace irt {
 struct TBRefineStat
 {
   int32_t shifted_edge_num = 0;
+  int32_t local_steiner_repair_num = 0;
+  int32_t failed_local_steiner_repair_num = 0;
+  int32_t remaining_illegal_steiner_num = 0;
+  int32_t max_local_steiner_radius = 0;
   bool used_terminal_mst = false;
 };
 

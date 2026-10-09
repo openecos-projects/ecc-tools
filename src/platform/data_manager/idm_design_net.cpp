@@ -358,7 +358,7 @@ void DataManager::mergeNet(IdbNet* net)
       auto it_2 = segments.begin() + 1;
       for (; it_2 != segments.end(); it_2++) {
         /// save point
-        auto coord_1_begin = b_horizontal ? (*it_1)->get_point_start()->get_x() : (*it_1)->get_point_start()->get_y();
+        // auto coord_1_begin = b_horizontal ? (*it_1)->get_point_start()->get_x() : (*it_1)->get_point_start()->get_y();
         auto coord_1_end = b_horizontal ? (*it_1)->get_point_second()->get_x() : (*it_1)->get_point_second()->get_y();
         auto coord_2_begin = b_horizontal ? (*it_2)->get_point_start()->get_x() : (*it_2)->get_point_start()->get_y();
         auto coord_2_end = b_horizontal ? (*it_2)->get_point_second()->get_x() : (*it_2)->get_point_second()->get_y();

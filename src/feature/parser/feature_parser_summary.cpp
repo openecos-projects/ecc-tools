@@ -276,7 +276,7 @@ json FeatureParser::buildSummaryPins()
 
   json json_distribution;
   for (int i = 0; i < (int) db_summary.pins.pin_distribution.size(); i++) {
-    if (db_summary.pins.pin_distribution[i].pin_num > db_summary.pins.max_fanout) {
+    if (db_summary.pins.pin_distribution[i].pin_num > static_cast<uint64_t>(db_summary.pins.max_fanout)) {
       json_distribution[i]["pin_num"] = "> 32";
     } else {
       json_distribution[i]["pin_num"] = db_summary.pins.pin_distribution[i].pin_num;

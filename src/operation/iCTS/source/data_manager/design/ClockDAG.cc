@@ -94,7 +94,15 @@ auto PinDirectionName(PinType type) -> const char*
 
 auto PropagationKindName(ClockPropagationKind kind) -> const char*
 {
-  return kind == ClockPropagationKind::kBuffer ? "buffer" : "inverter";
+  switch (kind) {
+    case ClockPropagationKind::kBuffer:
+      return "buffer";
+    case ClockPropagationKind::kInverter:
+      return "inverter";
+    case ClockPropagationKind::kClockGate:
+      return "clock_gate";
+  }
+  return "unknown";
 }
 
 auto PropagationOriginName(ClockPropagationOrigin origin) -> const char*
@@ -634,7 +642,8 @@ auto ClockDAG::rebuild(const std::vector<Clock*>& clocks) -> bool
         add_issue(graph, std::move(issue));
       }
       const bool physical_kind_matches = (arc->kind == ClockPropagationKind::kBuffer && arc->inst->is_buffer())
-                                         || (arc->kind == ClockPropagationKind::kInverter && arc->inst->is_inverter());
+                                         || (arc->kind == ClockPropagationKind::kInverter && arc->inst->is_inverter())
+                                         || (arc->kind == ClockPropagationKind::kClockGate && arc->inst->is_clock_gate());
       if (!physical_kind_matches) {
         auto issue = issue_base;
         SetIssueCode(issue, ClockGraphIssueCode::kPhysicalKindMismatch);

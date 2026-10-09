@@ -36,9 +36,10 @@
 #include "tcl_register_irt.h"
 #include "tcl_register_ilvs.h"
 #include "tcl_register_ista.h"
+#include "tcl_register_ipw.h"
 #include "tcl_register_ifp.h"
 #include "tcl_register_iemir.h"
-#include "tcl_register_izh.h"
+#include "tcl_register_imj.h"
 #include "tcl_register_ircx.h"
 #include "tcl_register_report.h"
 
@@ -68,6 +69,9 @@ int registerCommands()
   /// STA
   registerCmdSTA();
 
+  /// PW
+  registerCmdPW();
+
   /// FP
   registerCmdFP();
 
@@ -80,8 +84,8 @@ int registerCommands()
   /// RCX
   registerCmdRCX();
 
-  /// ZH
-  registerCmdZH();
+  /// MJ
+  registerCmdMJ();
 
   registerCmdReport();
   return EXIT_SUCCESS;

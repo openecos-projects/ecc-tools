@@ -51,7 +51,7 @@ class DisjointSet
 
  private:
   std::vector<int32_t> _parent;
-  std::vector<int32_t> _rank;
+  std::vector<uint8_t> _rank;
 };
 
 }  // namespace ilvs

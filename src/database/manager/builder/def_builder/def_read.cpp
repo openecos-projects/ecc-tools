@@ -771,7 +771,6 @@ int32_t DefRead::parse_die(defiBox* def_box)
   // IdbDesign* design = _def_service->get_design();
   IdbLayout* layout = _def_service->get_layout();
   IdbDie* die = layout->get_die();
-
   defiPoints points = def_box->getPoint();
   for (int i = 0; i < points.numPoints; ++i) {
     die->add_point(points.x[i], points.y[i]);

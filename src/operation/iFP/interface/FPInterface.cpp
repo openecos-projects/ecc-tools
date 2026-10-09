@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "FPInterface.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <cmath>
 #include <sstream>
@@ -603,6 +604,7 @@ void FPInterface::wrapRoutingLayerList()
     routing_layer.set_pitch_x(idb_routing_layer->get_pitch_x());
     routing_layer.set_pitch_y(idb_routing_layer->get_pitch_y());
     routing_layer.set_min_width(idb_routing_layer->get_min_width());
+    routing_layer.set_min_area(std::max(idb_routing_layer->get_area(), 0));
     routing_layer.set_prefer_track_offset(idb_routing_layer->get_offset_prefer());
     routing_layer.set_spacing(idb_routing_layer->get_spacing(0));
     routing_layer.set_prefer_direction(idb_routing_layer->is_horizontal() ? Direction::kHorizontal : Direction::kVertical);
@@ -630,18 +632,24 @@ void FPInterface::wrapInstanceList()
     instance.set_width(idb_instance->get_cell_master()->get_width());
     instance.set_height(idb_instance->get_cell_master()->get_height());
     instance.set_macro(idb_instance->get_cell_master()->is_block());
+    instance.set_orient(wrapPlacementOrientation(idb_instance->get_orient()));
+    instance.set_fixed(idb_instance->is_fixed());
+    instance.set_cover(idb_instance->is_cover());
+    instance.set_placed(idb_instance->has_placed());
+    if (idb_instance->has_placed()) {
+      instance.set_coord(idb_instance->get_coordinate()->get_x(), idb_instance->get_coordinate()->get_y());
+      idb_instance->set_bounding_box();
+      instance.set_bounding_rect(idb_instance->get_bounding_box()->get_low_x(), idb_instance->get_bounding_box()->get_low_y(),
+                                 idb_instance->get_bounding_box()->get_high_x(), idb_instance->get_bounding_box()->get_high_y());
+    }
+
     if (instance.get_macro()) {
-      wrapUnplacedMacroPinShapeList(idb_instance, instance);
-    } else {
-      instance.set_orient(wrapPlacementOrientation(idb_instance->get_orient()));
-      instance.set_fixed(idb_instance->is_fixed());
-      instance.set_cover(idb_instance->is_cover());
-      instance.set_placed(idb_instance->has_placed());
-      if (idb_instance->has_placed()) {
-        instance.set_coord(idb_instance->get_coordinate()->get_x(), idb_instance->get_coordinate()->get_y());
-        idb_instance->set_bounding_box();
-        instance.set_bounding_rect(idb_instance->get_bounding_box()->get_low_x(), idb_instance->get_bounding_box()->get_low_y(),
-                                   idb_instance->get_bounding_box()->get_high_x(), idb_instance->get_bounding_box()->get_high_y());
+      // An external placement file transforms master-local pin shapes after this
+      // function. Without one, IDB already owns the absolute placed pin shapes.
+      if (FPDM.getConfig().input_macro_path.empty() && idb_instance->has_placed()) {
+        wrapPlacedMacroPinShapeList(idb_instance, instance);
+      } else {
+        wrapUnplacedMacroPinShapeList(idb_instance, instance);
       }
     }
     instance_list.push_back(instance);

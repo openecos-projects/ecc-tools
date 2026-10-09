@@ -90,14 +90,14 @@ void EvalWrapper::wrapRange(std::vector<TT*>& target, const std::vector<ST*>& sr
 template <typename NET, typename FUNC>
 auto ReportEvaluator::computeWireLength(std::vector<NET*> nets, FUNC fptr, const int threads)
 {
-  int64_t total_len = 0;
-  int64_t max_len = 0;
+  uint64_t total_len = 0;
+  uint64_t max_len = 0;
   auto* max_net = nets[0];
 
   auto compute = [&nets, &fptr](size_t start, size_t end) {
-    int64_t total_len = 0;
+    uint64_t total_len = 0;
     NET* max_net = nets[start];
-    int64_t max_len = (max_net->*fptr)();
+    uint64_t max_len = (max_net->*fptr)();
     for (size_t i = start; i < end; ++i) {
       auto len = (nets[i]->*fptr)();
       total_len += len;

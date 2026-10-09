@@ -92,9 +92,15 @@
             ];
             sha256 = "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5";
           };
-          boost-build = pkgs.boost-build.override {
-            useBoost = self;
-          };
+          # The pinned nixpkgs applies its fix-clang-target.patch to b2 for any
+          # boost >= 1.81 with no upper bound, but 1.91 moved --target handling
+          # into set-triple, so the hunk no longer applies. nixpkgs master now
+          # bounds the patch to [1.81, 1.88); drop it here the same way.
+          boost-build = (pkgs.boost-build.override { useBoost = self; }).overrideAttrs (old: {
+            patches = builtins.filter (
+              p: !pkgs.lib.hasInfix "fix-clang-target" (toString p)
+            ) (old.patches or [ ]);
+          });
         });
     in {
       packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };

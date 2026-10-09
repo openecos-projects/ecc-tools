@@ -100,7 +100,7 @@ auto ClockDistribution::prepare(const ClockDistributionInput& input) -> std::opt
   const auto* const sink_domain_label = ToString(input.sink_domain);
   ClockDistributionContext context;
   context.sink_domain = input.sink_domain;
-  context.domain_prefix = ClockTreeRealization::makeSinkDomainPrefix(clock, input.clock_index, input.sink_domain);
+  context.domain_prefix = ClockTreeRealization::makeSinkDomainPrefix(clock, input.clock_index, input.sink_domain) + clock.get_synthesis_region_suffix();
   context.sinks = input.sinks;
 
   const auto root_buffer_output = addRootBuffer(input, context.domain_prefix);

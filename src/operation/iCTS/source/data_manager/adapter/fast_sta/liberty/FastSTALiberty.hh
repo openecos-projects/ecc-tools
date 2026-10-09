@@ -23,14 +23,30 @@
 
 #pragma once
 
+#include <cstddef>
 #include <optional>
 #include <string>
 
+#include "FastSTACondition.hh"
 #include "FastSTALibertyModel.hh"
 
 namespace icts {
 
 class Wrapper;
+
+enum class FastStaCheckStatus
+{
+  kMeasured,
+  kInactive,
+  kUnavailable,
+  kInvalidCondition
+};
+
+struct FastStaCheckValue
+{
+  FastStaCheckStatus status = FastStaCheckStatus::kUnavailable;
+  double requirement_ns = 0.0;
+};
 
 class FastStaLiberty
 {
@@ -38,6 +54,14 @@ class FastStaLiberty
   FastStaLiberty() = delete;
 
   static auto extractBufferCell(Wrapper& wrapper, const std::string& cell_master) -> std::optional<FastStaLibertyCell>;
+  static auto extractCellArc(Wrapper& wrapper, const std::string& cell_master, const std::string& input_port, const std::string& output_port)
+      -> std::optional<FastStaLibertyCell>;
+  static auto extractLaunchArc(Wrapper& wrapper, const std::string& cell_master, const std::string& clock_port, const std::string& output_port,
+                               FastStaTransition clock_transition) -> std::optional<FastStaLibertyCell>;
+  static auto queryTimingCheck(Wrapper& wrapper, const std::string& cell_master, const std::string& clock_port, const std::string& data_port,
+                               FastStaTimingCheckKind kind, FastStaTransition clock_transition, FastStaTransition data_transition, double clock_slew_ns,
+                               double data_slew_ns, std::size_t& conditional_fallback_count, std::size_t& conditional_extrema_count,
+                               const FastStaCondition::PinValueLookup& case_lookup) -> FastStaCheckValue;
 };
 
 }  // namespace icts

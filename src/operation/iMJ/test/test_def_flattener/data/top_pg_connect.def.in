@@ -1,0 +1,48 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN top_pg_connect ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 100000 100000 ) ;
+
+COMPONENTS 2 ;
+  - u_child CHILD + FIXED ( 30000 40000 ) N ;
+  - u_pass PASS + FIXED ( 60000 40000 ) N ;
+END COMPONENTS
+
+PINS 4 ;
+  - top_in + NET top_in + DIRECTION INPUT + USE SIGNAL
+    + PORT
+      + LAYER M1 ( -50 -100 ) ( 50 100 )
+    + FIXED ( 0 41000 ) N ;
+  - top_out + NET top_out + DIRECTION OUTPUT + USE SIGNAL
+    + PORT
+      + LAYER M1 ( -50 -100 ) ( 50 100 )
+    + FIXED ( 100000 41000 ) N ;
+  - VDD + NET VDD + DIRECTION INOUT + USE POWER
+    + PORT
+      + LAYER M1 ( -50 -50 ) ( 50 50 )
+    + FIXED ( 0 45000 ) N ;
+  - VSS + NET VSS + DIRECTION INOUT + USE GROUND
+    + PORT
+      + LAYER M1 ( -50 -50 ) ( 50 50 )
+    + FIXED ( 0 40000 ) N ;
+END PINS
+
+SPECIALNETS 4 ;
+  - VDD ( PIN VDD ) + USE POWER
+    + ROUTED M1 100 ( 0 45000 ) ( 40000 45000 ) ;
+  - VSS ( PIN VSS ) + USE GROUND
+    + ROUTED M1 100 ( 0 40000 ) ( 40000 40000 ) ;
+  - VDD_PASS_A ( u_pass VPWR1 ) + USE POWER ;
+  - VDD_PASS_B ( u_pass VPWR2 ) + USE POWER ;
+END SPECIALNETS
+
+NETS 4 ;
+  - top_in ( PIN top_in ) ( u_child IN ) + USE SIGNAL ;
+  - top_out ( u_child OUT ) ( PIN top_out ) + USE SIGNAL ;
+  - top_pass_in ( u_pass IN ) + USE SIGNAL ;
+  - top_pass_out ( u_pass OUT ) + USE SIGNAL ;
+END NETS
+
+END DESIGN

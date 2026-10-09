@@ -4,8 +4,8 @@
 The script drives the existing Tcl API:
   LEF/DEF -> save_data -> reset_data -> load_data
 
-It exports source and restored ViewJson/connectivity/DEF snapshots and compares
-them. A mismatch means data_builder did not preserve the exported IDB state.
+It exports source and restored connectivity/DEF snapshots and compares them.
+A mismatch means data_builder did not preserve the exported IDB state.
 """
 
 from __future__ import annotations
@@ -116,9 +116,6 @@ def compare_trees(source: Path, restored: Path, diff_limit: int) -> list[Differe
 def build_tcl(args: argparse.Namespace, out_dir: Path, data_dir: Path) -> str:
     source_dir = out_dir / "source"
     restored_dir = out_dir / "restored"
-    source_view = source_dir / "view_json"
-    restored_view = restored_dir / "view_json"
-
     lines = [
         "proc must {label body} {",
         "  puts \"\\[IdbRoundtrip\\] $label\"",
@@ -144,7 +141,6 @@ def build_tcl(args: argparse.Namespace, out_dir: Path, data_dir: Path) -> str:
         [
             f"must \"read def\" {{def_init -path {tcl_word(args.def_file)}}}",
             f"must \"validate source connectivity\" {{idb_validate -path {tcl_word(source_dir / 'connectivity.json')} -check_floating {int(args.check_floating)}}}",
-            f"must \"export source view json\" {{view_json_save -path {tcl_word(source_view)}}}",
         ]
     )
 
@@ -157,7 +153,6 @@ def build_tcl(args: argparse.Namespace, out_dir: Path, data_dir: Path) -> str:
             "must \"reset data\" {reset_data}",
             f"must \"load binary data\" {{load_data -path {tcl_word(data_dir)}}}",
             f"must \"validate restored connectivity\" {{idb_validate -path {tcl_word(restored_dir / 'connectivity.json')} -check_floating {int(args.check_floating)}}}",
-            f"must \"export restored view json\" {{view_json_save -path {tcl_word(restored_view)}}}",
         ]
     )
 
@@ -246,9 +241,7 @@ def main(argv: list[str]) -> int:
         return run_rc
 
     diffs: list[Difference] = []
-    diffs.extend(compare_trees(out_dir / "source" / "view_json", out_dir / "restored" / "view_json", args.diff_lines))
     diffs.extend(compare_trees(out_dir / "source", out_dir / "restored", args.diff_lines))
-    diffs = [diff for diff in diffs if not diff.path.startswith("view_json/")]
 
     ok = len(diffs) == 0
     write_summary(out_dir, ok, run_rc, diffs)

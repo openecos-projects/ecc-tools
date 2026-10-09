@@ -90,7 +90,7 @@ CmdFeatureTool::CmdFeatureTool(const char* cmd_name) : TclCmd(cmd_name)
 unsigned CmdFeatureTool::check()
 {
   TclOption* path_option = getOptionOrArg(TCL_PATH);
-  TclOption* step_option = getOptionOrArg(TCL_STEP);
+  // TclOption* step_option = getOptionOrArg(TCL_STEP);
   ecc::checkTclOption(path_option, TCL_PATH);
   //   LOG_FATAL_IF(!step_option);
   return 1;
@@ -175,7 +175,7 @@ CmdFeatureRoute::CmdFeatureRoute(const char* cmd_name) : TclCmd(cmd_name)
 
 unsigned CmdFeatureRoute::check()
 {
-  TclOption* path_option = getOptionOrArg(TCL_PATH);
+  // TclOption* path_option = getOptionOrArg(TCL_PATH);
 
   return 1;
 }
@@ -208,7 +208,7 @@ CmdFeatureRouteRead::CmdFeatureRouteRead(const char* cmd_name) : TclCmd(cmd_name
 
 unsigned CmdFeatureRouteRead::check()
 {
-  TclOption* path_option = getOptionOrArg(TCL_PATH);
+  // TclOption* path_option = getOptionOrArg(TCL_PATH);
 
   return 1;
 }

@@ -95,7 +95,20 @@ auto appendUniqueIdbPin(std::vector<idb::IdbPin*>& pins, std::unordered_set<idb:
   pins.push_back(idb_pin);
 }
 
-auto collectIdbClockNetPins(idb::IdbNet* idb_net) -> IdbClockNetPins
+auto isLibertyClockGateOutput(const Wrapper& wrapper, idb::IdbPin* idb_pin) -> bool
+{
+  auto* inst = idb_pin == nullptr ? nullptr : idb_pin->get_instance();
+  auto* master = inst == nullptr ? nullptr : inst->get_cell_master();
+  auto* term = idb_pin == nullptr ? nullptr : idb_pin->get_term();
+  if (master == nullptr || term == nullptr) {
+    return false;
+  }
+  auto* lib_cell = wrapper.findLibertyCell(master->get_name());
+  auto* lib_port = lib_cell == nullptr ? nullptr : lib_cell->get_cell_port_or_port_bus(term->get_name().c_str());
+  return lib_cell != nullptr && lib_cell->isICG() && lib_port != nullptr && lib_port->isOutput() != 0U;
+}
+
+auto collectIdbClockNetPins(const Wrapper& wrapper, idb::IdbNet* idb_net) -> IdbClockNetPins
 {
   IdbClockNetPins net_pins;
   if (idb_net == nullptr) {
@@ -126,7 +139,8 @@ auto collectIdbClockNetPins(idb::IdbNet* idb_net) -> IdbClockNetPins
       continue;
     }
     if (!idb_pin->is_io_pin()
-        && (idb_term->get_direction() == idb::IdbConnectDirection::kOutput || idb_term->get_direction() == idb::IdbConnectDirection::kOutputTriState)) {
+        && (idb_term->get_direction() == idb::IdbConnectDirection::kOutput || idb_term->get_direction() == idb::IdbConnectDirection::kOutputTriState
+            || isLibertyClockGateOutput(wrapper, idb_pin))) {
       driver_candidates.push_back(idb_pin);
     }
   }
@@ -674,7 +688,7 @@ class Wrapper::CtsClockReader
     cts_net->set_loads({});
     clock->set_clock_source_net(cts_net);
 
-    const auto idb_net_pins = collectIdbClockNetPins(idb_net);
+    const auto idb_net_pins = collectIdbClockNetPins(*_wrapper, idb_net);
     if (idb_net_pins.driver == nullptr) {
       CTSLOG.warn(Loc::current(), "CTS clock read failed for clock \"", clock_name, "\": iDB net \"", clock_net_name, "\" has no resolvable driver pin.");
       return nullptr;
@@ -792,7 +806,7 @@ class Wrapper::CtsClockReader
     };
 
     auto* source_cts_net = materialize_net(source_idb_net->get_net_name());
-    const auto source_pins = collectIdbClockNetPins(source_idb_net);
+    const auto source_pins = collectIdbClockNetPins(*_wrapper, source_idb_net);
     auto* source_pin = materialize_pin(source_pins.driver);
     if (source_cts_net == nullptr || source_pin == nullptr) {
       return nullptr;
@@ -836,13 +850,24 @@ class Wrapper::CtsClockReader
       if (output_net != source_cts_net) {
         clock->add_net(output_net);
       }
-      const auto kind = step.kind == ClockTracePropagationKind::kBuffer ? ClockPropagationKind::kBuffer : ClockPropagationKind::kInverter;
+      ClockPropagationKind kind = ClockPropagationKind::kBuffer;
+      switch (step.kind) {
+        case ClockTracePropagationKind::kBuffer:
+          kind = ClockPropagationKind::kBuffer;
+          break;
+        case ClockTracePropagationKind::kInverter:
+          kind = ClockPropagationKind::kInverter;
+          break;
+        case ClockTracePropagationKind::kClockGate:
+          kind = ClockPropagationKind::kClockGate;
+          break;
+      }
       const auto arc_status = clock->addPropagationArc({.inst = cts_inst,
                                                         .input_pin = input_pin,
                                                         .output_pin = output_pin,
                                                         .kind = kind,
                                                         .origin = ClockPropagationOrigin::kTracedInput,
-                                                        .path_buffer_weight = 1});
+                                                        .path_buffer_weight = kind == ClockPropagationKind::kClockGate ? 0 : 1});
       if (!arc_status.ok()) {
         CTSLOG.warn(Loc::current(), "CTS clock read failed for clock \"", clock_target.clock_name, "\": ", arc_status.message, ".");
         return nullptr;
@@ -856,7 +881,7 @@ class Wrapper::CtsClockReader
       if (idb_net == nullptr || cts_net == nullptr) {
         return nullptr;
       }
-      const auto pins = collectIdbClockNetPins(idb_net);
+      const auto pins = collectIdbClockNetPins(*_wrapper, idb_net);
       auto* driver = materialize_pin(pins.driver);
       if (driver == nullptr || (cts_net->get_driver() != nullptr && cts_net->get_driver() != driver)) {
         return nullptr;
@@ -870,7 +895,7 @@ class Wrapper::CtsClockReader
         }
         load->set_net(cts_net);
         cts_net->add_load(load);
-        if (!explicit_inputs.contains(load)) {
+        if (!explicit_inputs.contains(load) || (load->get_inst() != nullptr && load->get_inst()->is_clock_gate())) {
           terminal_loads.push_back(load);
         }
       }
@@ -908,7 +933,7 @@ class Wrapper::CtsClockReader
     cts_net->set_loads({});
     clock->set_clock_source_net(cts_net);
 
-    const auto source_pins = collectIdbClockNetPins(source_idb_net);
+    const auto source_pins = collectIdbClockNetPins(*_wrapper, source_idb_net);
     if (source_pins.driver == nullptr) {
       CTSLOG.warn(Loc::current(), "CTS clock read failed for clock \"", clock_target.clock_name, "\": source iDB net \"", clock_target.clock_net_name,
                   "\" has no resolvable driver pin.");
@@ -1048,7 +1073,9 @@ class Wrapper::CtsClockReader
       return nullptr;
     }
     cts_pin->set_name(pin_name);
-    cts_pin->set_type(convertIdbPinType(idb_term->get_type(), idb_term->get_direction()));
+    cts_pin->set_type(cts_inst != nullptr && cts_inst->is_clock_gate() && isLibertyClockGateOutput(*_wrapper, idb_pin)
+                          ? PinType::kOut
+                          : convertIdbPinType(idb_term->get_type(), idb_term->get_direction()));
     cts_pin->set_location(Wrapper::idbToCts(*avg_coord));
     cts_pin->set_inst(cts_inst);
     cts_pin->set_io(idb_pin->is_io_pin());

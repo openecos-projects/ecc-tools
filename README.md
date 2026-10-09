@@ -166,9 +166,9 @@ Roadmap -->
 
 ## **Contribution Guide**
 
-Fork this iEDA repository，after adding and commiting code, please summit [Pull Request](https://gitee.com/oscc-project/iEDA/pulls)。
-
-Please note the using [Coding Style][Code-conduct-md] of iEDA。
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for branch, commit message,
+pull request, formatting, and validation requirements. Pull requests should
+target the `main` branch and use [.github/pull_request_template.md](.github/pull_request_template.md).
 
 ## **Citation**
 ```

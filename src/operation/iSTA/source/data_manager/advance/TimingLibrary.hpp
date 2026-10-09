@@ -37,7 +37,6 @@ class TimingLibrary
   std::vector<std::string>& get_library_name_list() { return _library_name_list; }
   std::string& get_default_operating_conditions() { return _default_operating_conditions; }
   std::string& get_default_wire_load() { return _default_wire_load; }
-  std::optional<std::string>& get_leakage_power_unit() { return _leakage_power_unit; }
   std::optional<std::string>& get_current_unit_name() { return _current_unit_name; }
   std::optional<std::string>& get_voltage_unit_name() { return _voltage_unit_name; }
   TimingCapacitiveUnit get_cap_unit() const { return _cap_unit; }
@@ -67,7 +66,6 @@ class TimingLibrary
   void set_library_name_list(const std::vector<std::string>& library_name_list) { _library_name_list = library_name_list; }
   void set_default_operating_conditions(const std::string& default_operating_conditions) { _default_operating_conditions = default_operating_conditions; }
   void set_default_wire_load(const std::string& default_wire_load) { _default_wire_load = default_wire_load; }
-  void set_leakage_power_unit(const std::optional<std::string>& leakage_power_unit) { _leakage_power_unit = leakage_power_unit; }
   void set_current_unit_name(const std::optional<std::string>& current_unit_name) { _current_unit_name = current_unit_name; }
   void set_voltage_unit_name(const std::optional<std::string>& voltage_unit_name) { _voltage_unit_name = voltage_unit_name; }
   void set_cap_unit(const TimingCapacitiveUnit& cap_unit) { _cap_unit = cap_unit; }
@@ -99,7 +97,6 @@ class TimingLibrary
   std::vector<std::string> _library_name_list;
   std::string _default_operating_conditions;
   std::string _default_wire_load;
-  std::optional<std::string> _leakage_power_unit;
   std::optional<std::string> _current_unit_name;
   std::optional<std::string> _voltage_unit_name;
   TimingCapacitiveUnit _cap_unit = TimingCapacitiveUnit::kPF;

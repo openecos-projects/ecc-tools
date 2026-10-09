@@ -79,6 +79,8 @@ class IdbDie : public IdbObject
     }
 
     _points.clear();
+    _area = 0;
+    _polygon = polygon_t();
   }
 
   uint32_t add_point(IdbCoordinate<int32_t>* pt);

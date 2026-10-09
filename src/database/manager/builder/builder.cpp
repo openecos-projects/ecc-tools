@@ -33,6 +33,8 @@
 
 #include "builder.h"
 
+#include "gds_builder/gds_layer_map.h"
+
 #include <algorithm>
 #include <cassert>
 #include <cctype>
@@ -87,7 +89,7 @@ void IdbBuilder::log()
   double min_gate_area = 1e9;
   double sum_area = 0;
   IdbInstance* min_gate = nullptr;
-  for (int i = 0; i < design->get_instance_list()->get_instance_list().size(); i++) {
+  for (int32_t i = 0; i < static_cast<int32_t>(design->get_instance_list()->get_instance_list().size()); i++) {
     auto* inst = design->get_instance_list()->get_instance_list().at(i);
     double inst_area = inst->get_bounding_box()->get_area();
     sum_area += inst_area;
@@ -151,6 +153,7 @@ IdbDefService* IdbBuilder::buildDef(string file)
   }
 
   IdbLayout* layout = _lef_service->get_layout();
+  layout->resetDefData();
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(file.c_str())) {
@@ -186,6 +189,7 @@ IdbDefService* IdbBuilder::buildDefGzip(string gzip_file)
   }
 
   IdbLayout* layout = _lef_service->get_layout();
+  layout->resetDefData();
   _def_service = new IdbDefService(layout);
 
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileInit(gzip_file.c_str())) {
@@ -414,19 +418,25 @@ void IdbBuilder::saveVerilog(std::string verilog_file_name, std::set<std::string
   writer.writeModule();
 }
 
-bool IdbBuilder::saveGDSII(string file, bool is_hardened /* = false */)
+bool IdbBuilder::saveGDSII(string file, string layer_map_path /* = "" */)
 {
+  if (layer_map_path.empty()) {
+    ECCLOG.error(ecc::Loc::current(), "gds_save requires -layer_map <path>.");
+    return false;
+  }
+
+  GdsLayerMap layer_map;
+  if (!layer_map.load(layer_map_path)) {
+    ECCLOG.error(ecc::Loc::current(), "Load GDS layer map failed: ", layer_map.error());
+    return false;
+  }
   if (IdbDefServiceResult::kServiceFailed == _def_service->DefFileWriteInit(file.c_str())) {
     ECCLOG.warn(ecc::Loc::current(), "Create GDSII file failed...");
     return false;
   }
 
   std::shared_ptr<Def2GdsWrite> gds_write = std::make_shared<Def2GdsWrite>(_def_service);
-  if(is_hardened) {
-    return gds_write->writeHardenedDb(file.c_str());
-  }else{
-    return gds_write->writeDb(file.c_str());
-  }
+  return gds_write->writeDb(file.c_str(), layer_map_path.empty() ? nullptr : layer_map_path.c_str());
 }
 
 bool IdbBuilder::saveJSON(string file, string options)
@@ -438,16 +448,6 @@ bool IdbBuilder::saveJSON(string file, string options)
   // ECCLOG.info(ecc::Loc::current(), "Options: ", options);
   std::shared_ptr<Gds2JsonWrite> json_write = std::make_shared<Gds2JsonWrite>(_def_service);
   return json_write->writeDb(file.c_str(), options);
-}
-
-bool IdbBuilder::saveViewJson(string output_dir, ViewJsonWriteOptions options)
-{
-  return writeViewJson(_def_service, output_dir, options);
-}
-
-bool IdbBuilder::applyViewJsonEdits(string edits_path, bool compressed_hint)
-{
-  return idb::applyViewJsonEdits(_def_service, edits_path, compressed_hint);
 }
 
 void IdbBuilder::saveLayout(string folder)

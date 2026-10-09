@@ -56,6 +56,9 @@ struct PyPlaceDB
   unsigned int num_nodes;           ///< number of nodes, including terminals and terminal_NIs
   unsigned int num_terminals;       ///< number of terminals, essentially fixed macros
   unsigned int num_terminal_NIs;    ///< number of terminal_NIs, essentially IO pins
+  unsigned int m2_pg_rail_blockage_rects;
+  pybind11::list m2_pg_rail_boxes;
+  pybind11::list m2_pg_rail_density_boxes;
   pybind11::dict node_name2id_map;  ///< node name to id map, cell name
   pybind11::list node_names;        ///< 1D array, cell name
   pybind11::list node_x;            ///< 1D array, cell position x
@@ -74,6 +77,7 @@ struct PyPlaceDB
 
   pybind11::dict net_name2id_map;         ///< net name to id map
   pybind11::list net_names;               ///< net name
+  pybind11::list clock_net_names;         ///< clock nets omitted from placement routing data
   pybind11::list net2pin_map;             ///< array of 1D array, each row stores pin id
   pybind11::list flat_net2pin_map;        ///< flatten version of net2pin_map
   pybind11::list flat_net2pin_start_map;  ///< starting index of each net in flat_net2pin_map
@@ -107,6 +111,8 @@ struct PyPlaceDB
   pybind11::list unit_vertical_capacities;       /// number of vertical tracks of layers per unit distance
   pybind11::list initial_horizontal_demand_map;  ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
   pybind11::list initial_vertical_demand_map;    ///< initial routing demand from fixed cells, indexed by (layer, grid x, grid y)
+  pybind11::list min_wire_widths;                ///< min wire width for each routing layer
+  pybind11::list min_wire_spacings;              ///< min wire spacing for each routing layer
 
   int xl;
   int yl;
@@ -115,15 +121,18 @@ struct PyPlaceDB
 
   int row_height;
   int site_width;
+  double total_fixed_node_area;
   double total_space_area;  ///< total placeable space area excluding fixed cells.
                             ///< This is not the exact area, because we cannot exclude the overlapping fixed cells
                             ///< within a bin.
 
   int num_movable_pins;
 
-  PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta)
+  PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true)
   {
-    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta);
+    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
+        include_m2_pg_rail_density);
   }
 
   const std::vector<bool>& getNodeIsHardMacro() const { return _node_is_hard_macro; }
@@ -132,7 +141,8 @@ struct PyPlaceDB
       const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
       const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
 
-  void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta);
+  void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
+           bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
 

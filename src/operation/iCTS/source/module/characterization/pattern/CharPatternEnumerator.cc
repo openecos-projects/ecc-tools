@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <optional>
 #include <ostream>
@@ -43,7 +42,34 @@
 namespace icts::char_builder::detail {
 namespace {
 
-constexpr unsigned kMaxTopologySlots = std::numeric_limits<std::uint64_t>::digits - 1U;
+auto SaturatingAdd(std::size_t lhs, std::size_t rhs) -> std::size_t
+{
+  const auto maximum = std::numeric_limits<std::size_t>::max();
+  return rhs > maximum - lhs ? maximum : lhs + rhs;
+}
+
+auto SaturatingMultiply(std::size_t lhs, std::size_t rhs) -> std::size_t
+{
+  const auto maximum = std::numeric_limits<std::size_t>::max();
+  return lhs != 0U && rhs > maximum / lhs ? maximum : lhs * rhs;
+}
+
+auto SaturatingCombination(std::size_t n, std::size_t k) -> std::size_t
+{
+  if (k > n) {
+    return 0U;
+  }
+  k = std::min(k, n - k);
+  unsigned __int128 result = 1U;
+  const auto maximum = std::numeric_limits<std::size_t>::max();
+  for (std::size_t index = 0U; index < k; ++index) {
+    result = result * static_cast<unsigned __int128>(n - index) / static_cast<unsigned __int128>(index + 1U);
+    if (result > maximum) {
+      return maximum;
+    }
+  }
+  return static_cast<std::size_t>(result);
+}
 
 }  // namespace
 
@@ -51,62 +77,70 @@ auto CharPatternEnumerator::calcTopologySlotCount(double wirelength_um) const ->
 {
   const ::icts::UniformValueLattice length_lattice(_impl._length_unit_um, _impl._wirelength_iterations);
   const auto length_idx = length_lattice.tryObservedIndex(wirelength_um);
-  auto slot_count = length_idx.value_or(length_lattice.coveringIndex(wirelength_um));
-  if (slot_count > kMaxTopologySlots) {
-    static bool has_logged_slot_clamp = false;
-    if (!has_logged_slot_clamp) {
-      CTSLOG.warn(Loc::current(), "CharBuilder: slot count exceeds topology bit capacity, clamp to ", kMaxTopologySlots);
-      has_logged_slot_clamp = true;
-    }
-    slot_count = kMaxTopologySlots;
-  }
-  return slot_count;
+  return length_idx.value_or(length_lattice.coveringIndex(wirelength_um));
 }
 
-auto CharPatternEnumerator::countSelectedSlots(TopologyBits topology_bits) -> unsigned
+auto CharPatternEnumerator::countSelectedSlots(const TopologySlotSelection& selected_slots) -> unsigned
 {
-  unsigned slot_count = 0U;
-  auto remaining_bits = topology_bits.value;
-  while (remaining_bits != 0U) {
-    slot_count += static_cast<unsigned>(remaining_bits & 1U);
-    remaining_bits >>= 1U;
+  return static_cast<unsigned>(std::ranges::count_if(selected_slots, [](std::uint8_t selected) -> bool { return selected != 0U; }));
+}
+
+auto CharPatternEnumerator::estimatePatternCount(unsigned num_slots, std::size_t num_buf_types) -> std::size_t
+{
+  std::size_t total_patterns = 1U;
+  for (unsigned num_buffer_positions = 1U; num_buffer_positions <= num_slots; ++num_buffer_positions) {
+    const auto topology_count = SaturatingCombination(num_slots, num_buffer_positions);
+    const auto master_count = getMonotonicComboCount(num_buf_types, num_buffer_positions);
+    total_patterns = SaturatingAdd(total_patterns, SaturatingMultiply(topology_count, master_count));
+    if (total_patterns == std::numeric_limits<std::size_t>::max()) {
+      return total_patterns;
+    }
   }
-  return slot_count;
+  return total_patterns;
 }
 
 auto CharPatternEnumerator::estimatePatternCountPerWirelength(double wirelength_um) const -> std::size_t
 {
+  if (_impl._use_boundary_primitive_patterns) {
+    return SaturatingAdd(1U, _impl._sorted_buffers.size());
+  }
   const unsigned num_slots = calcTopologySlotCount(wirelength_um);
-  if (num_slots >= std::numeric_limits<std::uint64_t>::digits) {
-    CTSLOG.error(Loc::current(), "CharBuilder: buffer slot count ", num_slots, " exceeds topology bit capacity.");
-  }
-
-  std::size_t total_patterns = 0;
-  const std::uint64_t num_topologies = std::uint64_t{1} << num_slots;
-  for (std::uint64_t topology_bits_value = 0; topology_bits_value < num_topologies; ++topology_bits_value) {
-    const unsigned num_buffer_positions = countSelectedSlots(TopologyBits{topology_bits_value});
-    total_patterns += (num_buffer_positions == 0U) ? 1U : getMonotonicComboCount(_impl._sorted_buffers.size(), num_buffer_positions);
-  }
-  return total_patterns;
+  return estimatePatternCount(num_slots, _impl._sorted_buffers.size());
 }
 
 auto CharPatternEnumerator::enumerateWirelength(unsigned length_idx, double wirelength_um, BuildProgress& build_progress) -> void
 {
   const unsigned num_slots = calcTopologySlotCount(wirelength_um);
-  if (num_slots >= std::numeric_limits<std::uint64_t>::digits) {
-    CTSLOG.error(Loc::current(), "CharBuilder: buffer slot count ", num_slots, " exceeds topology bit capacity.");
+  TopologySlotSelection selected_slots(num_slots, 0U);
+  enumerateTopology(length_idx, wirelength_um, selected_slots, build_progress);
+  if (_impl._use_boundary_primitive_patterns) {
+    if (!selected_slots.empty()) {
+      selected_slots.back() = 1U;
+      enumerateTopology(length_idx, wirelength_um, selected_slots, build_progress);
+    }
+    return;
   }
-
-  const std::uint64_t num_topologies = std::uint64_t{1} << num_slots;
-  for (std::uint64_t topology_bits_value = 0; topology_bits_value < num_topologies; ++topology_bits_value) {
-    enumerateTopology(length_idx, wirelength_um, num_slots, TopologyBits{topology_bits_value}, build_progress);
+  while (advanceToNextSlotSelection(selected_slots)) {
+    enumerateTopology(length_idx, wirelength_um, selected_slots, build_progress);
   }
 }
 
-auto CharPatternEnumerator::enumerateTopology(unsigned length_idx, double wirelength_um, unsigned num_slots, TopologyBits topology_bits,
+auto CharPatternEnumerator::advanceToNextSlotSelection(TopologySlotSelection& selected_slots) -> bool
+{
+  for (auto& selected : selected_slots) {
+    if (selected == 0U) {
+      selected = 1U;
+      return true;
+    }
+    selected = 0U;
+  }
+  return false;
+}
+
+auto CharPatternEnumerator::enumerateTopology(unsigned length_idx, double wirelength_um, const TopologySlotSelection& selected_slots,
                                               BuildProgress& build_progress) -> void
 {
-  const TopologyDesc topo = _impl.topologyPlanner().buildTopologyDesc(wirelength_um, num_slots, topology_bits);
+  const TopologyDesc topo = _impl.topologyPlanner().buildTopologyDesc(wirelength_um, selected_slots);
   const std::size_t num_buf_positions = topo.buffer_positions.size();
 
   if (num_buf_positions == 0) {
@@ -140,14 +174,11 @@ auto CharPatternEnumerator::getMonotonicComboCount(std::size_t num_buf_types, st
   if (num_buf_types == 0 || num_positions == 0) {
     return 0;
   }
-  const std::size_t combination_n = num_buf_types + num_positions - 1;
-  std::size_t combination_k = num_positions;
-  combination_k = std::min(combination_k, combination_n - combination_k);
-  std::size_t result = 1;
-  for (std::size_t index = 0; index < combination_k; ++index) {
-    result = result * (combination_n - index) / (index + 1);
+  if (num_positions > std::numeric_limits<std::size_t>::max() - num_buf_types + 1U) {
+    return std::numeric_limits<std::size_t>::max();
   }
-  return result;
+  const std::size_t combination_n = num_buf_types + num_positions - 1;
+  return SaturatingCombination(combination_n, num_positions);
 }
 
 auto CharPatternEnumerator::advanceToNextMonotonic(std::vector<std::size_t>& buf_indices, std::size_t num_buf_types) -> bool
