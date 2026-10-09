@@ -89,3 +89,27 @@ jobs:
           name: ecc-tools-python-api-artifacts
           if-no-files-found: ignore
           path: test-artifacts/
+
+  nix-build:
+    name: Nix Build (flake checks)
+    runs-on: ubuntu-latest
+    # Cold cache builds boost 1.91 and ecc-tools from source;
+    # magic-nix-cache makes subsequent runs incremental.
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          extra-conf: |
+            extra-substituters = https://cache.ani.llc
+            extra-trusted-public-keys = cache.ani.llc:8nINs8lCCU0Yoed1KMjLj6fCHpMmrY+sFuhGTdxLB88=
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@v15
+
+      - name: Build all flake checks
+        run: nix flake check -L
