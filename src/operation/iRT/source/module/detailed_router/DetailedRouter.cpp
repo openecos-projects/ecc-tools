@@ -143,7 +143,6 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
     int32_t iter_num = static_cast<int32_t>(dr_iter_param_list.size());
     RTLOG.info(Loc::current(), "***** Begin iteration ", iter, "/", iter_num, "(", RTUTIL.getPercentage(iter, iter_num), ") *****");
 
-    dr_model.get_previous_result() = dr_model.get_curr_result();
     // debugPlotDRModel(dr_model, "before");
     setDRIterParam(dr_model, iter, dr_iter_param_list[i]);
     initDRBoxMap(dr_model);
@@ -2907,28 +2906,6 @@ void DetailedRouter::updateNetResult(DRModel& dr_model)
       LayerCoord coord = dr_pin_list[pin_idx].get_access_point().getRealLayerCoord();
       candidate_root_coord_list.push_back(coord);
       key_coord_pin_map[coord].insert(static_cast<int32_t>(pin_idx));
-    }
-    bool has_uncovered_pin = false;
-    for (const LayerCoord& pin_coord : candidate_root_coord_list) {
-      bool covered = false;
-      for (const Segment<LayerCoord>& segment : detailed_result_list) {
-        if (RTUTIL.isInside(segment, pin_coord)) {
-          covered = true;
-          break;
-        }
-      }
-      if (!covered) {
-        has_uncovered_pin = true;
-        break;
-      }
-    }
-    if (has_uncovered_pin) {
-      auto& previous_result_map = dr_model.get_previous_result().get_net_detailed_result_map();
-      auto previous_iter = previous_result_map.find(net_idx);
-      if (previous_iter != previous_result_map.end() && !previous_iter->second.empty()) {
-        detailed_result_list = previous_iter->second;
-        RTLOG.warn(Loc::current(), "The current DR result lost a pin; restored the previous connected result. net_idx: ", net_idx);
-      }
     }
     MTree<LayerCoord> coord_tree = RTUTIL.getTreeByFullFlow(candidate_root_coord_list, detailed_result_list, key_coord_pin_map);
 
