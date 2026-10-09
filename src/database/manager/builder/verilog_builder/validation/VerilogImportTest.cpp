@@ -17,7 +17,8 @@
 #include "VerilogImportPlan.hh"
 #include "VerilogLibrary.hh"
 #include "def_service.h"
-#include "verilog/VerilogParser.hh"
+#include "verilog/VerilogFrontend.hh"
+#include "verilog/VerilogSyntax.hh"
 #include "verilog_read.h"
 #include "verilog_write.h"
 
@@ -212,6 +213,72 @@ void testConstantsAndPreflight()
   std::filesystem::remove(output);
 }
 
+void testLibraryModuleInterfaces()
+{
+  const auto path = std::filesystem::temp_directory_path() / "verilog_library_interface_test.v";
+  {
+    std::ofstream stream(path);
+    stream << "module BUS(input [0:1] D,output Y);endmodule\n"
+              "module top(input [1:0] a,output y);BUS u(a,y);endmodule\n";
+  }
+  idb::IdbLayout layout;
+  auto* master = layout.get_cell_master_list()->set_cell_master("BUS");
+  master->add_term("Y")->set_direction(idb::IdbConnectDirection::kOutput);
+  master->add_term("D[1]")->set_direction(idb::IdbConnectDirection::kInput);
+  master->add_term("D[0]")->set_direction(idb::IdbConnectDirection::kInput);
+  idb::IdbDefService service(&layout);
+  idb::VerilogRead reader(&service);
+  require(reader.createDb(path.string(), "top"), "library interface import failed");
+  auto* cell = service.get_design()->get_instance_list()->find_instance("u");
+  require(cell != nullptr, "empty library module disappeared during hierarchy expansion");
+  auto* io = service.get_design()->get_io_pin_list();
+  require(cell->get_pin("D[0]")->get_net() == io->find_pin("a[1]")->get_net(), "ascending interface reversed D[0]");
+  require(cell->get_pin("D[1]")->get_net() == io->find_pin("a[0]")->get_net(), "ascending interface reversed D[1]");
+  require(cell->get_pin("Y")->get_net() == io->find_pin("y")->get_net(), "positional output used LEF order");
+  require(service.get_design()->get_net_list()->get_num() == 3, "library interface created phantom internal nets");
+  const auto declarations = std::filesystem::temp_directory_path() / "verilog_library_interface_declarations.sv";
+  {
+    std::ofstream stream(declarations);
+    stream << "`define WIDTH 2\n(* blackbox *) module BUS(input logic [0:`WIDTH-1] D,output logic Y);endmodule\n";
+  }
+  {
+    std::ofstream stream(path);
+    stream << "module top(input logic [`WIDTH-1:0] D,output logic Y);BUS u(.*);endmodule\n";
+  }
+  idb::verilog::SourceOptions options;
+  options.language = idb::verilog::LanguageMode::systemVerilog;
+  idb::IdbDefService sv_service(&layout);
+  idb::VerilogRead sv_reader(&sv_service);
+  require(sv_reader.createDb(std::vector<std::string>{declarations.string(), path.string()}, "top", options),
+          "SV multi-file library import failed");
+  auto* sv_cell = sv_service.get_design()->get_instance_list()->find_instance("u");
+  require(sv_cell && sv_cell->get_pin("D[0]")->get_net() == sv_service.get_design()->get_io_pin_list()->find_pin("D[1]")->get_net(),
+          "SV wildcard or ascending library index mapping changed");
+  for (const char* declaration : {"module BUS(input [1:0] D,input Y);endmodule", "module BUS(input [2:0] D,output Y);endmodule",
+                                  "module BUS(input [2:1] D,output Y);endmodule", "(* blackbox *) module MISSING(input A);endmodule"}) {
+    {
+      std::ofstream stream(path);
+      stream << declaration << "\n";
+      if (std::string(declaration).find("MISSING") != std::string::npos)
+        stream << "module top(input a);MISSING u(a);endmodule";
+      else
+        stream << "module top(input [1:0] a,output y);BUS u(a,y);endmodule";
+    }
+    idb::IdbDefService invalid(&layout);
+    invalid.get_design()->set_design_name("unchanged");
+    bool failed = false;
+    try {
+      idb::VerilogRead(&invalid).createDb(path.string(), "top");
+    } catch (const std::runtime_error&) {
+      failed = true;
+    }
+    require(failed && invalid.get_design()->get_design_name() == "unchanged" && invalid.get_design()->get_net_list()->get_num() == 0,
+            "invalid library interface partially imported");
+  }
+  std::filesystem::remove(declarations);
+  std::filesystem::remove(path);
+}
+
 void testPlanOwnsResolvedMappings()
 {
   std::unique_ptr<idb::verilog_import::VerilogImportPlan> plan;
@@ -223,7 +290,7 @@ void testPlanOwnsResolvedMappings()
     idb::verilog_import::VerilogLibrary library(layout);
     auto ast = idb::verilog::parse("module top(input a); BUS u(.D({a,1'b1})); endmodule");
     require(bool(ast), "plan lifetime fixture parse failed");
-    auto flat = idb::verilog::elaborate(*ast.design, "top", [&](auto cell, auto port) { return library.resolve(cell, port); });
+    auto flat = idb::verilog::compile(*ast.design, "top", [&](auto cell) { return library.lookup(cell); });
     require(bool(flat), "plan lifetime fixture elaborate failed");
     auto result = idb::verilog_import::makeImportPlan(*flat.design, library);
     require(bool(result), "plan creation failed");
@@ -247,6 +314,7 @@ int main()
     testMissingMasterRaisesError();
     testInvalidInputRaisesError();
     testConstantsAndPreflight();
+    testLibraryModuleInterfaces();
     testPlanOwnsResolvedMappings();
   } catch (const std::exception& error) {
     std::cout << error.what() << '\n';

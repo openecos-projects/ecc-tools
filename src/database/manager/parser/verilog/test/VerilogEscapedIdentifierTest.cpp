@@ -2,8 +2,8 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "VerilogElaborator.hh"
-#include "VerilogParser.hh"
+#include "VerilogFrontend.hh"
+#include "VerilogSyntax.hh"
 using namespace idb::verilog;
 int main()
 {
@@ -15,9 +15,9 @@ int main()
     if (!result)
       throw std::runtime_error(result.diagnostics.front().text());
     const auto& module = result.design->modules[0];
-    if (module.declarations[0].name != "bus[0].n,();" || module.declarations[1].name != "a\\b")
+    if (module.scope.declarations[0].name != "bus[0].n,();" || module.scope.declarations[1].name != "a\\b")
       throw std::runtime_error("escaped punctuation or internal backslash changed");
-    auto flat = elaborate(*result.design, "top");
+    auto flat = compile(*result.design, "top");
     if (!flat || flat.design->instances[0].name != "u;" || flat.design->instances[0].ports[0].name != "p)")
       throw std::runtime_error("escaped cell or port name changed");
     for (const auto* invalid : {"module top; wire \\ ; endmodule", "module top; wire $abc; endmodule", "module top; wire \\abc"})

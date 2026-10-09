@@ -53,5 +53,5 @@ struct ImportPlanResult
   std::vector<verilog::Diagnostic> diagnostics;
   explicit operator bool() const { return plan != nullptr; }
 };
-ImportPlanResult makeImportPlan(const verilog::FlatDesign& flat, VerilogLibrary& library);
+ImportPlanResult makeImportPlan(const verilog::Netlist& flat, VerilogLibrary& library);
 }  // namespace idb::verilog_import

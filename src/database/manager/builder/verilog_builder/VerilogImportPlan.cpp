@@ -15,7 +15,7 @@ using detail::Error;
 class PlanBuilder
 {
  public:
-  PlanBuilder(const FlatDesign& flat, VerilogLibrary& library) : _flat(flat), _library(library) {}
+  PlanBuilder(const Netlist& flat, VerilogLibrary& library) : _flat(flat), _library(library) {}
   VerilogImportPlan run()
   {
     _parent.resize(_flat.nets.size());
@@ -232,7 +232,7 @@ class PlanBuilder
     }
   }
 
-  const FlatDesign& _flat;
+  const Netlist& _flat;
   VerilogLibrary& _library;
   VerilogImportPlan _plan;
   std::vector<NetId> _parent, _representative, _canonical, _mapped;
@@ -241,13 +241,14 @@ class PlanBuilder
   NetId _zero = xBit, _one = xBit;
 };
 }  // namespace
-ImportPlanResult makeImportPlan(const verilog::FlatDesign& flat, VerilogLibrary& library)
+ImportPlanResult makeImportPlan(const verilog::Netlist& flat, VerilogLibrary& library)
 {
   ImportPlanResult result;
   try {
     result.plan = std::make_unique<VerilogImportPlan>(PlanBuilder(flat, library).run());
   } catch (const verilog::detail::Error& error) {
-    result.diagnostics.push_back({flat.source, error.location, error.what()});
+    result.diagnostics.push_back({error.location.file < flat.source_files.size() ? flat.source_files[error.location.file] : flat.source,
+                                  error.location, error.what()});
   }
   return result;
 }

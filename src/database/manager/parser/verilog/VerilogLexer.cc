@@ -1,160 +1,283 @@
 // iEDA is licensed under Mulan PSL v2. See LICENSE for details.
 #include "VerilogLexer.hh"
 
+#include <algorithm>
 #include <cctype>
+#include <stdexcept>
+#include <unordered_set>
 
-#include "VerilogValue.hh"
-
-namespace idb::verilog::detail {
+namespace idb::verilog {
 namespace {
-bool space(char c)
-{
-  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
-}
+// Keywords cannot be used as simple identifiers (IEEE 1364-2005 Annex B).
+const std::unordered_set<std::string_view> keywords = {"always",
+                                                       "and",
+                                                       "assign",
+                                                       "automatic",
+                                                       "begin",
+                                                       "buf",
+                                                       "bufif0",
+                                                       "bufif1",
+                                                       "case",
+                                                       "casex",
+                                                       "casez",
+                                                       "cell",
+                                                       "cmos",
+                                                       "config",
+                                                       "deassign",
+                                                       "default",
+                                                       "defparam",
+                                                       "design",
+                                                       "disable",
+                                                       "edge",
+                                                       "else",
+                                                       "end",
+                                                       "endcase",
+                                                       "endconfig",
+                                                       "endfunction",
+                                                       "endgenerate",
+                                                       "endmodule",
+                                                       "endprimitive",
+                                                       "endspecify",
+                                                       "endtable",
+                                                       "endtask",
+                                                       "event",
+                                                       "for",
+                                                       "force",
+                                                       "forever",
+                                                       "fork",
+                                                       "function",
+                                                       "generate",
+                                                       "genvar",
+                                                       "highz0",
+                                                       "highz1",
+                                                       "if",
+                                                       "ifnone",
+                                                       "incdir",
+                                                       "include",
+                                                       "initial",
+                                                       "inout",
+                                                       "input",
+                                                       "instance",
+                                                       "integer",
+                                                       "join",
+                                                       "large",
+                                                       "liblist",
+                                                       "library",
+                                                       "localparam",
+                                                       "macromodule",
+                                                       "medium",
+                                                       "module",
+                                                       "nand",
+                                                       "negedge",
+                                                       "nmos",
+                                                       "nor",
+                                                       "noshowcancelled",
+                                                       "not",
+                                                       "notif0",
+                                                       "notif1",
+                                                       "or",
+                                                       "output",
+                                                       "parameter",
+                                                       "pmos",
+                                                       "posedge",
+                                                       "primitive",
+                                                       "pull0",
+                                                       "pull1",
+                                                       "pulldown",
+                                                       "pullup",
+                                                       "pulsestyle_onevent",
+                                                       "pulsestyle_ondetect",
+                                                       "rcmos",
+                                                       "real",
+                                                       "realtime",
+                                                       "reg",
+                                                       "release",
+                                                       "repeat",
+                                                       "rnmos",
+                                                       "rpmos",
+                                                       "rtran",
+                                                       "rtranif0",
+                                                       "rtranif1",
+                                                       "scalared",
+                                                       "showcancelled",
+                                                       "signed",
+                                                       "small",
+                                                       "specify",
+                                                       "specparam",
+                                                       "strong0",
+                                                       "strong1",
+                                                       "supply0",
+                                                       "supply1",
+                                                       "table",
+                                                       "task",
+                                                       "time",
+                                                       "tran",
+                                                       "tranif0",
+                                                       "tranif1",
+                                                       "tri",
+                                                       "tri0",
+                                                       "tri1",
+                                                       "triand",
+                                                       "trior",
+                                                       "trireg",
+                                                       "unsigned",
+                                                       "use",
+                                                       "uwire",
+                                                       "vectored",
+                                                       "wait",
+                                                       "wand",
+                                                       "weak0",
+                                                       "weak1",
+                                                       "while",
+                                                       "wire",
+                                                       "wor",
+                                                       "xnor",
+                                                       "xor"};
+
 bool letter(char c)
 {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
 }
-bool digit(char c)
-{
-  return c >= '0' && c <= '9';
-}
-bool identifier(char c)
-{
-  return letter(c) || digit(c) || c == '$';
-}
 }  // namespace
-char Lexer::peek(size_t ahead) const
+bool isKeyword(std::string_view name, LanguageMode language)
 {
-  return _offset + ahead < _source.size() ? _source[_offset + ahead] : '\0';
+  static const std::unordered_set<std::string_view> sv_keywords{"accept_on",
+                                                                "alias",
+                                                                "always_comb",
+                                                                "always_ff",
+                                                                "always_latch",
+                                                                "assert",
+                                                                "assume",
+                                                                "before",
+                                                                "bind",
+                                                                "bins",
+                                                                "binsof",
+                                                                "bit",
+                                                                "break",
+                                                                "byte",
+                                                                "chandle",
+                                                                "checker",
+                                                                "class",
+                                                                "clocking",
+                                                                "const",
+                                                                "constraint",
+                                                                "context",
+                                                                "continue",
+                                                                "cover",
+                                                                "covergroup",
+                                                                "coverpoint",
+                                                                "cross",
+                                                                "dist",
+                                                                "do",
+                                                                "endchecker",
+                                                                "endclass",
+                                                                "endclocking",
+                                                                "endgroup",
+                                                                "endinterface",
+                                                                "endpackage",
+                                                                "endprogram",
+                                                                "endproperty",
+                                                                "endsequence",
+                                                                "enum",
+                                                                "eventually",
+                                                                "expect",
+                                                                "export",
+                                                                "extends",
+                                                                "extern",
+                                                                "final",
+                                                                "first_match",
+                                                                "foreach",
+                                                                "forkjoin",
+                                                                "global",
+                                                                "iff",
+                                                                "ignore_bins",
+                                                                "illegal_bins",
+                                                                "implements",
+                                                                "implies",
+                                                                "import",
+                                                                "inside",
+                                                                "int",
+                                                                "interconnect",
+                                                                "interface",
+                                                                "intersect",
+                                                                "join_any",
+                                                                "join_none",
+                                                                "let",
+                                                                "local",
+                                                                "logic",
+                                                                "longint",
+                                                                "matches",
+                                                                "modport",
+                                                                "nettype",
+                                                                "new",
+                                                                "nexttime",
+                                                                "null",
+                                                                "package",
+                                                                "packed",
+                                                                "priority",
+                                                                "program",
+                                                                "property",
+                                                                "protected",
+                                                                "pure",
+                                                                "rand",
+                                                                "randc",
+                                                                "randcase",
+                                                                "randsequence",
+                                                                "ref",
+                                                                "reject_on",
+                                                                "restrict",
+                                                                "return",
+                                                                "s_always",
+                                                                "s_eventually",
+                                                                "s_nexttime",
+                                                                "s_until",
+                                                                "s_until_with",
+                                                                "sequence",
+                                                                "shortint",
+                                                                "shortreal",
+                                                                "soft",
+                                                                "solve",
+                                                                "static",
+                                                                "string",
+                                                                "strong",
+                                                                "struct",
+                                                                "super",
+                                                                "sync_accept_on",
+                                                                "sync_reject_on",
+                                                                "tagged",
+                                                                "this",
+                                                                "throughout",
+                                                                "timeprecision",
+                                                                "timeunit",
+                                                                "type",
+                                                                "typedef",
+                                                                "union",
+                                                                "unique",
+                                                                "unique0",
+                                                                "until",
+                                                                "until_with",
+                                                                "untyped",
+                                                                "var",
+                                                                "virtual",
+                                                                "void",
+                                                                "wait_order",
+                                                                "weak",
+                                                                "wildcard",
+                                                                "with",
+                                                                "within"};
+  return keywords.count(name) != 0 || (language == LanguageMode::systemVerilog && sv_keywords.count(name) != 0);
 }
-void Lexer::advance()
+bool isSimpleIdentifier(std::string_view name)
 {
-  if (_source[_offset++] == '\n') {
-    ++_location.line;
-    _location.column = 1;
-  } else {
-    ++_location.column;
-  }
+  return !name.empty() && letter(name.front()) && !isKeyword(name)
+         && std::all_of(name.begin() + 1, name.end(), [](char c) { return letter(c) || (c >= '0' && c <= '9') || c == '$'; });
 }
-void Lexer::trivia()
+std::string encodeIdentifier(std::string_view name)
 {
-  for (;;) {
-    while (_offset < _source.size() && space(peek()))
-      advance();
-    if (peek() == '/' && peek(1) == '/') {
-      while (_offset < _source.size() && peek() != '\n')
-        advance();
-    } else if (peek() == '/' && peek(1) == '*') {
-      const auto start = _location;
-      advance();
-      advance();
-      while (_offset < _source.size() && !(peek() == '*' && peek(1) == '/'))
-        advance();
-      if (_offset == _source.size())
-        throw Error(start, "unterminated block comment");
-      advance();
-      advance();
-    } else {
-      return;
-    }
-  }
+  if (isSimpleIdentifier(name))
+    return std::string(name);
+  if (name.empty() || !std::all_of(name.begin(), name.end(), [](unsigned char c) { return c >= 33 && c <= 126; }))
+    throw std::invalid_argument("name is not a printable Verilog identifier: " + std::string(name));
+  return "\\" + std::string(name) + " ";
 }
-Token Lexer::next()
-{
-  trivia();
-  auto start = _offset;
-  auto location = _location;
-  if (_offset == _source.size())
-    return {TokenKind::end, {}, location};
-  if (peek() == '\\') {
-    advance();
-    start = _offset;
-    while (_offset < _source.size() && !space(peek())) {
-      const auto c = static_cast<unsigned char>(peek());
-      if (c < 33 || c > 126)
-        throw Error(location, "invalid character in escaped identifier");
-      advance();
-    }
-    if (start == _offset || _offset == _source.size())
-      throw Error(location, "escaped identifier requires a name and terminating whitespace");
-    return {TokenKind::identifier, _source.substr(start, _offset - start), location, true};
-  }
-  if (letter(peek()) || peek() == '$' || peek() == '`') {
-    const bool directive = peek() == '`';
-    advance();
-    while (identifier(peek()))
-      advance();
-    return {directive ? TokenKind::directive : TokenKind::identifier, _source.substr(start, _offset - start), location};
-  }
-  if (digit(peek()) || peek() == '\'') {
-    while (digit(peek()) || peek() == '_')
-      advance();
-    // IEEE 1364-2005 3.5.1 allows whitespace separating size, base and digits.
-    const auto after_size = _offset;
-    const auto after_size_location = _location;
-    trivia();
-    if (peek() == '\'') {
-      const auto base_start = _offset;
-      advance();
-      if (peek() == 's' || peek() == 'S')
-        advance();
-      if (peek() != 'b' && peek() != 'B' && peek() != 'o' && peek() != 'O' && peek() != 'd' && peek() != 'D' && peek() != 'h'
-          && peek() != 'H')
-        throw Error(location, "expected Verilog number base after apostrophe");
-      advance();
-      const auto base_end = _offset;
-      trivia();
-      const auto value_start = _offset;
-      while (identifier(peek()) || peek() == '?')
-        advance();
-      _literal.assign(_source.substr(start, after_size - start));
-      _literal += _source.substr(base_start, base_end - base_start);
-      _literal += ' ';
-      _literal += _source.substr(value_start, _offset - value_start);
-    } else {
-      _offset = after_size;
-      _location = after_size_location;
-      if (identifier(peek()) || peek() == '.')
-        throw Error(location, "invalid integer or unsupported real literal");
-    }
-    auto text = _offset != after_size ? std::string_view(_literal) : _source.substr(start, _offset - start);
-    try {
-      (void) BitVector::parse(text);
-    } catch (const std::exception& error) {
-      throw Error(location, error.what());
-    }
-    return {TokenKind::number, text, location};
-  }
-  if (peek() == '"') {
-    advance();
-    while (_offset < _source.size() && peek() != '"') {
-      if (peek() == '\n' || peek() == '\r')
-        throw Error(location, "newline in string literal");
-      if (peek() == '\\') {
-        advance();
-        if (_offset == _source.size())
-          break;
-      }
-      advance();
-    }
-    if (_offset == _source.size())
-      throw Error(location, "unterminated string literal");
-    advance();
-    return {TokenKind::stringliteral, _source.substr(start, _offset - start), location};
-  }
-  for (std::string_view op :
-       {"<<<", ">>>", "===", "!==", "**", "<<", ">>", "<=", ">=", "==", "!=", "&&", "||", "~&", "~|", "~^", "^~", "+:", "-:", "(*", "*)"}) {
-    if (_source.substr(_offset, op.size()) == op) {
-      for (size_t i = 0; i < op.size(); ++i)
-        advance();
-      return {TokenKind::symbol, op, location};
-    }
-  }
-  if (std::string_view("()[]{};:,.#=+-*/%&|^~!<>").find(peek()) != std::string_view::npos || peek() == '?') {
-    advance();
-    return {TokenKind::symbol, _source.substr(start, 1), location};
-  }
-  throw Error(location, "invalid character or unsupported token");
-}
-}  // namespace idb::verilog::detail
+}  // namespace idb::verilog

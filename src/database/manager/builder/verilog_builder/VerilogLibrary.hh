@@ -1,8 +1,9 @@
 // iEDA is licensed under Mulan PSL v2. See LICENSE for details.
 #pragma once
 #include <unordered_map>
+#include <vector>
 
-#include "verilog/VerilogElaborator.hh"
+#include "verilog/VerilogTypes.hh"
 namespace idb {
 class IdbLayout;
 class IdbCellMaster;
@@ -17,6 +18,7 @@ struct CellInterface
 {
   std::unordered_map<std::string, CellPort> ports;
   bool has_buses = false;
+  verilog::LibraryCell semantic;
 };
 
 // Owns interface snapshots; it never exposes borrowed LEF terms to a plan.
@@ -25,7 +27,7 @@ class VerilogLibrary
  public:
   explicit VerilogLibrary(IdbLayout& layout) : _layout(layout) {}
   const CellInterface* find(std::string_view cell);
-  std::optional<verilog::PortShape> resolve(std::string_view cell, std::string_view port);
+  const verilog::LibraryCell* lookup(std::string_view cell);
   static CellInterface describe(IdbCellMaster& master);
 
  private:

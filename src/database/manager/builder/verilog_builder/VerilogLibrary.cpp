@@ -61,6 +61,9 @@ CellInterface VerilogLibrary::describe(IdbCellMaster& master)
     result.has_buses = true;
     result.ports.emplace(name, std::move(port));
   }
+  for (const auto& [name, port] : result.ports)
+    result.semantic.ports.emplace(
+        name, PortShape{port.direction, static_cast<uint32_t>(port.pins.size()), false, false, NetType::wire, false, port.range});
   return result;
 }
 
@@ -74,14 +77,9 @@ const CellInterface* VerilogLibrary::find(std::string_view cell)
     return nullptr;
   return &_interfaces.emplace(cell, describe(*master)).first->second;
 }
-std::optional<PortShape> VerilogLibrary::resolve(std::string_view cell, std::string_view port)
+const LibraryCell* VerilogLibrary::lookup(std::string_view cell)
 {
   const auto* interface = find(cell);
-  if (!interface)
-    return std::nullopt;
-  const auto found = interface->ports.find(std::string(port));
-  if (found == interface->ports.end())
-    return std::nullopt;
-  return PortShape{found->second.direction, static_cast<uint32_t>(found->second.pins.size())};
+  return interface ? &interface->semantic : nullptr;
 }
 }  // namespace idb::verilog_import

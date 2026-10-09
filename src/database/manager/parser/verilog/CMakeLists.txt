@@ -24,15 +24,33 @@ else()
   find_package(ZLIB REQUIRED)
 endif()
 
+find_package(FLEX 2.6 REQUIRED)
+find_package(BISON 3.2 REQUIRED)
+set(verilog_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated_frontend")
+file(MAKE_DIRECTORY "${verilog_generated_dir}")
+BISON_TARGET(VerilogGrammar VerilogParser.yy "${verilog_generated_dir}/VerilogParser.cc"
+  DEFINES_FILE "${verilog_generated_dir}/VerilogParser.hh"
+  COMPILE_FLAGS "-Werror=conflicts-sr -Werror=conflicts-rr")
+# Full tables avoid compressed-DFA lookups on large netlists; retain 8-bit input
+# so invalid non-ASCII bytes are diagnosed by the scanner's catch-all rule.
+FLEX_TARGET(VerilogScanner VerilogLexer.l "${verilog_generated_dir}/VerilogScanner.cc"
+  COMPILE_FLAGS "-8 -Cf")
+ADD_FLEX_BISON_DEPENDENCY(VerilogScanner VerilogGrammar)
+
 add_library(verilog
-  VerilogIdentifier.cc
+  ${BISON_VerilogGrammar_OUTPUTS}
+  ${FLEX_VerilogScanner_OUTPUTS}
+  VerilogSource.cc
   VerilogLexer.cc
-  VerilogParser.cc
-  VerilogConstEval.cc
-  VerilogElaborator.cc
+  VerilogSyntax.cc
   VerilogValue.cc
+  VerilogExpression.cc
+  VerilogHierarchy.cc
+  VerilogNetlist.cc
+  VerilogFrontend.cc
 )
-target_link_libraries(verilog PRIVATE ${ZLIB_LIBRARIES})
+target_link_libraries(verilog PRIVATE ZLIB::ZLIB)
+target_include_directories(verilog PRIVATE "${verilog_generated_dir}")
 target_include_directories(verilog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 if(BUILD_TESTING)

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -25,32 +26,32 @@ struct Signal
   bool is_signed = false;
   bool unsized = false;
 };
-struct FlatNet
+struct Net
 {
   std::string name;
   NetType type;
 };
-struct FlatPort
+struct TopPort
 {
   std::string name;
   Direction direction;
   std::optional<std::pair<int32_t, int32_t>> range;
   Signal signal;
 };
-struct FlatConnection
+struct PinConnection
 {
   SourceLocation location;
   std::string name;
   Signal signal;
 };
-struct FlatInstance
+struct CellInstance
 {
   SourceLocation location;
   std::string type;
   std::string name;
-  std::vector<FlatConnection> ports;
+  std::vector<PinConnection> ports;
 };
-struct FlatBus
+struct NetBus
 {
   std::string name;
   int32_t left;
@@ -64,17 +65,29 @@ struct NetConnection
   NetId source;
   SourceLocation location;
 };
-struct FlatDesign
+struct Netlist
 {
   std::string source;
+  std::vector<std::string> source_files;
   std::string top;
-  std::vector<FlatNet> nets;
-  std::vector<FlatPort> ports;
-  std::vector<FlatInstance> instances;
-  std::vector<FlatBus> buses;
+  std::vector<Net> nets;
+  std::vector<TopPort> ports;
+  std::vector<CellInstance> instances;
+  std::vector<NetBus> buses;
   std::vector<NetConnection> assignments;
   std::vector<NetConnection> inouts;
 };
+struct Hierarchy;
+struct NetlistResult
+{
+  std::unique_ptr<Netlist> design;
+  std::vector<Diagnostic> diagnostics;
+  explicit operator bool() const { return design != nullptr; }
+};
+// Converts already-bound scopes into connectivity. This pass does not choose
+// generate branches, specialize parameters, or mutate syntax/hierarchy objects.
+NetlistResult lower(const Hierarchy& hierarchy);
+
 inline Signal resized(Signal signal, std::size_t width)
 {
   if (width > BitVector::kMaxWidth || width == 0)

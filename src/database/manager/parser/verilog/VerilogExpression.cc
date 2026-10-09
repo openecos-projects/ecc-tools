@@ -1,5 +1,5 @@
 // iEDA is licensed under Mulan PSL v2. See LICENSE for details.
-#include "VerilogConstEval.hh"
+#include "VerilogExpression.hh"
 
 #include <algorithm>
 
@@ -20,7 +20,7 @@ size_t rangeWidth(int64_t left, int64_t right, SourceLocation location)
     throw Error(location, "net width exceeds frontend limit");
   return static_cast<size_t>(width);
 }
-std::optional<BitVector> ConstEvaluator::natural(ExprId id, const Constants& values, ValueCache& cache)
+std::optional<BitVector> ExpressionEvaluator::natural(ExprId id, const Constants& values, ValueCache& cache)
 {
   if (const auto found = cache.find(id); found != cache.end())
     return found->second;
@@ -28,7 +28,7 @@ std::optional<BitVector> ConstEvaluator::natural(ExprId id, const Constants& val
   cache.emplace(id, value);
   return value;
 }
-std::optional<BitVector> ConstEvaluator::naturalImpl(ExprId id, const Constants& values, ValueCache& cache)
+std::optional<BitVector> ExpressionEvaluator::naturalImpl(ExprId id, const Constants& values, ValueCache& cache)
 {
   const auto& e = expr(id);
   if (e.kind == ExpressionKind::reference) {
@@ -39,6 +39,8 @@ std::optional<BitVector> ConstEvaluator::naturalImpl(ExprId id, const Constants&
   }
   if (e.kind == ExpressionKind::number)
     return BitVector::parse(e.text);
+  if (e.kind == ExpressionKind::fill)
+    return BitVector(e.text);
   std::vector<BitVector> operands;
   for (auto operand : e.operands) {
     auto value = natural(operand, values, cache);
@@ -47,6 +49,19 @@ std::optional<BitVector> ConstEvaluator::naturalImpl(ExprId id, const Constants&
     operands.push_back(std::move(*value));
   }
   try {
+    if (e.kind == ExpressionKind::call) {
+      const auto argument = evaluated(e.operands[0], values, cache);
+      if (e.text == "$signed" || e.text == "$unsigned")
+        return BitVector(std::string(argument.bits()), e.text == "$signed");
+      if (!argument.known())
+        return BitVector(std::string(32, 'x'), true);
+      const auto bits = argument.bits();
+      const auto first = bits.find('1');
+      if (first == bits.npos)
+        return BitVector::fromInteger(0);
+      const auto power = bits.size() - first - 1;
+      return BitVector::fromInteger(power + (bits.find('1', first + 1) != bits.npos));
+    }
     if (e.kind == ExpressionKind::unary)
       return evaluated(e.operands[0], values, cache).unary(e.text);
     if (e.kind == ExpressionKind::binary) {
@@ -113,12 +128,14 @@ std::optional<BitVector> ConstEvaluator::naturalImpl(ExprId id, const Constants&
     throw Error(e.location, error.what());
   }
 }
-BitVector ConstEvaluator::evaluated(ExprId id, const Constants& values, ValueCache& cache, uint32_t width, std::optional<bool> sign)
+BitVector ExpressionEvaluator::evaluated(ExprId id, const Constants& values, ValueCache& cache, uint32_t width, std::optional<bool> sign)
 {
   const auto& e = expr(id);
   const auto base = *natural(id, values, cache);
   width = std::max(width, base.width());
   const bool type = sign.value_or(base.isSigned());
+  if (e.kind == ExpressionKind::fill)
+    return BitVector(std::string(width, e.text.front()), type);
   auto convert = [&](BitVector value) { return BitVector(std::string(value.resized(width, type).bits()), type, value.isUnsized()); };
   if (e.kind == ExpressionKind::unary && (e.text == "+" || e.text == "-" || e.text == "~"))
     return evaluated(e.operands[0], values, cache, width, type).unary(e.text);
@@ -165,21 +182,21 @@ BitVector ConstEvaluator::evaluated(ExprId id, const Constants& values, ValueCac
     return convert(evaluated(e.operands[0], values, cache).unary(e.text));
   return convert(base);
 }
-std::optional<BitVector> ConstEvaluator::constant(ExprId id, const Constants& values, uint32_t width)
+std::optional<BitVector> ExpressionEvaluator::constant(ExprId id, const Constants& values, uint32_t width)
 {
   ValueCache cache;
   if (!natural(id, values, cache))
     return std::nullopt;
   return evaluated(id, values, cache, width);
 }
-BitVector ConstEvaluator::requiredConstant(ExprId id, const Constants& values, uint32_t width)
+BitVector ExpressionEvaluator::requiredConstant(ExprId id, const Constants& values, uint32_t width)
 {
   auto value = constant(id, values, width);
   if (!value)
     throw Error(expr(id).location, "expected constant expression; unknown parameter or nonconstant expression");
   return *value;
 }
-std::optional<std::pair<int32_t, int32_t>> ConstEvaluator::bounds(Range range, const Constants& values)
+std::optional<std::pair<int32_t, int32_t>> ExpressionEvaluator::bounds(Range range, const Constants& values)
 {
   if (!range.present())
     return std::nullopt;
@@ -188,7 +205,7 @@ std::optional<std::pair<int32_t, int32_t>> ConstEvaluator::bounds(Range range, c
   rangeWidth(left, right, expr(range.left).location);
   return std::pair<int32_t, int32_t>{static_cast<int32_t>(left), static_cast<int32_t>(right)};
 }
-std::vector<int64_t> ConstEvaluator::selectIndices(const Expression& e, const Constants& values, std::pair<int32_t, int32_t> range)
+std::vector<int64_t> ExpressionEvaluator::selectIndices(const Expression& e, const Constants& values, std::pair<int32_t, int32_t> range)
 {
   int64_t left = integer(requiredConstant(e.operands[1], values), e.location);
   int64_t right = left;

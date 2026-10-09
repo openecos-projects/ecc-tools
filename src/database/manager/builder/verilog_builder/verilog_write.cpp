@@ -13,7 +13,7 @@
 #include "VerilogConstantNet.hh"
 #include "VerilogLibrary.hh"
 #include "utility/logger/Logger.hpp"
-#include "verilog/VerilogIdentifier.hh"
+#include "verilog/VerilogLexer.hh"
 namespace idb {
 namespace {
 using verilog::encodeIdentifier;

@@ -5,7 +5,7 @@
 #include "VerilogLibrary.hh"
 #include "def_service.h"
 #include "utility/logger/Logger.hpp"
-#include "verilog/VerilogParser.hh"
+#include "verilog/VerilogFrontend.hh"
 namespace idb {
 namespace {
 using namespace verilog;
@@ -106,44 +106,44 @@ class Importer
   const VerilogImportPlan& _plan;
   std::vector<IdbNet*> _nets;
 };
-std::string import(IdbDefService* service, const std::string& file, const std::string& top)
+std::string import(IdbDefService* service, const std::vector<std::string>& files, const std::string& top, const SourceOptions& options)
 {
   // Return diagnostics after RAII cleanup: the caller's Error policy may terminate the process.
-  auto parsed = readFile(file);
-  if (!parsed)
-    return parsed.diagnostics.front().text();
   if (!service || !service->get_layout() || !service->get_design())
     return "missing Verilog import service, design or LEF layout";
   try {
     VerilogLibrary library(*service->get_layout());
-    auto flat = elaborate(*parsed.design, top, [&](std::string_view cell, std::string_view pin) { return library.resolve(cell, pin); });
+    auto flat = compileFiles(files, top, options, [&](std::string_view cell) { return library.lookup(cell); });
     if (!flat)
       return flat.diagnostics.front().text();
-    parsed.design.reset();
     auto planned = makeImportPlan(*flat.design, library);
     if (!planned)
       return planned.diagnostics.front().text();
     flat.design.reset();
     Importer(*service->get_design(), *planned.plan).run();
   } catch (const detail::Error& error) {
-    return Diagnostic{file, error.location, error.what()}.text();
+    return Diagnostic{files.empty() ? "<input>" : files.front(), error.location, error.what()}.text();
   } catch (const ImportError& error) {
     return error.what();
   }
   return {};
 }
 }  // namespace
-bool VerilogRead::createDb(std::string file, std::string top_module_name)
+bool VerilogRead::createDb(std::string file, std::string top_module_name, const verilog::SourceOptions& options)
 {
-  const auto error = import(_def_service, file, top_module_name);
+  return createDb(std::vector<std::string>{std::move(file)}, std::move(top_module_name), options);
+}
+bool VerilogRead::createDb(const std::vector<std::string>& files, std::string top_module_name, const verilog::SourceOptions& options)
+{
+  const auto error = import(_def_service, files, top_module_name, options);
   if (!error.empty()) {
-    ECCLOG.error(ecc::Loc::current(), "Verilog import failed: input=", file, ", ", error);
+    ECCLOG.error(ecc::Loc::current(), "Verilog import failed: ", error);
     return false;
   }
   return true;
 }
-bool VerilogRead::createDbAutoTop(std::string file)
+bool VerilogRead::createDbAutoTop(std::string file, const verilog::SourceOptions& options)
 {
-  return createDb(std::move(file), {});
+  return createDb(std::move(file), {}, options);
 }
 }  // namespace idb

@@ -9,7 +9,7 @@
 #include <type_traits>
 
 #include "def_service.h"
-#include "verilog/VerilogParser.hh"
+#include "verilog/VerilogSyntax.hh"
 #include "verilog_read.h"
 #include "verilog_write.h"
 static_assert(!std::is_copy_constructible_v<idb::VerilogWriter>);
