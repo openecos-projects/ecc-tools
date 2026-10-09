@@ -103,7 +103,12 @@ auto FastStaBranch::evaluate(const FastStaContext& resident, const FastStaBranch
   branch.buffer_input_node_id_by_inst.emplace(driver_identity, 0U);
   branch.buffer_output_node_id_by_inst.emplace(driver_identity, 1U);
   branch.liberty_cell_by_master.emplace(request.driver_cell_master, *driver);
-  FastStaNet net{.name = request.component_id + "/branch", .driver_node_id = 1U, .load_node_ids = {}, .load_rc_node_ids = {}, .driver_timing_by_state = {}};
+  FastStaNet net{.name = request.component_id + "/branch",
+                 .driver_node_id = 1U,
+                 .load_node_ids = {},
+                 .load_rc_node_ids = {},
+                 .ignore_terminals = {},
+                 .driver_timing_by_state = {}};
   std::unordered_set<std::string> identities;
   bool representative_found = false;
   for (const auto& load : request.loads) {

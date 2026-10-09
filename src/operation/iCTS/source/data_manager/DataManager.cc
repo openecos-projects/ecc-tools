@@ -41,6 +41,7 @@
 #include "builder.h"
 #include "design/Clock.hh"
 #include "design/Inst.hh"
+#include "design/Net.hh"
 #include "design/Pin.hh"
 #include "idm.h"
 #include "routing/ClockRouteSegmentRC.hh"
@@ -195,13 +196,21 @@ auto logDesignDistribution(const Design& design) -> void
       continue;
     }
     std::map<InstType, std::size_t> sink_type_counts;
-    std::size_t io_sinks = 0U;
     for (const auto* load : clock->get_loads()) {
-      if (load == nullptr || load->get_inst() == nullptr) {
-        ++io_sinks;
-      } else {
+      if (load != nullptr && load->get_inst() != nullptr) {
         ++sink_type_counts[load->get_inst()->get_type()];
       }
+    }
+    std::size_t ignore_load_count = 0U;
+    std::set<const Net*> counted_nets;
+    const auto count_ignore_loads = [&](const Net* net) -> void {
+      if (net != nullptr && counted_nets.insert(net).second) {
+        ignore_load_count += net->get_ignore_loads().size();
+      }
+    };
+    count_ignore_loads(clock->get_clock_source_net());
+    for (const auto* net : clock->get_nets()) {
+      count_ignore_loads(net);
     }
     total_sinks += clock->get_loads().size();
     const auto sequential_sinks = sink_type_counts[InstType::kFlipFlop] + sink_type_counts[InstType::kLatch];
@@ -216,13 +225,13 @@ auto logDesignDistribution(const Design& design) -> void
                                  clock->get_clock_period_source(), ToLogTableCell(clock->get_nets().size()), ToLogTableCell(clock->get_insts().size()),
                                  ToLogTableCell(clock->get_loads().size()), ToLogTableCell(sequential_sinks),
                                  ToLogTableCell(sink_type_counts[InstType::kMacroBlock]), ToLogTableCell(boundary_sinks), ToLogTableCell(propagation_sinks),
-                                 ToLogTableCell(io_sinks), ToLogTableCell(clock->is_preclustered_sink_reuse()),
+                                 ToLogTableCell(ignore_load_count), ToLogTableCell(clock->is_preclustered_sink_reuse()),
                                  ToLogTableCell(clock->get_preclustered_anchor_input_net_names().size())});
   }
   distribution_rows.push_back({"TOTAL", "-", "-", "-", ToLogTableCell(design.get_nets().size()), ToLogTableCell(design.get_insts().size()),
                                ToLogTableCell(total_sinks), "-", "-", "-", "-", "-", "-", "-"});
   EmitLogTable(Loc::current(), "Clock Distribution Overview",
-               {"Clock", "Net", "Period", "Source", "Nets", "Insts", "Sinks", "Seq", "Macro", "Boundary", "Propagation", "IO", "Reuse", "Anchors"},
+               {"Clock", "Net", "Period", "Source", "Nets", "Insts", "Sinks", "Seq", "Macro", "Boundary", "Propagation", "Ignore", "Reuse", "Anchors"},
                distribution_rows);
 }
 

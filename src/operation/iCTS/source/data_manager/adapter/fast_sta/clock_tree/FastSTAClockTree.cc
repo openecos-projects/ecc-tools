@@ -200,6 +200,16 @@ auto FastStaClockTree::buildFromClock(const Clock& clock) -> FastStaContext
       fast_net.load_node_ids.push_back(load_node_id);
       context.nodes.at(load_node_id).incoming_net_id = net_id;
     }
+    fast_net.ignore_terminals.reserve(net->get_ignore_loads().size());
+    for (auto* ignore_load : net->get_ignore_loads()) {
+      if (ignore_load == nullptr) {
+        continue;
+      }
+      fast_net.ignore_terminals.push_back(FastStaNetIgnoreTerminal{
+          .name = makeNodeName(ignore_load),
+          .location = FastStaPoint{.x_dbu = ignore_load->get_location().get_x(), .y_dbu = ignore_load->get_location().get_y()},
+      });
+    }
     context.nets.push_back(std::move(fast_net));
   };
 

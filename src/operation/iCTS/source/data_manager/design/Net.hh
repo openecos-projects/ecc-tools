@@ -40,11 +40,13 @@ class Net
   auto get_name() const -> const std::string& { return _name; }
   auto get_driver() const -> Pin* { return _driver; }
   auto get_loads() const -> const std::vector<Pin*>& { return _loads; }
+  auto get_ignore_loads() const -> const std::vector<Pin*>& { return _ignore_loads; }
 
   // Setter
   auto set_name(const std::string& net_name) -> void { _name = net_name; }
   auto set_driver(Pin* driver) -> void { _driver = driver; }
   auto set_loads(const std::vector<Pin*>& loads) -> void { _loads = loads; }
+  auto set_ignore_loads(const std::vector<Pin*>& ignore_loads) -> void { _ignore_loads = ignore_loads; }
 
   // Adder
   auto add_load(Pin* load) -> void
@@ -54,10 +56,20 @@ class Net
     }
     _loads.push_back(load);
   }
+  auto add_ignore_load(Pin* ignore_load) -> void
+  {
+    if (ignore_load == nullptr || std::ranges::find(_ignore_loads, ignore_load) != _ignore_loads.end()) {
+      return;
+    }
+    _ignore_loads.push_back(ignore_load);
+  }
 
  private:
   std::string _name = "";
   Pin* _driver = nullptr;
   std::vector<Pin*> _loads;
+  // Top-level IO pins that stay connected to the net but are not CTS sinks:
+  // they are never balanced, clustered, or counted as clock loads.
+  std::vector<Pin*> _ignore_loads;
 };
 }  // namespace icts

@@ -105,12 +105,22 @@ struct FastStaNode
   bool slew_limit_from_master = false;
 };
 
+// A top-level IO pin that stays on a clock net without being a clock sink. It
+// takes part only in input-graph snapshot matching; it is never a node of the
+// clock context, never attached as an RC terminal, and never counted as a load.
+struct FastStaNetIgnoreTerminal
+{
+  std::string name = "";
+  FastStaPoint location{};
+};
+
 struct FastStaNet
 {
   std::string name = "";
   FastStaNodeId driver_node_id = kInvalidFastStaNodeId;
   std::vector<FastStaNodeId> load_node_ids;
   std::vector<FastStaRcNodeId> load_rc_node_ids;
+  std::vector<FastStaNetIgnoreTerminal> ignore_terminals;
   double wire_resistance_ohm = 0.0;
   double wire_cap_pf = 0.0;
   int64_t total_wirelength_dbu = 0;
