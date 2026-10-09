@@ -51,8 +51,6 @@ class PowerReporter
   void outputPowerGroup(std::ofstream* power_report_file, PowerGroupType power_group_type);
   void outputPowerAttribute(std::ofstream* power_report_file);
   void outputInstancePower();
-  void outputInstancePowerHeader(std::ofstream* instance_power_file);
-  void outputInstancePowerRecord(std::ofstream* instance_power_file, const std::string& instance_name, InstancePower& instance_power);
   void outputCellPowerReport(const std::string& directory_path, std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,
                              const int32_t top_num, const bool is_all);
   void outputNetPowerReport(const std::string& directory_path, std::vector<std::pair<std::string, NetPower*>>& net_power_list,

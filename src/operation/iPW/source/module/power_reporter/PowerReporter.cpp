@@ -212,42 +212,23 @@ void PowerReporter::outputPowerAttribute(std::ofstream* power_report_file)
 
 void PowerReporter::outputInstancePower()
 {
-  Database& database = PWDM.getDatabase();
-  std::ofstream* instance_power_file = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.bin"));
-  outputInstancePowerHeader(instance_power_file);
-  for (std::pair<const std::string, InstancePower>& instance_power_pair : database.get_instance_power_map()) {
-    outputInstancePowerRecord(instance_power_file, instance_power_pair.first, instance_power_pair.second);
+  std::ofstream* instance_power_file
+      = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.tsv"));
+  (*instance_power_file) << "# iEMIR_PTPX_INSTANCE_POWER_V1\n";
+  (*instance_power_file) << "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\t"
+                            "total_power_w\taverage_current_a\n";
+  (*instance_power_file) << std::setprecision(17);
+  for (std::pair<const std::string, InstancePower>& instance_power_pair : PWDM.getDatabase().get_instance_power_map()) {
+    InstancePower& instance_power = instance_power_pair.second;
+    PowerValue& power_value = instance_power.get_power_value();
+    double voltage = instance_power.get_voltage();
+    double total_power = power_value.get_total_power();
+    double average_current = voltage > 0.0 ? total_power / voltage : 0.0;
+    (*instance_power_file) << instance_power_pair.first << '\t' << voltage << '\t' << power_value.get_internal_power() << '\t';
+    (*instance_power_file) << power_value.get_switching_power() << '\t' << power_value.get_leakage_power() << '\t';
+    (*instance_power_file) << total_power << '\t' << average_current << '\n';
   }
   PWUTIL.closeFileStream(instance_power_file);
-}
-
-void PowerReporter::outputInstancePowerHeader(std::ofstream* instance_power_file)
-{
-  char magic[8] = {'I', 'S', 'T', 'A', 'P', 'W', 'R', '\0'};
-  uint32_t version = 1;
-  uint32_t record_size = sizeof(uint64_t) + sizeof(uint32_t) + 4 * sizeof(double);
-  uint64_t instance_power_num = PWDM.getDatabase().get_instance_power_map().size();
-  instance_power_file->write(magic, static_cast<std::streamsize>(sizeof(magic)));
-  instance_power_file->write(reinterpret_cast<const char*>(&version), static_cast<std::streamsize>(sizeof(version)));
-  instance_power_file->write(reinterpret_cast<const char*>(&record_size), static_cast<std::streamsize>(sizeof(record_size)));
-  instance_power_file->write(reinterpret_cast<const char*>(&instance_power_num), static_cast<std::streamsize>(sizeof(instance_power_num)));
-}
-
-void PowerReporter::outputInstancePowerRecord(std::ofstream* instance_power_file, const std::string& instance_name, InstancePower& instance_power)
-{
-  // iEMIR resolves the stable ID against the same IDB design database.
-  uint64_t instance_id = PWDM.getDatabase().get_instance_map()[instance_name].get_instance_id();
-  uint32_t power_group_type = static_cast<uint32_t>(instance_power.get_power_group_type());
-  double voltage = instance_power.get_voltage();
-  double internal_power = instance_power.get_power_value().get_internal_power();
-  double switching_power = instance_power.get_power_value().get_switching_power();
-  double leakage_power = instance_power.get_power_value().get_leakage_power();
-  instance_power_file->write(reinterpret_cast<const char*>(&instance_id), static_cast<std::streamsize>(sizeof(instance_id)));
-  instance_power_file->write(reinterpret_cast<const char*>(&power_group_type), static_cast<std::streamsize>(sizeof(power_group_type)));
-  instance_power_file->write(reinterpret_cast<const char*>(&voltage), static_cast<std::streamsize>(sizeof(voltage)));
-  instance_power_file->write(reinterpret_cast<const char*>(&internal_power), static_cast<std::streamsize>(sizeof(internal_power)));
-  instance_power_file->write(reinterpret_cast<const char*>(&switching_power), static_cast<std::streamsize>(sizeof(switching_power)));
-  instance_power_file->write(reinterpret_cast<const char*>(&leakage_power), static_cast<std::streamsize>(sizeof(leakage_power)));
 }
 
 void PowerReporter::outputCellPowerReport(const std::string& directory_path,
