@@ -124,7 +124,7 @@ Graph、shadow、box/patch DRC、重叠几何查询和调试都读取这份固�
 `freeDRBox` 在释放 route/patch 状态及环境/本地索引后重置 fixed_geometry，保留待汇总的 owner 结果。
 它保留整个 curr_result，不能用默认 DRBoxResult 替换；普通 stage 由 updateRouteViolation 负责释放其中的待归并违例。
 route/patch 工作区和形状索引先释放，随后释放 task_order_list 与值存储 task，再释放 graph；best_result 独立重置。
-final-min-area 路径不向 box 的当前违例列表写入违例，仍按原流程清理工作区并最终释放 box map。
+final-min-area 使用独立的局部 box，不向 box 的当前违例列表写入违例；每个 box 先清理工作区与借用引用，再向 model 归并新增 patch。
 
 ## 4. 连通分量与任务构建
 
@@ -223,6 +223,8 @@ isBoxMinAreaViolation 与 PA 同名、同语义：minimum-area 且与 box 开重
 
 `buildPatchDETask` 从原 getPatchViolationList 抽出，保留 fixed、owner/env 索引取数、对象顺序和 checked nets；后者只负责执行。
 Patch DRC 用工作区已接受 patch 替代当前 net 的本地旧 patch，仍保留借用环境 patch。
+普通 `initSinglePatchTask` 根据当前 net 几何生成检查窗口；final-min-area 使用显式窗口重载，检查局部 box 的所有 routing layer。
+两种入口完成任务初始化后，共用 `patchDRTask(DRBox&)` 的违例搜索、候选修补与结果发布流程。
 selectPatch 按需构建一次输入和基线；只临时 push/pop 候选指针，不再 push/pop 工作区 patch。
 普通候选指针在宽候选合并扩容前已经弹出，工作区在整个选择期间保持稳定，DETask 不跨正式接受保存。
 待修列表在初始化时取得，不在每次接受后整体刷新；新接受 patch 参与下一条违例的候选 DRC，但任务末尾才投影 graph 并重建 net 索引。
@@ -298,9 +300,25 @@ routeDRBox(model, box) 在恢复前显式调用 updateBestResult，即使 needRo
 routeDRModel 负责最终阶段的迭代号推进、恢复、补面积、统计、CSV 与发布，selectBestResult(model) 不再隐式执行这些副作用。
 最终日志的来源函数随职责调整改变，但阶段顺序和传给 final-min-area 的迭代号保持不变。
 
-`patchFinalMinArea` 在普通迭代末尾和恢复 model 最优结果后处理剩余 minimum-area 违例。
-它构建临时 box，共用建图和 patch 流程，按 net/LayerRect 去重后只向 model 追加新 patch，有更新才重查违例。
-此路径不经过 splitNetResult 或 routeDRNet，不能假定普通重布的 owner/environment 初始化已经执行。
+`patchFinalMinArea` 在普通迭代的 updateNetResult、updateNetPatch 和 updateViolation 之后处理剩余 minimum-area 违例。
+它与 repairViolation 共用违例驱动的 box 范围生成、局部 box 初始化、model 环境构建和结果归并：
+
+```text
+筛选 model 的 minimum-area 违例
+  -> getRepairBoxRectList：按违例矩形取 GCell 范围，扩大 size/2，裁剪到 die，合并相邻/重叠范围
+  -> 依次处理局部 box：
+       initRepairDRBox -> buildRepairNetEnvironment -> buildFinalPatchBox
+       buildFixedRect -> buildDRBoxGraph
+       按 net 重查 box 内实际 minimum-area 违例 -> 共用 patchDRTask
+       freeDRBox -> updateRepairDRModel
+  -> 新增 patch 非空时 updateViolation
+```
+
+已有线段和 patch 保留在 model，由局部 box 借用为只读环境；box owner map 只持有新增 patch。
+final patch task 按与 box 开重叠的输入违例构建，只包含有效的 active net，每个 net 一个任务。
+每个任务重新检查实际 box 几何，已修复的输入违例不会直接成为待补列表。
+box 顺序求解并立即归并，后续 box 能读取先前新增的 patch；归并前必须释放索引、DETask 工作区和环境指针，避免 model 向量扩容使引用失效。
+此路径不经过 splitNetResult 或 routeDRNet，也不依赖普通 box map 的 owner/environment 初始化。
 最终 `uploadDRModel` 将结果移动回 RTDM，并替换违例 RTree；box 快照恢复不是全局发布。
 
 ## 9. 修改与验证
