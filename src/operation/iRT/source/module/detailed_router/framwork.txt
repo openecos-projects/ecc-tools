@@ -14,7 +14,7 @@ DR 使用 PA 已确定的 AP 及 via 约束，不负责重新生成或选择 PA 
 | 连通分量与任务 | initDRTaskList、buildNetTaskList | DRConnectivity、DRTaskComponent、DRTask、DRGroup |
 | 图搜索与 via 约束 | routeDRNet、routeDRTask、expandSearching、getRoutingSegmentList | DRRouteState、DRNode、AccessPoint |
 | Patch 生成与接受 | patchDRTask、getCandidatePatchList、getCompactPatchList、selectPatch、isPatchImprovement、updateTaskPatch | DRPatchState、DRPatch、std::optional<int32_t> 候选下标 |
-| 几何投影与 DRC 输入 | buildFixedRect、buildDRBoxGraph、buildDRShapeIndex、getRouteViolationList、getPatchViolationList | DRFixedGeometry、DRNodeNetState、DRShadow、DRShapeIndex、DETask |
+| 几何投影与 DRC 输入 | buildFixedRect、buildDRBoxGraph、buildDRShapeIndex、getRouteViolationList、getPatchViolationList | DRFixedGeometry、DRNodeNetState、DRShapeIndex、DETask |
 | 快照、汇总与发布 | updateBestResult、selectBestResult、updateDRModel、uploadDRModel、freeDRBox | DRBoxResult、DRModelResult |
 
 ## 2. 整体运行流程
@@ -158,7 +158,7 @@ set_dr_group_list 是 group 的唯一修改入口，同时重建 sort_coord_list
 
 ## 5. 单任务路由与 via 契约
 
-`routeDRNet` 先移除该 net 的 routed index 引用，删除旧 patch 的 graph/shadow 贡献，
+`routeDRNet` 先移除该 net 的 routed index 引用，删除旧 patch 的 graph 贡献，
 只删除需要重布的 component 线段贡献。逐 task 布线后汇总所有 component 结果，
 更新 net 索引，再以该 net 的首个 task 调用 `patchDRTask`，最后增加 net 重布次数。
 
@@ -168,7 +168,7 @@ routeDRTask
   对尚未连接的 end group：
     routeSinglePath：从 start 和已有路径节点搜索，返回是否命中 end；失败立即带任务上下文报错
     updatePathResult -> updateDirectionSet -> resetStartAndEnd -> resetPath
-  updateTaskResult：重建线段、恢复 via 身份、写入 component 并投影 graph/shadow
+  updateTaskResult：重建线段、恢复 via 身份、写入 component 并投影 graph
   resetTask
 ```
 
@@ -206,7 +206,7 @@ PatchGeometry 位于 data_manager/advance，仅共用切割矩形选择、采样
 
 `updatePatchCost` 与 PA 同样计算 fixed/routed、方向及重叠面积；比较器依次按 fixed、routed、层方向、重叠面积、几何坐标排序。
 `selectCandidatePatchList` 优先零代价候选并按上限取样，没有零代价候选时保留最优者；上限为 1 或 2 均有定义。
-grid、wire_width、max_candidate_patch_num 必须为正。DRPatch、DRShadow 不再维护 patch violation 代价及其调试绘图，DRNode 的路由违例惩罚不变。
+grid、wire_width、max_candidate_patch_num 必须为正。DRPatch 不再维护 patch violation 代价及其调试绘图，DRNode 的路由违例惩罚不变。
 
 | selectPatch 情况 | 当前行为 |
 | --- | --- |
@@ -225,9 +225,9 @@ isBoxMinAreaViolation 与 PA 同名、同语义：minimum-area 且与 box 开重
 Patch DRC 用工作区已接受 patch 替代当前 net 的本地旧 patch，仍保留借用环境 patch。
 selectPatch 按需构建一次输入和基线；只临时 push/pop 候选指针，不再 push/pop 工作区 patch。
 普通候选指针在宽候选合并扩容前已经弹出，工作区在整个选择期间保持稳定，DETask 不跨正式接受保存。
-待修列表在初始化时取得，不在每次接受后整体刷新；新接受 patch 参与下一条违例的候选 DRC，但任务末尾才投影 graph/shadow。
+待修列表在初始化时取得，不在每次接受后整体刷新；新接受 patch 参与下一条违例的候选 DRC，但任务末尾才投影 graph 并重建 net 索引。
 `updateTaskPatch` 在 owner patch 向量可能扩容前 removeNet，追加工作区 patch 后重建该 net 索引。
-graph/shadow 只增加本次工作区 patch 的贡献，不重新投影 owner 中已发布的旧 patch；清理时按 owner 列表逐项撤销。
+graph 只增加本次工作区 patch 的贡献，不重新投影 owner 中已发布的旧 patch；清理时按 owner 列表逐项撤销。
 
 ## 7. 图、空间索引与 DRC 视图
 
@@ -236,16 +236,15 @@ graph/shadow 只增加本次工作区 patch 的贡献，不重新投影 owner �
 | DRNode graph | 轨道节点、邻接、搜索状态、方向代价 | 搜索与重跑，不是原始几何数据库 |
 | DRNodeNetState | fixed 的每方向 net 集合及摘要；空/单 net 内联，多 net 使用动态明细 | 重复 add 不累加，del 删除整个成员，保留 pin 豁免语义 |
 | DRNodeNetCountState | routed 的每方向 net 摘要与贡献次数；单 net 计数内联，多 net 使用动态明细 | 每次投影 add/del 配对，计数归零才移除成员；缺失 del 报错 |
-| DRShadow | fixed/routed 代价评估使用的膨胀几何 | Patch 占用评分，不能直接用于 DRC 输入；不保存 patch violation 惩罚 |
 | DRFixedGeometry | RTDM 固定矩形指针、net/type、来源顺序及分层 RTree | buildFixedRect 时构建，box 求解期间只读；不混入环境结果 |
-| DRShapeIndex.env_shape_index | 借用环境 segment/patch 的原始形状副本和对象指针 | 建图时批量 build，box 求解期间只读；不再重复索引固定矩形 |
-| DRShapeIndex.routed_shape_index | 本 box owner segment/patch 的原始形状副本和对象指针 | 随 net 重布或 patch 写回更新，修改源向量前必须 removeNet |
+| DRShapeIndex.env_shape_index | 借用环境 segment/patch 的原始形状副本和对象指针，外加固定矩形与环境形状的膨胀 halo | 建图时批量 build，box 求解期间只读；halo 用于 patch fixed 代价评分，不能作为 DRC 输入 |
+| DRShapeIndex.routed_shape_index | 本 box owner segment/patch 的原始形状副本、对象指针及膨胀 halo | 随 net 重布或 patch 写回更新，修改源向量前必须 removeNet；halo 用于 patch routed 代价评分 |
 
-`buildDRBoxGraph` 依次建立轨道、节点、shadow、邻接、graph/shadow 投影和精确形状索引。
-DRShadow 与 PAShadow 一致：fixed 代价查询前必须完成 fixed index 构建，未构建立即报错；已构建的空索引合法，routed index 仍动态维护。
+`buildDRBoxGraph` 依次建立轨道、节点、邻接、graph 投影和形状索引（含 halo）。
+代价查询前必须完成对应 DRShapeIndex 的 build，未构建立即报错；已构建的空索引合法，routed index 随 net 整网重建。
 `getRoutingSpacingPairList` 共用 PRL/EOL 间距计算；平面投影处理 East/North 并同步反向端点，
 via 投影处理内部 track 的 Above/Below，cut 投影保留自己的层间 spacing 规则。
-`getRoutingShadowShapeList` 与 PA 同名同签名，只读取 NetShape，保留贴边减一规则和 cut 类型报错；不能将三类几何投影改成无差别矩形更新。
+halo 生成沿用原 `getRoutingShadowShapeList` 规则（现为 DRShapeIndex 私有）：只读取 NetShape，保留贴边减一规则和 cut 类型报错；不能将三类几何投影改成无差别矩形更新。
 
 DRFixedGeometry 保留输入 map 的 type/layer/net/set 遍历顺序，查询按来源下标排序去重。
 重复 build、未 build 的求解访问、非法固定矩形或查询窗口会报错；只有调试绘图允许未 build 时不输出固定几何。

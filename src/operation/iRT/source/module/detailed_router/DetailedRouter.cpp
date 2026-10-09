@@ -134,8 +134,8 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
   std::vector<DRIterParam> repair_iter_param_list;
   // clang-format off
   repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 18, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 54, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  // repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  // repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 54, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
   // clang-format on
 
   for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(dr_iter_param_list.size()); i++, iter++) {
@@ -210,6 +210,7 @@ void DetailedRouter::initDRBoxMap(DRModel& dr_model)
   }
   offset %= size;
 
+  // collect x/y gcell scale list
   int32_t x_gcell_num = 0;
   for (const ScaleGrid& x_grid : gcell_axis.get_x_grid_list()) {
     x_gcell_num += x_grid.get_step_num();
@@ -236,6 +237,7 @@ void DetailedRouter::initDRBoxMap(DRModel& dr_model)
   std::ranges::sort(y_scale_list);
   y_scale_list.erase(std::ranges::unique(y_scale_list).begin(), y_scale_list.end());
 
+  // init dr box map
   GridMap<DRBox>& dr_box_map = dr_model.get_dr_box_map();
   int32_t x_box_num = static_cast<int32_t>(x_scale_list.size()) - 1;
   int32_t y_box_num = static_cast<int32_t>(y_scale_list.size()) - 1;
@@ -262,6 +264,7 @@ void DetailedRouter::initDRBoxMap(DRModel& dr_model)
     }
   }
 
+  // build box idx
   GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<int32_t> gcell_x_box_idx_list(gcell_map.get_x_size(), -1);
   std::vector<int32_t> gcell_y_box_idx_list(gcell_map.get_y_size(), -1);
@@ -1093,10 +1096,8 @@ void DetailedRouter::buildDRBoxGraph(DRBox& dr_box)
 {
   buildBoxTrackAxis(dr_box);
   buildLayerNodeMap(dr_box);
-  buildLayerShadowMap(dr_box);
   buildDRNodeNeighbor(dr_box);
   buildOrientNetMap(dr_box);
-  buildNetShadowMap(dr_box);
   buildDRShapeIndex(dr_box);
 }
 
@@ -1202,13 +1203,6 @@ void DetailedRouter::buildLayerNodeMap(DRBox& dr_box)
   }
 }
 
-void DetailedRouter::buildLayerShadowMap(DRBox& dr_box)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-
-  dr_box.get_layer_shadow_map().resize(routing_layer_list.size());
-}
-
 void DetailedRouter::buildDRNodeNeighbor(DRBox& dr_box)
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
@@ -1294,39 +1288,12 @@ void DetailedRouter::buildOrientNetMap(DRBox& dr_box)
   }
 }
 
-void DetailedRouter::buildNetShadowMap(DRBox& dr_box)
-{
-  for (const DRFixedShape& shape : dr_box.get_fixed_geometry().get_shape_list()) {
-    addFixedRectToShadow(dr_box, shape.net_idx, shape.rect, shape.is_routing);
-  }
-  for (auto& [net_idx, segment_list] : dr_box.get_net_env_result_map()) {
-    for (Segment<LayerCoord>* segment : segment_list) {
-      addFixedRectToShadow(dr_box, net_idx, segment);
-    }
-  }
-  for (auto& [net_idx, segment_list] : dr_box.get_curr_result().get_net_own_result_map()) {
-    for (Segment<LayerCoord>& segment : segment_list) {
-      updateRoutedRectToShadow(dr_box, ChangeType::kAdd, net_idx, segment);
-    }
-  }
-  for (auto& [net_idx, patch_list] : dr_box.get_net_env_patch_map()) {
-    for (EXTLayerRect* patch : patch_list) {
-      addFixedRectToShadow(dr_box, net_idx, patch, true);
-    }
-  }
-  for (auto& [net_idx, patch_list] : dr_box.get_curr_result().get_net_own_patch_map()) {
-    for (EXTLayerRect& patch : patch_list) {
-      updateRoutedRectToShadow(dr_box, ChangeType::kAdd, net_idx, patch, true);
-    }
-  }
-  for (DRShadow& dr_shadow : dr_box.get_layer_shadow_map()) {
-    dr_shadow.buildFixedRectRTree();
-  }
-}
-
 void DetailedRouter::buildDRShapeIndex(DRBox& dr_box)
 {
   DRShapeIndex& env_shape_index = dr_box.get_env_shape_index();
+  for (const DRFixedShape& shape : dr_box.get_fixed_geometry().get_shape_list()) {
+    env_shape_index.addFixedRect(shape.net_idx, shape.rect, shape.is_routing);
+  }
   for (auto& [net_idx, segment_list] : dr_box.get_net_env_result_map()) {
     for (Segment<LayerCoord>* segment : segment_list) {
       env_shape_index.addSegment(net_idx, segment, RTDM.getNetDetailedShapeList(net_idx, *segment));
@@ -1491,11 +1458,9 @@ void DetailedRouter::updateGraph(DRBox& dr_box, ChangeType change_type, int32_t 
 {
   for (Segment<LayerCoord>& segment : segment_list) {
     updateRoutedRectToGraph(dr_box, change_type, net_idx, segment);
-    updateRoutedRectToShadow(dr_box, change_type, net_idx, segment);
   }
   for (EXTLayerRect& patch : patch_list) {
     updateRoutedRectToGraph(dr_box, change_type, net_idx, patch, true);
-    updateRoutedRectToShadow(dr_box, change_type, net_idx, patch, true);
   }
 }
 
@@ -1853,7 +1818,6 @@ void DetailedRouter::updateTaskResult(DRBox& dr_box)
   // 新结果添加到graph
   for (Segment<LayerCoord>& routing_segment : routing_segment_list) {
     updateRoutedRectToGraph(dr_box, ChangeType::kAdd, curr_net_idx, routing_segment);
-    updateRoutedRectToShadow(dr_box, ChangeType::kAdd, curr_net_idx, routing_segment);
   }
 }
 
@@ -2554,6 +2518,18 @@ void DetailedRouter::updatePatchCost(DRBox& dr_box, DRPatch& dr_patch, const std
   dr_patch.set_overlap_area(static_cast<int32_t>(overlap_area));
 }
 
+double DetailedRouter::getFixedRectCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch)
+{
+  double fixed_rect_unit = dr_box.get_dr_iter_param()->get_fixed_rect_unit();
+  return dr_box.get_env_shape_index().getOverlapCost(net_idx, patch.get_layer_idx(), patch.get_real_rect(), fixed_rect_unit);
+}
+
+double DetailedRouter::getRoutedRectCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch)
+{
+  double routed_rect_unit = dr_box.get_dr_iter_param()->get_routed_rect_unit();
+  return dr_box.get_routed_shape_index().getOverlapCost(net_idx, patch.get_layer_idx(), patch.get_real_rect(), routed_rect_unit);
+}
+
 std::vector<DRPatch> DetailedRouter::selectCandidatePatchList(DRBox& dr_box, std::vector<DRPatch>& dr_patch_list)
 {
   if (dr_patch_list.empty()) {
@@ -2654,7 +2630,6 @@ void DetailedRouter::updateTaskPatch(DRBox& dr_box)
   // 新结果添加到graph
   for (EXTLayerRect& routing_patch : patch_state.get_routing_patch_list()) {
     updateRoutedRectToGraph(dr_box, ChangeType::kAdd, curr_net_idx, routing_patch, true);
-    updateRoutedRectToShadow(dr_box, ChangeType::kAdd, curr_net_idx, routing_patch, true);
   }
   updateNetShapeIndex(dr_box, curr_net_idx);
 }
@@ -2849,7 +2824,6 @@ void DetailedRouter::freeDRBox(DRBox& dr_box)
   std::vector<ScaleGrid>().swap(dr_box.get_box_track_axis().get_x_grid_list());
   std::vector<ScaleGrid>().swap(dr_box.get_box_track_axis().get_y_grid_list());
   dr_box.get_layer_node_map().clear();
-  dr_box.get_layer_shadow_map().clear();
   dr_box.get_layer_axis_map().clear();
   dr_box.get_best_result() = DRBoxResult();
 }
@@ -3589,7 +3563,7 @@ void DetailedRouter::uploadDRModel(DRModel& dr_model)
   RTDM.replaceViolationRTree(dr_model.get_curr_result().get_route_violation_list());
 }
 
-#if 1  // update env
+#if 1  // update graph
 
 void DetailedRouter::updateFixedRectToGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing)
 {
@@ -3634,6 +3608,11 @@ void DetailedRouter::addRouteViolationToGraph(DRBox& dr_box, Violation& violatio
     return;
   }
   LayerRect searched_rect = violation.get_violation_shape().get_real_rect();
+  if (violation.get_is_routing()) {
+    searched_rect.set_layer_idx(violation.get_violation_shape().get_layer_idx());
+  } else {
+    RTLOG.error(Loc::current(), "The violation layer is cut!");
+  }
   std::vector<Segment<LayerCoord>> overlap_segment_list;
   std::set<int32_t> found_net_set;
   int32_t searched_times = 0;
@@ -3641,11 +3620,6 @@ void DetailedRouter::addRouteViolationToGraph(DRBox& dr_box, Violation& violatio
   while (true) {
     searched_rect.set_rect(RTUTIL.getEnlargedRect(searched_rect, RTDM.getOnlyPitch()));
     searched_times++;
-    if (violation.get_is_routing()) {
-      searched_rect.set_layer_idx(violation.get_violation_shape().get_layer_idx());
-    } else {
-      RTLOG.error(Loc::current(), "The violation layer is cut!");
-    }
     for (auto& [net_idx, segment_list] : dr_box.get_curr_result().get_net_own_result_map()) {
       if (!RTUTIL.exist(target_net_set, net_idx) || RTUTIL.exist(found_net_set, net_idx)) {
         continue;
@@ -3750,23 +3724,6 @@ void DetailedRouter::updateNetShapeToGraph(DRBox& dr_box, ChangeType change_type
     updateRoutingNetShapeToGraph(dr_box, change_type, net_shape, is_fixed);
   } else {
     updateCutNetShapeToGraph(dr_box, change_type, net_shape, is_fixed);
-  }
-}
-
-void DetailedRouter::updateNodeNetToGraph(DRNode& dr_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed)
-{
-  if (change_type == ChangeType::kAdd) {
-    if (is_fixed) {
-      dr_node.addFixedRectNet(orientation, net_idx);
-    } else {
-      dr_node.addRoutedRectNet(orientation, net_idx);
-    }
-  } else if (change_type == ChangeType::kDel) {
-    if (is_fixed) {
-      dr_node.delFixedRectNet(orientation, net_idx);
-    } else {
-      dr_node.delRoutedRectNet(orientation, net_idx);
-    }
   }
 }
 
@@ -3944,84 +3901,21 @@ void DetailedRouter::updateCutNetShapeToGraph(DRBox& dr_box, ChangeType change_t
   }
 }
 
-void DetailedRouter::addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing)
-{
-  NetShape net_shape(net_idx, fixed_rect->getRealLayerRect(), is_routing);
-  if (!net_shape.get_is_routing()) {
-    return;
-  }
-  for (const PlanarRect& shadow_shape : getRoutingShadowShapeList(net_shape)) {
-    DRShadow& dr_shadow = dr_box.get_layer_shadow_map()[net_shape.get_layer_idx()];
-    dr_shadow.addFixedRect(net_idx, shadow_shape);
-  }
-}
-
-void DetailedRouter::addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, Segment<LayerCoord>* segment)
-{
-  for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, *segment)) {
-    if (!net_shape.get_is_routing()) {
-      continue;
-    }
-    for (const PlanarRect& shadow_shape : getRoutingShadowShapeList(net_shape)) {
-      DRShadow& dr_shadow = dr_box.get_layer_shadow_map()[net_shape.get_layer_idx()];
-      dr_shadow.addFixedRect(net_idx, shadow_shape);
-    }
-  }
-}
-
-void DetailedRouter::updateRoutedRectToShadow(DRShadow& dr_shadow, ChangeType change_type, int32_t net_idx, const PlanarRect& shadow_shape)
+void DetailedRouter::updateNodeNetToGraph(DRNode& dr_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed)
 {
   if (change_type == ChangeType::kAdd) {
-    dr_shadow.addRoutedRect(net_idx, shadow_shape);
+    if (is_fixed) {
+      dr_node.addFixedRectNet(orientation, net_idx);
+    } else {
+      dr_node.addRoutedRectNet(orientation, net_idx);
+    }
   } else if (change_type == ChangeType::kDel) {
-    dr_shadow.delRoutedRect(net_idx, shadow_shape);
-  }
-}
-
-void DetailedRouter::updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment)
-{
-  for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
-    if (!net_shape.get_is_routing()) {
-      continue;
-    }
-    for (const PlanarRect& shadow_shape : getRoutingShadowShapeList(net_shape)) {
-      DRShadow& dr_shadow = dr_box.get_layer_shadow_map()[net_shape.get_layer_idx()];
-      updateRoutedRectToShadow(dr_shadow, change_type, net_idx, shadow_shape);
+    if (is_fixed) {
+      dr_node.delFixedRectNet(orientation, net_idx);
+    } else {
+      dr_node.delRoutedRectNet(orientation, net_idx);
     }
   }
-}
-
-void DetailedRouter::updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing)
-{
-  NetShape net_shape(net_idx, routed_rect.getRealLayerRect(), is_routing);
-  if (!net_shape.get_is_routing()) {
-    return;
-  }
-  for (const PlanarRect& shadow_shape : getRoutingShadowShapeList(net_shape)) {
-    DRShadow& dr_shadow = dr_box.get_layer_shadow_map()[net_shape.get_layer_idx()];
-    updateRoutedRectToShadow(dr_shadow, change_type, net_idx, shadow_shape);
-  }
-}
-
-std::vector<PlanarRect> DetailedRouter::getRoutingShadowShapeList(const NetShape& net_shape)
-{
-  if (!net_shape.get_is_routing()) {
-    RTLOG.error(Loc::current(), "The type of net_shape is cut!");
-    return {};
-  }
-  std::array<std::pair<int32_t, int32_t>, 2> spacing_pair_list = getRoutingSpacingPairList(net_shape);
-  std::vector<PlanarRect> shadow_shape_list;
-  shadow_shape_list.reserve(spacing_pair_list.size());
-  for (auto& [x_spacing, y_spacing] : spacing_pair_list) {
-    // 膨胀size为 spacing
-    int32_t enlarged_x_size = x_spacing;
-    int32_t enlarged_y_size = y_spacing;
-    // 贴合的也不算违例
-    enlarged_x_size = std::max(enlarged_x_size - 1, 0);
-    enlarged_y_size = std::max(enlarged_y_size - 1, 0);
-    shadow_shape_list.push_back(RTUTIL.getEnlargedRect(net_shape.get_rect(), enlarged_x_size, enlarged_y_size, enlarged_x_size, enlarged_y_size));
-  }
-  return shadow_shape_list;
 }
 
 std::array<std::pair<int32_t, int32_t>, 2> DetailedRouter::getRoutingSpacingPairList(const NetShape& net_shape)
@@ -4034,24 +3928,6 @@ std::array<std::pair<int32_t, int32_t>, 2> DetailedRouter::getRoutingSpacingPair
     std::swap(eol_spacing.first, eol_spacing.second);
   }
   return {std::make_pair(prl_spacing, prl_spacing), eol_spacing};
-}
-
-#endif
-
-#if 1  // get env
-
-double DetailedRouter::getFixedRectCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch)
-{
-  double fixed_rect_unit = dr_box.get_dr_iter_param()->get_fixed_rect_unit();
-  DRShadow& dr_shadow = dr_box.get_layer_shadow_map()[patch.get_layer_idx()];
-  return dr_shadow.getFixedRectCost(net_idx, patch.get_real_rect(), fixed_rect_unit);
-}
-
-double DetailedRouter::getRoutedRectCost(DRBox& dr_box, int32_t net_idx, EXTLayerRect& patch)
-{
-  double routed_rect_unit = dr_box.get_dr_iter_param()->get_routed_rect_unit();
-  DRShadow& dr_shadow = dr_box.get_layer_shadow_map()[patch.get_layer_idx()];
-  return dr_shadow.getRoutedRectCost(net_idx, patch.get_real_rect(), routed_rect_unit);
 }
 
 #endif
@@ -4827,36 +4703,25 @@ void DetailedRouter::debugPlotDRBox(DRBox& dr_box, std::string flag)
     }
   }
 
-  // layer_shadow_map
-  {
-    std::vector<DRShadow>& layer_shadow_map = dr_box.get_layer_shadow_map();
-    for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(routing_layer_list.size()); layer_idx++) {
-      DRShadow& dr_shadow = layer_shadow_map[layer_idx];
-
-      std::map<int32_t, std::set<PlanarRect, CmpPlanarRectByXASC>> net_fixed_rect_map;
-      for (const auto& [bg_rect, net_idx] : dr_shadow.get_fixed_rect_rtree()) {
+  // shape index halo
+  for (auto& [shape_index, shadow_name] : {std::pair<DRShapeIndex*, std::string>{&dr_box.get_env_shape_index(), "shadow_fixed_rect"},
+                                             std::pair<DRShapeIndex*, std::string>{&dr_box.get_routed_shape_index(), "shadow_routed_rect"}}) {
+    for (const auto& [layer_idx, halo_rtree] : shape_index->get_layer_halo_rtree_map()) {
+      std::map<int32_t, std::set<PlanarRect, CmpPlanarRectByXASC>> net_rect_map;
+      for (const auto& [bg_rect, net_idx] : halo_rtree) {
         BGRectInt rect = bg_rect;
-        net_fixed_rect_map[net_idx].insert(RTUTIL.convertToPlanarRect(rect));
+        net_rect_map[net_idx].insert(RTUTIL.convertToPlanarRect(rect));
       }
-      for (const auto& [net_idx, rect_set] : net_fixed_rect_map) {
-        GPStruct fixed_rect_struct(RTUTIL.getString("shadow_fixed_rect(net_", net_idx, ")"));
+      for (const auto& [net_idx, rect_set] : net_rect_map) {
+        GPStruct shadow_struct(RTUTIL.getString(shadow_name, "(net_", net_idx, ")"));
         for (const PlanarRect& rect : rect_set) {
           GPBoundary gp_boundary;
           gp_boundary.set_data_type(static_cast<int32_t>(GPDataType::kShadow));
           gp_boundary.set_rect(rect);
           gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
-          fixed_rect_struct.push(gp_boundary);
+          shadow_struct.push(gp_boundary);
         }
-        gp_gds.addStruct(fixed_rect_struct);
-      }
-
-      for (const auto& [net_idx, rect_map] : dr_shadow.get_net_routed_rect_map()) {
-        GPStruct routed_rect_struct(RTUTIL.getString("shadow_routed_rect(net_", net_idx, ")"));
-        for (const auto& [rect, count] : rect_map) {
-          (void) count;
-          routed_rect_struct.push(GPBoundary(rect, RTGP.getGDSIdxByRouting(layer_idx), static_cast<int32_t>(GPDataType::kShadow)));
-        }
-        gp_gds.addStruct(routed_rect_struct);
+        gp_gds.addStruct(shadow_struct);
       }
     }
   }

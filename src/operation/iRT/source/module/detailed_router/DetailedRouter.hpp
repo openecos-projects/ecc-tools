@@ -36,7 +36,6 @@ namespace irt {
 #define RTDR (irt::DetailedRouter::getInst())
 
 class DETask;
-class DRShadow;
 
 class DetailedRouter
 {
@@ -87,10 +86,8 @@ class DetailedRouter
   void buildDRBoxGraph(DRBox& dr_box);
   void buildBoxTrackAxis(DRBox& dr_box);
   void buildLayerNodeMap(DRBox& dr_box);
-  void buildLayerShadowMap(DRBox& dr_box);
   void buildDRNodeNeighbor(DRBox& dr_box);
   void buildOrientNetMap(DRBox& dr_box);
-  void buildNetShadowMap(DRBox& dr_box);
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
@@ -188,12 +185,6 @@ class DetailedRouter
   void updateViaRectToGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateCutNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateNodeNetToGraph(DRNode& dr_node, ChangeType change_type, int32_t net_idx, Orientation orientation, bool is_fixed);
-  void addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, EXTLayerRect* fixed_rect, bool is_routing);
-  void addFixedRectToShadow(DRBox& dr_box, int32_t net_idx, Segment<LayerCoord>* segment);
-  void updateRoutedRectToShadow(DRShadow& dr_shadow, ChangeType change_type, int32_t net_idx, const PlanarRect& shadow_shape);
-  void updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, Segment<LayerCoord>& segment);
-  void updateRoutedRectToShadow(DRBox& dr_box, ChangeType change_type, int32_t net_idx, EXTLayerRect& routed_rect, bool is_routing);
-  std::vector<PlanarRect> getRoutingShadowShapeList(const NetShape& net_shape);
   std::array<std::pair<int32_t, int32_t>, 2> getRoutingSpacingPairList(const NetShape& net_shape);
 #endif
 
