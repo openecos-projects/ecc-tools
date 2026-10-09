@@ -29,6 +29,8 @@ class PowerReporter
   static void destroyInst();
   // function
   void report();
+  void reportCellPower(const std::string& directory_path, const int32_t top_num, const bool is_all);
+  void reportNetPower(const std::string& directory_path, const int32_t top_num, const bool is_all);
 
  private:
   // self
@@ -49,11 +51,17 @@ class PowerReporter
   void outputPowerGroup(std::ofstream* power_report_file, PowerGroupType power_group_type);
   void outputPowerAttribute(std::ofstream* power_report_file);
   void outputInstancePower();
-  void outputInstancePowerHeader(std::ofstream* instance_power_file);
-  void outputInstancePowerRecord(std::ofstream* instance_power_file, const std::string& instance_name, InstancePower& instance_power);
+  void outputCellPowerReport(const std::string& directory_path, std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,
+                             const int32_t top_num, const bool is_all);
+  void outputNetPowerReport(const std::string& directory_path, std::vector<std::pair<std::string, NetPower*>>& net_power_list,
+                            const int32_t top_num, const bool is_all);
   PowerValue getPowerGroupPowerValue(PowerGroupType power_group_type);
   double getDynamicPower();
   double getPercentage(double numerator, double denominator);
+  std::string getPowerCellString(double power);
+  std::string getPowerCellPercentageString(double percentage);
+  std::string getNetPowerValueString(NetPower& net_power);
+  std::string getNetPowerAttributeString(const std::string& net_name, NetPower& net_power);
   std::string getPowerString(double power);
   std::string getPowerTableString(double power, bool is_leakage_power);
   std::string getPowerTotalString(double power, bool is_leakage_power);

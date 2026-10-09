@@ -65,6 +65,8 @@ class PowerAnalyzer
   double getLogicExpressionStaticProbability(LogicExpression& logic_expression, Instance& instance, PAInstanceModel& pa_instance_model);
   double getSensitivityProbability(LogicExpression& logic_expression, const std::string& port_name, Instance& instance, PAInstanceModel& pa_instance_model);
   void analyzeSwitchingPower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model);
+  void recordNetPower(const std::string& output_pin_name, const double voltage, const double output_load, PowerActivity& activity,
+                      const double switching_power);
   void analyzeLeakagePower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model);
   double getLeakageConditionProbability(Instance& instance, TimingLeakagePower& timing_leakage_power, PAInstanceModel& pa_instance_model);
   PowerActivity getPortActivity(Instance& instance, const std::string& port_name, PAInstanceModel& pa_instance_model);

@@ -67,6 +67,7 @@ void PowerAnalyzer::analyzePower()
 {
   Database& database = PWDM.getDatabase();
   database.get_instance_power_map().clear();
+  database.get_net_power_map().clear();
   initPowerSummary();
   PowerSummary& power_summary = database.get_power_summary();
   for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
@@ -398,13 +399,37 @@ void PowerAnalyzer::analyzeSwitchingPower(Instance& instance, PowerValue& power_
     }
     std::string output_pin_name = instance.get_instance_name() + ":" + port_pair.first;
     PowerActivity activity = getPortActivity(instance, port_pair.first, pa_instance_model);
-    if (!activity.get_is_valid()) {
-      continue;
-    }
     double output_load = std::max(PWDC.getPowerOutputLoad(output_pin_name, AnalysisType::kMax, TransType::kRise),
                                   PWDC.getPowerOutputLoad(output_pin_name, AnalysisType::kMax, TransType::kFall));
-    power_value.add_switching_power(0.5 * output_load * voltage * voltage * activity.get_transition_density() * 1E-3);
+    if (!activity.get_is_valid()) {
+      recordNetPower(output_pin_name, voltage, output_load, activity, 0.0);
+      continue;
+    }
+    double switching_power = 0.5 * output_load * voltage * voltage * activity.get_transition_density() * 1E-3;
+    power_value.add_switching_power(switching_power);
+    recordNetPower(output_pin_name, voltage, output_load, activity, switching_power);
   }
+}
+
+void PowerAnalyzer::recordNetPower(const std::string& output_pin_name, const double voltage, const double output_load,
+                                   PowerActivity& activity, const double switching_power)
+{
+  Database& database = PWDM.getDatabase();
+  auto pin_iter = database.get_pin_map().find(output_pin_name);
+  if (pin_iter == database.get_pin_map().end() || pin_iter->second.get_net_name().empty()) {
+    return;
+  }
+  NetPower net_power;
+  net_power.set_voltage(voltage);
+  net_power.set_total_net_load(output_load);
+  net_power.set_switching_power(switching_power);
+  net_power.set_activity_origin(activity.get_origin());
+  net_power.set_is_activity_valid(activity.get_is_valid());
+  if (activity.get_is_valid()) {
+    net_power.set_static_probability(activity.get_static_probability());
+    net_power.set_transition_density(activity.get_transition_density());
+  }
+  database.get_net_power_map()[pin_iter->second.get_net_name()] = net_power;
 }
 
 void PowerAnalyzer::analyzeLeakagePower(Instance& instance, PowerValue& power_value, PAInstanceModel& pa_instance_model)
