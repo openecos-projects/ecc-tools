@@ -29,6 +29,8 @@ namespace vcd {
 
 namespace {
 
+constexpr double kXTransitionDerateFactor = 0.5;
+
 class SignalState
 {
  public:
@@ -43,9 +45,10 @@ class SignalState
       if (duration > 0 && _last_value == '1') {
         _high_duration += static_cast<double>(duration);
       }
-      if (duration > 0 && value != _last_value) {
-        _transition_count += isUnknown(value) || isUnknown(_last_value) ? 0.5 : 1.0;
-      }
+      countTransition(value, duration > 0);
+    }
+    if (!isUnknown(value)) {
+      _last_defined_value = value;
     }
     _last_time = time;
     _last_value = value;
@@ -86,10 +89,25 @@ class SignalState
 
   bool isUnknown(char value) const { return value == 'x' || value == 'z'; }
 
+  void countTransition(char value, bool is_weighted)
+  {
+    if (!is_weighted || value == _last_value) {
+      return;
+    }
+    if (!isUnknown(value)) {
+      if (!isUnknown(_last_value)) {
+        _transition_count += 1.0;
+      } else if (_last_defined_value != '\0') {
+        _transition_count += value == _last_defined_value ? kXTransitionDerateFactor : 1.0;
+      }
+    }
+  }
+
   bool _has_value = false;
   int64_t _start_time = 0;
   int64_t _last_time = 0;
   char _last_value = 'x';
+  char _last_defined_value = '\0';
   double _transition_count = 0.0;
   double _high_duration = 0.0;
 };

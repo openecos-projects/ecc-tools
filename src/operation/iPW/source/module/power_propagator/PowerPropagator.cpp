@@ -690,6 +690,7 @@ void PowerPropagator::propagateNetActivity(Arc& arc)
 
 void PowerPropagator::propagateSequentialActivity(PPModel& pp_model)
 {
+  bool valid_quit = false;
   for (int32_t pass_idx = 0; pass_idx < pp_model.get_max_activity_pass_num(); pass_idx++) {
     bool has_activity_change = false;
     for (std::string& instance_name : pp_model.get_sequential_instance_name_list()) {
@@ -704,9 +705,15 @@ void PowerPropagator::propagateSequentialActivity(PPModel& pp_model)
       }
     }
     if (!has_activity_change) {
+      valid_quit = true;
       break;
     }
     propagateCombinationalActivity(pp_model);
+  }
+
+  if (!valid_quit) {
+    PWLOG.warn(Loc::current(), "Sequential activity propagation did not converge in ",
+        pp_model.get_max_activity_pass_num(), "; result may be inaccurate");
   }
 }
 
