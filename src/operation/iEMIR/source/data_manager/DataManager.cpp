@@ -21,6 +21,7 @@
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "InstancePowerReader.hpp"
+#include "PowerSourceReader.hpp"
 #include "Utility.hpp"
 
 namespace {
@@ -299,54 +300,9 @@ void DataManager::readPowerSourceFile()
 {
   std::vector<PowerSource>& source_list = _database.get_power_source_list();
   source_list.clear();
-  if (_config.ploc_file_path.empty()) {
-    return;
-  }
-  if (!std::filesystem::is_regular_file(_config.ploc_file_path)) {
-    EMIRLOG.error(Loc::current(), "The PLOC file is missing: ", _config.ploc_file_path);
-  }
-  std::ifstream input(_config.ploc_file_path);
-  std::string line;
-  std::size_t line_number = 0;
-  while (std::getline(input, line)) {
-    line_number++;
-    std::size_t comment_pos = line.find('#');
-    if (comment_pos != std::string::npos) {
-      line = line.substr(0, comment_pos);
-    }
-    line = trim(line);
-    if (line.empty()) {
-      continue;
-    }
-    std::string name;
-    std::string layer_name;
-    std::string type_name;
-    double x_um = 0.0;
-    double y_um = 0.0;
-    std::istringstream iss(line);
-    if (!(iss >> name >> x_um >> y_um >> layer_name >> type_name)) {
-      EMIRLOG.error(Loc::current(), "Invalid PLOC record at line ", line_number, ": ", line);
-    }
-    type_name = toUpper(type_name);
-    PowerNetType net_type = type_name == "POWER" ? PowerNetType::kPower : (type_name == "GROUND" ? PowerNetType::kGround : PowerNetType::kNone);
-    if (net_type == PowerNetType::kNone) {
-      EMIRLOG.error(Loc::current(), "Invalid PLOC source type at line ", line_number, ": ", type_name);
-    }
-    std::string marker = net_type == PowerNetType::kPower ? "_POWER_" : "_GROUND_";
-    std::size_t marker_pos = name.rfind(marker);
-    PowerSource source;
-    source.set_name(name);
-    source.set_net_name(marker_pos == std::string::npos ? "" : name.substr(0, marker_pos));
-    source.set_layer_name(layer_name);
-    source.set_net_type(net_type);
-    source.set_x(static_cast<int32_t>(std::llround(x_um * _database.get_micron_dbu())));
-    source.set_y(static_cast<int32_t>(std::llround(y_um * _database.get_micron_dbu())));
-    source_list.push_back(source);
-  }
-  if (source_list.empty()) {
-    EMIRLOG.error(Loc::current(), "The PLOC file does not contain any source: ", _config.ploc_file_path);
-  }
-  EMIRLOG.info(Loc::current(), "Loaded ", source_list.size(), " source locations from ", _config.ploc_file_path);
+  if (_config.ploc_file_path.empty()) return;
+  source_list = PowerSourceReader::read(_config.ploc_file_path, _database.get_micron_dbu());
+  EMIRLOG.info(Loc::current(), "Loaded ", source_list.size(), " absolute source locations");
 }
 
 void DataManager::readInstancePower()
