@@ -32,6 +32,7 @@ class TimingCell
   std::string& get_cell_name() { return _cell_name; }
   std::string& get_library_name() { return _library_name; }
   double get_area() const { return _area; }
+  double get_leakage_power() const { return _leakage_power; }
   std::map<std::string, TimingCellPort>& get_port_map() { return _port_map; }
   std::vector<TimingCellArc>& get_cell_arc_list() { return _cell_arc_list; }
   std::vector<TimingCheckArc>& get_check_arc_list() { return _check_arc_list; }
@@ -54,6 +55,7 @@ class TimingCell
   void set_cell_name(const std::string& cell_name) { _cell_name = cell_name; }
   void set_library_name(const std::string& library_name) { _library_name = library_name; }
   void set_area(const double area) { _area = area; }
+  void set_leakage_power(double leakage_power) { _leakage_power = leakage_power; }
   void set_port_map(const std::map<std::string, TimingCellPort>& port_map) { _port_map = port_map; }
   void set_cell_arc_list(const std::vector<TimingCellArc>& cell_arc_list) { _cell_arc_list = cell_arc_list; }
   void set_check_arc_list(const std::vector<TimingCheckArc>& check_arc_list) { _check_arc_list = check_arc_list; }
@@ -78,6 +80,7 @@ class TimingCell
   std::string _cell_name;
   std::string _library_name;
   double _area = 0.0;
+  double _leakage_power = 0.0;
   std::map<std::string, TimingCellPort> _port_map;
   std::vector<TimingCellArc> _cell_arc_list;
   std::vector<TimingCheckArc> _check_arc_list;
