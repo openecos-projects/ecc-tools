@@ -218,6 +218,14 @@ struct PyPlaceDB
   pybind11::list r_trans_flat_luts_trans_table;
   pybind11::list r_trans_flat_luts_cap_table;
   pybind11::list r_trans_flat_luts_dim;
+  pybind11::list f_check_flat_luts_values;
+  pybind11::list f_check_flat_luts_trans_table;
+  pybind11::list f_check_flat_luts_cap_table;
+  pybind11::list f_check_flat_luts_dim;
+  pybind11::list r_check_flat_luts_values;
+  pybind11::list r_check_flat_luts_trans_table;
+  pybind11::list r_check_flat_luts_cap_table;
+  pybind11::list r_check_flat_luts_dim;
   double c_unit = 1.0;
   double r_unit = 1.0;
 

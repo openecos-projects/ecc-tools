@@ -466,6 +466,9 @@ double TimingAnalyzer::getEndPointRequired(std::string& start_point, std::string
     if (analysis_type == AnalysisType::kMin) {
       return roundTime(getEndPointCaptureTime(start_point, end_point, analysis_type) + check_time - cppr + uncertainty);
     }
+    if (timing_check_arc->get_check_type() == TimingCheckType::kRecovery) {
+      return roundTime(getEndPointCaptureTime(start_point, end_point, analysis_type) + check_time + cppr - uncertainty);
+    }
     return roundTime(getEndPointCaptureTime(start_point, end_point, analysis_type) - check_time + cppr - uncertainty);
   }
   return default_required_time;
@@ -607,6 +610,9 @@ double TimingAnalyzer::getEndPointRequired(TimingPathState& end_path_state, std:
           + getEndPointClockArrival(end_point, capture_clock, getCaptureAnalysisType(analysis_type), capture_trans_type);
     if (analysis_type == AnalysisType::kMin) {
       return roundTime(capture_time + check_time - cppr + uncertainty);
+    }
+    if (timing_check_arc->get_check_type() == TimingCheckType::kRecovery) {
+      return roundTime(capture_time + check_time + cppr - uncertainty);
     }
     return roundTime(capture_time - check_time + cppr - uncertainty);
   }

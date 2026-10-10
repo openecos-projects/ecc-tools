@@ -210,7 +210,7 @@ std::vector<TimingLibCellSnapshot> LibertyExportAdapter::exportCells(TimingLibra
       }
     }
     for (TimingCheckArc& check_arc : cell.get_check_arc_list()) {
-      if (check_arc.get_check_type() != TimingCheckType::kSetup || check_arc.get_timing_arc_list().empty()) continue;
+      if (check_arc.get_timing_arc_list().empty()) continue;
       TimingLibArcSnapshot exported_arc;
       exported_arc.source_port = check_arc.get_clock_port();
       exported_arc.sink_port = check_arc.get_data_port();

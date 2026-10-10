@@ -383,18 +383,16 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
         exported.source_pin = source_pin;
         exported.sink_pin = sink_pin;
         exported.library_cell = instance.get_cell_name();
-        if (check_arc.get_check_type() == TimingCheckType::kSetup) {
-          const auto cell_id = cell_ids.find(instance.get_cell_name());
-          if (cell_id != cell_ids.end()) {
-            const auto& arcs = snapshot.lib_cells[cell_id->second].arcs;
-            const auto& clock_port = check_arc.get_clock_port().substr(check_arc.get_clock_port().find(':') + 1);
-            const auto& data_port = check_arc.get_data_port().substr(check_arc.get_data_port().find(':') + 1);
-            for (std::size_t index = 0; index < arcs.size(); ++index) {
-              if (arcs[index].check_type == static_cast<int32_t>(TimingCheckType::kSetup)
-                  && arcs[index].source_port == clock_port && arcs[index].sink_port == data_port) {
-                exported.library_arc_id = static_cast<int32_t>(index);
-                break;
-              }
+        const auto cell_id = cell_ids.find(instance.get_cell_name());
+        if (cell_id != cell_ids.end()) {
+          const auto& arcs = snapshot.lib_cells[cell_id->second].arcs;
+          const auto& clock_port = check_arc.get_clock_port().substr(check_arc.get_clock_port().find(':') + 1);
+          const auto& data_port = check_arc.get_data_port().substr(check_arc.get_data_port().find(':') + 1);
+          for (std::size_t index = 0; index < arcs.size(); ++index) {
+            if (arcs[index].check_type == static_cast<int32_t>(check_arc.get_check_type())
+                && arcs[index].source_port == clock_port && arcs[index].sink_port == data_port) {
+              exported.library_arc_id = static_cast<int32_t>(index);
+              break;
             }
           }
         }

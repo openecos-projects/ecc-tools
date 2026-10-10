@@ -312,6 +312,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       appendLut(r_delay_flat_luts_values, r_delay_flat_luts_trans_table, r_delay_flat_luts_cap_table, r_delay_flat_luts_dim, arc.rise_delay);
       appendLut(f_trans_flat_luts_values, f_trans_flat_luts_trans_table, f_trans_flat_luts_cap_table, f_trans_flat_luts_dim, arc.fall_slew);
       appendLut(r_trans_flat_luts_values, r_trans_flat_luts_trans_table, r_trans_flat_luts_cap_table, r_trans_flat_luts_dim, arc.rise_slew);
+      appendLut(f_check_flat_luts_values, f_check_flat_luts_trans_table, f_check_flat_luts_cap_table, f_check_flat_luts_dim, arc.fall_check);
+      appendLut(r_check_flat_luts_values, r_check_flat_luts_trans_table, r_check_flat_luts_cap_table, r_check_flat_luts_dim, arc.rise_check);
       ++flat_arc_id;
       ++local_arc_id;
     }
