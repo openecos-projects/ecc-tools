@@ -41,7 +41,7 @@ bool saveMacroTCL(const std::string& tcl_name);
 bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names = {}, bool is_add_space_for_escape_name = false);
 bool saveGDSII(const std::string& gds_name, const std::string& layer_map_path);
 bool saveJson(const std::string& path);
-bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc = false);
+bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc = false, const std::string& thumbnail_path = "");
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
                    const std::string& source = "", const std::string& placement_status = "fixed", bool create_if_missing = true);
 bool initializeGeometrySession();

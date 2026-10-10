@@ -191,7 +191,7 @@ bool saveJson(const std::string& path)
   return dmInst->saveJSON(path, options);
 }
 
-bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
+bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc, const std::string& thumbnail_path)
 {
   idb::IdbDesign* design = dmInst->get_idb_design();
   idb::IdbLayout* layout = dmInst->get_idb_layout();
@@ -228,7 +228,7 @@ bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
     }
   }
 
-  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc)).ok;
+  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc), thumbnail_path).ok;
 }
 
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
