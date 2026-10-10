@@ -17,6 +17,7 @@
 #include "GraphBuilder.hpp"
 
 #include "DataManager.hpp"
+#include "EMTech.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerEdge.hpp"
@@ -28,6 +29,19 @@
 #include "PowerSource.hpp"
 #include "PowerVia.hpp"
 #include "PowerWireSegment.hpp"
+
+namespace {
+std::string csvField(const std::string& value)
+{
+  if (value.find_first_of(",\"\r\n") == std::string::npos) return value;
+  std::string escaped = "\"";
+  for (char character : value) {
+    if (character == '"') escaped += '"';
+    escaped += character;
+  }
+  return escaped + '"';
+}
+}  // namespace
 
 namespace iemir {
 
@@ -63,7 +77,16 @@ void GraphBuilder::build()
   Monitor monitor;
   EMIRLOG.info(Loc::current(), "Starting...");
 
-  buildPowerGraphList();
+  std::string path = EMIRDM.getConfig().gb_temp_directory_path + "source_connections.csv";
+  std::ofstream source_report(path);
+  if (!source_report) EMIRLOG.error(Loc::current(), "Cannot create supply connection diagnostics: ", path);
+  source_report << "source_name,net,layer,requested_x_dbu,requested_y_dbu,node_id,node_x_dbu,node_y_dbu,displacement_dbu,contact_kind,element_index\n"
+                << std::setprecision(17);
+  source_report.flush();
+  buildPowerGraphList(source_report);
+  source_report.close();
+  if (!source_report) EMIRLOG.error(Loc::current(), "Cannot write supply connection diagnostics: ", path);
+  EMIRLOG.info(Loc::current(), "Supply connection diagnostics: ", path);
 
   EMIRLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -78,16 +101,16 @@ GBModel GraphBuilder::initGBModel()
   return gb_model;
 }
 
-void GraphBuilder::buildPowerGraphList()
+void GraphBuilder::buildPowerGraphList(std::ofstream& source_report)
 {
   Database& database = EMIRDM.getDatabase();
   database.get_power_graph_map().clear();
+  resolvePowerSourceNets();
   for (std::pair<const std::string, PowerNet>& power_net_pair : database.get_power_net_map()) {
     if (!database.get_power_source_list().empty()) {
       bool has_source = false;
       for (PowerSource& source : database.get_power_source_list()) {
-        if (source.get_net_type() == power_net_pair.second.get_type()
-            && (source.get_net_name().empty() || source.get_net_name() == power_net_pair.first)) {
+        if (source.get_net_name() == power_net_pair.first) {
           has_source = true;
           break;
         }
@@ -97,11 +120,44 @@ void GraphBuilder::buildPowerGraphList()
         continue;
       }
     }
-    buildPowerGraph(power_net_pair.second);
+    buildPowerGraph(power_net_pair.second, source_report);
   }
 }
 
-void GraphBuilder::buildPowerGraph(PowerNet& power_net)
+void GraphBuilder::resolvePowerSourceNets()
+{
+  auto& nets = EMIRDM.getDatabase().get_power_net_map();
+  std::set<std::string> names;
+  for (PowerSource& source : EMIRDM.getDatabase().get_power_source_list()) {
+    if (source.get_name().empty() || !names.insert(source.get_name()).second) {
+      EMIRLOG.error(Loc::current(), "Empty or duplicate supply source name: ", source.get_name());
+    }
+    if (source.get_net_name().empty()) {
+      std::vector<std::string> candidates;
+      for (auto& [name, net] : nets) {
+        if (net.get_type() == source.get_net_type() && net.get_type() != PowerNetType::kNone) {
+          candidates.push_back(name);
+        }
+      }
+      if (candidates.size() != 1) {
+        EMIRLOG.error(Loc::current(), "Supply source ", source.get_name(), " has no unique PG net (", candidates.size(),
+                      " candidates); specify an explicit net");
+      }
+      source.set_net_name(candidates.front());
+    }
+    auto net = nets.find(source.get_net_name());
+    if (net == nets.end()) {
+      EMIRLOG.error(Loc::current(), "Supply source ", source.get_name(), " refers to unknown PG net ", source.get_net_name());
+    }
+    PowerNetType type = net->second.get_type();
+    if (type == PowerNetType::kNone || (source.get_net_type() != PowerNetType::kNone && source.get_net_type() != type)) {
+      EMIRLOG.error(Loc::current(), "Supply source ", source.get_name(), " has a type inconsistent with net ", source.get_net_name());
+    }
+    source.set_net_type(type);
+  }
+}
+
+void GraphBuilder::buildPowerGraph(PowerNet& power_net, std::ofstream& source_report)
 {
   PowerGraph power_graph;
   GBModel gb_model = initGBModel();
@@ -111,7 +167,7 @@ void GraphBuilder::buildPowerGraph(PowerNet& power_net)
     buildWireIntersectionNodeList(power_graph, power_net, gb_model);
   }
   buildViaNodeList(power_graph, power_net, gb_model);
-  buildConfiguredSourceNodeList(power_graph, power_net, gb_model);
+  buildConfiguredSourceNodeList(power_graph, power_net, gb_model, source_report);
   buildPinNodeList(power_graph, power_net, gb_model);
   buildWireEdgeList(power_graph, power_net, gb_model);
   buildViaEdgeList(power_graph, power_net);
@@ -377,30 +433,35 @@ void GraphBuilder::buildPinNodeList(PowerGraph& power_graph, PowerNet& power_net
   }
 }
 
-void GraphBuilder::buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model)
+void GraphBuilder::buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model, std::ofstream& source_report)
 {
+  std::size_t connected_source_count = 0;
   for (PowerSource& source : EMIRDM.getDatabase().get_power_source_list()) {
-    if (source.get_net_type() != power_net.get_type()
-        || (!source.get_net_name().empty() && source.get_net_name() != power_net.get_net_name())) {
+    if (source.get_net_name() != power_net.get_net_name()) {
       continue;
     }
     bool connected = false;
-    auto mark_source_node = [&](int32_t layer_idx, int32_t x, int32_t y) {
+    auto mark_source_node = [&](int32_t layer_idx, int32_t x, int32_t y, const char* kind, std::size_t element_index) {
       std::size_t node_id = getPowerNode(power_graph, layer_idx, x, y, PowerNodeType::kSource);
       std::vector<std::size_t>& source_node_list = power_graph.get_source_node_id_list();
       if (std::find(source_node_list.begin(), source_node_list.end(), node_id) == source_node_list.end()) {
         source_node_list.push_back(node_id);
       }
+      double displacement = std::hypot(static_cast<double>(x) - source.get_x(), static_cast<double>(y) - source.get_y());
+      source_report << csvField(source.get_name()) << ',' << csvField(power_net.get_net_name()) << ',' << csvField(source.get_layer_name())
+                    << ',' << source.get_x() << ',' << source.get_y() << ',' << node_id << ',' << x << ',' << y << ',' << displacement
+                    << ',' << kind << ',' << element_index << '\n';
       connected = true;
       return node_id;
     };
-    for (PowerVia& via : power_net.get_via_list()) {
+    for (std::size_t via_index = 0; via_index < power_net.get_via_list().size(); ++via_index) {
+      PowerVia& via = power_net.get_via_list()[via_index];
       if (via.get_bottom_layer_name() == source.get_layer_name() && via.get_bottom_x() == source.get_x()
           && via.get_bottom_y() == source.get_y()) {
-        mark_source_node(via.get_bottom_layer_idx(), via.get_bottom_x(), via.get_bottom_y());
+        mark_source_node(via.get_bottom_layer_idx(), via.get_bottom_x(), via.get_bottom_y(), "via_bottom", via_index);
       }
       if (via.get_top_layer_name() == source.get_layer_name() && via.get_top_x() == source.get_x() && via.get_top_y() == source.get_y()) {
-        mark_source_node(via.get_top_layer_idx(), via.get_top_x(), via.get_top_y());
+        mark_source_node(via.get_top_layer_idx(), via.get_top_x(), via.get_top_y(), "via_top", via_index);
       }
     }
     struct SourceConnection
@@ -434,14 +495,18 @@ void GraphBuilder::buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerN
         continue;
       }
       PowerWireSegment& segment = power_net.get_wire_segment_list()[connection.segment_idx];
-      std::size_t node_id = mark_source_node(segment.get_layer_idx(), connection.x, connection.y);
+      std::size_t node_id = mark_source_node(segment.get_layer_idx(), connection.x, connection.y, "wire", connection.segment_idx);
       appendWireNodeId(gb_model, connection.segment_idx, node_id);
     }
+    source_report.flush();
     if (!connected) {
       EMIRLOG.error(Loc::current(), "PLOC source ", source.get_name(), " is not on routed net ", power_net.get_net_name(), " at ",
                     source.get_layer_name(), " (", source.get_x(), ",", source.get_y(), ") DBU");
     }
+    ++connected_source_count;
   }
+  EMIRLOG.info(Loc::current(), "Connected ", connected_source_count, " configured supply contacts to ",
+               power_graph.get_source_node_id_list().size(), " ideal nodes in net ", power_net.get_net_name());
 }
 
 bool GraphBuilder::isOnWireSegment(PowerWireSegment& power_wire_segment, int32_t x, int32_t y)
@@ -542,6 +607,7 @@ bool GraphBuilder::getPinWireConnectionCoordinate(PowerWireSegment& power_wire_s
 
 void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model)
 {
+  auto& metal_rules = EMIRDM.getDatabase().get_em_tech().get_metal_rule_map();
   std::vector<PowerWireSegment>& power_wire_segment_list = power_net.get_wire_segment_list();
   for (std::size_t segment_idx = 0; segment_idx < power_wire_segment_list.size(); segment_idx++) {
     PowerWireSegment& power_wire_segment = power_wire_segment_list[segment_idx];
@@ -560,15 +626,22 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
       if (length == 0) {
         continue;
       }
+      auto rule_iter = metal_rules.find(power_wire_segment.get_layer_name());
+      if (!power_wire_segment.get_has_explicit_resistance()
+          && (rule_iter == metal_rules.end() || rule_iter->second.get_resistance_per_square() <= 0.0)) {
+        EMIRLOG.error(Loc::current(), "The technology file has no sheet resistance for routing layer ", power_wire_segment.get_layer_name(), "!");
+      }
+      double resistance_per_square
+          = rule_iter == metal_rules.end() ? 0.0 : rule_iter->second.resistancePerSquareAt(EMIRDM.getConfig().temperature_c);
       if (power_wire_segment.get_width() <= 0
-          || (!power_wire_segment.get_has_explicit_resistance() && power_wire_segment.get_resistance_per_square() <= 0.0)) {
+          || (!power_wire_segment.get_has_explicit_resistance() && resistance_per_square <= 0.0)) {
         EMIRLOG.error(Loc::current(), "The power wire resistance data is invalid!");
       }
       int32_t segment_length = std::abs(power_wire_segment.get_first_x() - power_wire_segment.get_second_x())
                                + std::abs(power_wire_segment.get_first_y() - power_wire_segment.get_second_y());
       double resistance = power_wire_segment.get_has_explicit_resistance()
                               ? power_wire_segment.get_resistance() * static_cast<double>(length) / segment_length
-                              : power_wire_segment.get_resistance_per_square() * static_cast<double>(length) / power_wire_segment.get_width();
+                              : resistance_per_square * static_cast<double>(length) / power_wire_segment.get_width();
       PowerEdge* power_edge = addPowerEdge(power_graph, PowerEdgeType::kWire, first_power_node.get_node_id(), second_power_node.get_node_id(),
                                            power_wire_segment.get_layer_idx(), power_wire_segment.get_width(), length, resistance,
                                            power_net.get_has_explicit_parasitics());
@@ -582,17 +655,27 @@ void GraphBuilder::buildWireEdgeList(PowerGraph& power_graph, PowerNet& power_ne
 
 void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net)
 {
+  auto& via_rules = EMIRDM.getDatabase().get_em_tech().get_via_rule_map();
   for (PowerVia& power_via : power_net.get_via_list()) {
     std::size_t bottom_node_id = getPowerNode(power_graph, power_via.get_bottom_layer_idx(), power_via.get_bottom_x(), power_via.get_bottom_y(),
                                               PowerNodeType::kVia);
     std::size_t top_node_id
         = getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_top_x(), power_via.get_top_y(), PowerNodeType::kVia);
-    if (power_via.get_resistance() <= 0.0) {
+    auto rule_iter = via_rules.find(power_via.get_cut_layer_name());
+    double resistance = power_via.get_resistance();
+    if (rule_iter != via_rules.end() && rule_iter->second.get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
+      resistance = rule_iter->second.get_resistance_per_cut() / power_via.get_cut_num();
+    }
+    if (!power_net.get_has_explicit_parasitics()
+        && (rule_iter == via_rules.end() || rule_iter->second.get_resistance_per_cut() <= 0.0 || power_via.get_cut_num() <= 0)) {
+      EMIRLOG.error(Loc::current(), "The technology file has no valid resistance for cut layer ", power_via.get_cut_layer_name(), "!");
+    }
+    if (resistance <= 0.0) {
       EMIRLOG.error(Loc::current(), "The power via resistance data is invalid!");
     }
     PowerEdge* power_edge
         = addPowerEdge(power_graph, PowerEdgeType::kVia, bottom_node_id, top_node_id, power_via.get_bottom_layer_idx(), 0, 0,
-                       power_via.get_resistance(), power_net.get_has_explicit_parasitics());
+                       resistance, power_net.get_has_explicit_parasitics());
     if (power_edge != nullptr) {
       power_edge->set_layer_name(power_via.get_bottom_layer_name());
       power_edge->set_via_name(power_via.get_via_name());

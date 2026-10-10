@@ -2,6 +2,9 @@ $timescale 1ns $end
 $scope module top $end
 $var wire 1 ! a $end
 $var wire 1 ! alias_a $end
+$var wire 1 % ret_x $end
+$var wire 1 & chg_x $end
+$var wire 1 ' lead_x $end
 $scope module u0 $end
 $var reg 2 " bus [1:0] $end
 $var wire 4 # hexbus [3:0] $end
@@ -10,14 +13,23 @@ $upscope $end
 $enddefinitions $end
 #10
 0!
+1%
+0&
+x'
 b00 "
 h0 #
 #20
 1!
+x%
+x&
+0'
 b01 "
 ha #
 #30
 x!
+1%
+1&
+1'
 b11 "
 hf #
 #40

@@ -156,6 +156,30 @@ void PWInterface::destroyPW()
 #endif
 }
 
+void PWInterface::reportCellPower(const std::string& directory_path, const int32_t top_num, const bool is_all)
+{
+  Monitor monitor;
+  PWLOG.info(Loc::current(), "Starting...");
+
+  PowerReporter::initInst();
+  PWPR.reportCellPower(directory_path, top_num, is_all);
+  PowerReporter::destroyInst();
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PWInterface::reportNetPower(const std::string& directory_path, const int32_t top_num, const bool is_all)
+{
+  Monitor monitor;
+  PWLOG.info(Loc::current(), "Starting...");
+
+  PowerReporter::initInst();
+  PWPR.reportNetPower(directory_path, top_num, is_all);
+  PowerReporter::destroyInst();
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 #endif
 
 #endif

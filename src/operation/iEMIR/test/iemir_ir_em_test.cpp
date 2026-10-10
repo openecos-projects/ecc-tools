@@ -25,7 +25,7 @@
 #include "IRAnalyzer.hpp"
 #include "InstancePower.hpp"
 #include "Logger.hpp"
-#include "PTPXPowerReader.hpp"
+#include "InstancePowerReader.hpp"
 #include "PowerEdge.hpp"
 #include "PowerEdgeType.hpp"
 #include "PowerGraph.hpp"
@@ -37,7 +37,7 @@
 #include "PowerSource.hpp"
 #include "PowerVia.hpp"
 #include "PowerWireSegment.hpp"
-#include "RedHawkResNetworkReader.hpp"
+#include "ResistanceNetworkReader.hpp"
 
 namespace {
 
@@ -245,17 +245,31 @@ bool checkShiftedViaGraph(const std::filesystem::path& directory)
   return is_pass;
 }
 
-bool checkPTPXPowerReader(const std::filesystem::path& directory)
+bool checkInstancePowerReader(const std::filesystem::path& directory)
 {
-  std::filesystem::path file_path = directory / "ptpx_instance_power.tsv";
+  std::filesystem::path file_path = directory / "instance_power.tsv";
   std::ofstream output(file_path);
-  output << "# iEMIR_PTPX_INSTANCE_POWER_V1\n";
+  output << "# iEMIR_INSTANCE_POWER_V1\n";
   output << "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\ttotal_power_w\taverage_current_a\n";
   output << "U1\t1.2\t1e-6\t2e-6\t3e-6\t6e-6\t5e-6\n";
   output.close();
-  std::vector<iemir::PTPXPowerRecord> records = iemir::PTPXPowerReader::read(file_path.string());
+  std::vector<iemir::InstancePowerRecord> records = iemir::InstancePowerReader::read(file_path.string());
   return records.size() == 1 && records.front().instance_name == "U1" && std::abs(records.front().total_power - 6.0e-6) <= 1.0e-18
          && std::abs(records.front().average_current - 5.0e-6) <= 1.0e-18;
+}
+
+bool checkTechnologyResistanceFormula()
+{
+  iemir::EMMetalRule metal;
+  metal.set_resistance_per_square(0.1122);
+  metal.set_tnom_c(25.0);
+  metal.set_coeff_rt1(3.242e-3);
+  metal.set_coeff_rt2(6.79e-6);
+  double wire_resistance_25c = metal.resistancePerSquareAt(25.0) * 1.0 / 0.16;
+  double expected_100c = 0.1122 * (1.0 + 3.242e-3 * 75.0 + 6.79e-6 * 75.0 * 75.0);
+  double via_resistance = 2.0 / 5.0;
+  return std::abs(wire_resistance_25c - 0.70125) < 1e-12 && std::abs(metal.resistancePerSquareAt(100.0) - expected_100c) < 1e-12
+         && std::abs(via_resistance - 0.4) < 1e-12;
 }
 
 bool checkPointSourceDoesNotShortNearbySegment()
@@ -310,9 +324,9 @@ bool checkPointSourceDoesNotShortNearbySegment()
   return is_pass;
 }
 
-bool checkRedHawkResNetworkReader(const std::filesystem::path& directory)
+bool checkResistanceNetworkReader(const std::filesystem::path& directory)
 {
-  std::filesystem::path file_path = directory / "redhawk.res_network";
+  std::filesystem::path file_path = directory / "reference.res_network";
   std::ofstream output(file_path);
   output << "W 10 MET1 VDD 0 0 10 0 10 2 0 2 2 1 h\n";
   output << "WS 10_1 0 1 10 1 0 0 0 r 0.25 1\n";
@@ -320,9 +334,9 @@ bool checkRedHawkResNetworkReader(const std::filesystem::path& directory)
   output << "V 7 VIA1 VIA1_TEST VDD 1 2 2 0.1 0.2 0.5 7 0 0 0 r RULE LANDING 10_1\n";
   output.close();
 
-  iemir::RedHawkResNetwork network = iemir::RedHawkResNetworkReader::read(file_path.string());
-  const iemir::RedHawkWireSegmentRecord& explicit_segment = network.wire_segments.at(0);
-  const iemir::RedHawkViaRecord& via = network.vias.at(0);
+  iemir::ResistanceNetwork network = iemir::ResistanceNetworkReader::read(file_path.string());
+  const iemir::ResistanceWireSegmentRecord& explicit_segment = network.wire_segments.at(0);
+  const iemir::ResistanceViaRecord& via = network.vias.at(0);
   return network.wire_segments.size() == 1 && network.vias.size() == 1 && explicit_segment.id == "10_1" && explicit_segment.layer_name == "MET1"
          && explicit_segment.net_name == "VDD" && std::abs(explicit_segment.resistance_ohm - 0.25) <= 1.0e-18 && via.id == "7" && via.layer_name == "VIA1"
          && via.net_name == "VDD" && via.cut_num == 2 && via.connected_wire_segment_ids == std::vector<std::string>{"10_1"}
@@ -414,25 +428,25 @@ bool checkImportedPinAreaInjection()
 
 bool checkViaUsesConnectedResistorJunction()
 {
-  iemir::RedHawkWireSegmentRecord rail;
+  iemir::ResistanceWireSegmentRecord rail;
   rail.id = "rail";
   rail.layer_name = "MET4";
   rail.net_name = "VDD";
   rail.first_x_um = rail.second_x_um = 235.0;
   rail.first_y_um = 231.0;
   rail.second_y_um = 233.8;
-  iemir::RedHawkWireSegmentRecord pad = rail;
+  iemir::ResistanceWireSegmentRecord pad = rail;
   pad.id = "pad";
   pad.first_y_um = 233.8;
   pad.second_y_um = 233.84;
-  std::unordered_map<std::string, const iemir::RedHawkWireSegmentRecord*> segments{{"rail", &rail}, {"pad", &pad}};
-  iemir::RedHawkViaRecord via;
+  std::unordered_map<std::string, const iemir::ResistanceWireSegmentRecord*> segments{{"rail", &rail}, {"pad", &pad}};
+  iemir::ResistanceViaRecord via;
   via.net_name = "VDD";
   via.x_um = 234.75;
   via.y_um = 233.84;
   for (const auto& ids : {std::vector<std::string>{"rail", "pad"}, std::vector<std::string>{"pad", "rail"}}) {
     via.connected_wire_segment_ids = ids;
-    auto coordinate = iemir::RedHawkResNetworkReader::connectionCoordinate(via, segments, "MET4");
+    auto coordinate = iemir::ResistanceNetworkReader::connectionCoordinate(via, segments, "MET4");
     if (!coordinate || coordinate->first != 235.0 || coordinate->second != 233.8) {
       return false;
     }
@@ -440,9 +454,9 @@ bool checkViaUsesConnectedResistorJunction()
   // A single connected segment still uses projection; an unrelated layer
   // must not acquire a fabricated connection.
   via.connected_wire_segment_ids = {"pad"};
-  auto coordinate = iemir::RedHawkResNetworkReader::connectionCoordinate(via, segments, "MET4");
+  auto coordinate = iemir::ResistanceNetworkReader::connectionCoordinate(via, segments, "MET4");
   return coordinate && coordinate->first == 235.0 && coordinate->second == 233.84
-         && !iemir::RedHawkResNetworkReader::connectionCoordinate(via, segments, "MET2");
+         && !iemir::ResistanceNetworkReader::connectionCoordinate(via, segments, "MET2");
 }
 
 }  // namespace
@@ -452,7 +466,7 @@ int main(int argc, char* argv[])
   if (argc > 1) {
     try {
       for (int argument_index = 1; argument_index < argc; argument_index++) {
-        iemir::RedHawkResNetworkReader::read(argv[argument_index]);
+        iemir::ResistanceNetworkReader::read(argv[argument_index]);
       }
     } catch (const std::exception& error) {
       std::cerr << error.what() << "\n";
@@ -468,8 +482,10 @@ int main(int argc, char* argv[])
   std::filesystem::remove_all(report_directory_path);
   std::filesystem::create_directories(report_directory_path);
   EMIRDM.getConfig().ia_temp_directory_path = report_directory_path.string() + "/";
+  EMIRDM.getConfig().gb_temp_directory_path = report_directory_path.string() + "/";
 
-  bool is_pass = checkPTPXPowerReader(report_directory_path) && checkRedHawkResNetworkReader(report_directory_path)
+  bool is_pass = checkInstancePowerReader(report_directory_path) && checkTechnologyResistanceFormula()
+                 && checkResistanceNetworkReader(report_directory_path)
                  && checkShiftedViaGraph(report_directory_path) && checkPointSourceDoesNotShortNearbySegment() && checkImportedPinAreaInjection()
                  && checkViaUsesConnectedResistorJunction() && checkSubMicroampLoad() && checkRepeatedIRLoads(report_directory_path);
   EMIRDM.getDatabase().set_design_name("test_design");

@@ -438,6 +438,7 @@ auto FastStaChar::buildContext(const FastStaCharTopologySpec& spec) -> BuildResu
                                  .driver_node_id = driver_node_id,
                                  .load_node_ids = {load_node_id},
                                  .load_rc_node_ids = {},
+                                 .ignore_terminals = {},
                                  .max_cap_pf = context.liberty_cell_by_master.at(context.nodes.at(driver_node_id).cell_master).output_cap_limit_pf,
                                  .parasitic = {},
                                  .driver_timing_by_state = {},

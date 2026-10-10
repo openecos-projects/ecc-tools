@@ -82,7 +82,7 @@
     };
   in flake-parts.lib.mkFlake { inherit inputs; } {
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
-    perSystem = { self', pkgs, system, ... }: let
+    perSystem = { self', pkgs, system, config, ... }: let
       boost191 = pkgs.lib.fix (self:
         pkgs.callPackage "${pkgs.path}/pkgs/development/libraries/boost/generic.nix" {
           version = "1.91.0";
@@ -92,17 +92,22 @@
             ];
             sha256 = "de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5";
           };
-          # nixpkgs' fix-clang-target.patch targets the pre-1.91 clang.jam
-          # layout and fails during the Boost 1.91 source unpack. Boost 1.91
-          # already carries the current clang target handling, so keep the
-          # matching b2 source but omit that stale nixpkgs patch.
-          boost-build = (pkgs.boost-build.override {
-            useBoost = self;
-          }).overrideAttrs (_: {
-            patches = [];
+          # The pinned nixpkgs applies its fix-clang-target.patch to b2 for any
+          # boost >= 1.81 with no upper bound, but 1.91 moved --target handling
+          # into set-triple, so the hunk no longer applies. nixpkgs master now
+          # bounds the patch to [1.81, 1.88); drop it here the same way.
+          boost-build = (pkgs.boost-build.override { useBoost = self; }).overrideAttrs (old: {
+            patches = builtins.filter (
+              p: !pkgs.lib.hasInfix "fix-clang-target" (toString p)
+            ) (old.patches or [ ]);
           });
         });
     in {
+      # Re-export packages and the devShell as checks so CI
+      # (`nix flake check`) builds them.
+      checks = config.packages // {
+        devShell = config.devShells.default;
+      };
       packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };
       devShells.default = pkgs.mkShell.override {
         stdenv = pkgs.ccacheStdenv;

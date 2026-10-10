@@ -49,7 +49,8 @@ inline bool isPlacementFixed(idb::IdbInstance* node)
   }
 
   auto* cell_master = node->get_cell_master();
-  return cell_master != nullptr && cell_master->is_block()
+  // Preplaced IO pads are fixed physical terminals even though PAD is not BLOCK.
+  return cell_master != nullptr && (cell_master->is_block() || cell_master->is_io_cell())
          && (status == idb::IdbPlacementStatus::kPlaced || status == idb::IdbPlacementStatus::kCover);
 }
 

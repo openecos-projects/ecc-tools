@@ -29,35 +29,10 @@
 #include "PowerPin.hpp"
 #include "PowerVia.hpp"
 #include "PowerWireSegment.hpp"
-#include "RedHawkResNetworkReader.hpp"
 #include "Utility.hpp"
 #include "idm.h"
 
 namespace iemir {
-
-namespace {
-
-int32_t micronToDBU(double value, int32_t micron_dbu)
-{
-  return static_cast<int32_t>(std::llround(value * micron_dbu));
-}
-
-std::pair<idb::IdbLayer*, idb::IdbLayer*> getAdjacentRoutingLayers(idb::IdbLayers* layers, idb::IdbLayer* cut_layer)
-{
-  idb::IdbLayer* bottom_layer = nullptr;
-  idb::IdbLayer* top_layer = nullptr;
-  for (idb::IdbLayer* routing_layer : layers->get_routing_layers()) {
-    if (routing_layer->get_order() < cut_layer->get_order() && (bottom_layer == nullptr || routing_layer->get_order() > bottom_layer->get_order())) {
-      bottom_layer = routing_layer;
-    }
-    if (routing_layer->get_order() > cut_layer->get_order() && (top_layer == nullptr || routing_layer->get_order() < top_layer->get_order())) {
-      top_layer = routing_layer;
-    }
-  }
-  return {bottom_layer, top_layer};
-}
-
-}  // namespace
 
 EMIRInterface* EMIRInterface::_emir_interface_instance = nullptr;
 
@@ -86,6 +61,49 @@ void EMIRInterface::destroyInst()
 void EMIRInterface::initEMIR(std::map<std::string, std::any> config_map)
 {
   Logger::initInst();
+  const auto pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
+  const auto ploc_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
+  const auto def_sources = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0);
+  if (def_sources != 0 && def_sources != 1)
+    throw std::invalid_argument("add_ploc_from_top_def must be 0 or 1");
+  if (!pad_files.empty() && !ploc_path.empty())
+    throw std::invalid_argument("pad_files and ploc_file_path are mutually exclusive");
+  if (config_map.count("-pad_files") && pad_files.empty())
+    throw std::invalid_argument("pad_files must contain at least one supply input file");
+  if (def_sources == 1 && (!pad_files.empty() || !ploc_path.empty()))
+    throw std::invalid_argument("add_ploc_from_top_def and supply files (pad_files or ploc_file_path) are mutually exclusive");
+  if (def_sources == 0 && pad_files.empty() && ploc_path.empty())
+    throw std::invalid_argument("No supply inputs: provide -pad_files or -ploc_file_path, or explicitly enable -add_ploc_from_top_def 1");
+  // Initialization clears its output directory. Reject inputs inside it before
+  // mutating either the analysis database or the filesystem, including aliases.
+  namespace fs = std::filesystem;
+  auto output = fs::weakly_canonical(fs::absolute(
+      EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory"))).lexically_normal();
+  if (output.filename().empty()) output = output.parent_path();
+  std::vector<std::string> inputs = pad_files;
+  for (const char* key : {"-ploc_file_path", "-instance_power_file_path", "-technology_file_path", "-em_limit_file_path"}) {
+    auto path = EMIRUTIL.getConfigValue<std::string>(config_map, key, "");
+    if (!path.empty()) inputs.push_back(path);
+  }
+  for (const auto& path : inputs) {
+    if (path.empty()) throw std::invalid_argument("empty supply input path");
+    auto input = fs::weakly_canonical(fs::absolute(path));
+    // A symlink can point outside the output tree while its directory entry
+    // (or a symlinked parent directory) is still removed by cleanup. Check each
+    // path component as well as the final target before accepting the input.
+    for (auto entry = fs::absolute(path); !entry.empty();) {
+      auto resolved = fs::weakly_canonical(entry);
+      auto mismatch = std::mismatch(output.begin(), output.end(), resolved.begin(), resolved.end());
+      if (mismatch.first == output.end())
+        throw std::invalid_argument("input is inside the analysis output directory: " + path);
+      auto parent = entry.parent_path();
+      if (parent == entry) break;
+      entry = parent;
+    }
+    if (!fs::is_regular_file(input)) throw std::invalid_argument("cannot read input file: " + path);
+  }
+  if (!dmInst->get_idb_design() || !dmInst->get_idb_layout())
+    throw std::invalid_argument("load DEF/LEF before initializing EMIR");
   // clang-format off
   EMIRLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   EMIRLOG.info(Loc::current(), "____________________  _________________     _____________________________________  ");
@@ -176,11 +194,13 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 {
   /////////////////////////////////////////////
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
-  EMIRDM.getConfig().ptpx_instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ptpx_instance_power_file_path", "");
-  EMIRDM.getConfig().redhawk_res_network_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_res_network_file_path", "");
+  EMIRDM.getConfig().instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-instance_power_file_path", "");
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
-  EMIRDM.getConfig().redhawk_tech_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_tech_file_path", "");
+  EMIRDM.getConfig().pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
+  EMIRDM.getConfig().add_ploc_from_top_def = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0) == 1;
+  EMIRDM.getConfig().technology_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-technology_file_path", "");
   EMIRDM.getConfig().em_limit_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-em_limit_file_path", "");
+  EMIRDM.getConfig().temperature_c = EMIRUTIL.getConfigValue<double>(config_map, "-temperature_c", 25.0);
   EMIRDM.getConfig().em_violation_threshold_percent = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);
   EMIRDM.getConfig().thread_number = EMIRUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
   auto& config = EMIRDM.getConfig();
@@ -208,9 +228,6 @@ void EMIRInterface::wrapDatabase()
   wrapDBInfo();
   wrapInstanceIdSet();
   wrapPowerNetList();
-  if (!EMIRDM.getConfig().redhawk_res_network_file_path.empty()) {
-    wrapRedHawkResNetwork();
-  }
 }
 
 void EMIRInterface::wrapDBInfo()
@@ -245,109 +262,6 @@ void EMIRInterface::wrapPowerNetList()
     }
     wrapPowerNet(idb_power_net);
   }
-}
-
-void EMIRInterface::wrapRedHawkResNetwork()
-{
-  RedHawkResNetwork network = RedHawkResNetworkReader::read(EMIRDM.getConfig().redhawk_res_network_file_path);
-  idb::IdbLayers* layers = dmInst->get_idb_layout()->get_layers();
-  int32_t micron_dbu = EMIRDM.getDatabase().get_micron_dbu();
-  std::unordered_map<std::string, std::vector<PowerWireSegment>> wire_lists;
-  std::unordered_map<std::string, std::vector<PowerVia>> via_lists;
-  std::unordered_map<std::string, const RedHawkWireSegmentRecord*> wire_segment_map;
-
-  for (const RedHawkWireSegmentRecord& record : network.wire_segments) {
-    wire_segment_map[record.id] = &record;
-    idb::IdbLayer* layer = layers->find_layer(record.layer_name);
-    if (layer == nullptr || !layer->is_routing()) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network uses an unmapped routing layer: ", record.layer_name);
-    }
-    PowerWireSegment wire;
-    wire.set_layer_idx(layer->get_id());
-    wire.set_layer_name(layer->get_name());
-    wire.set_first_x(micronToDBU(record.first_x_um, micron_dbu));
-    wire.set_first_y(micronToDBU(record.first_y_um, micron_dbu));
-    wire.set_second_x(micronToDBU(record.second_x_um, micron_dbu));
-    wire.set_second_y(micronToDBU(record.second_y_um, micron_dbu));
-    wire.set_width(std::max(micronToDBU(record.width_um, micron_dbu), 1));
-    wire.set_resistance(record.resistance_ohm);
-    wire_lists[record.net_name].push_back(std::move(wire));
-  }
-
-  for (const RedHawkViaRecord& record : network.vias) {
-    idb::IdbLayer* cut_layer = layers->find_layer(record.layer_name);
-    if (cut_layer == nullptr || !cut_layer->is_cut()) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network uses an unmapped cut layer: ", record.layer_name);
-    }
-    auto [bottom_layer, top_layer] = getAdjacentRoutingLayers(layers, cut_layer);
-    if (bottom_layer == nullptr || top_layer == nullptr) {
-      EMIRLOG.error(Loc::current(), "Cannot map adjacent routing layers for RedHawk cut layer: ", record.layer_name);
-    }
-
-    PowerVia via;
-    via.set_via_name(record.via_name);
-    via.set_bottom_layer_name(bottom_layer->get_name());
-    via.set_top_layer_name(top_layer->get_name());
-    via.set_bottom_layer_idx(bottom_layer->get_id());
-    via.set_top_layer_idx(top_layer->get_id());
-    via.set_x(micronToDBU(record.x_um, micron_dbu));
-    via.set_y(micronToDBU(record.y_um, micron_dbu));
-    std::optional<std::pair<double, double>> bottom_coordinate
-        = RedHawkResNetworkReader::connectionCoordinate(record, wire_segment_map, bottom_layer->get_name());
-    std::optional<std::pair<double, double>> top_coordinate = RedHawkResNetworkReader::connectionCoordinate(record, wire_segment_map, top_layer->get_name());
-    if (bottom_coordinate.has_value()) {
-      via.set_bottom_x(micronToDBU(bottom_coordinate->first, micron_dbu));
-      via.set_bottom_y(micronToDBU(bottom_coordinate->second, micron_dbu));
-    }
-    if (top_coordinate.has_value()) {
-      via.set_top_x(micronToDBU(top_coordinate->first, micron_dbu));
-      via.set_top_y(micronToDBU(top_coordinate->second, micron_dbu));
-    }
-    via.set_cut_num(record.cut_num);
-    via.set_cut_area_um2(static_cast<double>(record.cut_num) * record.cut_width_um * record.cut_height_um);
-    int32_t half_cut_width = std::max(micronToDBU(record.cut_width_um / 2.0, micron_dbu), 1);
-    int32_t half_cut_height = std::max(micronToDBU(record.cut_height_um / 2.0, micron_dbu), 1);
-    via.set_cut_low_x(-half_cut_width);
-    via.set_cut_low_y(-half_cut_height);
-    via.set_cut_high_x(half_cut_width);
-    via.set_cut_high_y(half_cut_height);
-    via.set_resistance(record.resistance_ohm);
-    via_lists[record.net_name].push_back(std::move(via));
-  }
-
-  std::map<std::string, PowerNet>& power_net_map = EMIRDM.getDatabase().get_power_net_map();
-  for (const auto& [net_name, wires] : wire_lists) {
-    if (power_net_map.count(net_name) == 0) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network net is not a DEF POWER/GROUND net: ", net_name);
-    }
-  }
-  for (const auto& [net_name, vias] : via_lists) {
-    if (power_net_map.count(net_name) == 0) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network net is not a DEF POWER/GROUND net: ", net_name);
-    }
-  }
-
-  std::size_t imported_net_num = 0;
-  for (auto& [net_name, power_net] : power_net_map) {
-    auto wire_iter = wire_lists.find(net_name);
-    if (wire_iter == wire_lists.end()) {
-      continue;
-    }
-    power_net.get_wire_segment_list() = std::move(wire_iter->second);
-    auto via_iter = via_lists.find(net_name);
-    if (via_iter == via_lists.end()) {
-      power_net.get_via_list().clear();
-    } else {
-      power_net.get_via_list() = std::move(via_iter->second);
-    }
-    power_net.set_has_explicit_parasitics(true);
-    imported_net_num++;
-  }
-  if (imported_net_num == 0) {
-    EMIRLOG.error(Loc::current(), "The RedHawk res_network contains no DEF POWER/GROUND net: ", EMIRDM.getConfig().redhawk_res_network_file_path);
-  }
-  EMIRLOG.info(Loc::current(), "Imported ", network.wire_segments.size(), " RedHawk PG wire resistors and ", network.vias.size(), " via resistors from ",
-               imported_net_num, " nets in ", EMIRDM.getConfig().redhawk_res_network_file_path);
 }
 
 void EMIRInterface::wrapPowerNet(idb::IdbSpecialNet* idb_power_net)
@@ -426,6 +340,7 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
   power_via.set_via_name(via_name);
   power_via.set_bottom_layer_name(bottom_layer_shape.get_layer()->get_name());
   power_via.set_top_layer_name(top_layer_shape.get_layer()->get_name());
+  power_via.set_cut_layer_name(cut_layer_shape.get_layer()->get_name());
   power_via.set_bottom_layer_idx(bottom_layer_shape.get_layer()->get_id());
   power_via.set_top_layer_idx(top_layer_shape.get_layer()->get_id());
   power_via.set_x(coordinate->get_x());
@@ -509,9 +424,11 @@ void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* id
       }
     }
   }
-  for (idb::IdbPin* idb_pin : idb_power_net->get_io_pin_list()->get_pin_list()) {
-    if (idb_pin != nullptr && wrapped_pins.insert(idb_pin).second) {
-      wrapPowerPin(power_net, idb_pin, true);
+  if (EMIRDM.getConfig().add_ploc_from_top_def) {
+    for (idb::IdbPin* idb_pin : idb_power_net->get_io_pin_list()->get_pin_list()) {
+      if (idb_pin != nullptr && wrapped_pins.insert(idb_pin).second) {
+        wrapPowerPin(power_net, idb_pin, true);
+      }
     }
   }
 }

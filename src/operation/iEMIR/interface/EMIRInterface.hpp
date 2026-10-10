@@ -18,8 +18,10 @@
 
 #include <any>
 #include <cstdint>
+#include <cstddef>
 #include <map>
 #include <string>
+#include <vector>
 
 #if 1  // 前向声明
 
@@ -71,7 +73,6 @@ class EMIRInterface
   void wrapDBInfo();
   void wrapInstanceIdSet();
   void wrapPowerNetList();
-  void wrapRedHawkResNetwork();
   void wrapPowerNet(idb::IdbSpecialNet* idb_power_net);
   PowerNetType wrapPowerNetType(idb::IdbConnectType connect_type);
   void wrapPowerWireSegmentList(PowerNet& power_net, idb::IdbSpecialNet* idb_power_net);
