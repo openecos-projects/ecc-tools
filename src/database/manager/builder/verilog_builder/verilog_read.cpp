@@ -84,6 +84,7 @@ class Importer
       }
       pinBuses(cell.buses, pins, IdbBus::kBusType::kBusInstancePin);
     }
+    _design.canonicalizeNetNames();
   }
 
  private:

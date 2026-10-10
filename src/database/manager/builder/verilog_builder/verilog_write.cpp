@@ -95,7 +95,7 @@ class Serializer
                 + encodeIdentifier(port->get_pin_name()) + ";\n");
     }
     for (auto* net : _design.get_net_list()->get_net_list()) {
-      const auto& name = _names.at(net);
+      const auto name = net->get_net_name();
       const bool zero = net->get_net_name() == verilogZeroNet && net->is_ground();
       const bool one = net->get_net_name() == verilogOneNet && net->is_power();
       if (zero || one || !_port_names.count(name))
@@ -104,7 +104,7 @@ class Serializer
     for (auto* port : _ports) {
       if (!port->get_net())
         continue;
-      const auto& name = _names.at(port->get_net());
+      const auto name = port->get_net()->get_net_name();
       if (name == port->get_pin_name())
         continue;
       const auto d = port->get_term()->get_direction();
@@ -133,7 +133,6 @@ class Serializer
   void prepareNames()
   {
     std::unordered_map<std::string, IdbNet*> port_nets;
-    std::unordered_map<IdbNet*, std::string> inouts;
     for (auto* pin : _design.get_io_pin_list()->get_pin_list()) {
       if (powerPin(pin) && !pin->get_net())
         continue;
@@ -144,8 +143,6 @@ class Serializer
       _port_names.insert(pin->get_pin_name());
       port_nets.emplace(pin->get_pin_name(), pin->get_net());
       _used.insert(pin->get_pin_name());
-      if (direction == IdbConnectDirection::kInOut && pin->get_net())
-        inouts.emplace(pin->get_net(), pin->get_pin_name());
     }
     std::unordered_set<std::string> instance_names;
     for (auto* cell : _design.get_instance_list()->get_instance_list()) {
@@ -156,12 +153,12 @@ class Serializer
       _used.insert(net->get_net_name());
     std::unordered_set<std::string> chosen;
     for (auto* net : _design.get_net_list()->get_net_list()) {
-      auto name = inouts.count(net) ? inouts.at(net) : net->get_net_name();
+      const auto& name = net->get_net_name();
       const auto port = port_nets.find(name);
       if ((port != port_nets.end() && port->second != net) || instance_names.count(name) || chosen.count(name))
-        name = fresh("__ecc_verilog_net_");
+        throw std::runtime_error("iDB net name conflicts with a port or instance: " + name
+                                 + "; canonicalize net names after the topology edit, before initializing timing");
       chosen.insert(name);
-      _names.emplace(net, std::move(name));
     }
   }
   const std::vector<ExportPort>& ports(IdbCellMaster& master)
@@ -217,7 +214,7 @@ class Serializer
           if (i)
             connections += ", ";
           if (nets[i])
-            connections += encodeIdentifier(_names.at(nets[i]));
+            connections += encodeIdentifier(nets[i]->get_net_name());
           else {
             const auto name = fresh("__ecc_verilog_open_");
             out.write("wire " + name + ";\n");
@@ -235,7 +232,6 @@ class Serializer
   IdbDesign& _design;
   const std::set<std::string>& _excluded;
   std::vector<IdbPin*> _ports;
-  std::unordered_map<IdbNet*, std::string> _names;
   std::unordered_map<IdbCellMaster*, std::vector<ExportPort>> _interfaces;
   std::unordered_set<std::string> _used, _port_names;
   uint64_t _next = 0;
