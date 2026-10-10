@@ -21,6 +21,7 @@
 #include "EMIRReporter.hpp"
 #include "GraphBuilder.hpp"
 #include "IRAnalyzer.hpp"
+#include "IRLinearSolver.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerNet.hpp"
@@ -28,37 +29,10 @@
 #include "PowerPin.hpp"
 #include "PowerVia.hpp"
 #include "PowerWireSegment.hpp"
-#include "RedHawkResNetworkReader.hpp"
 #include "Utility.hpp"
 #include "idm.h"
 
 namespace iemir {
-
-namespace {
-
-int32_t micronToDBU(double value, int32_t micron_dbu)
-{
-  return static_cast<int32_t>(std::llround(value * micron_dbu));
-}
-
-std::pair<idb::IdbLayer*, idb::IdbLayer*> getAdjacentRoutingLayers(idb::IdbLayers* layers, idb::IdbLayer* cut_layer)
-{
-  idb::IdbLayer* bottom_layer = nullptr;
-  idb::IdbLayer* top_layer = nullptr;
-  for (idb::IdbLayer* routing_layer : layers->get_routing_layers()) {
-    if (routing_layer->get_order() < cut_layer->get_order()
-        && (bottom_layer == nullptr || routing_layer->get_order() > bottom_layer->get_order())) {
-      bottom_layer = routing_layer;
-    }
-    if (routing_layer->get_order() > cut_layer->get_order()
-        && (top_layer == nullptr || routing_layer->get_order() < top_layer->get_order())) {
-      top_layer = routing_layer;
-    }
-  }
-  return {bottom_layer, top_layer};
-}
-
-}  // namespace
 
 EMIRInterface* EMIRInterface::_emir_interface_instance = nullptr;
 
@@ -103,6 +77,7 @@ void EMIRInterface::initEMIR(std::map<std::string, std::any> config_map)
   Monitor monitor;
   EMIRLOG.info(Loc::current(), "Starting...");
 
+  IRAnalyzer::destroyInst();
   DataManager::initInst();
   EMIRDM.input(config_map);
 
@@ -120,7 +95,6 @@ void EMIRInterface::runEMIR()
 
   IRAnalyzer::initInst();
   EMIRIA.analyze();
-  IRAnalyzer::destroyInst();
 
   EMAnalyzer::initInst();
   EMIREA.analyze();
@@ -139,6 +113,7 @@ void EMIRInterface::destroyEMIR()
   EMIRLOG.info(Loc::current(), "Starting...");
 
   EMIRDM.output();
+  IRAnalyzer::destroyInst();
   DataManager::destroyInst();
 
   EMIRLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -176,16 +151,29 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 {
   /////////////////////////////////////////////
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
-  EMIRDM.getConfig().ptpx_instance_power_file_path
-      = EMIRUTIL.getConfigValue<std::string>(config_map, "-ptpx_instance_power_file_path", "");
-  EMIRDM.getConfig().redhawk_res_network_file_path
-      = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_res_network_file_path", "");
+  EMIRDM.getConfig().ptpx_instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ptpx_instance_power_file_path", "");
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
   EMIRDM.getConfig().redhawk_tech_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_tech_file_path", "");
   EMIRDM.getConfig().em_limit_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-em_limit_file_path", "");
-  EMIRDM.getConfig().em_violation_threshold_percent
-      = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);
+  EMIRDM.getConfig().temperature_c = EMIRUTIL.getConfigValue<double>(config_map, "-temperature_c", 25.0);
+  EMIRDM.getConfig().em_violation_threshold_percent = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);
   EMIRDM.getConfig().thread_number = EMIRUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
+  auto& config = EMIRDM.getConfig();
+  config.ir_solver = EMIRUTIL.getConfigValue<std::string>(config_map, "-ir_solver", "auto");
+  config.ir_solver_tolerance = EMIRUTIL.getConfigValue<double>(config_map, "-ir_solver_tolerance", 1.e-10);
+  config.ir_solver_max_iterations = EMIRUTIL.getConfigValue<int32_t>(config_map, "-ir_solver_max_iterations", 2000);
+  IRSolverOptions options;
+  options.method = config.ir_solver;
+  options.relative_tolerance = config.ir_solver_tolerance;
+  options.max_iterations = config.ir_solver_max_iterations;
+  try {
+    IRLinearSolver::validateOptions(options);
+    if (options.relative_tolerance > 1.e-8) {
+      throw std::invalid_argument("ir_solver_tolerance must be <= 1e-8 to preserve IR residual/current-balance checks");
+    }
+  } catch (const std::exception& error) {
+    EMIRLOG.error(Loc::current(), "Invalid IR solver configuration: ", error.what());
+  }
   omp_set_num_threads(std::max(EMIRDM.getConfig().thread_number, 1));
   /////////////////////////////////////////////
 }
@@ -195,9 +183,6 @@ void EMIRInterface::wrapDatabase()
   wrapDBInfo();
   wrapInstanceIdSet();
   wrapPowerNetList();
-  if (!EMIRDM.getConfig().redhawk_res_network_file_path.empty()) {
-    wrapRedHawkResNetwork();
-  }
 }
 
 void EMIRInterface::wrapDBInfo()
@@ -232,110 +217,6 @@ void EMIRInterface::wrapPowerNetList()
     }
     wrapPowerNet(idb_power_net);
   }
-}
-
-void EMIRInterface::wrapRedHawkResNetwork()
-{
-  RedHawkResNetwork network = RedHawkResNetworkReader::read(EMIRDM.getConfig().redhawk_res_network_file_path);
-  idb::IdbLayers* layers = dmInst->get_idb_layout()->get_layers();
-  int32_t micron_dbu = EMIRDM.getDatabase().get_micron_dbu();
-  std::unordered_map<std::string, std::vector<PowerWireSegment>> wire_lists;
-  std::unordered_map<std::string, std::vector<PowerVia>> via_lists;
-  std::unordered_map<std::string, const RedHawkWireSegmentRecord*> wire_segment_map;
-
-  for (const RedHawkWireSegmentRecord& record : network.wire_segments) {
-    wire_segment_map[record.id] = &record;
-    idb::IdbLayer* layer = layers->find_layer(record.layer_name);
-    if (layer == nullptr || !layer->is_routing()) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network uses an unmapped routing layer: ", record.layer_name);
-    }
-    PowerWireSegment wire;
-    wire.set_layer_idx(layer->get_id());
-    wire.set_layer_name(layer->get_name());
-    wire.set_first_x(micronToDBU(record.first_x_um, micron_dbu));
-    wire.set_first_y(micronToDBU(record.first_y_um, micron_dbu));
-    wire.set_second_x(micronToDBU(record.second_x_um, micron_dbu));
-    wire.set_second_y(micronToDBU(record.second_y_um, micron_dbu));
-    wire.set_width(std::max(micronToDBU(record.width_um, micron_dbu), 1));
-    wire.set_resistance(record.resistance_ohm);
-    wire_lists[record.net_name].push_back(std::move(wire));
-  }
-
-  for (const RedHawkViaRecord& record : network.vias) {
-    idb::IdbLayer* cut_layer = layers->find_layer(record.layer_name);
-    if (cut_layer == nullptr || !cut_layer->is_cut()) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network uses an unmapped cut layer: ", record.layer_name);
-    }
-    auto [bottom_layer, top_layer] = getAdjacentRoutingLayers(layers, cut_layer);
-    if (bottom_layer == nullptr || top_layer == nullptr) {
-      EMIRLOG.error(Loc::current(), "Cannot map adjacent routing layers for RedHawk cut layer: ", record.layer_name);
-    }
-
-    PowerVia via;
-    via.set_via_name(record.via_name);
-    via.set_bottom_layer_name(bottom_layer->get_name());
-    via.set_top_layer_name(top_layer->get_name());
-    via.set_bottom_layer_idx(bottom_layer->get_id());
-    via.set_top_layer_idx(top_layer->get_id());
-    via.set_x(micronToDBU(record.x_um, micron_dbu));
-    via.set_y(micronToDBU(record.y_um, micron_dbu));
-    std::optional<std::pair<double, double>> bottom_coordinate
-        = RedHawkResNetworkReader::connectionCoordinate(record, wire_segment_map, bottom_layer->get_name());
-    std::optional<std::pair<double, double>> top_coordinate = RedHawkResNetworkReader::connectionCoordinate(record, wire_segment_map, top_layer->get_name());
-    if (bottom_coordinate.has_value()) {
-      via.set_bottom_x(micronToDBU(bottom_coordinate->first, micron_dbu));
-      via.set_bottom_y(micronToDBU(bottom_coordinate->second, micron_dbu));
-    }
-    if (top_coordinate.has_value()) {
-      via.set_top_x(micronToDBU(top_coordinate->first, micron_dbu));
-      via.set_top_y(micronToDBU(top_coordinate->second, micron_dbu));
-    }
-    via.set_cut_num(record.cut_num);
-    via.set_cut_area_um2(static_cast<double>(record.cut_num) * record.cut_width_um * record.cut_height_um);
-    int32_t half_cut_width = std::max(micronToDBU(record.cut_width_um / 2.0, micron_dbu), 1);
-    int32_t half_cut_height = std::max(micronToDBU(record.cut_height_um / 2.0, micron_dbu), 1);
-    via.set_cut_low_x(-half_cut_width);
-    via.set_cut_low_y(-half_cut_height);
-    via.set_cut_high_x(half_cut_width);
-    via.set_cut_high_y(half_cut_height);
-    via.set_resistance(record.resistance_ohm);
-    via_lists[record.net_name].push_back(std::move(via));
-  }
-
-  std::map<std::string, PowerNet>& power_net_map = EMIRDM.getDatabase().get_power_net_map();
-  for (const auto& [net_name, wires] : wire_lists) {
-    if (power_net_map.count(net_name) == 0) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network net is not a DEF POWER/GROUND net: ", net_name);
-    }
-  }
-  for (const auto& [net_name, vias] : via_lists) {
-    if (power_net_map.count(net_name) == 0) {
-      EMIRLOG.error(Loc::current(), "RedHawk res_network net is not a DEF POWER/GROUND net: ", net_name);
-    }
-  }
-
-  std::size_t imported_net_num = 0;
-  for (auto& [net_name, power_net] : power_net_map) {
-    auto wire_iter = wire_lists.find(net_name);
-    if (wire_iter == wire_lists.end()) {
-      continue;
-    }
-    power_net.get_wire_segment_list() = std::move(wire_iter->second);
-    auto via_iter = via_lists.find(net_name);
-    if (via_iter == via_lists.end()) {
-      power_net.get_via_list().clear();
-    } else {
-      power_net.get_via_list() = std::move(via_iter->second);
-    }
-    power_net.set_has_explicit_parasitics(true);
-    imported_net_num++;
-  }
-  if (imported_net_num == 0) {
-    EMIRLOG.error(Loc::current(), "The RedHawk res_network contains no DEF POWER/GROUND net: ",
-                  EMIRDM.getConfig().redhawk_res_network_file_path);
-  }
-  EMIRLOG.info(Loc::current(), "Imported ", network.wire_segments.size(), " RedHawk PG wire resistors and ", network.vias.size(),
-               " via resistors from ", imported_net_num, " nets in ", EMIRDM.getConfig().redhawk_res_network_file_path);
 }
 
 void EMIRInterface::wrapPowerNet(idb::IdbSpecialNet* idb_power_net)
@@ -414,6 +295,7 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
   power_via.set_via_name(via_name);
   power_via.set_bottom_layer_name(bottom_layer_shape.get_layer()->get_name());
   power_via.set_top_layer_name(top_layer_shape.get_layer()->get_name());
+  power_via.set_cut_layer_name(cut_layer_shape.get_layer()->get_name());
   power_via.set_bottom_layer_idx(bottom_layer_shape.get_layer()->get_id());
   power_via.set_top_layer_idx(top_layer_shape.get_layer()->get_id());
   power_via.set_x(coordinate->get_x());
@@ -425,8 +307,8 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
     if (cut_rect == nullptr || micron_dbu <= 0) {
       continue;
     }
-    cut_area_um2 += static_cast<double>(cut_rect->get_width()) * static_cast<double>(cut_rect->get_height())
-                    / static_cast<double>(micron_dbu) / static_cast<double>(micron_dbu);
+    cut_area_um2 += static_cast<double>(cut_rect->get_width()) * static_cast<double>(cut_rect->get_height()) / static_cast<double>(micron_dbu)
+                    / static_cast<double>(micron_dbu);
   }
   power_via.set_cut_area_um2(cut_area_um2);
   idb::IdbRect cut_bounding_box = idb_via->get_cut_bounding_box();
@@ -491,8 +373,7 @@ void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* id
         continue;
       }
       for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
-        if (idb_pin != nullptr && idb_design->findSpecialNetForInstancePin(idb_pin) == idb_power_net
-            && wrapped_pins.insert(idb_pin).second) {
+        if (idb_pin != nullptr && idb_design->findSpecialNetForInstancePin(idb_pin) == idb_power_net && wrapped_pins.insert(idb_pin).second) {
           wrapPowerPin(power_net, idb_pin, false);
         }
       }

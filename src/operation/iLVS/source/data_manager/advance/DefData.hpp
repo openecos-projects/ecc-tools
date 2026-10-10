@@ -16,7 +16,6 @@
 // ***************************************************************************************
 #pragma once
 
-#include "DefRoutingData.hpp"
 #include "DesignData.hpp"
 #include "Die.hpp"
 #include "PhysicalGraph.hpp"
@@ -29,24 +28,20 @@ class DefData : public DesignData
   DefData() = default;
   // getter
   Die& get_die() { return _die; }
-  DefRoutingData& get_def_routing_data() { return _def_routing_data; }
   PhysicalGraph& get_physical_graph() { return _physical_graph; }
   // const getter
   const Die& get_die() const { return _die; }
-  const DefRoutingData& get_def_routing_data() const { return _def_routing_data; }
   const PhysicalGraph& get_physical_graph() const { return _physical_graph; }
   // function
   void reset()
   {
     DesignData::reset();
     _die = Die();
-    _def_routing_data.reset();
     _physical_graph.reset();
   }
 
  private:
   Die _die;
-  DefRoutingData _def_routing_data;
   PhysicalGraph _physical_graph;
 };
 

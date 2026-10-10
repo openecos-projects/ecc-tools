@@ -25,6 +25,7 @@
 #include "IRAnalyzer.hpp"
 #include "InstancePower.hpp"
 #include "Logger.hpp"
+#include "PTPXPowerReader.hpp"
 #include "PowerEdge.hpp"
 #include "PowerEdgeType.hpp"
 #include "PowerGraph.hpp"
@@ -36,7 +37,6 @@
 #include "PowerSource.hpp"
 #include "PowerVia.hpp"
 #include "PowerWireSegment.hpp"
-#include "PTPXPowerReader.hpp"
 #include "RedHawkResNetworkReader.hpp"
 
 namespace {
@@ -104,8 +104,7 @@ bool checkSubMicroampLoad()
   iemir::PowerGraph& power_graph = EMIRDM.getDatabase().get_power_graph_map().at("VDD");
   const double voltage = power_graph.get_node_list()[1].get_voltage();
   const double current = power_graph.get_node_list()[1].get_current();
-  const bool is_pass = std::abs(voltage - (1.0 - kLoadCurrent)) <= 1.0e-12
-                       && std::abs(current + kLoadCurrent) <= 1.0e-12;
+  const bool is_pass = std::abs(voltage - (1.0 - kLoadCurrent)) <= 1.0e-12 && std::abs(current + kLoadCurrent) <= 1.0e-12;
   EMIRDM.getDatabase().get_instance_power_map().clear();
   EMIRDM.getDatabase().get_power_graph_map().clear();
   return is_pass;
@@ -116,6 +115,53 @@ bool checkReport(const std::string& report_file_path, const std::string& content
   std::ifstream report_file(report_file_path);
   std::string report_content((std::istreambuf_iterator<char>(report_file)), std::istreambuf_iterator<char>());
   return report_content.find(content) != std::string::npos;
+}
+
+bool checkRepeatedIRLoads(const std::filesystem::path& directory)
+{
+  auto field = [&](const std::string& name) {
+    std::ifstream file(directory / "solver_diagnostics.csv");
+    std::string header, row, key, value;
+    std::getline(file, header);
+    std::getline(file, row);
+    std::istringstream keys(header), values(row);
+    while (std::getline(keys, key, ',') && std::getline(values, value, ',')) {
+      if (key == name)
+        return value;
+    }
+    return std::string();
+  };
+  bool passed = true;
+  for (const std::string method : {"auto", "hierarchical", "iccg", "sparse_lu"}) {
+    EMIRDM.getConfig().ir_solver = method;
+    EMIRDM.getDatabase().get_instance_power_map().clear();
+    EMIRDM.getDatabase().get_power_graph_map().clear();
+    iemir::InstancePower power;
+    power.set_instance_id(1);
+    power.set_voltage(1.0);
+    power.set_average_current(5.e-7);
+    EMIRDM.getDatabase().get_instance_power_map()[1] = power;
+    EMIRDM.getDatabase().get_power_graph_map()["VDD"] = buildPowerGraph("VDD", iemir::PowerNetType::kPower);
+    auto& graph = EMIRDM.getDatabase().get_power_graph_map()["VDD"];
+    iemir::IRAnalyzer::initInst();
+    EMIRIA.analyze();
+    passed = passed && std::abs(graph.get_node_list()[1].get_voltage() - (1 - 5.e-7)) < 1.e-12;
+    EMIRDM.getDatabase().get_instance_power_map()[1].set_average_current(2.e-6);
+    EMIRIA.analyze();
+    passed = passed && std::abs(graph.get_node_list()[1].get_voltage() - (1 - 2.e-6)) < 1.e-12 && field("matrix_reused") == "1";
+    graph.get_edge_list()[0].set_resistance(3.0);
+    EMIRIA.analyze();
+    passed
+        = passed && std::abs(graph.get_node_list()[1].get_voltage() - (1 - 6.e-6)) < 1.e-12 && field("matrix_reused") == "0" && field("symbolic_reused") == "1";
+    EMIRDM.getDatabase().get_instance_power_map()[1].set_average_current(0.0);
+    EMIRIA.analyze();
+    passed = passed && graph.get_node_list()[1].get_voltage() == 1.0;
+    iemir::IRAnalyzer::destroyInst();
+  }
+  EMIRDM.getConfig().ir_solver = "auto";
+  EMIRDM.getDatabase().get_instance_power_map().clear();
+  EMIRDM.getDatabase().get_power_graph_map().clear();
+  return passed;
 }
 
 bool checkShiftedViaGraph(const std::filesystem::path& directory)
@@ -192,8 +238,8 @@ bool checkShiftedViaGraph(const std::filesystem::path& directory)
   is_pass = is_pass && checkReport((directory / "shifted_via.em.worst").string(), "via VIA_SHIFTED  (0.012,0.000)")
             && checkReport((directory / "em.rpt").string(), "via VIA_SHIFTED  (0.012,0.000)")
             && checkReport((directory / "shifted_via.res_network").string(), "VIA_SHIFTED SHIFTED_VIA (0.012 0.000)")
-            && checkReport((directory / "shifted_via.em.worst").string(), "1.000000e-06")
-            && coordinate_node_map.count(std::make_tuple(1, 12, 0)) == 0 && coordinate_node_map.count(std::make_tuple(2, 12, 0)) == 0;
+            && checkReport((directory / "shifted_via.em.worst").string(), "1.000000e-06") && coordinate_node_map.count(std::make_tuple(1, 12, 0)) == 0
+            && coordinate_node_map.count(std::make_tuple(2, 12, 0)) == 0;
   EMIRDM.getDatabase().get_power_net_map().clear();
   EMIRDM.getDatabase().get_power_graph_map().clear();
   return is_pass;
@@ -210,6 +256,20 @@ bool checkPTPXPowerReader(const std::filesystem::path& directory)
   std::vector<iemir::PTPXPowerRecord> records = iemir::PTPXPowerReader::read(file_path.string());
   return records.size() == 1 && records.front().instance_name == "U1" && std::abs(records.front().total_power - 6.0e-6) <= 1.0e-18
          && std::abs(records.front().average_current - 5.0e-6) <= 1.0e-18;
+}
+
+bool checkRedHawkResistanceFormula()
+{
+  iemir::EMMetalRule metal;
+  metal.set_resistance_per_square(0.1122);
+  metal.set_tnom_c(25.0);
+  metal.set_coeff_rt1(3.242e-3);
+  metal.set_coeff_rt2(6.79e-6);
+  double wire_resistance_25c = metal.resistancePerSquareAt(25.0) * 1.0 / 0.16;
+  double expected_100c = 0.1122 * (1.0 + 3.242e-3 * 75.0 + 6.79e-6 * 75.0 * 75.0);
+  double via_resistance = 2.0 / 5.0;
+  return std::abs(wire_resistance_25c - 0.70125) < 1e-12 && std::abs(metal.resistancePerSquareAt(100.0) - expected_100c) < 1e-12
+         && std::abs(via_resistance - 0.4) < 1e-12;
 }
 
 bool checkPointSourceDoesNotShortNearbySegment()
@@ -277,9 +337,8 @@ bool checkRedHawkResNetworkReader(const std::filesystem::path& directory)
   iemir::RedHawkResNetwork network = iemir::RedHawkResNetworkReader::read(file_path.string());
   const iemir::RedHawkWireSegmentRecord& explicit_segment = network.wire_segments.at(0);
   const iemir::RedHawkViaRecord& via = network.vias.at(0);
-  return network.wire_segments.size() == 1 && network.vias.size() == 1 && explicit_segment.id == "10_1"
-         && explicit_segment.layer_name == "MET1" && explicit_segment.net_name == "VDD"
-         && std::abs(explicit_segment.resistance_ohm - 0.25) <= 1.0e-18 && via.id == "7" && via.layer_name == "VIA1"
+  return network.wire_segments.size() == 1 && network.vias.size() == 1 && explicit_segment.id == "10_1" && explicit_segment.layer_name == "MET1"
+         && explicit_segment.net_name == "VDD" && std::abs(explicit_segment.resistance_ohm - 0.25) <= 1.0e-18 && via.id == "7" && via.layer_name == "VIA1"
          && via.net_name == "VDD" && via.cut_num == 2 && via.connected_wire_segment_ids == std::vector<std::string>{"10_1"}
          && std::abs(via.resistance_ohm - 0.5) <= 1.0e-18;
 }
@@ -424,9 +483,10 @@ int main(int argc, char* argv[])
   std::filesystem::create_directories(report_directory_path);
   EMIRDM.getConfig().ia_temp_directory_path = report_directory_path.string() + "/";
 
-  bool is_pass = checkPTPXPowerReader(report_directory_path) && checkRedHawkResNetworkReader(report_directory_path) && checkShiftedViaGraph(report_directory_path)
-                 && checkPointSourceDoesNotShortNearbySegment() && checkImportedPinAreaInjection() && checkViaUsesConnectedResistorJunction()
-                 && checkSubMicroampLoad();
+  bool is_pass = checkPTPXPowerReader(report_directory_path) && checkRedHawkResistanceFormula()
+                 && checkRedHawkResNetworkReader(report_directory_path)
+                 && checkShiftedViaGraph(report_directory_path) && checkPointSourceDoesNotShortNearbySegment() && checkImportedPinAreaInjection()
+                 && checkViaUsesConnectedResistorJunction() && checkSubMicroampLoad() && checkRepeatedIRLoads(report_directory_path);
   EMIRDM.getDatabase().set_design_name("test_design");
   EMIRDM.getDatabase().set_micron_dbu(1000);
   iemir::EMMetalRule metal_rule;

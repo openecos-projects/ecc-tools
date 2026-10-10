@@ -83,10 +83,13 @@ int main()
   assert(LVSUTIL.exist(def_data.get_net_map(), std::string("n1")));
   assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("PIN/IN")));
   assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("u0/A")));
-  assert(def_data.get_physical_graph().get_net_routing_graph_map().empty());
-  assert(LVSUTIL.exist(def_data.get_def_routing_data().get_net_routing_data_map(), std::string("n1")));
-  assert(def_data.get_def_routing_data().get_power_instance_pin_net_map().at("u0/VDD") == "VDD");
-  assert(def_data.get_def_routing_data().get_ground_instance_pin_net_map().at("u0/VSS") == "VSS");
+  ilvs::PhysicalGraph& physical_graph = def_data.get_physical_graph();
+  assert(physical_graph.get_net_routing_graph_list().size() == 3);
+  assert(physical_graph.getNetRoutingGraph("n1") != nullptr);
+  assert(physical_graph.getNetRoutingGraph("VDD") != nullptr);
+  assert(physical_graph.getNetRoutingGraph("VSS") != nullptr);
+  assert(physical_graph.get_power_instance_pin_net_map().at("u0/VDD") == "VDD");
+  assert(physical_graph.get_ground_instance_pin_net_map().at("u0/VSS") == "VSS");
   assert(vdd_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vss_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vdd_pin->get_special_net() == nullptr);

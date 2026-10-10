@@ -156,6 +156,30 @@ void PWInterface::destroyPW()
 #endif
 }
 
+void PWInterface::reportCellPower(const std::string& directory_path, const int32_t top_num, const bool is_all)
+{
+  Monitor monitor;
+  PWLOG.info(Loc::current(), "Starting...");
+
+  PowerReporter::initInst();
+  PWPR.reportCellPower(directory_path, top_num, is_all);
+  PowerReporter::destroyInst();
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PWInterface::reportNetPower(const std::string& directory_path, const int32_t top_num, const bool is_all)
+{
+  Monitor monitor;
+  PWLOG.info(Loc::current(), "Starting...");
+
+  PowerReporter::initInst();
+  PWPR.reportNetPower(directory_path, top_num, is_all);
+  PowerReporter::destroyInst();
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 #endif
 
 #endif
@@ -202,19 +226,25 @@ void PWInterface::wrapVcdActivity()
   if (vcd_reader == nullptr) {
     return;
   }
+  std::size_t matched_net_num = 0;
   for (std::pair<const std::string, vcd::VcdSignalActivity>& activity_pair : vcd_reader->get_signal_activity_map()) {
     std::string vcd_signal_name = activity_pair.first;
-    std::string pin_name = wrapVcdPinName(vcd_signal_name);
-    if (pin_name.empty() || database.get_pin_map().count(pin_name) == 0) {
+    std::string net_name = wrapVcdPinName(vcd_signal_name);
+    if (net_name.empty() || database.get_net_map().count(net_name) == 0) {
       continue;
     }
+    matched_net_num++;
     PowerActivity activity;
     activity.set_transition_density(activity_pair.second.get_transition_density());
     activity.set_static_probability(activity_pair.second.get_static_probability());
     activity.set_origin(PowerActivityOrigin::kVcd);
     activity.set_is_valid(true);
-    database.get_vcd_activity_map()[pin_name] = activity;
+    for (std::string& pin_name : database.get_net_map()[net_name].get_pin_name_list()) {
+      database.get_vcd_activity_map()[pin_name] = activity;
+    }
   }
+  PWLOG.info(Loc::current(), "Matched ", matched_net_num, " net(s) from ", vcd_reader->get_signal_activity_map().size(),
+             " VCD signal(s); annotated ", database.get_vcd_activity_map().size(), " pin(s).");
 }
 
 std::string PWInterface::wrapVcdPinName(std::string& vcd_signal_name)

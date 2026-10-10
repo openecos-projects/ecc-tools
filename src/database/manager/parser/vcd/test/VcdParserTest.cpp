@@ -35,9 +35,19 @@ int main()
   assert(std::fabs(signal_activity_map["top/a"].get_static_probability() - 1.0 / 3.0) < 1E-9);
   assert(std::fabs(signal_activity_map["top/alias_a"].get_transition_density() - 2.0 / 30.0) < 1E-9);
   assert(std::fabs(signal_activity_map["top/alias_a"].get_static_probability() - 1.0 / 3.0) < 1E-9);
-  assert(std::fabs(signal_activity_map["top/u0/bus[1]"].get_transition_density() - 1.5 / 30.0) < 1E-9);
+  assert(std::fabs(signal_activity_map["top/u0/bus[1]"].get_transition_density() - 1.0 / 30.0) < 1E-9);
   assert(std::fabs(signal_activity_map["top/u0/bus[0]"].get_static_probability() - 2.0 / 3.0) < 1E-9);
   assert(std::fabs(signal_activity_map["top/u0/hexbus[3]"].get_transition_density() - 2.0 / 30.0) < 1E-9);
   assert(std::fabs(signal_activity_map["top/u0/hexbus[3]"].get_static_probability() - 2.0 / 3.0) < 1E-9);
+
+  // Unknown excursions are weighted once, when the signal returns to a defined
+  // value: a return-type excursion weighs the derate factor, a change-type
+  // excursion weighs one whole transition, and an unknown state that is never
+  // left (top/u0/bus[1] stays at z) or that the dump starts in (top/lead_x)
+  // weighs nothing.
+  assert(std::fabs(signal_activity_map["top/ret_x"].get_transition_density() - 0.5 / 30.0) < 1E-9);
+  assert(std::fabs(signal_activity_map["top/ret_x"].get_static_probability() - 2.0 / 3.0) < 1E-9);
+  assert(std::fabs(signal_activity_map["top/chg_x"].get_transition_density() - 1.0 / 30.0) < 1E-9);
+  assert(std::fabs(signal_activity_map["top/lead_x"].get_transition_density() - 1.0 / 30.0) < 1E-9);
   return 0;
 }

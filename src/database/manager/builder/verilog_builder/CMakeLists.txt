@@ -1,4 +1,6 @@
 add_library(verilog_builder
+    VerilogLibrary.cpp
+    VerilogImportPlan.cpp
     verilog_read.cpp
     verilog_write.cpp
 )
@@ -29,9 +31,10 @@ target_link_libraries(verilog_builder
 )
 
 if(BUILD_TESTING)
-  add_executable(verilog_reader_escaped_identifier_test
-      validation/verilog_reader_escaped_identifier_test.cpp
-  )
-  target_link_libraries(verilog_reader_escaped_identifier_test PRIVATE verilog_builder def_service idb ecc_logger)
-  add_test(NAME verilog_reader_escaped_identifier_test COMMAND verilog_reader_escaped_identifier_test)
+  foreach(test IN ITEMS Import RoundTrip)
+    string(TOLOWER "${test}" name)
+    add_executable(verilog_${name}_test validation/Verilog${test}Test.cpp)
+    target_link_libraries(verilog_${name}_test PRIVATE verilog_builder verilog def_service idb ecc_logger)
+    add_test(NAME verilog_${name}_test COMMAND verilog_${name}_test)
+  endforeach()
 endif()

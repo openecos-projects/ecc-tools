@@ -1,634 +1,261 @@
-// ***************************************************************************************
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
-/**
- * @file verilog_writer.cpp
- * @author longshy (longshy@pcl.ac.cn)
- * @brief
- * @version 0.1
- * @date 2021-12-03
- */
+// iEDA is licensed under Mulan PSL v2. See LICENSE for details.
 #include "verilog_write.h"
 
-#include <cassert>
-#include <cstdarg>
-#include <cstdlib>
-#include <map>
-#include <optional>
-#include <regex>
-#include <string>
-#include <string_view>
+#include <zlib.h>
 
+#include <algorithm>
+#include <cstdio>
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
+
+#include "IdbDesign.h"
+#include "VerilogConstantNet.hh"
+#include "VerilogLibrary.hh"
 #include "utility/logger/Logger.hpp"
-
+#include "verilog/VerilogLexer.hh"
 namespace idb {
-
 namespace {
-
-std::pair<std::string, std::optional<int>> splitBusName(const char* name)
+using verilog::encodeIdentifier;
+class Output
 {
-  std::string_view name_view(name);
-  if (!name_view.ends_with("]")) {
-    return {std::string(name_view), std::nullopt};
-  }
-
-  size_t left_bracket_idx = name_view.find('[');
-  size_t right_bracket_idx = name_view.find(']', left_bracket_idx);
-  if (left_bracket_idx == std::string_view::npos || right_bracket_idx == std::string_view::npos) {
-    return {std::string(name_view), std::nullopt};
-  }
-
-  int index = std::atoi(std::string(name_view.substr(left_bracket_idx + 1, right_bracket_idx - left_bracket_idx - 1)).c_str());
-  return {std::string(name_view.substr(0, left_bracket_idx)), index};
-}
-
-std::string removeBackslash(std::string name)
-{
-  std::erase(name, '\\');
-  return name;
-}
-
-}  // namespace
-
-VerilogWriter::VerilogWriter(const char* file_name, std::set<std::string>& exclude_cell_names, IdbDesign& idb_design,
-                             bool is_add_space_for_escape_name)
-    : _file_name(file_name),
-      _exclude_cell_names(exclude_cell_names),
-      _stream(nullptr),
-      _gzip_stream(nullptr),
-      _save_format(VerilogSaveFormat::kUnzip),
-      _idb_design(idb_design),
-      _is_add_space_for_escape_name(is_add_space_for_escape_name)
-{
-  if (std::string_view(file_name).find(".gz") != std::string_view::npos) {
-    _save_format = VerilogSaveFormat::kGzip;
-    _gzip_stream = gzopen(file_name, "w");
-  } else {
-    _save_format = VerilogSaveFormat::kUnzip;
-    _stream = std::fopen(file_name, "w");
-  }
-}
-
-VerilogWriter::~VerilogWriter()
-{
-  switch (_save_format) {
-    case VerilogSaveFormat::kGzip:
-      if (_gzip_stream != nullptr) {
-        gzclose(_gzip_stream);
-        _gzip_stream = nullptr;
-      }
-      break;
-    case VerilogSaveFormat::kUnzip:
-    default:
-      if (_stream != nullptr) {
-        std::fclose(_stream);
-        _stream = nullptr;
-      }
-      break;
-  }
-}
-
-/**
- * @brief write the verilog design.
- *
- */
-void VerilogWriter::writeModule()
-{
-  if (_stream == nullptr && _gzip_stream == nullptr) {
-    ECCLOG.info(ecc::Loc::current(), "File", _file_name, "NotWritable");
-  }
-  ECCLOG.info(ecc::Loc::current(), "start write verilog file ", _file_name);
-
-  writeStr("module %s (", _idb_design.get_design_name().c_str());
-  writeStr("\n");
-  writePorts();
-  writeStr("\n");
-  writePortDcls();
-  writeStr("\n");
-  writeWire();
-  writeStr("\n");
-  writeAssign();
-  writeStr("\n");
-  writeInstances();
-  writeStr("\n");
-  writeStr("endmodule\n");
-
-  ECCLOG.info(ecc::Loc::current(), "finish write verilog file ", _file_name);
-}
-
-void VerilogWriter::writeStr(const char* strdata, ...)
-{
-  va_list args;
-  va_start(args, strdata);
-  switch (_save_format) {
-    case VerilogSaveFormat::kGzip:
-      gzvprintf(_gzip_stream, strdata, args);
-      break;
-    case VerilogSaveFormat::kUnzip:
-    default:
-      vfprintf(_stream, strdata, args);
-      break;
-  }
-  va_end(args);
-}
-
-/**
- * @brief write the port of the verilog design.
- *
- */
-void VerilogWriter::writePorts()
-{
-  bool first = true;
-
-  vector<IdbPin*> io_pin_list = _idb_design.get_io_pin_list()->get_pin_list();
-
-  for (const auto& io_pin : io_pin_list) {
-    std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
-
-    if (is_bus) {
-      continue;
-    }
-
-    auto pin_type = io_pin->get_term()->get_type();
-
-    if (pin_type == IdbConnectType::kPower || pin_type == IdbConnectType::kGround) {
-      continue;
-    }
-
-    if (io_pin->get_term()->get_direction() == IdbConnectDirection::kInput
-        || io_pin->get_term()->get_direction() == IdbConnectDirection::kOutput
-        || io_pin->get_term()->get_direction() == IdbConnectDirection::kInOut) {
-      if (!first) {
-        writeStr(",\n");
-      }
-
-      writeStr("%s", pin_name.c_str());
-      first = false;
-    }
-  }
-
-  std::set<std::string> bus_processed;
-  for (const auto& io_pin : io_pin_list) {
-    std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
-
-    if (!is_bus) {
-      continue;
-    }
-
-    // if (bus_processed.contains(pin_bus_name)) {
-    //   continue;
-    // }
-
-    if (!first) {
-      writeStr(",\n");
-    }
-
-    // bus_processed.insert(pin_bus_name);
-
-    writeStr("\\%s ", pin_name.c_str());
-    first = false;
-  }
-
-  writeStr(");\n");
-}
-
-/**
- * @brief write the directed port of the verilog design.
- *
- */
-void VerilogWriter::writePortDcls()
-{
-  std::vector<std::string> input_port_names;
-  std::vector<std::string> output_port_names;
-  std::vector<std::string> inout_port_names;
-
-  vector<IdbPin*> io_pin_list = _idb_design.get_io_pin_list()->get_pin_list();
-
-  for (const auto& io_pin : io_pin_list) {
-    std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
-
-    if (is_bus) {
-      continue;
-    }
-
-    auto pin_type = io_pin->get_term()->get_type();
-    if (pin_type == IdbConnectType::kPower || pin_type == IdbConnectType::kGround) {
-      continue;
-    }
-
-    IdbConnectDirection port_dir = io_pin->get_term()->get_direction();
-
-    if (port_dir == IdbConnectDirection::kInput) {
-      writeStr("input %s ;\n", pin_name.c_str());
-    } else if (port_dir == IdbConnectDirection::kOutput) {
-      writeStr("output %s ;\n", pin_name.c_str());
-    } else if (port_dir == IdbConnectDirection::kInOut) {
-      writeStr("inout %s ;\n", pin_name.c_str());
+ public:
+  explicit Output(const std::string& path)
+  {
+    if (path.ends_with(".gz")) {
+      _gzip.reset(gzopen(path.c_str(), "wb"));
+      if (!_gzip)
+        throw std::runtime_error("cannot open output: " + path);
+      gzbuffer(_gzip.get(), 1U << 20);
     } else {
-      continue;
+      _plain.reset(std::fopen(path.c_str(), "wb"));
+      if (!_plain)
+        throw std::runtime_error("cannot open output: " + path);
     }
   }
-
-  std::set<std::string> bus_processed;
-  for (const auto& io_pin : io_pin_list) {
-    std::string pin_name = io_pin->get_pin_name();
-    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
-
-    if (!is_bus) {
-      continue;
-    }
-
-    // if (bus_processed.contains(pin_bus_name)) {
-    //   continue;
-    // }
-
-    // bus_processed.insert(pin_bus_name);
-
-    // auto pin_bus = _idb_design.get_bus_list()->findBus(pin_bus_name);
-    // unsigned int bus_left = pin_bus->get().get_left();
-    // unsigned int bus_right = pin_bus->get().get_right();
-
-    IdbConnectDirection port_dir = io_pin->get_term()->get_direction();
-
-    if (port_dir == IdbConnectDirection::kInput) {
-      writeStr("input \\%s ;\n",  pin_name.c_str());
-    } else if (port_dir == IdbConnectDirection::kOutput) {
-      writeStr("output \\%s ;\n",  pin_name.c_str());
-    } else if (port_dir == IdbConnectDirection::kInOut) {
-      writeStr("inout \\%s ;\n",  pin_name.c_str());
-    } else {
-      continue;
+  void write(std::string_view text)
+  {
+    while (!text.empty()) {
+      const auto size = std::min(text.size(), size_t(1U << 20));
+      const auto count = _gzip ? gzwrite(_gzip.get(), text.data(), static_cast<unsigned>(size))
+                               : static_cast<int>(std::fwrite(text.data(), 1, size, _plain.get()));
+      if (count != static_cast<int>(size))
+        throw std::runtime_error("failed writing Verilog output");
+      text.remove_prefix(size);
     }
   }
-}
+  void finish()
+  {
+    const int result = _gzip ? gzclose(_gzip.release()) : std::fclose(_plain.release());
+    if (result != 0)
+      throw std::runtime_error("failed closing Verilog output");
+  }
 
-/**
- * @brief write the net of the verilog design.
- *
- */
-void VerilogWriter::writeWire()
-{
-  vector<IdbNet*> net_list = _idb_design.get_net_list()->get_net_list();
-
-  auto replace_str = [](const string& str, const string& replace_str, const string& new_str) {
-    std::regex re(replace_str);
-    return std::regex_replace(str, re, new_str);
+ private:
+  struct CloseFile
+  {
+    void operator()(FILE* file) const { std::fclose(file); }
   };
-
-  for (const auto& net : net_list) {
-    std::string net_name = net->get_net_name();
-
-    auto [net_bus_name, is_bus] = splitBusName(net_name.c_str());
-
-    if (net_bus_name.back() == '\\') {
-      is_bus = std::nullopt;
-    }
-
-    // bus of bus is not printed as bus
-    if (std::ranges::count(net_name, '[') > 1) {
-      is_bus = std::nullopt;
-    }
-
-    // if (is_bus) {
-    //   continue;
-    // }
-
-    std::string new_net_name = replace_str(net_name, R"(\\)", "");
-    std::string escape_net_name = escapeName(new_net_name);
-    writeStr("wire %s ;\n", escape_net_name.c_str());
-  }
-
-  // std::set<std::string> bus_processed;
-  // for (const auto& net : net_list) {
-  //   std::string net_name = net->get_net_name();
-
-  //   if (net_bus_name.back() == '\\') {
-  //     is_bus = std::nullopt;
-  //   }
-
-  //   // bus of bus is not printed as bus
-  //   if (std::ranges::count(net_name, '[') > 1) {
-  //     is_bus = std::nullopt;
-  //   }
-
-  //   if (!is_bus) {
-  //     continue;
-  //   }
-
-  //   if (bus_processed.contains(net_bus_name)) {
-  //     continue;
-  //   }
-
-  //   bus_processed.insert(net_bus_name);
-  //   // remove all "\" in net_bus_name
-  //   net_bus_name.erase(std::remove(net_bus_name.begin(), net_bus_name.end(), '\\'), net_bus_name.end());
-  //   auto net_bus = _idb_design.get_bus_list()->findBus(net_bus_name);
-  //   assert(net_bus);
-  //   int bus_left = net_bus->get().get_left();
-  //   int bus_right = net_bus->get().get_right();
-
-  //   std::string escape_bus_net_name = escapeName(net_bus_name);
-
-  //   fprintf(_stream, "wire [%d:%d] %s ;\n", bus_left, bus_right, escape_bus_net_name.c_str());
-  // }
-}
-
-/**
- * @brief write assign declarations(assign net=port(such as assign g6265 = 983 ;))
- *
- */
-void VerilogWriter::writeAssign()
-{
-  vector<IdbNet*> net_list = _idb_design.get_net_list()->get_net_list();
-  for (const auto& net : net_list) {
-    std::string net_name = net->get_net_name();
-    for (const auto& io_pin : net->get_io_pins()->get_pin_list()) {
-      // assign net = input_port;
-
-      std::string new_net_name = removeBackslash(net_name);
-      std::string escape_net_name = escapeName(new_net_name);
-
-      std::string new_io_pin_name = removeBackslash(io_pin->get_pin_name());
-      std::string escape_io_pin_name = escapeName(new_io_pin_name);
-
-      if (io_pin->get_term()->get_direction() == IdbConnectDirection::kInput && io_pin->get_pin_name() != net_name) {
-        writeStr("assign %s = %s ;\n", escape_net_name.c_str(), escape_io_pin_name.c_str());
-      }
-      // assign output_port = net;
-      // assign output_port = input_port;
-      if (io_pin->get_term()->get_direction() == IdbConnectDirection::kOutput && io_pin->get_pin_name() != net_name) {
-        writeStr("assign %s = %s ;\n", escape_io_pin_name.c_str(), escape_net_name.c_str());
-      }
-    }
-  }
-}
-
-/**
- * @brief write the instances of the verilog design.
- *
- */
-void VerilogWriter::writeInstances()
-{
-  std::vector<IdbInstance*> instance_list = _idb_design.get_instance_list()->get_instance_list();
-
-  for (const auto& instance : instance_list) {
-    if (std::string inst_cell_name = instance->get_cell_master()->get_name(); _exclude_cell_names.contains(inst_cell_name)) {
-      continue;
-    }
-    writeInstance(instance);
-  }
-}
-
-/**
- * @brief write the instance of the verilog design.
- *
- * @param inst
- */
-void VerilogWriter::writeInstance(IdbInstance* inst)
-{
-  auto replace_str = [](const string& str, const string& old_str, const string& new_str) {
-    std::regex re(old_str);
-    return std::regex_replace(str, re, new_str);
+  struct CloseGzip
+  {
+    void operator()(gzFile_s* file) const { gzclose(file); }
   };
-
-  std::string inst_cell_name = inst->get_cell_master()->get_name();
-  std::string inst_name = inst->get_name();
-  std::string new_inst_name = replace_str(inst_name, R"(\\)", "");
-  std::string inst_escape_name = escapeName(new_inst_name);
-
-  writeStr("%s %s ( ", inst_cell_name.c_str(), inst_escape_name.c_str());
-
-  bool first_pin = true;
-  vector<IdbPin*> pin_list = inst->get_pin_list()->get_pin_list();
-  std::map<std::string, std::map<int, IdbPin*>> instance_bus_pins;
-
-  for (const auto& pin : pin_list) {
-    std::string pin_name = pin->get_pin_name();
-    auto [pin_bus_name, bus_index] = splitBusName(pin_name.c_str());
-    if (bus_index) {
-      instance_bus_pins[pin_bus_name][bus_index.value()] = pin;
+  std::unique_ptr<FILE, CloseFile> _plain;
+  std::unique_ptr<gzFile_s, CloseGzip> _gzip;
+};
+bool powerPin(IdbPin* pin)
+{
+  return pin->get_term()->get_type() == IdbConnectType::kPower || pin->get_term()->get_type() == IdbConnectType::kGround;
+}
+struct ExportPort
+{
+  std::string name;
+  std::vector<std::string> pins;
+  bool power = false;
+};
+class Serializer
+{
+ public:
+  Serializer(IdbDesign& design, const std::set<std::string>& excluded) : _design(design), _excluded(excluded) {}
+  void run(Output& out)
+  {
+    prepareNames();
+    out.write("module " + encodeIdentifier(_design.get_design_name()) + " (\n");
+    for (size_t i = 0; i < _ports.size(); ++i) {
+      if (i)
+        out.write(",\n");
+      out.write("  " + encodeIdentifier(_ports[i]->get_pin_name()));
     }
-  }
-
-  for (const auto& pin : pin_list) {
-    std::string pin_name = pin->get_pin_name();
-
-    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
-
-    if (is_bus) {
-      continue;
+    out.write("\n);\n");
+    for (auto* port : _ports) {
+      const auto d = port->get_term()->get_direction();
+      out.write(std::string(d == IdbConnectDirection::kInput    ? "input "
+                            : d == IdbConnectDirection::kOutput ? "output "
+                                                                : "inout ")
+                + encodeIdentifier(port->get_pin_name()) + ";\n");
     }
-
-    auto pin_type = pin->get_term()->get_type();
-
-    if (pin_type == IdbConnectType::kPower || pin_type == IdbConnectType::kGround) {
-      continue;
+    for (auto* net : _design.get_net_list()->get_net_list()) {
+      const auto& name = _names.at(net);
+      const bool zero = net->get_net_name() == verilogZeroNet && net->is_ground();
+      const bool one = net->get_net_name() == verilogOneNet && net->is_power();
+      if (zero || one || !_port_names.count(name))
+        out.write(std::string(zero ? "supply0 " : one ? "supply1 " : "wire ") + encodeIdentifier(name) + ";\n");
     }
-
-    std::string pin_net_name;
-    if (pin_name == "VDD" || pin_name == "VSS") {
-      pin->get_special_net() ? pin_net_name = pin->get_special_net()->get_net_name() : pin_net_name = pin_name;
-    } else {
-      if (pin->get_net()) {
-        pin_net_name = pin->get_net()->get_net_name();
-      }
-    }
-
-    pin_net_name = escapeName(pin_net_name);
-
-    if (!first_pin) {
-      writeStr(", ");
-    }
-
-    writeStr(".%s(%s )", pin_name.c_str(), pin_net_name.c_str());
-    first_pin = false;
-  }
-
-  std::set<std::string> bus_processed;
-  for (const auto& pin : pin_list) {
-    std::string pin_name = pin->get_pin_name();
-
-    auto [pin_bus_name, is_bus] = splitBusName(pin_name.c_str());
-
-    if (!is_bus) {
-      continue;
-    }
-
-    if (bus_processed.contains(pin_bus_name)) {
-      continue;
-    }
-
-    bus_processed.insert(pin_bus_name);
-
-    auto bus_name = pin->get_instance()->get_name();
-    bus_name += "/";
-    bus_name += pin_bus_name;
-
-    auto pin_bus = _idb_design.get_bus_list()->findBus(bus_name);
-    auto local_bus_pin_it = instance_bus_pins.find(pin_bus_name);
-    int bus_left = 0;
-    int bus_right = 0;
-
-    if (pin_bus) {
-      bus_left = pin_bus->get().get_left();
-      bus_right = pin_bus->get().get_right();
-    } else {
-      if (local_bus_pin_it == instance_bus_pins.end() || local_bus_pin_it->second.empty()) {
-        ECCLOG.warn(ecc::Loc::current(), "skip missing bus pin ", bus_name, " when writing verilog instance ", inst->get_name());
+    for (auto* port : _ports) {
+      if (!port->get_net())
         continue;
-      }
-      bus_left = local_bus_pin_it->second.rbegin()->first;
-      bus_right = local_bus_pin_it->second.begin()->first;
+      const auto& name = _names.at(port->get_net());
+      if (name == port->get_pin_name())
+        continue;
+      const auto d = port->get_term()->get_direction();
+      if (d == IdbConnectDirection::kInOut)
+        throw std::runtime_error("multiple aliased inout ports require an unsupported tran connection: " + port->get_pin_name());
+      const auto pin = encodeIdentifier(port->get_pin_name()), net = encodeIdentifier(name);
+      out.write("assign " + (d == IdbConnectDirection::kInput ? net + " = " + pin : pin + " = " + net) + ";\n");
     }
-
-    std::string concate_str = "{ ";
-    for (int index = bus_left; index >= bus_right; --index) {
-      auto* one_pin = pin_bus ? pin_bus->get().getPin(index) : nullptr;
-      if (one_pin == nullptr && local_bus_pin_it != instance_bus_pins.end()) {
-        if (auto local_pin_it = local_bus_pin_it->second.find(index); local_pin_it != local_bus_pin_it->second.end()) {
-          one_pin = local_pin_it->second;
-        }
-      }
-
-      std::string pin_net_name;
-
-      if (one_pin) {
-        if (one_pin->get_net()) {
-          pin_net_name = one_pin->get_net()->get_net_name();
-        } else {
-          if (one_pin->get_term()->get_direction() == IdbConnectDirection::kInput) {
-            pin_net_name = R"(1'b0)";
-          }
-        }
-      } else {
-        pin_net_name = R"(1'b0)";
-      }
-
-      pin_net_name = escapeName(pin_net_name);
-
-      concate_str += " ";
-      concate_str += pin_net_name;
-
-      if (index != bus_right) {
-        concate_str += " , ";
-      }
+    for (auto* instance : _design.get_instance_list()->get_instance_list()) {
+      if (_excluded.count(instance->get_cell_master()->get_name()))
+        continue;
+      writeInstance(out, *instance);
     }
-
-    concate_str += " }";
-
-    if (!first_pin) {
-      writeStr(", ");
-    }
-
-    writeStr(".%s(%s )", pin_bus_name.c_str(), concate_str.c_str());
-
-    first_pin = false;
+    out.write("endmodule\n");
   }
 
-  writeStr(" );\n");
-}
-
-/**
- * @brief judge whether a string need escape.
- *
- * @param name
- * @return true
- * @return false
- */
-bool VerilogWriter::isNeedEscape(const std::string& name)
-{
-  bool is_need_escape = false;
-  for (const auto& ch : name) {
-    if (ch == '/' || ch == '[' || ch == ']' || ch == '.') {
-      is_need_escape = true;
-      break;
-    }
-  }
-  return is_need_escape;
-}
-
-/**
- * @brief escape the name.
- *
- * @param name
- * @return std::string
- */
-std::string VerilogWriter::escapeName(const std::string& name)
-{
-  std::string trim_name = removeBackslash(name);
-
-  std::string escape_name;
-  if (_is_add_space_for_escape_name) {
-    escape_name = isNeedEscape(trim_name) ? "\\" + addSpaceForEscapeName(trim_name) : trim_name;
-  } else {
-    escape_name = isNeedEscape(trim_name) ? "\\" + trim_name : trim_name;
-  }
-
-  return escape_name;
-}
-
-/**
- * @brief add space for escape name between id and bracket
- * such as \waddrReg_r[2] should be changed to \waddrReg_r [2], which is required by verilator. And such as \waddrReg_r[2]wa should not be
- * changed.
- * @param name
- * @return std::string
- */
-std::string VerilogWriter::addSpaceForEscapeName(const std::string& name)
-{
-  if (std::count(name.begin(), name.end(), '[') > 1) {
+ private:
+  std::string fresh(std::string_view prefix)
+  {
+    std::string name;
+    do {
+      name = std::string(prefix) + std::to_string(_next++);
+    } while (!_used.insert(name).second);
     return name;
   }
-
-  size_t start_pos = name.find("[");
-  size_t end_pos = name.find("]");
-  if (start_pos != string::npos && end_pos == name.size() - 1) {
-    std::string replace_str = name;
-    replace_str.replace(start_pos, 1, " [");
-    return replace_str;
-  }
-
-  return name;
-}
-
-/**
- * @brief judge whether a string have "[0]" object in middle.
- *
- * @param str
- * @return true
- * @return false
- */
-bool VerilogWriter::isMiddleSquareBracket(const std::string& str)
-{
-  size_t start_pos = str.find('[');
-  size_t end_pos = str.find(']', start_pos);
-
-  if (start_pos != std::string::npos && end_pos != std::string::npos && start_pos > 0 && end_pos < str.size() - 1) {
-    for (size_t i = start_pos + 1; i < end_pos; ++i) {
-      if (!std::isdigit(str[i])) {
-        return false;
-      }
+  void prepareNames()
+  {
+    std::unordered_map<std::string, IdbNet*> port_nets;
+    std::unordered_map<IdbNet*, std::string> inouts;
+    for (auto* pin : _design.get_io_pin_list()->get_pin_list()) {
+      if (powerPin(pin) && !pin->get_net())
+        continue;
+      const auto direction = pin->get_term()->get_direction();
+      if (direction != IdbConnectDirection::kInput && direction != IdbConnectDirection::kOutput && direction != IdbConnectDirection::kInOut)
+        continue;
+      _ports.push_back(pin);
+      _port_names.insert(pin->get_pin_name());
+      port_nets.emplace(pin->get_pin_name(), pin->get_net());
+      _used.insert(pin->get_pin_name());
+      if (direction == IdbConnectDirection::kInOut && pin->get_net())
+        inouts.emplace(pin->get_net(), pin->get_pin_name());
     }
-    return true;
+    std::unordered_set<std::string> instance_names;
+    for (auto* cell : _design.get_instance_list()->get_instance_list()) {
+      _used.insert(cell->get_name());
+      instance_names.insert(cell->get_name());
+    }
+    for (auto* net : _design.get_net_list()->get_net_list())
+      _used.insert(net->get_net_name());
+    std::unordered_set<std::string> chosen;
+    for (auto* net : _design.get_net_list()->get_net_list()) {
+      auto name = inouts.count(net) ? inouts.at(net) : net->get_net_name();
+      const auto port = port_nets.find(name);
+      if ((port != port_nets.end() && port->second != net) || instance_names.count(name) || chosen.count(name))
+        name = fresh("__ecc_verilog_net_");
+      chosen.insert(name);
+      _names.emplace(net, std::move(name));
+    }
   }
-
-  return false;
+  const std::vector<ExportPort>& ports(IdbCellMaster& master)
+  {
+    auto found = _interfaces.find(&master);
+    if (found != _interfaces.end())
+      return found->second;
+    auto interface = verilog_import::VerilogLibrary::describe(master);
+    std::unordered_set<std::string> grouped;
+    std::vector<ExportPort> ports;
+    for (const auto& [name, port] : interface.ports)
+      if (port.range) {
+        bool power = true;
+        for (const auto& pin : port.pins) {
+          auto* term = master.findTerm(pin);
+          power &= term->get_type() == IdbConnectType::kPower || term->get_type() == IdbConnectType::kGround;
+          grouped.insert(pin);
+        }
+        ports.push_back({name, port.pins, power});
+      }
+    for (auto* term : master.get_term_list())
+      if (!grouped.count(term->get_name()))
+        ports.push_back({term->get_name(),
+                         {term->get_name()},
+                         term->get_type() == IdbConnectType::kPower || term->get_type() == IdbConnectType::kGround});
+    std::sort(ports.begin(), ports.end(), [](const auto& a, const auto& b) { return a.name < b.name; });
+    return _interfaces.emplace(&master, std::move(ports)).first->second;
+  }
+  void writeInstance(Output& out, IdbInstance& instance)
+  {
+    // Missing bits of a partially connected bus use separate undriven wires.
+    // Entirely open ports use .P(), preserving disconnection without a constant driver.
+    std::string connections;
+    for (const auto& port : ports(*instance.get_cell_master())) {
+      std::vector<IdbNet*> nets;
+      bool connected = false;
+      for (const auto& name : port.pins) {
+        auto* pin = instance.get_pin(name);
+        auto* net = pin ? pin->get_net() : nullptr;
+        nets.push_back(net);
+        connected |= net != nullptr;
+      }
+      // Preserve explicit signal-net connections even on LEF POWER/GROUND terms.
+      if (port.power && !connected)
+        continue;
+      if (!connections.empty())
+        connections += ", ";
+      connections += "." + encodeIdentifier(port.name) + "(";
+      if (connected) {
+        if (nets.size() > 1)
+          connections += "{";
+        for (size_t i = 0; i < nets.size(); ++i) {
+          if (i)
+            connections += ", ";
+          if (nets[i])
+            connections += encodeIdentifier(_names.at(nets[i]));
+          else {
+            const auto name = fresh("__ecc_verilog_open_");
+            out.write("wire " + name + ";\n");
+            connections += name;
+          }
+        }
+        if (nets.size() > 1)
+          connections += "}";
+      }
+      connections += ")";
+    }
+    out.write(encodeIdentifier(instance.get_cell_master()->get_name()) + " " + encodeIdentifier(instance.get_name()) + " (" + connections
+              + ");\n");
+  }
+  IdbDesign& _design;
+  const std::set<std::string>& _excluded;
+  std::vector<IdbPin*> _ports;
+  std::unordered_map<IdbNet*, std::string> _names;
+  std::unordered_map<IdbCellMaster*, std::vector<ExportPort>> _interfaces;
+  std::unordered_set<std::string> _used, _port_names;
+  uint64_t _next = 0;
+};
+}  // namespace
+VerilogWriter::VerilogWriter(const char* file_name, const std::set<std::string>& excluded, IdbDesign& design, bool)
+    : _file_name(file_name ? file_name : ""), _exclude_cell_names(excluded), _design(design)
+{
 }
-
+void VerilogWriter::writeModule()
+{
+  std::string error;
+  try {
+    Output output(_file_name);
+    Serializer(_design, _exclude_cell_names).run(output);
+    output.finish();
+  } catch (const std::exception& exception) {
+    error = exception.what();
+  }
+  if (!error.empty())
+    ECCLOG.error(ecc::Loc::current(), "Verilog export failed: output=", _file_name, ", ", error);
+}
 }  // namespace idb

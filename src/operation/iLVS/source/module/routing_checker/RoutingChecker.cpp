@@ -73,7 +73,7 @@ RCModel RoutingChecker::initRCModel()
 {
   DefData& def_data = LVSDM.getDatabase().get_def_data();
   std::unordered_map<std::string, Net>& net_map = def_data.get_net_map();
-  std::map<std::string, NetRoutingGraph>& net_routing_graph_map = def_data.get_physical_graph().get_net_routing_graph_map();
+  PhysicalGraph& physical_graph = def_data.get_physical_graph();
 
   RCModel rc_model;
   std::vector<RoutingCheckTask>& task_list = rc_model.get_routing_check_task_list();
@@ -83,8 +83,7 @@ RCModel RoutingChecker::initRCModel()
     if (net.get_terminal_name_list().size() <= 1) {
       continue;
     }
-    auto routing_graph_iter = net_routing_graph_map.find(net_name);
-    NetRoutingGraph* routing_graph = routing_graph_iter == net_routing_graph_map.end() ? nullptr : &routing_graph_iter->second;
+    NetRoutingGraph* routing_graph = physical_graph.getNetRoutingGraph(net_name);
     task_list.push_back({&net_name, &net, routing_graph});
   }
   std::sort(task_list.begin(), task_list.end(), [](const RoutingCheckTask& first, const RoutingCheckTask& second) {
@@ -236,12 +235,7 @@ void RoutingChecker::checkShort(RCModel& rc_model)
   PhysicalGraph& physical_graph = LVSDM.getDatabase().get_def_data().get_physical_graph();
   std::vector<int32_t>& short_component_id_list = rc_model.get_short_component_id_list();
   if (physical_graph.has_optimized_component_data()) {
-    const std::vector<std::vector<int32_t>>& component_net_id_list = physical_graph.get_component_net_id_list();
-    for (int32_t component_id = 0; component_id < static_cast<int32_t>(component_net_id_list.size()); component_id++) {
-      if (component_net_id_list[component_id].size() > 1) {
-        short_component_id_list.push_back(component_id);
-      }
-    }
+    short_component_id_list = physical_graph.get_short_component_id_list();
   } else {
     for (const auto& [component_id, net_name_list] : physical_graph.get_component_net_name_map()) {
       if (LVSUTIL.getSortedUniqueList(net_name_list).size() > 1) {

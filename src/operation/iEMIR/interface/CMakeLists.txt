@@ -4,6 +4,7 @@ add_library(iemir_interface
 
 target_link_libraries(iemir_interface
     PRIVATE
+    iemir_ir_solver
     iemir_source
     idm
 )

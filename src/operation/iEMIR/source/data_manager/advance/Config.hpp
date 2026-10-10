@@ -36,10 +36,10 @@ class Config
   // **********       EMIR        ********** //
   std::string temp_directory_path;
   std::string ptpx_instance_power_file_path;
-  std::string redhawk_res_network_file_path;
   std::string ploc_file_path;
   std::string redhawk_tech_file_path;
   std::string em_limit_file_path;
+  double temperature_c = 25.0;
   double em_violation_threshold_percent = 100.0;
   int32_t thread_number;
   /////////////////////////////////////////////
@@ -51,6 +51,9 @@ class Config
   std::string gb_temp_directory_path;
   // **********    IRAnalyzer     ********** //
   std::string ia_temp_directory_path;
+  std::string ir_solver = "auto";
+  double ir_solver_tolerance = 1.e-10;
+  int32_t ir_solver_max_iterations = 2000;
   // **********    EMAnalyzer     ********** //
   std::string ea_temp_directory_path;
   // **********   EMIRReporter    ********** //
