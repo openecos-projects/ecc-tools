@@ -26,7 +26,7 @@ namespace py = pybind11;
 void register_iemir(py::module& m)
 {
   m.def("init_emir", init_emir, py::arg("temp_directory_path") = "", py::arg("instance_power_file_path") = "",
-        py::arg("thread_number") = 128);
+        py::arg("thread_number") = 128, py::arg("technology_file_path") = "", py::arg("ploc_file_path") = "");
   m.def("run_emir", run_emir);
   m.def("destroy_emir", destroy_emir);
 }

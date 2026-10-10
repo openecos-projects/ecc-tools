@@ -214,7 +214,7 @@ void PowerReporter::outputInstancePower()
 {
   std::ofstream* instance_power_file
       = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.tsv"));
-  (*instance_power_file) << "# iEMIR_PTPX_INSTANCE_POWER_V1\n";
+  (*instance_power_file) << "# iEMIR_INSTANCE_POWER_V1\n";
   (*instance_power_file) << "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\t"
                             "total_power_w\taverage_current_a\n";
   (*instance_power_file) << std::setprecision(17);

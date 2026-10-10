@@ -19,7 +19,8 @@
 
 namespace python_interface {
 
-bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number);
+bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number,
+               const std::string& technology_file_path, const std::string& ploc_file_path);
 bool run_emir();
 bool destroy_emir();
 

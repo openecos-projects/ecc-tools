@@ -8,7 +8,7 @@ endif()
 
 add_library(iemir_data_manager
     ${IEMIR_DATA_MANAGER}/DataManager.cpp
-    ${IEMIR_DATA_MANAGER}/PTPXPowerReader.cpp
+    ${IEMIR_DATA_MANAGER}/InstancePowerReader.cpp
 )
 
 target_link_libraries(iemir_data_manager

@@ -151,9 +151,9 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 {
   /////////////////////////////////////////////
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
-  EMIRDM.getConfig().ptpx_instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ptpx_instance_power_file_path", "");
+  EMIRDM.getConfig().instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-instance_power_file_path", "");
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
-  EMIRDM.getConfig().redhawk_tech_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-redhawk_tech_file_path", "");
+  EMIRDM.getConfig().technology_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-technology_file_path", "");
   EMIRDM.getConfig().em_limit_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-em_limit_file_path", "");
   EMIRDM.getConfig().temperature_c = EMIRUTIL.getConfigValue<double>(config_map, "-temperature_c", 25.0);
   EMIRDM.getConfig().em_violation_threshold_percent = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);

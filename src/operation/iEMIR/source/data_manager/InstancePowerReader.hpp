@@ -11,7 +11,7 @@
 
 namespace iemir {
 
-struct PTPXPowerRecord
+struct InstancePowerRecord
 {
   std::string instance_name;
   double voltage = 0.0;
@@ -22,10 +22,10 @@ struct PTPXPowerRecord
   double average_current = 0.0;
 };
 
-class PTPXPowerReader
+class InstancePowerReader
 {
  public:
-  static std::vector<PTPXPowerRecord> read(const std::string& file_path);
+  static std::vector<InstancePowerRecord> read(const std::string& file_path);
 };
 
 }  // namespace iemir
