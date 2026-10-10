@@ -477,13 +477,17 @@ std::string IdbDesign::makeUniqueNetName(const std::string& prefix) const
   }
 
   std::string base_name = prefix.empty() ? "net" : prefix;
-  if (_net_list->find_net(base_name) == nullptr) {
+  const auto available = [this](const std::string& name) {
+    return _net_list->find_net(name) == nullptr && _io_pin_list->find_pin(name) == nullptr
+           && _instance_list->find_instance(name) == nullptr;
+  };
+  if (available(base_name)) {
     return base_name;
   }
 
   for (uint64_t index = 0;; ++index) {
     std::string candidate = base_name + std::to_string(index);
-    if (_net_list->find_net(candidate) == nullptr) {
+    if (available(candidate)) {
       return candidate;
     }
   }

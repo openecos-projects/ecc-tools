@@ -23,6 +23,7 @@ class PlanBuilder
     _representative = _parent;
     _rank.resize(_parent.size());
     _assignment_targets.resize(_parent.size());
+    rankNetNames();
     for (NetId i = 0; i < _flat.nets.size(); ++i) {
       const auto type = _flat.nets[i].type;
       if (type == NetType::supply0 || type == NetType::supply1)
@@ -95,6 +96,32 @@ class PlanBuilder
   }
 
  private:
+  void rankNetNames()
+  {
+    // Exported cell connections carry the physical net name. Port declarations
+    // are aliases, even when they appear earlier in the file (e.g. eoi_0 before
+    // mem_addr_0). Input assignments run in the opposite direction to outputs,
+    // so choosing the RHS unconditionally is also incorrect.
+    constexpr uint8_t assignment_source = 1, internal_net = 2, cell_connection = 4;
+    _name_priority.assign(_flat.nets.size(), assignment_source | internal_net);
+    for (const auto& port : _flat.ports)
+      for (auto bit : port.signal.bits)
+        if (!isConstant(bit))
+          _name_priority[bit] &= ~internal_net;
+    for (const auto& edge : _flat.assignments)
+      _name_priority[edge.target] &= ~assignment_source;
+    for (const auto& instance : _flat.instances)
+      for (const auto& port : instance.ports)
+        for (auto bit : port.signal.bits)
+          if (!isConstant(bit))
+            _name_priority[bit] |= cell_connection;
+  }
+  NetId preferredName(NetId a, NetId b) const
+  {
+    if (_name_priority[a] != _name_priority[b])
+      return _name_priority[a] > _name_priority[b] ? a : b;
+    return std::min(a, b);
+  }
   [[noreturn]] void fail(SourceLocation location, const std::string& message) const { throw Error(location, message); }
   NetId mapped(NetId bit)
   {
@@ -131,7 +158,7 @@ class PlanBuilder
     const auto vb = isConstant(b) ? b : _representative[rb];
     if (isConstant(va) && isConstant(vb) && va != vb)
       throw Error(location, "conflicting constant drivers cannot be represented as a physical net");
-    const auto value = isConstant(va) ? va : isConstant(vb) ? vb : std::min(va, vb);
+    const auto value = isConstant(va) ? va : isConstant(vb) ? vb : preferredName(va, vb);
     if (isConstant(a)) {
       _representative[rb] = value;
       return;
@@ -236,7 +263,7 @@ class PlanBuilder
   VerilogLibrary& _library;
   VerilogImportPlan _plan;
   std::vector<NetId> _parent, _representative, _canonical, _mapped;
-  std::vector<uint8_t> _rank;
+  std::vector<uint8_t> _rank, _name_priority;
   std::vector<bool> _assignment_targets;
   NetId _zero = xBit, _one = xBit;
 };
