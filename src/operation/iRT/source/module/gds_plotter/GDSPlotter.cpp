@@ -35,7 +35,7 @@ constexpr uint8_t kReal8 = 0x05;
 constexpr uint8_t kAscii = 0x06;
 constexpr size_t kGDSFileBufferSize = 16 * 1024 * 1024;
 
-const std::string& getInnovusColor(int32_t layer_idx)
+const std::string& getLayerColor(int32_t layer_idx)
 {
   static const std::vector<std::string> color_list
       = {"#2f3bff", "#e52b2b", "#41e65a", "#f0ee66", "#8e2631", "#f2b63f", "#c438d0", "#35d4c8", "#8b5a3c", "#f0e85a"};
@@ -363,7 +363,7 @@ void GDSPlotter::buildGraphLypFile()
     } else if (RTUTIL.exist(_gds_routing_layer_map, gds_layer_idx)) {
       // routing
       int32_t routing_layer_idx = _gds_routing_layer_map[gds_layer_idx];
-      std::string color = getInnovusColor(routing_layer_idx);
+      std::string color = getLayerColor(routing_layer_idx);
       std::string routing_layer_name = routing_layer_list[routing_layer_idx].get_layer_name();
       for (auto& [routing_data_type, visible] : routing_data_type_visible_map) {
         lyp_layer_list.emplace_back(color, routing_pattern, visible, RTUTIL.getString(routing_layer_name, "_", GetGPDataTypeName()(routing_data_type)),
@@ -381,7 +381,7 @@ void GDSPlotter::buildGraphLypFile()
           }
         }
       }
-      std::string color = getInnovusColor(upper_routing_layer_idx);
+      std::string color = getLayerColor(upper_routing_layer_idx);
       for (auto& [cut_data_type, visible] : cut_data_type_visible_map) {
         lyp_layer_list.emplace_back(color, cut_pattern, visible, RTUTIL.getString(cut_layer_name, "_", GetGPDataTypeName()(cut_data_type)), gds_layer_idx,
                                     static_cast<int32_t>(cut_data_type));

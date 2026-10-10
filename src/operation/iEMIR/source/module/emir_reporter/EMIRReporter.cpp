@@ -187,7 +187,7 @@ void EMIRReporter::outputIRReportFile(const std::string& report_file_path)
 
 void EMIRReporter::outputIRReportHeader(std::ofstream* ir_report_file)
 {
-  (*ir_report_file) << "# iEMIR RedHawk-compatible static IR report\n";
+  (*ir_report_file) << "# iEMIR static IR report\n";
   (*ir_report_file) << "Design : " << EMIRDM.getDatabase().get_design_name() << "\n\n";
   (*ir_report_file) << "#Report locations (x, y) with worst voltage_drops/ground_bounces\n";
   (*ir_report_file) << "#voltage #ideal_volt   #net      #x_y_location     #layer_name\n";
@@ -360,7 +360,7 @@ void EMIRReporter::outputEMReportFile(const std::string& report_file_path, bool 
 
 void EMIRReporter::outputEMReportHeader(std::ofstream* em_report_file, bool worst_only)
 {
-  (*em_report_file) << "# iEMIR RedHawk-compatible static EM/current report\n";
+  (*em_report_file) << "# iEMIR static EM/current report\n";
   (*em_report_file) << "Design : " << EMIRDM.getDatabase().get_design_name() << "\n\n";
   (*em_report_file) << "# EM MODE is AVG\n";
   if (worst_only) {
@@ -370,7 +370,7 @@ void EMIRReporter::outputEMReportHeader(std::ofstream* em_report_file, bool wors
     (*em_report_file) << "# For vias: #via_name #x-y_coordinates #EM_Ratio #current #net #cut_box #direction #blech_length\n\n";
   } else {
     (*em_report_file) << "# This file reports the EM values and currents. Unit used for coordinates and dimensions is um.\n";
-    (*em_report_file) << "# EM_Ratio is calculated from solved current and loaded RedHawk EM limits when available.\n\n";
+    (*em_report_file) << "# EM_Ratio is calculated from solved current and loaded technology EM limits when available.\n\n";
     (*em_report_file) << "# For wires: #layer #end-to-end_coordinates #EM_Ratio #Current_value #net #width #blech_length\n";
     (*em_report_file) << "# For vias:  #via_name #x-y_coordinates #EM_Ratio #Current_value #net #via_cut_bounding_box #Direction #blech_length\n\n";
   }
@@ -468,7 +468,7 @@ void EMIRReporter::outputResNetworkReportFile(const std::string& report_file_pat
 
 void EMIRReporter::outputResNetworkReportHeader(std::ofstream* res_network_report_file)
 {
-  (*res_network_report_file) << "# iEMIR RedHawk-compatible resistance/current/EM network report\n";
+  (*res_network_report_file) << "# iEMIR resistance/current/EM network report\n";
   (*res_network_report_file) << "Design : " << EMIRDM.getDatabase().get_design_name() << "\n\n";
   (*res_network_report_file) << "# For Wire-segments\n";
   (*res_network_report_file)

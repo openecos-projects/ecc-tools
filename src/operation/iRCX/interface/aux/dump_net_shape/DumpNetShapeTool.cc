@@ -233,7 +233,7 @@ void writeHeader(std::ostream& stream, LayoutData& layout_data, LayerTable& laye
   stream << '\n';
   stream << "# dbu_per_micron: " << layout_data.get_dbu_per_micron() << '\n';
   stream << "# purpose: AI-readable dump of DEF/LEF-derived raw net shapes; "
-            "compare with StarRC topology from 8_spef_topology_starrc.py\n";
+            "compare with topology extracted from a reference SPEF\n";
   stream << "# shape_code: A=Segment B=Patch C=Via_non_cut_layer "
             "D=Via_cut_layer E=Pin_non_cut_layer F=Pin_cut_layer\n";
   stream << "# shape_code_note: C/E are non-cut shape types on the current layer; "
