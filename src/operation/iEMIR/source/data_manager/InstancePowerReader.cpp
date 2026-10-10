@@ -5,11 +5,11 @@
 //
 // iEDA is licensed under Mulan PSL v2.
 // ***************************************************************************************
-#include "PTPXPowerReader.hpp"
+#include "InstancePowerReader.hpp"
 
 namespace {
 
-constexpr const char* kFormatMarker = "# iEMIR_PTPX_INSTANCE_POWER_V1";
+constexpr const char* kFormatMarker = "# iEMIR_INSTANCE_POWER_V1";
 constexpr const char* kHeader
     = "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\ttotal_power_w\taverage_current_a";
 
@@ -61,14 +61,14 @@ bool closeEnough(double lhs, double rhs)
 
 namespace iemir {
 
-std::vector<PTPXPowerRecord> PTPXPowerReader::read(const std::string& file_path)
+std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& file_path)
 {
   std::ifstream input(file_path);
   if (!input.is_open()) {
-    throw std::runtime_error("Cannot open PT-PX instance power file: " + file_path);
+    throw std::runtime_error("Cannot open Instance power file: " + file_path);
   }
 
-  std::vector<PTPXPowerRecord> records;
+  std::vector<InstancePowerRecord> records;
   std::unordered_set<std::string> instance_names;
   std::string line;
   std::size_t line_number = 0;
@@ -92,14 +92,14 @@ std::vector<PTPXPowerRecord> PTPXPowerReader::read(const std::string& file_path)
       continue;
     }
     if (!saw_header) {
-      throw std::runtime_error("Missing PT-PX column header before line " + std::to_string(line_number));
+      throw std::runtime_error("Missing instance-power column header before line " + std::to_string(line_number));
     }
 
     std::vector<std::string> fields = splitTab(line);
     if (fields.size() != 7) {
       throw std::runtime_error("Expected 7 tab-separated fields at line " + std::to_string(line_number));
     }
-    PTPXPowerRecord record;
+    InstancePowerRecord record;
     record.instance_name = trim(fields[0]);
     if (record.instance_name.empty()) {
       throw std::runtime_error("Empty instance name at line " + std::to_string(line_number));
@@ -126,13 +126,13 @@ std::vector<PTPXPowerRecord> PTPXPowerReader::read(const std::string& file_path)
     records.push_back(std::move(record));
   }
   if (!saw_marker) {
-    throw std::runtime_error("Missing PT-PX format marker: " + std::string(kFormatMarker));
+    throw std::runtime_error("Missing instance-power format marker: " + std::string(kFormatMarker));
   }
   if (!saw_header) {
-    throw std::runtime_error("Missing PT-PX column header in " + file_path);
+    throw std::runtime_error("Missing instance-power column header in " + file_path);
   }
   if (records.empty()) {
-    throw std::runtime_error("No PT-PX instance power records in " + file_path);
+    throw std::runtime_error("No Instance power records in " + file_path);
   }
   return records;
 }

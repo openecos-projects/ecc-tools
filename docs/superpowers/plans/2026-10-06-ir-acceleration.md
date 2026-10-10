@@ -22,7 +22,6 @@
 ## References
 
 - `嵌套式层次化P_G网IR-drop分析方法的研究_解敏.caj`, physical pp. 39–41 (port elimination / hierarchy), p. 51 (ICCG). Original page images inspected.
-- `RedHawk_User_Manual_11.1.pdf`, PDF p. 46: dynamic-flow input boundary; no claim that accelerating a resistor solve supplies missing dynamic RLC/current models.
 - Eigen official sparse-solver, SimplicialLDLT and IncompleteCholesky documentation; installed Eigen headers determine API behavior.
 
 ## Review Focus

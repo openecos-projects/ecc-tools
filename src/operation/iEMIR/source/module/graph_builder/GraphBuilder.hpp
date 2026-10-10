@@ -46,8 +46,9 @@ class GraphBuilder
   GraphBuilder& operator=(GraphBuilder&& other) = delete;
   // function
   GBModel initGBModel();
-  void buildPowerGraphList();
-  void buildPowerGraph(PowerNet& power_net);
+  void resolvePowerSourceNets();
+  void buildPowerGraphList(std::ofstream& source_report);
+  void buildPowerGraph(PowerNet& power_net, std::ofstream& source_report);
   void initPowerGraph(PowerGraph& power_graph, PowerNet& power_net);
   void buildWireNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
   void buildWireEndpointNode(PowerGraph& power_graph, PowerWireSegment& power_wire_segment, std::size_t segment_idx, GBModel& gb_model);
@@ -60,7 +61,7 @@ class GraphBuilder
   bool getWireIntersectionCoordinate(PowerWireSegment& first_power_wire_segment, PowerWireSegment& second_power_wire_segment, int32_t& x, int32_t& y);
   void appendWireNodeId(GBModel& gb_model, std::size_t segment_idx, std::size_t node_id);
   void buildViaNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
-  void buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
+  void buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model, std::ofstream& source_report);
   void buildPinNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
   bool getPointWireConnectionCoordinate(PowerWireSegment& power_wire_segment, int32_t point_x, int32_t point_y, int32_t& wire_x,
                                         int32_t& wire_y);

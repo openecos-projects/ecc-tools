@@ -20,7 +20,8 @@
 #include "EMTech.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
-#include "PTPXPowerReader.hpp"
+#include "InstancePowerReader.hpp"
+#include "PowerSourceReader.hpp"
 #include "Utility.hpp"
 
 namespace {
@@ -146,7 +147,7 @@ void addViaRule(iemir::EMTech& em_tech, const std::string& name, double em_limit
   }
 }
 
-std::vector<std::string> tokenizeRedHawkTechFile(const std::string& file_path)
+std::vector<std::string> tokenizeTechnologyFile(const std::string& file_path)
 {
   std::ifstream input(file_path);
   std::vector<std::string> tokens;
@@ -246,15 +247,16 @@ void DataManager::buildConfig()
   // **********       EMIR        ********** //
   _config.temp_directory_path = std::filesystem::absolute(_config.temp_directory_path);
   _config.temp_directory_path += "/";
-  if (!_config.redhawk_tech_file_path.empty()) {
-    _config.redhawk_tech_file_path = std::filesystem::absolute(_config.redhawk_tech_file_path);
+  if (!_config.technology_file_path.empty()) {
+    _config.technology_file_path = std::filesystem::absolute(_config.technology_file_path);
   }
-  if (!_config.ptpx_instance_power_file_path.empty()) {
-    _config.ptpx_instance_power_file_path = std::filesystem::absolute(_config.ptpx_instance_power_file_path);
+  if (!_config.instance_power_file_path.empty()) {
+    _config.instance_power_file_path = std::filesystem::absolute(_config.instance_power_file_path);
   }
   if (!_config.ploc_file_path.empty()) {
     _config.ploc_file_path = std::filesystem::absolute(_config.ploc_file_path);
   }
+  for (auto& path : _config.pad_files) path = std::filesystem::absolute(path);
   if (!_config.em_limit_file_path.empty()) {
     _config.em_limit_file_path = std::filesystem::absolute(_config.em_limit_file_path);
   }
@@ -299,64 +301,21 @@ void DataManager::readPowerSourceFile()
 {
   std::vector<PowerSource>& source_list = _database.get_power_source_list();
   source_list.clear();
-  if (_config.ploc_file_path.empty()) {
-    return;
-  }
-  if (!std::filesystem::is_regular_file(_config.ploc_file_path)) {
-    EMIRLOG.error(Loc::current(), "The PLOC file is missing: ", _config.ploc_file_path);
-  }
-  std::ifstream input(_config.ploc_file_path);
-  std::string line;
-  std::size_t line_number = 0;
-  while (std::getline(input, line)) {
-    line_number++;
-    std::size_t comment_pos = line.find('#');
-    if (comment_pos != std::string::npos) {
-      line = line.substr(0, comment_pos);
-    }
-    line = trim(line);
-    if (line.empty()) {
-      continue;
-    }
-    std::string name;
-    std::string layer_name;
-    std::string type_name;
-    double x_um = 0.0;
-    double y_um = 0.0;
-    std::istringstream iss(line);
-    if (!(iss >> name >> x_um >> y_um >> layer_name >> type_name)) {
-      EMIRLOG.error(Loc::current(), "Invalid PLOC record at line ", line_number, ": ", line);
-    }
-    type_name = toUpper(type_name);
-    PowerNetType net_type = type_name == "POWER" ? PowerNetType::kPower : (type_name == "GROUND" ? PowerNetType::kGround : PowerNetType::kNone);
-    if (net_type == PowerNetType::kNone) {
-      EMIRLOG.error(Loc::current(), "Invalid PLOC source type at line ", line_number, ": ", type_name);
-    }
-    std::string marker = net_type == PowerNetType::kPower ? "_POWER_" : "_GROUND_";
-    std::size_t marker_pos = name.rfind(marker);
-    PowerSource source;
-    source.set_name(name);
-    source.set_net_name(marker_pos == std::string::npos ? "" : name.substr(0, marker_pos));
-    source.set_layer_name(layer_name);
-    source.set_net_type(net_type);
-    source.set_x(static_cast<int32_t>(std::llround(x_um * _database.get_micron_dbu())));
-    source.set_y(static_cast<int32_t>(std::llround(y_um * _database.get_micron_dbu())));
-    source_list.push_back(source);
-  }
-  if (source_list.empty()) {
-    EMIRLOG.error(Loc::current(), "The PLOC file does not contain any source: ", _config.ploc_file_path);
-  }
-  EMIRLOG.info(Loc::current(), "Loaded ", source_list.size(), " source locations from ", _config.ploc_file_path);
+  if (_config.pad_files.empty() && _config.ploc_file_path.empty()) return;
+  source_list = _config.pad_files.empty()
+                    ? PowerSourceReader::read(_config.ploc_file_path, _database.get_micron_dbu())
+                    : PowerSourceReader::read(_config.pad_files, _database.get_micron_dbu());
+  EMIRLOG.info(Loc::current(), "Loaded ", source_list.size(), " absolute source locations");
 }
 
 void DataManager::readInstancePower()
 {
-  if (_config.ptpx_instance_power_file_path.empty()) {
-    EMIRLOG.error(Loc::current(), "ptpx_instance_power_file_path is required!");
+  if (_config.instance_power_file_path.empty()) {
+    EMIRLOG.error(Loc::current(), "instance_power_file_path is required!");
   }
-  std::vector<PTPXPowerRecord> records;
+  std::vector<InstancePowerRecord> records;
   try {
-    records = PTPXPowerReader::read(_config.ptpx_instance_power_file_path);
+    records = InstancePowerReader::read(_config.instance_power_file_path);
   } catch (const std::exception& error) {
     EMIRLOG.error(Loc::current(), error.what());
   }
@@ -367,7 +326,7 @@ void DataManager::readInstancePower()
   std::size_t unknown_record_num = 0;
   double report_total_power = 0.0;
   double matched_total_power = 0.0;
-  for (const PTPXPowerRecord& record : records) {
+  for (const InstancePowerRecord& record : records) {
     report_total_power += record.total_power;
     auto instance_iter = instance_name_to_id_map.find(record.instance_name);
     if (instance_iter == instance_name_to_id_map.end() && !record.instance_name.empty() && record.instance_name.front() == '\\') {
@@ -388,24 +347,24 @@ void DataManager::readInstancePower()
     matched_total_power += record.total_power;
   }
   if (instance_power_map.empty() || report_total_power <= 0.0 || matched_total_power <= 0.0) {
-    EMIRLOG.error(Loc::current(), "No non-zero PT-PX instance power matched the DEF design.");
+    EMIRLOG.error(Loc::current(), "No non-zero Instance power matched the DEF design.");
   }
   double power_coverage = 100.0 * matched_total_power / report_total_power;
-  EMIRLOG.info(Loc::current(), "Loaded shared PT-PX power: matched_instances=", instance_power_map.size(), ", unknown_records=", unknown_record_num,
-               ", power_coverage=", power_coverage, "% from ", _config.ptpx_instance_power_file_path);
+  EMIRLOG.info(Loc::current(), "Loaded instance power: matched_instances=", instance_power_map.size(), ", unknown_records=", unknown_record_num,
+               ", power_coverage=", power_coverage, "% from ", _config.instance_power_file_path);
   if (power_coverage < 95.0) {
-    EMIRLOG.error(Loc::current(), "PT-PX instance power coverage is below 95%: ", power_coverage, "%");
+    EMIRLOG.error(Loc::current(), "Instance power coverage is below 95%: ", power_coverage, "%");
   }
 }
 
 void DataManager::readEMTech()
 {
   _database.get_em_tech().clear();
-  if (_config.redhawk_tech_file_path.empty()) {
-    EMIRLOG.error(Loc::current(), "redhawk_tech_file_path is required for internal power-grid resistance extraction!");
+  if (_config.technology_file_path.empty()) {
+    EMIRLOG.error(Loc::current(), "technology_file_path is required for internal power-grid resistance extraction!");
   }
-  if (!_config.redhawk_tech_file_path.empty()) {
-    readRedHawkTechFile(_config.redhawk_tech_file_path);
+  if (!_config.technology_file_path.empty()) {
+    readTechnologyFile(_config.technology_file_path);
   }
   if (!_config.em_limit_file_path.empty()) {
     readEMLimitFile(_config.em_limit_file_path);
@@ -418,14 +377,14 @@ void DataManager::readEMTech()
                ": metal=", _database.get_em_tech().get_metal_rule_map().size(), ", via=", _database.get_em_tech().get_via_rule_map().size());
 }
 
-void DataManager::readRedHawkTechFile(const std::string& redhawk_tech_file_path)
+void DataManager::readTechnologyFile(const std::string& technology_file_path)
 {
-  if (!std::filesystem::is_regular_file(redhawk_tech_file_path)) {
-    EMIRLOG.error(Loc::current(), "The RedHawk tech file is missing: ", redhawk_tech_file_path);
+  if (!std::filesystem::is_regular_file(technology_file_path)) {
+    EMIRLOG.error(Loc::current(), "The technology file is missing: ", technology_file_path);
   }
   EMTech& em_tech = _database.get_em_tech();
-  em_tech.set_source_file_path(redhawk_tech_file_path);
-  std::vector<std::string> tokens = tokenizeRedHawkTechFile(redhawk_tech_file_path);
+  em_tech.set_source_file_path(technology_file_path);
+  std::vector<std::string> tokens = tokenizeTechnologyFile(technology_file_path);
   for (std::size_t token_idx = 0; token_idx + 1 < tokens.size(); token_idx++) {
     if (toUpper(tokens[token_idx]) != "HALF_NODE_SCALE_FACTOR") {
       continue;
@@ -550,12 +509,14 @@ void DataManager::printConfig()
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(0), "EMIR_CONFIG_INPUT");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "temp_directory_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.temp_directory_path);
-  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "ptpx_instance_power_file_path");
-  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ptpx_instance_power_file_path);
+  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "instance_power_file_path");
+  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.instance_power_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "ploc_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ploc_file_path);
-  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "redhawk_tech_file_path");
-  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.redhawk_tech_file_path);
+  for (const auto& path : _config.pad_files) EMIRLOG.info(Loc::current(), "pad_files: ", path);
+  EMIRLOG.info(Loc::current(), "add_ploc_from_top_def: ", _config.add_ploc_from_top_def);
+  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "technology_file_path");
+  EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.technology_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "temperature_c");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.temperature_c);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "em_limit_file_path");

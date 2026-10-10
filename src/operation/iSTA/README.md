@@ -43,13 +43,13 @@ RC wire delay and its threshold correction still use the calculated waveform.
 Maximum analysis, input-port waveforms, resistance loops, and the DMP fallback
 retain their previous behavior.
 
-This approximation was evaluated against controlled PrimeTime minimum-slew
+This approximation was evaluated against controlled reference minimum-slew
 runs. Restricting it to compatible slew conventions avoids applying the
 approximation to unvalidated library conversions, which previously worsened
 some SRAM receiver delays. This is a conservative scope limit, not a
 requirement of RC physics. The fitted Arnoldi resistance is a heuristic,
 not an exact physical resistance derived from the delay/load slope.
-Neither the ratio nor this scope limit should be treated as PrimeTime's
+Neither the ratio nor this scope limit should be treated as the reference tool's
 complete algorithm. Some paths improve and others regress, so the option
 remains experimental. It does not resolve all driver-model or SDF coverage
 differences.

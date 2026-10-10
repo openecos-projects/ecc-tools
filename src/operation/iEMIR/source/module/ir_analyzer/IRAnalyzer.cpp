@@ -172,7 +172,7 @@ void IRAnalyzer::buildInstanceNodeCurrent(PowerGraph& power_graph, uint64_t inst
     EMIRLOG.error(Loc::current(), "The instance power voltage is invalid!");
   }
   double instance_current = instance_power.get_has_average_current() ? instance_power.get_average_current() : total_power / instance_power.get_voltage();
-  // PT-PX currents for small blocks commonly fall below the generic 1e-6
+  // Instance currents for small blocks commonly fall below the generic 1e-6
   // geometry/voltage tolerance. Only an actual zero means there is no load.
   if (instance_current == 0.0) {
     return;

@@ -115,8 +115,8 @@ class TimingReporter
   std::optional<std::size_t> getPinFanout(const std::string& pin_name);
   std::string getNumberString(double value);
   std::string getPointLabel(TimingPathPoint& path_point);
-  std::string getPTPinName(std::string& pin_name);
-  std::string getPTCellName(TimingPathPoint& path_point);
+  std::string getReportPinName(std::string& pin_name);
+  std::string getReportCellName(TimingPathPoint& path_point);
   void outputRequiredClockInfo(std::ofstream* report_file, TimingPath& timing_path, DelayType delay_type, std::size_t label_width);
   std::string getLibraryCheckText(TimingPath& timing_path, DelayType delay_type);
   double getOutputDelay(TimingPath& timing_path, DelayType delay_type);
