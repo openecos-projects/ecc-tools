@@ -2,6 +2,7 @@
 
 #include "GeometryBuilder.h"
 #include "GeometryStore.h"
+#include "GeometryThumbnail.h"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
 #include "IdbUnits.h"
@@ -25,7 +26,8 @@ void populate_design_metadata(SnapshotWriteOptions& options, idb::IdbDesign& des
 
 SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout,
                                              const std::filesystem::path& output_dir,
-                                             std::optional<GeometryDrcDistribution> drc)
+                                             std::optional<GeometryDrcDistribution> drc,
+                                             const std::filesystem::path& thumbnail_path)
 {
   if (output_dir.empty()) {
     return {};
@@ -49,7 +51,11 @@ SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLay
   populate_design_metadata(options, design, layout);
 
   GeometrySnapshotWriter writer;
-  return writer.write(store, options);
+  SnapshotWriteResult result = writer.write(store, options);
+  if (result.ok && !thumbnail_path.empty()) {
+    render_thumbnail_png(store, options.layers, thumbnail_path, 1024, 1024);
+  }
+  return result;
 }
 
 }  // namespace ecc::geometry
