@@ -49,18 +49,28 @@ auto toFastStaTransition(WrapperTimingTransition transition) -> FastStaTransitio
 auto matchesSnapshotNet(const WrapperTimingNet& snapshot, const FastStaNet& net, const FastStaContext& context,
                         const std::unordered_map<std::string, const WrapperTimingNode*>& snapshot_nodes) -> bool
 {
+  // The input graph lists every pin of the net, including ignore terminals
+  // (top-level pins that are not clock loads). They take part in the identity
+  // check so that an unchanged net keeps its input RC; they are never attached
+  // as RC terminals.
+  const auto terminal_count = net.load_node_ids.size() + net.ignore_terminals.size();
   if (net.driver_node_id >= context.nodes.size() || context.nodes.at(net.driver_node_id).name != snapshot.driver_pin
-      || net.load_node_ids.size() != snapshot.load_pins.size()) {
+      || terminal_count != snapshot.load_pins.size()) {
     return false;
   }
   const std::unordered_set<std::string> load_names(snapshot.load_pins.begin(), snapshot.load_pins.end());
-  const auto same_location = [&](FastStaNodeId id) -> bool {
-    const auto& node = context.nodes.at(id);
-    const auto source = snapshot_nodes.find(node.name);
-    return source != snapshot_nodes.end() && source->second->x_dbu == node.location.x_dbu && source->second->y_dbu == node.location.y_dbu;
+  const auto snapshot_at = [&](const std::string& name, const FastStaPoint& location) -> bool {
+    const auto source = snapshot_nodes.find(name);
+    return source != snapshot_nodes.end() && source->second->x_dbu == location.x_dbu && source->second->y_dbu == location.y_dbu;
   };
-  return same_location(net.driver_node_id) && load_names.size() == net.load_node_ids.size()
-         && std::ranges::all_of(net.load_node_ids, [&](auto id) -> bool { return load_names.contains(context.nodes.at(id).name) && same_location(id); });
+  const auto& nodes = context.nodes;
+  return snapshot_at(nodes.at(net.driver_node_id).name, nodes.at(net.driver_node_id).location) && load_names.size() == terminal_count
+         && std::ranges::all_of(
+             net.load_node_ids,
+             [&](auto id) -> bool { return load_names.contains(nodes.at(id).name) && snapshot_at(nodes.at(id).name, nodes.at(id).location); })
+         && std::ranges::all_of(net.ignore_terminals, [&](const auto& terminal) -> bool {
+              return load_names.contains(terminal.name) && snapshot_at(terminal.name, terminal.location);
+            });
 }
 
 auto applySnapshotRc(const WrapperTimingNet& source, FastStaNetId net_id, FastStaContext& context, std::string& failure_reason) -> bool
