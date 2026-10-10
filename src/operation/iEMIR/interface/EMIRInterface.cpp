@@ -61,6 +61,49 @@ void EMIRInterface::destroyInst()
 void EMIRInterface::initEMIR(std::map<std::string, std::any> config_map)
 {
   Logger::initInst();
+  const auto pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
+  const auto ploc_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
+  const auto def_sources = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0);
+  if (def_sources != 0 && def_sources != 1)
+    throw std::invalid_argument("add_ploc_from_top_def must be 0 or 1");
+  if (!pad_files.empty() && !ploc_path.empty())
+    throw std::invalid_argument("pad_files and ploc_file_path are mutually exclusive");
+  if (config_map.count("-pad_files") && pad_files.empty())
+    throw std::invalid_argument("pad_files must contain at least one supply input file");
+  if (def_sources == 1 && (!pad_files.empty() || !ploc_path.empty()))
+    throw std::invalid_argument("add_ploc_from_top_def and supply files (pad_files or ploc_file_path) are mutually exclusive");
+  if (def_sources == 0 && pad_files.empty() && ploc_path.empty())
+    throw std::invalid_argument("No supply inputs: provide -pad_files or -ploc_file_path, or explicitly enable -add_ploc_from_top_def 1");
+  // Initialization clears its output directory. Reject inputs inside it before
+  // mutating either the analysis database or the filesystem, including aliases.
+  namespace fs = std::filesystem;
+  auto output = fs::weakly_canonical(fs::absolute(
+      EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory"))).lexically_normal();
+  if (output.filename().empty()) output = output.parent_path();
+  std::vector<std::string> inputs = pad_files;
+  for (const char* key : {"-ploc_file_path", "-instance_power_file_path", "-technology_file_path", "-em_limit_file_path"}) {
+    auto path = EMIRUTIL.getConfigValue<std::string>(config_map, key, "");
+    if (!path.empty()) inputs.push_back(path);
+  }
+  for (const auto& path : inputs) {
+    if (path.empty()) throw std::invalid_argument("empty supply input path");
+    auto input = fs::weakly_canonical(fs::absolute(path));
+    // A symlink can point outside the output tree while its directory entry
+    // (or a symlinked parent directory) is still removed by cleanup. Check each
+    // path component as well as the final target before accepting the input.
+    for (auto entry = fs::absolute(path); !entry.empty();) {
+      auto resolved = fs::weakly_canonical(entry);
+      auto mismatch = std::mismatch(output.begin(), output.end(), resolved.begin(), resolved.end());
+      if (mismatch.first == output.end())
+        throw std::invalid_argument("input is inside the analysis output directory: " + path);
+      auto parent = entry.parent_path();
+      if (parent == entry) break;
+      entry = parent;
+    }
+    if (!fs::is_regular_file(input)) throw std::invalid_argument("cannot read input file: " + path);
+  }
+  if (!dmInst->get_idb_design() || !dmInst->get_idb_layout())
+    throw std::invalid_argument("load DEF/LEF before initializing EMIR");
   // clang-format off
   EMIRLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   EMIRLOG.info(Loc::current(), "____________________  _________________     _____________________________________  ");
@@ -153,6 +196,8 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
   EMIRDM.getConfig().instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-instance_power_file_path", "");
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
+  EMIRDM.getConfig().pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
+  EMIRDM.getConfig().add_ploc_from_top_def = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0) == 1;
   EMIRDM.getConfig().technology_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-technology_file_path", "");
   EMIRDM.getConfig().em_limit_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-em_limit_file_path", "");
   EMIRDM.getConfig().temperature_c = EMIRUTIL.getConfigValue<double>(config_map, "-temperature_c", 25.0);
@@ -379,9 +424,11 @@ void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* id
       }
     }
   }
-  for (idb::IdbPin* idb_pin : idb_power_net->get_io_pin_list()->get_pin_list()) {
-    if (idb_pin != nullptr && wrapped_pins.insert(idb_pin).second) {
-      wrapPowerPin(power_net, idb_pin, true);
+  if (EMIRDM.getConfig().add_ploc_from_top_def) {
+    for (idb::IdbPin* idb_pin : idb_power_net->get_io_pin_list()->get_pin_list()) {
+      if (idb_pin != nullptr && wrapped_pins.insert(idb_pin).second) {
+        wrapPowerPin(power_net, idb_pin, true);
+      }
     }
   }
 }

@@ -30,6 +30,8 @@ TclInitEMIR::TclInitEMIR(const char* cmd_name) : TclCmd(cmd_name)
   _config_list.push_back(std::make_pair("-instance_power_file_path", ValueType::kString));
   // std::string ploc_file_path;            // optional
   _config_list.push_back(std::make_pair("-ploc_file_path", ValueType::kString));
+  _config_list.push_back(std::make_pair("-pad_files", ValueType::kStringList));
+  _config_list.push_back(std::make_pair("-add_ploc_from_top_def", ValueType::kString));
   // std::string technology_file_path;    // required
   _config_list.push_back(std::make_pair("-technology_file_path", ValueType::kString));
   // double temperature_c;                  // optional
@@ -54,8 +56,21 @@ unsigned TclInitEMIR::exec()
     return 0;
   }
   std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  EMIRI.initEMIR(config_map);
-  return 1;
+  try {
+    auto def_sources = config_map.find("-add_ploc_from_top_def");
+    if (def_sources != config_map.end()) {
+      // Validate the complete token before the generic integer parser can
+      // truncate malformed values such as "1.5" or "1garbage".
+      const auto& value = std::any_cast<const std::string&>(def_sources->second);
+      if (value != "0" && value != "1") throw std::invalid_argument("add_ploc_from_top_def must be 0 or 1");
+      def_sources->second = static_cast<int32_t>(value == "1");
+    }
+    EMIRI.initEMIR(config_map);
+    return 1;
+  } catch (const std::exception& error) {
+    Tcl_SetObjResult(ScriptEngine::getOrCreateInstance()->get_interp(), Tcl_NewStringObj(error.what(), -1));
+    return 0;
+  }
 }
 
 // private

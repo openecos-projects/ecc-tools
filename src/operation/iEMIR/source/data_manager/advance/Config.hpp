@@ -37,6 +37,8 @@ class Config
   std::string temp_directory_path;
   std::string instance_power_file_path;
   std::string ploc_file_path;
+  std::vector<std::string> pad_files;
+  bool add_ploc_from_top_def = false;
   std::string technology_file_path;
   std::string em_limit_file_path;
   double temperature_c = 25.0;

@@ -256,6 +256,7 @@ void DataManager::buildConfig()
   if (!_config.ploc_file_path.empty()) {
     _config.ploc_file_path = std::filesystem::absolute(_config.ploc_file_path);
   }
+  for (auto& path : _config.pad_files) path = std::filesystem::absolute(path);
   if (!_config.em_limit_file_path.empty()) {
     _config.em_limit_file_path = std::filesystem::absolute(_config.em_limit_file_path);
   }
@@ -300,8 +301,10 @@ void DataManager::readPowerSourceFile()
 {
   std::vector<PowerSource>& source_list = _database.get_power_source_list();
   source_list.clear();
-  if (_config.ploc_file_path.empty()) return;
-  source_list = PowerSourceReader::read(_config.ploc_file_path, _database.get_micron_dbu());
+  if (_config.pad_files.empty() && _config.ploc_file_path.empty()) return;
+  source_list = _config.pad_files.empty()
+                    ? PowerSourceReader::read(_config.ploc_file_path, _database.get_micron_dbu())
+                    : PowerSourceReader::read(_config.pad_files, _database.get_micron_dbu());
   EMIRLOG.info(Loc::current(), "Loaded ", source_list.size(), " absolute source locations");
 }
 
@@ -510,6 +513,8 @@ void DataManager::printConfig()
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.instance_power_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "ploc_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ploc_file_path);
+  for (const auto& path : _config.pad_files) EMIRLOG.info(Loc::current(), "pad_files: ", path);
+  EMIRLOG.info(Loc::current(), "add_ploc_from_top_def: ", _config.add_ploc_from_top_def);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "technology_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.technology_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "temperature_c");

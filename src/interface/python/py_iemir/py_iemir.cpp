@@ -23,7 +23,8 @@
 namespace python_interface {
 
 bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number,
-               const std::string& technology_file_path, const std::string& ploc_file_path)
+               const std::string& technology_file_path, const std::string& ploc_file_path, const std::vector<std::string>& pad_files,
+               bool add_ploc_from_top_def)
 {
   std::map<std::string, std::any> config_map;
   if (!temp_directory_path.empty()) {
@@ -35,6 +36,8 @@ bool init_emir(const std::string& temp_directory_path, const std::string& instan
   config_map.insert(std::make_pair("-thread_number", thread_number));
   if (!technology_file_path.empty()) config_map["-technology_file_path"] = technology_file_path;
   if (!ploc_file_path.empty()) config_map["-ploc_file_path"] = ploc_file_path;
+  if (!pad_files.empty()) config_map["-pad_files"] = pad_files;
+  config_map["-add_ploc_from_top_def"] = static_cast<int32_t>(add_ploc_from_top_def);
 
   EMIRI.initEMIR(config_map);
   return true;
