@@ -60,10 +60,13 @@ test/**
 !test/data/
 !test/data/test_python_io.py
 !test/data/timing_defaults.py
+!test/data/timing_qualification.py
 !test/data/test_pyplacedb_rows.py
 !test/operations/
 !test/operations/test_python_operations.py
 !test/operations/test_placement_map.py
+!test/timing/
+!test/timing/endpoint_qualification_test.cpp
 !test/fixtures/
 !test/fixtures/gcd/
 !test/fixtures/gcd/config/

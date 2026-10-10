@@ -110,6 +110,12 @@ struct PyPlaceDB
   std::string timing_parasitics_initialization;
   pybind11::list start_points;
   pybind11::list end_points;
+  pybind11::list endpoints_max_valid;
+  pybind11::list endpoints_max_reason;
+  pybind11::list endpoints_constraint_max_valid;
+  pybind11::list endpoints_constraint_max_reason;
+  pybind11::list endpoints_timing_check_max_valid;
+  pybind11::list endpoints_timing_check_max_reason;
   pybind11::list clock_pins;
   pybind11::list FF_ids;
   pybind11::list clk_pin_r_aat;

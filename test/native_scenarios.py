@@ -7,6 +7,7 @@ from textwrap import dedent
 from typing import Any
 
 from data.timing_defaults import assert_placement_timing_defaults
+from data.timing_qualification import assert_endpoint_qualification
 from ecc_tools_bin import ecc_py
 
 
@@ -161,6 +162,7 @@ def pyplacedb_timing(manifest: dict[str, Any]) -> dict[str, Path]:
         _require(ecc_py.run_sta(), "run_sta")
         place_db = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, True)  # noqa: FBT003
         assert_placement_timing_defaults(place_db, manifest)
+        assert_endpoint_qualification(place_db)
         num_pins = len(place_db.pin_names)
         for field_name in ("start_points", "end_points", "clock_pins", "endpoint_pin_ids", "start_pin_ids"):
             values = [int(value) for value in getattr(place_db, field_name)]
@@ -471,7 +473,7 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     second_spef = _run_rcx(manifest)
     _load_sta_inputs(manifest, spef_path=second_spef)
     second_pydb = run_sta()
-    if id(second_pydb) == old_pydb_id or int(second_pydb.timing_schema_version) != 1:
+    if id(second_pydb) == old_pydb_id or int(second_pydb.timing_schema_version) != 2:
         ecc_py.destroy_sta()
         raise AssertionError("full refresh did not return a new valid timing PyPlaceDB")
     refreshed_id = list(second_pydb.node_names).index(str(first_pydb.node_names[candidate_ids[0]]))
@@ -488,9 +490,14 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     third_spef = _run_rcx(manifest)
     _load_sta_inputs(manifest, spef_path=third_spef)
     third_pydb = run_sta()
-    if int(third_pydb.timing_schema_version) != 1:
+    if int(third_pydb.timing_schema_version) != 2:
         ecc_py.destroy_sta()
         raise AssertionError("second refresh did not return a valid timing PyPlaceDB")
+    first_qualification = assert_endpoint_qualification(first_pydb)
+    second_qualification = assert_endpoint_qualification(second_pydb)
+    third_qualification = assert_endpoint_qualification(third_pydb)
+    if first_qualification != second_qualification or second_qualification != third_qualification:
+        raise AssertionError("sizing refresh changed endpoint qualification identities")
     summary = _output(manifest, "full_refresh_mutation.json")
     summary.write_text(
         json.dumps(
@@ -618,6 +625,25 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     if {pin: pin_nets.get(pin) for pin in expected_connections} != expected_connections:
         raise AssertionError("native Segment chain lost its ancestor/child connectivity")
 
+    fresh_spef = _run_rcx(manifest)
+    _load_sta_inputs(manifest, spef_path=fresh_spef)
+    _require(
+        ecc_py.init_sta("", {
+            "-temp_directory_path": str(_output(manifest, "buffer_refresh_sta")),
+            "-thread_number": "2", "-output_timing_reports": "0",
+        }),
+        "init_sta",
+    )
+    try:
+        _require(ecc_py.run_sta(), "run_sta")
+        timing_db = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, True)  # noqa: FBT003
+        assert_endpoint_qualification(timing_db)
+        timing_pin_count = len(timing_db.pin_names)
+        if timing_pin_count <= len(place_db.pin_names):
+            raise AssertionError("timing refresh reused pre-buffer pin identities")
+    finally:
+        ecc_py.destroy_sta()
+
     def_output = _output(manifest, "buffer.def")
     verilog_output = _output(manifest, "buffer.v")
     _require(ecc_py.def_save(str(def_output)), "def_save")
@@ -632,6 +658,8 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
                 "rollback": dict(rollback),
                 "committed": dict(committed),
                 "segment_chain": dict(chain),
+                "timing_schema_version": int(timing_db.timing_schema_version),
+                "timing_pin_count": timing_pin_count,
                 "source_net": net_name,
                 "driver_pin": driver_name,
                 "load_pins": load_names,

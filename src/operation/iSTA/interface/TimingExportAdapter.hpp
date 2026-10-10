@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "../source/data_manager/advance/TimingEndpointQualification.hpp"
+
 namespace ista {
 
 struct TimingLutSnapshot
@@ -60,6 +62,7 @@ struct TimingLibCellSnapshot
 
 struct TimingPinSnapshot
 {
+  TimingMaxQualification max_qualification;
   std::string name;
   std::string net_name;
   std::string instance_name;
@@ -111,6 +114,7 @@ struct TimingNetArcSnapshot
 
 struct TimingEndpointArcSnapshot
 {
+  TimingMaxQualification max_qualification;
   std::string source_pin;
   std::string sink_pin;
   std::string library_cell;
@@ -133,7 +137,7 @@ struct TimingClockSnapshot
 
 struct TimingSnapshot
 {
-  static constexpr int32_t kSchemaVersion = 1;
+  static constexpr int32_t kSchemaVersion = 2;
 
   int32_t schema_version = kSchemaVersion;
   double time_unit_ps = 1.0;

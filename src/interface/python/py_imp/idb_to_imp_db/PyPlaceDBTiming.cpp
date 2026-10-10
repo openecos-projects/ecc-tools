@@ -54,6 +54,12 @@ int32_t mapId(const std::unordered_map<std::string, int32_t>& ids, const std::st
   return it == ids.end() ? -1 : it->second;
 }
 
+void appendQualification(pybind11::list& valid, pybind11::list& reasons, const ista::TimingMaxQualification& qualification)
+{
+  valid.append(pybind11::make_tuple(qualification.valid[0], qualification.valid[1]));
+  reasons.append(pybind11::make_tuple(static_cast<int32_t>(qualification.reason[0]), static_cast<int32_t>(qualification.reason[1])));
+}
+
 }  // namespace
 
 void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db)
@@ -166,6 +172,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     const auto pin_it = timing_pins.find(name);
     const TimingPinSnapshot pin = pin_it == timing_pins.end() ? TimingPinSnapshot{} : pin_it->second;
     outcaps.append(0.0);
+    appendQualification(endpoints_max_valid, endpoints_max_reason, pin.max_qualification);
     // Python subtracts setup at the current data slew. Restore the capture
     // deadline here; retain the native checked RAT in backend_endpoint_* below.
     endpoints_rRAT.append(pin.is_unconstrained_output ? 9.0e7 : pin.max_rise_rat_ps + pin.setup_check_time_ps);
@@ -318,7 +325,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     return cell_id_2_arc_id_start[cell_id].cast<int32_t>() + local_arc_id;
   };
 
-  auto appendEndpointArc = [&](pybind11::list& target, const ista::TimingEndpointArcSnapshot& arc) {
+  auto appendEndpointArc = [&](const ista::TimingEndpointArcSnapshot& arc) {
     pybind11::list row;
     row.append(mapId(pin_ids, arc.source_pin));
     row.append(mapId(pin_ids, arc.sink_pin));
@@ -328,7 +335,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     row.append(arc.timing_type);
     row.append(arc.check_type);
     row.append(arc.library_arc_id);
-    target.append(row);
+    endpoints_timing_check_arcs.append(row);
+    appendQualification(endpoints_timing_check_max_valid, endpoints_timing_check_max_reason, arc.max_qualification);
   };
   auto appendConstraintArc = [&](const ista::TimingEndpointArcSnapshot& arc) {
     const int32_t clock_index = mapId(clock_pin_indices, arc.source_pin);
@@ -347,9 +355,10 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     row.append(arc.check_type);
     row.append(arc.library_arc_id);
     endpoints_constraint_arcs.append(row);
+    appendQualification(endpoints_constraint_max_valid, endpoints_constraint_max_reason, arc.max_qualification);
   };
   for (const auto& arc : snapshot.constraint_arcs) appendConstraintArc(arc);
-  for (const auto& arc : snapshot.timing_check_arcs) appendEndpointArc(endpoints_timing_check_arcs, arc);
+  for (const auto& arc : snapshot.timing_check_arcs) appendEndpointArc(arc);
 
   std::vector<std::vector<std::pair<int32_t, int32_t>>> net_rows(net_names.size());
   for (const TimingNetArcSnapshot& arc : snapshot.net_arcs) {

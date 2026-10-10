@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "DataManager.hpp"
+#include "EndpointQualification.hpp"
 #include "STAInterface.hpp"
 #include "advance/Arc.hpp"
 #include "advance/ArcType.hpp"
@@ -191,10 +192,11 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
     exported.instance_name = pin.get_instance_name();
     exported.direction = static_cast<int32_t>(pin.get_direction());
     exported.is_port = pin.get_is_port();
-    if (exported.is_port && pin.get_direction() == PinDirection::kOutput) {
+    if (exported.is_port && (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout)) {
       const auto& port_constraints = database.get_timing_constraint().get_port_constraint_map();
       const auto constraint = port_constraints.find(name);
       exported.is_unconstrained_output = constraint == port_constraints.end() || !constraint->second.get_has_output_delay_max();
+      exported.max_qualification = qualifyMaxOutput(database, name);
     }
     exported.max_rise_rat_ps = kUnconstrainedRequiredPs;
     exported.max_fall_rat_ps = kUnconstrainedRequiredPs;
@@ -399,6 +401,16 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
         exported.sense = senseCode(timing_arc.get_sense());
         exported.timing_type = transCode(timing_arc.get_trigger_trans_type());
         exported.check_type = static_cast<int32_t>(check_arc.get_check_type());
+        exported.max_qualification = qualifyMaxCheck(database, check_arc, timing_arc);
+        auto& endpoint_qualification = snapshot.pins.at(pin_ids.at(sink_pin)).max_qualification;
+        for (std::size_t edge = 0; edge < 2; ++edge) {
+          if (!endpoint_qualification.valid[edge]
+              && (exported.max_qualification.reason[edge] != TimingMaxQualificationReason::kNotMaxCheck
+                  || endpoint_qualification.reason[edge] == TimingMaxQualificationReason::kUnconstrainedGraphTerminal)) {
+            endpoint_qualification.valid[edge] = exported.max_qualification.valid[edge];
+            endpoint_qualification.reason[edge] = exported.max_qualification.reason[edge];
+          }
+        }
         if (check_arc.get_check_type() == TimingCheckType::kSetup && exported.library_arc_id >= 0) {
           snapshot.constraint_arcs.push_back(exported);
         }

@@ -14,7 +14,7 @@ def test_pyplacedb_timing_export_contract(test_roots):
     result = run_scenario(test_roots, "pyplacedb_timing", timeout=180)
     summary = result.output_path("summary")
     payload = json.loads(summary.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 1
+    assert payload["schema_version"] == 2
     assert payload["num_pins"] > 0
     assert payload["num_start_points"] > 0
     assert payload["num_end_points"] > 0
@@ -98,7 +98,7 @@ def test_native_full_refresh_and_second_mutation(test_roots):
     assert payload["second"]["ok"] is True
     assert payload["first_pydb_id"] != payload["second_pydb_id"]
     assert payload["second_pydb_id"] != payload["third_pydb_id"]
-    assert payload["timing_schema_version"] == 1
+    assert payload["timing_schema_version"] == 2
     assert payload["endpoints"] > 0
 
 
