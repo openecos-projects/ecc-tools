@@ -299,6 +299,7 @@ bool DefRead::createDb(const char* file)
       return false;
     }
 
+    _def_service->get_design()->canonicalizeNetNames();
     return true;
   }
 }
@@ -491,6 +492,7 @@ bool DefRead::createDbGzip(const char* gzip_file)
     return false;
   }
 
+  _def_service->get_design()->canonicalizeNetNames();
   return true;
 }
 

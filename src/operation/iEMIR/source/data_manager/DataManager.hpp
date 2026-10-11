@@ -57,7 +57,7 @@ class DataManager
   void readInstancePower();
   void readPowerSourceFile();
   void readEMTech();
-  void readRedHawkTechFile(const std::string& redhawk_tech_file_path);
+  void readTechnologyFile(const std::string& technology_file_path);
   void readEMLimitFile(const std::string& em_limit_file_path);
   void printConfig();
   void printDatabase();

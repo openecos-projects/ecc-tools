@@ -21,6 +21,7 @@
  * @brief Clock-tree materialization helpers for the iCTS iDB wrapper.
  */
 #include <algorithm>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -160,6 +161,17 @@ class Wrapper::CtsClockIdbWriter
                     "; prior iDB state restored=", result.idb_clock_tree_restored ? "true" : "false", ".");
         return result;
       }
+    }
+
+    if (const auto dropped = findDroppedPreexistingPin(scope, restore_data); dropped.has_value()) {
+      result.success = false;
+      result.failed_clock = findClockOwningNet(scope, dropped->first);
+      result.failed_net = dropped->first;
+      result.reason = "clock_tree_preexisting_pin_dropped:" + dropped->first + ":" + dropped->second;
+      result.idb_clock_tree_restored = restorePreexistingClockTreeIdbObjects(scope, restore_data);
+      CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization dropped pre-existing pin \"", dropped->second, "\" of net \"", dropped->first,
+                  "\"; prior iDB state restored=", result.idb_clock_tree_restored ? "true" : "false", ".");
+      return result;
     }
 
     result.success = true;
@@ -533,6 +545,27 @@ class Wrapper::CtsClockIdbWriter
       idb_loads.push_back(idb_load);
     }
 
+    std::vector<idb::IdbPin*> idb_ignore_loads;
+    idb_ignore_loads.reserve(cts_net->get_ignore_loads().size());
+    for (auto* ignore_load : cts_net->get_ignore_loads()) {
+      if (ignore_load == nullptr) {
+        _failure_reason = "clock_tree_ignore_load_pin_missing";
+        CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed for net \"", net_name, "\": CTS ignore load pin is null.");
+        return false;
+      }
+      auto* idb_ignore_load = findExistingIdbPinForClockNet(ignore_load);
+      if (idb_ignore_load == nullptr) {
+        _failure_reason = "clock_tree_ignore_load_pin_unresolved";
+        CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed for net \"", net_name, "\": existing iDB pin for CTS ignore load \"",
+                    Design::getPinFullName(ignore_load), "\" was not found.");
+        return false;
+      }
+      if (!validatePinCurrentNetInWriteScope(idb_ignore_load, idb_net, scope, net_name, "ignore load", ignore_load)) {
+        return false;
+      }
+      idb_ignore_loads.push_back(idb_ignore_load);
+    }
+
     DetachIdbNetPins(_wrapper->_idb_design, idb_net);
     if (!AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, idb_driver)) {
       _failure_reason = "clock_tree_driver_pin_connect_failed";
@@ -541,6 +574,12 @@ class Wrapper::CtsClockIdbWriter
     for (auto* idb_load : idb_loads) {
       if (!AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, idb_load)) {
         _failure_reason = "clock_tree_load_pin_connect_failed";
+        return false;
+      }
+    }
+    for (auto* idb_ignore_load : idb_ignore_loads) {
+      if (!AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, idb_ignore_load)) {
+        _failure_reason = "clock_tree_ignore_load_pin_connect_failed";
         return false;
       }
     }
@@ -593,6 +632,46 @@ class Wrapper::CtsClockIdbWriter
     _wrapper->_cts2idb_pin_map.clear();
     _wrapper->_idb2cts_pin_map.clear();
     return idb_clock_tree_restored;
+  }
+
+  // Every pin that was on a rewritten net before materialization must still be
+  // connected afterwards; a dropped pin is a typed failure, never a silent edit.
+  static auto findDroppedPreexistingPin(const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data)
+      -> std::optional<std::pair<std::string, std::string>>
+  {
+    for (const auto& [net_name, net_pins] : restore_data.pins_by_net_name) {
+      if (!scope.touched_net_names.contains(net_name)) {
+        continue;
+      }
+      for (auto* io_pin : net_pins.io_pins) {
+        if (io_pin != nullptr && io_pin->get_net() == nullptr) {
+          return std::pair{net_name, io_pin->get_pin_name()};
+        }
+      }
+      for (auto* inst_pin : net_pins.inst_pins) {
+        if (inst_pin == nullptr || inst_pin->get_net() != nullptr) {
+          continue;
+        }
+        auto* inst = inst_pin->get_instance();
+        return std::pair{net_name, inst == nullptr ? inst_pin->get_pin_name() : inst->get_name() + "/" + inst_pin->get_pin_name()};
+      }
+    }
+    return std::nullopt;
+  }
+
+  static auto findClockOwningNet(const ClockTreeIdbMaterializationScope& scope, const std::string& net_name) -> std::string
+  {
+    for (const auto& [clock, nets] : scope.reachable_nets_by_clock) {
+      if (clock == nullptr) {
+        continue;
+      }
+      for (const auto* net : nets) {
+        if (net != nullptr && getClockTreeNetName(*clock, net) == net_name) {
+          return clock->get_clock_name();
+        }
+      }
+    }
+    return {};
   }
 
   static auto getClockTreeNetName(const Clock& clock, const Net* net) -> std::string

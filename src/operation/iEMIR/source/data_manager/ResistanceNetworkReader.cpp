@@ -1,4 +1,4 @@
-#include "RedHawkResNetworkReader.hpp"
+#include "ResistanceNetworkReader.hpp"
 
 namespace {
 
@@ -91,14 +91,14 @@ std::string getParentWireId(const std::string& segment_id, std::size_t line_numb
 
 namespace iemir {
 
-RedHawkResNetwork RedHawkResNetworkReader::read(const std::string& file_path)
+ResistanceNetwork ResistanceNetworkReader::read(const std::string& file_path)
 {
   std::ifstream input(file_path);
   if (!input.is_open()) {
-    throw std::runtime_error("Cannot open RedHawk res_network file: " + file_path);
+    throw std::runtime_error("Cannot open resistance-network file: " + file_path);
   }
 
-  RedHawkResNetwork network;
+  ResistanceNetwork network;
   std::vector<WireRecord> wires;
   std::unordered_map<std::string, std::size_t> wire_index_by_id;
   std::vector<WireSegmentFields> wire_segments;
@@ -161,7 +161,7 @@ RedHawkResNetwork RedHawkResNetworkReader::read(const std::string& file_path)
       if (fields.size() < 18) {
         throw std::runtime_error("Expected at least 18 fields for V at line " + std::to_string(line_number));
       }
-      RedHawkViaRecord via;
+      ResistanceViaRecord via;
       via.id = fields[1];
       via.layer_name = fields[2];
       via.via_name = fields[3];
@@ -180,7 +180,7 @@ RedHawkResNetwork RedHawkResNetworkReader::read(const std::string& file_path)
       continue;
     }
 
-    throw std::runtime_error("Unknown RedHawk res_network record at line " + std::to_string(line_number) + ": " + fields[0]);
+    throw std::runtime_error("Unknown resistance-network record at line " + std::to_string(line_number) + ": " + fields[0]);
   }
 
   for (const WireSegmentFields& segment_fields : wire_segments) {
@@ -190,7 +190,7 @@ RedHawkResNetwork RedHawkResNetworkReader::read(const std::string& file_path)
                                + segment_fields.parent_id);
     }
     WireRecord& wire = wires[wire_iter->second];
-    RedHawkWireSegmentRecord segment;
+    ResistanceWireSegmentRecord segment;
     segment.id = segment_fields.id;
     segment.layer_name = wire.layer_name;
     segment.net_name = wire.net_name;
@@ -203,7 +203,7 @@ RedHawkResNetwork RedHawkResNetworkReader::read(const std::string& file_path)
     network.wire_segments.push_back(std::move(segment));
   }
   if (network.wire_segments.empty()) {
-    throw std::runtime_error("No wire resistance records in RedHawk res_network file: " + file_path);
+    throw std::runtime_error("No wire resistance records in resistance-network file: " + file_path);
   }
   return network;
 }
@@ -212,8 +212,8 @@ RedHawkResNetwork RedHawkResNetworkReader::read(const std::string& file_path)
 
 namespace iemir {
 
-std::optional<std::pair<double, double>> RedHawkResNetworkReader::connectionCoordinate(
-    const RedHawkViaRecord& via, const std::unordered_map<std::string, const RedHawkWireSegmentRecord*>& wire_segment_map,
+std::optional<std::pair<double, double>> ResistanceNetworkReader::connectionCoordinate(
+    const ResistanceViaRecord& via, const std::unordered_map<std::string, const ResistanceWireSegmentRecord*>& wire_segment_map,
     const std::string& layer_name)
 {
   // The listed resistors describe the electrical junction. When multiple
@@ -251,7 +251,7 @@ std::optional<std::pair<double, double>> RedHawkResNetworkReader::connectionCoor
         || segment_iter->second->net_name != via.net_name) {
       continue;
     }
-    const RedHawkWireSegmentRecord& segment = *segment_iter->second;
+    const ResistanceWireSegmentRecord& segment = *segment_iter->second;
     double dx = segment.second_x_um - segment.first_x_um;
     double dy = segment.second_y_um - segment.first_y_um;
     double length_squared = dx * dx + dy * dy;

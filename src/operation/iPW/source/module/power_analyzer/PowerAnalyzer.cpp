@@ -80,8 +80,8 @@ void PowerAnalyzer::analyzePower()
     power_summary.get_total_power_value().add_power_value(instance_power.get_power_value());
     if (instance_power.get_power_group_type() == PowerGroupType::kRegister) {
       // Split the report groups only; retain the whole cell's power for
-      // instance exports and downstream current injection. PTPX User Guide,
-      // Table 9-1: register clock-pin internal power belongs to clock_network.
+      // instance exports and downstream current injection. Attribute register
+      // clock-pin internal power to the clock-network report group.
       double clock_power = pa_instance_model.get_clock_pin_internal_power();
       power_summary.get_group_power_map()[PowerGroupType::kRegister].add_internal_power(-clock_power);
       power_summary.get_group_power_map()[PowerGroupType::kClockNetwork].add_internal_power(clock_power);

@@ -76,6 +76,8 @@ struct IdbClockNetPins
 {
   idb::IdbPin* driver = nullptr;
   std::vector<idb::IdbPin*> loads;
+  // Non-driver top-level IO pins: connected to the net, never clock sinks.
+  std::vector<idb::IdbPin*> ignore_loads;
 };
 
 struct CtsInstClassification
@@ -166,7 +168,15 @@ auto collectIdbClockNetPins(const Wrapper& wrapper, idb::IdbNet* idb_net) -> Idb
   net_pins.driver = driver_candidates.size() == 1U ? driver_candidates.front() : nullptr;
 
   for (auto* idb_pin : all_pins) {
-    if (idb_pin != net_pins.driver) {
+    if (idb_pin == net_pins.driver) {
+      continue;
+    }
+    // A top-level IO pin that does not drive the net is an ignore load. It has
+    // no Liberty capacitance and CTS never balances or moves a port, so it
+    // stays connected to its net and never becomes a clock sink.
+    if (idb_pin->is_io_pin()) {
+      net_pins.ignore_loads.push_back(idb_pin);
+    } else {
       net_pins.loads.push_back(idb_pin);
     }
   }
@@ -560,6 +570,36 @@ auto ctsPinFullName(idb::IdbPin* idb_pin, Inst* cts_inst) -> std::string
   return cts_inst == nullptr ? pin_name : cts_inst->get_name() + "/" + pin_name;
 }
 
+auto directionName(idb::IdbConnectDirection direction) -> const char*
+{
+  switch (direction) {
+    case idb::IdbConnectDirection::kNone:
+      return "none";
+    case idb::IdbConnectDirection::kInput:
+      return "input";
+    case idb::IdbConnectDirection::kOutput:
+      return "output";
+    case idb::IdbConnectDirection::kOutputTriState:
+      return "output_tristate";
+    case idb::IdbConnectDirection::kInOut:
+      return "inout";
+    case idb::IdbConnectDirection::kFeedThru:
+      return "feed_thru";
+    case idb::IdbConnectDirection::kMax:
+      return "unknown";
+  }
+  return "unknown";
+}
+
+auto logIgnoreLoad(const std::string& clock_name, const Net* cts_net, idb::IdbPin* idb_pin) -> void
+{
+  auto* term = idb_pin == nullptr ? nullptr : idb_pin->get_term();
+  CTSLOG.info(Loc::current(), "CTS clock \"", clock_name, "\": top-level IO pin \"", termName(idb_pin), "\" on net \"",
+              cts_net == nullptr ? std::string{} : cts_net->get_name(), "\" (",
+              directionName(term == nullptr ? idb::IdbConnectDirection::kNone : term->get_direction()),
+              ") is an ignore load; it stays connected and is not a clock sink.");
+}
+
 }  // namespace
 
 class Wrapper::CtsClockReader
@@ -695,14 +735,18 @@ class Wrapper::CtsClockReader
     }
 
     std::vector<idb::IdbPin*> idb_pins;
-    idb_pins.reserve(idb_net_pins.loads.size() + 1U);
+    idb_pins.reserve(idb_net_pins.loads.size() + idb_net_pins.ignore_loads.size() + 1U);
     idb_pins.push_back(idb_net_pins.driver);
     std::ranges::copy(idb_net_pins.loads, std::back_inserter(idb_pins));
+    std::ranges::copy(idb_net_pins.ignore_loads, std::back_inserter(idb_pins));
+    const std::unordered_set<idb::IdbPin*> ignore_pin_set(idb_net_pins.ignore_loads.begin(), idb_net_pins.ignore_loads.end());
 
     std::unordered_map<idb::IdbInstance*, Inst*> cts_inst_by_idb;
     cts_inst_by_idb.reserve(idb_pins.size());
     std::vector<Pin*> cts_loads;
     cts_loads.reserve(idb_net_pins.loads.size());
+    std::vector<Pin*> cts_ignore_loads;
+    cts_ignore_loads.reserve(idb_net_pins.ignore_loads.size());
     for (auto* idb_pin : idb_pins) {
       if (idb_pin == nullptr) {
         continue;
@@ -740,12 +784,16 @@ class Wrapper::CtsClockReader
       if (idb_pin == idb_net_pins.driver) {
         clock->set_clock_source(cts_pin);
         cts_net->set_driver(cts_pin);
+      } else if (ignore_pin_set.contains(idb_pin)) {
+        cts_ignore_loads.push_back(cts_pin);
+        logIgnoreLoad(clock_name, cts_net, idb_pin);
       } else {
         cts_loads.push_back(cts_pin);
       }
     }
     clock->set_loads(cts_loads);
     cts_net->set_loads(cts_loads);
+    cts_net->set_ignore_loads(cts_ignore_loads);
     return clock;
   }
 
@@ -815,6 +863,11 @@ class Wrapper::CtsClockReader
     source_cts_net->set_driver(source_pin);
     clock->set_clock_source(source_pin);
     clock->set_clock_source_net(source_cts_net);
+    for (auto* idb_ignore_pin : source_pins.ignore_loads) {
+      if (!attachIgnoreLoad(clock_target.clock_name, source_cts_net, idb_ignore_pin)) {
+        return nullptr;
+      }
+    }
 
     std::unordered_set<Pin*> explicit_inputs;
     for (const auto& step : clock_target.propagation_steps) {
@@ -899,6 +952,11 @@ class Wrapper::CtsClockReader
           terminal_loads.push_back(load);
         }
       }
+      for (auto* idb_ignore_pin : pins.ignore_loads) {
+        if (!attachIgnoreLoad(clock_target.clock_name, cts_net, idb_ignore_pin)) {
+          return nullptr;
+        }
+      }
       if (cts_net != source_cts_net) {
         clock->add_net(cts_net);
       }
@@ -957,6 +1015,11 @@ class Wrapper::CtsClockReader
     }
     clock->set_clock_source(source_pin);
     cts_net->set_driver(source_pin);
+    for (auto* idb_ignore_pin : source_pins.ignore_loads) {
+      if (!attachIgnoreLoad(clock_target.clock_name, cts_net, idb_ignore_pin)) {
+        return nullptr;
+      }
+    }
 
     std::vector<Pin*> cts_loads;
     cts_loads.reserve(clock_target.preclustered_sink_anchors.size());
@@ -1081,6 +1144,25 @@ class Wrapper::CtsClockReader
     cts_pin->set_io(idb_pin->is_io_pin());
     bindIdbPin(idb_pin, cts_pin);
     return cts_pin;
+  }
+
+  auto attachIgnoreLoad(const std::string& clock_name, Net* cts_net, idb::IdbPin* idb_pin) -> bool
+  {
+    if (cts_net == nullptr || idb_pin == nullptr) {
+      return false;
+    }
+    auto* cts_pin = buildOrFindPinFromIdbPin(idb_pin, nullptr);
+    if (cts_pin == nullptr) {
+      CTSLOG.warn(Loc::current(), "CTS clock read failed for clock \"", clock_name, "\": cannot materialize ignore load \"", termName(idb_pin), "\" on net \"",
+                  cts_net->get_name(), "\".");
+      return false;
+    }
+    cts_pin->set_net(cts_net);
+    if (std::ranges::find(cts_net->get_ignore_loads(), cts_pin) == cts_net->get_ignore_loads().end()) {
+      cts_net->add_ignore_load(cts_pin);
+      logIgnoreLoad(clock_name, cts_net, idb_pin);
+    }
+    return true;
   }
 
   auto findIdbInstOrError(const std::string& clock_name, const std::string& inst_name) -> idb::IdbInstance*

@@ -294,9 +294,9 @@ void TimingPropagator::updateDataSlewDelay(Arc& arc, TimingPoint& source_point, 
   dc_task.set_output_trans_type(output_trans_type);
   dc_task.set_input_slew(input_slew);
   if (isSequentialClockPin(arc.get_source_pin())) {
-    // PT uses the ordinary propagated slew for C2Q delay, but uses the clock
-    // slew for its output-transition lookup.  A CK reached through data logic
-    // has no clock slew, so the latter intentionally falls back to zero.
+    // Use propagated input slew for C2Q delay and clock slew for the
+    // output-transition lookup. A CK reached through data logic has no
+    // clock slew, so the lookup intentionally falls back to zero.
     dc_task.set_output_slew_input_slew(getClockSlew(arc.get_source_pin(), analysis_type, input_trans_type));
   }
   STADC.calculate(dc_task);

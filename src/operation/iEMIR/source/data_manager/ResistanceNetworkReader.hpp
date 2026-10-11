@@ -4,7 +4,7 @@
 
 namespace iemir {
 
-struct RedHawkWireSegmentRecord
+struct ResistanceWireSegmentRecord
 {
   std::string id;
   std::string layer_name;
@@ -17,7 +17,7 @@ struct RedHawkWireSegmentRecord
   double resistance_ohm = 0.0;
 };
 
-struct RedHawkViaRecord
+struct ResistanceViaRecord
 {
   std::string id;
   std::string layer_name;
@@ -32,18 +32,18 @@ struct RedHawkViaRecord
   std::vector<std::string> connected_wire_segment_ids;
 };
 
-struct RedHawkResNetwork
+struct ResistanceNetwork
 {
-  std::vector<RedHawkWireSegmentRecord> wire_segments;
-  std::vector<RedHawkViaRecord> vias;
+  std::vector<ResistanceWireSegmentRecord> wire_segments;
+  std::vector<ResistanceViaRecord> vias;
 };
 
-class RedHawkResNetworkReader
+class ResistanceNetworkReader
 {
  public:
-  static RedHawkResNetwork read(const std::string& file_path);
+  static ResistanceNetwork read(const std::string& file_path);
   static std::optional<std::pair<double, double>> connectionCoordinate(
-      const RedHawkViaRecord& via, const std::unordered_map<std::string, const RedHawkWireSegmentRecord*>& wire_segment_map,
+      const ResistanceViaRecord& via, const std::unordered_map<std::string, const ResistanceWireSegmentRecord*>& wire_segment_map,
       const std::string& layer_name);
 };
 
