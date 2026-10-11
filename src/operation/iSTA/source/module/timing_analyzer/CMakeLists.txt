@@ -1,5 +1,6 @@
 add_library(ista_timing_analyzer
     ${ISTA_MODULE}/timing_analyzer/TimingAnalyzer.cpp
+    ${ISTA_MODULE}/timing_analyzer/EndpointQualification.cpp
 )
 
 target_link_libraries(ista_timing_analyzer

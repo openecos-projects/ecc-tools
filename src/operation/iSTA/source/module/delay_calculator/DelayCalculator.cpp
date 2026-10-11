@@ -273,8 +273,19 @@ void DelayCalculator::calculateTimingCheckArc(DCTask& dc_task)
       if (timing_arc->get_check_table_map().count(dc_task.get_data_trans_type()) == 0) {
         continue;
       }
-      double delay = timing_arc->get_check_table_map()[dc_task.get_data_trans_type()].findValue(dc_task.get_clock_slew() * timing_arc->get_time_unit_scale(),
-                                                                                                dc_task.get_data_slew() * timing_arc->get_time_unit_scale());
+      // Liberty's recovery/removal checks constrain the related clock edge.
+      // Their constrained-pin axis is therefore the clock transition, while
+      // the asynchronous data transition is the related-pin axis. Setup and
+      // hold use the opposite data/clock role. TimingTable::findValue swaps
+      // the arguments for a constrained-transition first axis, so reverse the
+      // call arguments only for recovery/removal to preserve the Liberty axis
+      // semantics.
+      const bool recovery_or_removal = timing_check_arc->get_check_type() == TimingCheckType::kRecovery
+                                       || timing_check_arc->get_check_type() == TimingCheckType::kRemoval;
+      const double first_slew = recovery_or_removal ? dc_task.get_data_slew() : dc_task.get_clock_slew();
+      const double second_slew = recovery_or_removal ? dc_task.get_clock_slew() : dc_task.get_data_slew();
+      double delay = timing_arc->get_check_table_map()[dc_task.get_data_trans_type()].findValue(first_slew * timing_arc->get_time_unit_scale(),
+                                                                                                second_slew * timing_arc->get_time_unit_scale());
       delay_list.push_back(delay / timing_arc->get_time_unit_scale());
     }
     if (!delay_list.empty()) {

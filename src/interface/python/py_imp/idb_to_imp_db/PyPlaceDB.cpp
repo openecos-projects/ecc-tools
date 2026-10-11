@@ -21,6 +21,7 @@
 #include "IdbLayout.h"
 #include "IdbPins.h"
 #include "idm.h"
+#include "TimingExportAdapter.hpp"
 #include <boost/polygon/polygon.hpp>
 #include <vector>
 
@@ -46,9 +47,9 @@ double intersectArea(Box const& b1, Box const& b2)
   return dist[0] * dist[1];
 }
 
-bool isInvailidNet(IdbNet* net)
+bool isInvailidNet(IdbNet* net, bool with_sta)
 {
-  return net->is_ground() || net->is_power() || net->is_pdn() || net->is_clock()
+  return net->is_ground() || net->is_power() || net->is_pdn() || (!with_sta && net->is_clock())
          || net->get_instance_pin_list()->get_pin_list().size() == 0;
 }
 
@@ -72,10 +73,6 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   m2_pg_rail_boxes = pybind11::list();
   m2_pg_rail_density_boxes = pybind11::list();
   dbu = db_deisgn->get_layout()->get_units()->get_micron_dbu();
-
-  if (with_sta) {
-    throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
-  }
 
   double total_fixed_terminal_area = 0;  // sum of fixed body and synthetic obstacle rectangles
   clock_net_names = pybind11::list();
@@ -104,7 +101,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   int net_id = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
     // is special net
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
 
@@ -113,7 +110,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   std::unordered_map<std::string, int> mPin2ID;
   int pin_id = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
 
@@ -447,7 +444,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
 
   num_movable_pins = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
     for (IdbPin* pin : net->get_instance_pin_list()->get_pin_list()) {
@@ -495,11 +492,12 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
 
   count = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
     // Net const& net = db.net(i);
-    net_weights.append(1);
+    // Timing needs clock-pin identities, but placement must not optimize clock HPWL.
+    net_weights.append(net->is_clock() ? 0 : 1);
     net_name2id_map[pybind11::str(net->get_net_name())] = mNet2ID[net->get_net_name()];
     net_names.append(pybind11::str(net->get_net_name()));
     pybind11::list pins;
@@ -609,6 +607,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
 
   if (with_routability) {
     init_routability(db, inst_resort_list);
+  }
+  if (with_sta) {
+    init_timing(ista::TimingExportAdapter::exportSnapshot(), db);
   }
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 

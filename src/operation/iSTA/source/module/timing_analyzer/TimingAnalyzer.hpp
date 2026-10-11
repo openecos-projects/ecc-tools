@@ -72,6 +72,8 @@ class TimingAnalyzer
   void propagateRequired();
   double resolveRequiredTime();
   void seedEndPointRequired(double required_time);
+  TimingPathState* getWorstEndPointPathState(std::string& end_point, AnalysisType analysis_type);
+  double getEndPointSetupCheckTime(std::string& end_point);
   double getEndPointRequired(std::string& end_point, double default_required_time, AnalysisType analysis_type);
   double getEndPointRequired(std::string& end_point, double default_required_time, AnalysisType analysis_type, TransType data_trans_type, double data_slew);
   double getEndPointRequired(std::string& start_point, std::string& end_point, double default_required_time, AnalysisType analysis_type,

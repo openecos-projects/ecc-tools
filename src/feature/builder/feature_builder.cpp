@@ -287,8 +287,20 @@ SummaryLayers FeatureBuilder::buildSummaryLayers()
       for (auto special_segment : special_wire->get_segment_list()) {
         if (special_segment->is_via()) {
           auto via = special_segment->get_via();
+          if (via == nullptr) {
+            ECCLOG.warn(ecc::Loc::current(), "Skip malformed special via segment on net ", special_net->get_net_name(), ": missing via object.");
+            continue;
+          }
+
           auto layer_shape = via->get_cut_layer_shape();
-          int order = layer_shape.get_layer()->get_order();
+          auto* layer = layer_shape.get_layer();
+          if (layer == nullptr || layer_shape.get_rect_list_num() == 0) {
+            ECCLOG.warn(ecc::Loc::current(), "Skip malformed special via segment on net ", special_net->get_net_name(),
+                        ": missing cut-layer shape.");
+            continue;
+          }
+
+          int order = layer->get_order();
           cut_layer_map[order].via_num += 1;
 
           via_total += 1;
