@@ -50,6 +50,7 @@ class IOPlacer
   IOPlacer& operator=(IOPlacer&& other) = delete;
   // function
 
+  void placeIOCell();
   void placeIOPin();
   void resetIOPinPlacement();
   void placeIOPinsFromFile(const std::string& file_path);

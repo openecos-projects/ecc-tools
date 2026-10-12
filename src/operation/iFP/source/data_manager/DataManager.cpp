@@ -186,6 +186,11 @@ void DataManager::printConfig()
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "io_pin");
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "mode: ", GetPlacementModeName()(_config.io_pin_placement_mode), ", layer: ", io_layer_name_string);
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "input_path: ", _config.input_io_pin_path);
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "io_placer");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "mode: ", GetIOPlacerModeName()(_config.io_placer_mode));
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "io_cell_mode: ", GetPlacementModeName()(_config.io_cell_placement_mode),
+             ", placement_path: ", _config.input_io_cell_path, ", definition_path: ", _config.input_io_cell_definition_path,
+             ", power_spacing: ", _config.io_cell_power_group_spacing_micron);
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "pg_connect_list");
   std::vector<std::string> pg_net_name_list;

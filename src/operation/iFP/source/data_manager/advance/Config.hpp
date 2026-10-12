@@ -18,6 +18,7 @@
 
 #include "DieMode.hpp"
 #include "FPHeader.hpp"
+#include "IOPlacerMode.hpp"
 #include "PGGlobalConnect.hpp"
 #include "PGLayerPair.hpp"
 #include "PGRail.hpp"
@@ -48,9 +49,17 @@ class Config
   double die_margin_right_micron;                          // optional
   double die_margin_top_micron;                            // optional
   double die_margin_bottom_micron;                         // optional
+  IOPlacerMode io_placer_mode;                             // required
   PlacementMode io_pin_placement_mode;                     // required
   std::vector<std::string> io_pin_layer_name_list;         // optional
   std::string input_io_pin_path;                           // optional
+  PlacementMode io_cell_placement_mode;                    // required when mode is io_cell
+  std::string input_io_cell_path;                          // optional
+  std::string input_io_cell_definition_path;               // required when mode is io_cell
+  double io_cell_power_group_spacing_micron;               // required when mode is io_cell
+  bool io_cell_power_enabled;                              // optional
+  bool io_cell_filler_enabled;                             // optional
+  bool io_cell_filler_require_exact;                       // optional
   std::vector<PGGlobalConnect> pg_connect_list;            // optional
   std::vector<PGRail> pg_rail_list;                        // optional
   std::vector<PGStripe> pg_stripe_list;                    // optional

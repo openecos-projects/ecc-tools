@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "DataManager.hpp"
+#include "IOCellPlacer.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
@@ -108,9 +109,14 @@ void IOPlacer::place()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
-  buildNetIOPinIndex();
-  resetIOPinPlacement();
-  placeIOPin();
+  Config& config = FPDM.getConfig();
+  if (config.io_placer_mode == IOPlacerMode::kIOCell) {
+    placeIOCell();
+  } else {
+    buildNetIOPinIndex();
+    resetIOPinPlacement();
+    placeIOPin();
+  }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -120,14 +126,27 @@ void IOPlacer::placeAuto()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
+  Config& config = FPDM.getConfig();
+  if (config.io_placer_mode == IOPlacerMode::kIOCell) {
+    placeIOCell();
+    FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+    return;
+  }
   buildNetIOPinIndex();
   resetIOPinPlacement();
-  Config& config = FPDM.getConfig();
   if (!config.io_pin_layer_name_list.empty()) {
     autoPlacePins(config.io_pin_layer_name_list);
   }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void IOPlacer::placeIOCell()
+{
+  IOCellPlacer placer;
+  if (!placer.place()) {
+    FPLOG.error(Loc::current(), "IO Cell placement failed.");
+  }
 }
 
 void IOPlacer::placeIOPin()

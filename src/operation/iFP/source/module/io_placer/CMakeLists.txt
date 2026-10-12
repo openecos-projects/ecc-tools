@@ -8,6 +8,7 @@ endif()
 
 add_library(ifp_io_placer
     ${IFP_MODULE}/io_placer/IOPlacer.cpp
+    ${IFP_MODULE}/io_placer/IOCellPlacer.cpp
 )
 
 target_link_libraries(ifp_io_placer
@@ -15,6 +16,7 @@ target_link_libraries(ifp_io_placer
     ifp_data_manager
     ifp_module
     ifp_toolkit
+    idb
 )
 
 target_include_directories(ifp_io_placer
