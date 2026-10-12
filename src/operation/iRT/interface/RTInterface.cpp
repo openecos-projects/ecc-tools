@@ -118,11 +118,12 @@ void RTInterface::runRT()
   RTPA.access();
   PinAccessor::destroyInst();
   RTUTIL.releaseMemory("PinAccessor");
+  // outputDef("irt_pa.def");
 
   initRegionRoute();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   region_route.set_is_regional_stage(region_route.get_enable());
-  
+
   SupplyAnalyzer::initInst();
   RTSA.analyze();
   SupplyAnalyzer::destroyInst();
@@ -144,6 +145,7 @@ void RTInterface::runRT()
   TrackAssigner::initInst();
   RTTA.assign();
   TrackAssigner::destroyInst();
+  // outputDef("irt_ta.def");
 
   DetailedRouter::initInst();
   RTDR.route();
@@ -161,12 +163,22 @@ void RTInterface::runRT()
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+void RTInterface::outputDef(const std::string& def_name)
+{
+  const std::string def_path = RTDM.getConfig().temp_directory_path + def_name;
+  RTLOG.info(Loc::current(), "Save def to : ", def_path);
+
+  output();
+  if (!dmInst->saveDef(def_path)) {
+    RTLOG.error(Loc::current(), "Failed to save DEF: ", def_path);
+  }
+}
+
 void RTInterface::initRegionRoute()
 {
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   region_route = RegionRoute();
 
-  // const std::optional<PlanarRect> region_rect = PlanarRect{581774,635063, 666631, 713974};
   const std::optional<PlanarRect> region_rect;
   if (!region_rect.has_value()) {
     return;
