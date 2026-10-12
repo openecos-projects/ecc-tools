@@ -136,7 +136,7 @@ void PlanarRouter::initPRTaskList(PRModel& pr_model)
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
   std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
+  bool regional_stage = region_route.get_enable();
   pr_task_list.reserve(pr_net_list.size());
   for (PRNet& pr_net : pr_net_list) {
     if (regional_stage && pr_net.get_pr_pin_list().size() < 2) {

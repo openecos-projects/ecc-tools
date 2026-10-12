@@ -646,7 +646,7 @@ void DetailedRouter::buildAccessPoint(DRBox& dr_box)
 {
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> net_access_point_map = RTDM.getNetAccessPointMap(dr_box.get_box_rect());
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  if (region_route.get_enable() && region_route.get_is_regional_stage()) {
+  if (region_route.get_enable()) {
     for (auto net_iter = net_access_point_map.begin(); net_iter != net_access_point_map.end();) {
       if (!region_route.isActiveNet(net_iter->first)) {
         net_iter = net_access_point_map.erase(net_iter);

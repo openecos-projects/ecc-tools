@@ -121,8 +121,6 @@ void RTInterface::runRT()
   // outputDef("irt_pa.def");
 
   initRegionRoute();
-  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  region_route.set_is_regional_stage(region_route.get_enable());
 
   SupplyAnalyzer::initInst();
   RTSA.analyze();
