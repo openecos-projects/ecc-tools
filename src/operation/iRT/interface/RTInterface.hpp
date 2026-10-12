@@ -158,7 +158,6 @@ class RTInterface
   RTInterface& operator=(RTInterface&& other) = delete;
   // function
   void initRegionRoute();
-  void runRoutingFlow();
 };
 
 }  // namespace irt
