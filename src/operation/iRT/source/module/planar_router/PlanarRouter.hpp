@@ -56,14 +56,6 @@ struct PRRouteParam
   const char* route_name;
   PRRouteMode pr_route_mode;
   PRTopoMode pr_topo_mode;
-  bool is_partial_rip_up = false;
-};
-
-struct PRPartialRoute
-{
-  std::vector<Segment<PlanarCoord>> kept_segment_list;
-  std::vector<Segment<PlanarCoord>> rip_up_segment_list;
-  std::vector<Segment<PlanarCoord>> planar_topo_list;
 };
 
 struct PRAStarTask
@@ -157,13 +149,6 @@ class PlanarRouter
                            std::vector<Segment<PlanarCoord>>& routing_segment_list);
   void updateCongestion(PRModel& pr_model);
   std::vector<PRNet*> getOverflowPRNetList(PRModel& pr_model);
-  PRPartialRoute getPartialRoute(PRNet& pr_net);
-  void expandRipUpGuard(const std::vector<Segment<PlanarCoord>>& unit_segment_list,
-                        const std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC>& coord_edge_idx_map,
-                        std::vector<int32_t>& rip_up_distance_list);
-  std::vector<Segment<PlanarCoord>> getOverflowPlanarTopoList(PRNet& pr_net, const std::vector<Segment<PlanarCoord>>& unit_segment_list,
-                                                              const std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC>& coord_edge_idx_map,
-                                                              const std::vector<int32_t>& rip_up_distance_list);
   bool shouldRefineTopology(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num);
   std::vector<Segment<PlanarCoord>> getPlanarTopoList(double overflow_unit, PRNet& pr_net, PRTopoMode pr_topo_mode);
 
