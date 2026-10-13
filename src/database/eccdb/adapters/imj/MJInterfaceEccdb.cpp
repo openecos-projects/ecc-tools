@@ -15,7 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 
-#include "ZHInterface.hpp"
+#include "MJInterface.hpp"
 
 #include <algorithm>
 #include <any>
@@ -58,7 +58,7 @@
 #include "tech/TechStore.h"
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 
-namespace izh {
+namespace imj {
 namespace {
 
 struct Box
@@ -512,7 +512,7 @@ std::vector<eccdb::DesignFillInput> buildMetalFillInputs(eccdb::DatabaseContext&
 
 }  // namespace
 
-void ZHInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_map)
+void MJInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_map)
 {
   if (_database_context == nullptr || _database_context->library() == nullptr) {
     throw std::logic_error("iZH native filler insertion requires a complete DatabaseContext");
@@ -640,7 +640,7 @@ void ZHInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_
   }
 }
 
-void ZHInterface::insertMetalFromEccdb(std::map<std::string, std::any>& config_map)
+void MJInterface::insertMetalFromEccdb(std::map<std::string, std::any>& config_map)
 {
   if (_database_context == nullptr || _database_context->technology() == nullptr) {
     throw std::logic_error("iZH native metal fill requires a complete DatabaseContext");
@@ -699,7 +699,7 @@ void ZHInterface::insertMetalFromEccdb(std::map<std::string, std::any>& config_m
   }
 }
 
-void ZHInterface::checkAntennaFromEccdb(std::map<std::string, std::any>& config_map)
+void MJInterface::checkAntennaFromEccdb(std::map<std::string, std::any>& config_map)
 {
   if (_database_context == nullptr) {
     throw std::logic_error("iZH native antenna checking requires a DatabaseContext");
@@ -764,4 +764,4 @@ void ZHInterface::checkAntennaFromEccdb(std::map<std::string, std::any>& config_
   _last_antenna_summary = std::move(summary);
 }
 
-}  // namespace izh
+}  // namespace imj

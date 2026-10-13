@@ -37,6 +37,16 @@ void MJInterface::destroyInst()
   }
 }
 
+void MJInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
+void MJInterface::setDesignSource(eccdb::DatabaseContext& context) noexcept
+{
+  setDesignSource(&context);
+}
+
 #if 1  // 外部调用MJ的API
 
 #if 1  // iMJ
@@ -68,6 +78,12 @@ void MJInterface::initMJ(std::map<std::string, std::any> config_map)
 
 void MJInterface::insertFiller(std::map<std::string, std::any> config_map)
 {
+#if defined(IMJ_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    insertFillerFromEccdb(config_map);
+    return;
+  }
+#endif
   FillerInserter::initInst();
   MJFI.insert(config_map);
   FillerInserter::destroyInst();
@@ -75,6 +91,12 @@ void MJInterface::insertFiller(std::map<std::string, std::any> config_map)
 
 void MJInterface::insertMetal(std::map<std::string, std::any> config_map)
 {
+#if defined(IMJ_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    insertMetalFromEccdb(config_map);
+    return;
+  }
+#endif
   MetalInserter::initInst();
   MJMI.insert(config_map);
   MetalInserter::destroyInst();
@@ -82,6 +104,12 @@ void MJInterface::insertMetal(std::map<std::string, std::any> config_map)
 
 void MJInterface::checkAntenna(std::map<std::string, std::any> config_map)
 {
+#if defined(IMJ_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    checkAntennaFromEccdb(config_map);
+    return;
+  }
+#endif
   AntennaChecker::initInst();
   MJAC.check(config_map);
   AntennaChecker::destroyInst();

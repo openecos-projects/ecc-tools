@@ -382,7 +382,6 @@ void STAInterface::wrapDatabaseFromEccdb()
   // never dereference dmInst in the native branch.
   wrapTimingLibrary();
   wrapParasiticLibrary();
-  wrapVcdActivity();
 }
 
 }  // namespace ista

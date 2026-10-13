@@ -26,7 +26,7 @@
 #include "RCXInterface.hpp"
 #include "RTInterface.hpp"
 #include "STAInterface.hpp"
-#include "ZHInterface.hpp"
+#include "MJInterface.hpp"
 #include "eccdb.h"
 #include "json.hpp"
 #include "spef/SpefParser.hh"
@@ -147,7 +147,7 @@ NativeToolchain::~NativeToolchain()
   CTS_API_INST.setDesignSource(nullptr);
   CTS_API_INST.setLibertyCellLookup({});
   CTS_API_INST.setSdcPath("");
-  ZHI.setDesignSource(nullptr);
+  MJI.setDesignSource(nullptr);
   RCXI.setDesignSource(nullptr);
   STAI.setDesignSource(nullptr);
   STAI.setTimingInputs({});
@@ -382,13 +382,13 @@ std::string NativeToolchain::run(const std::string& stage, const std::string& co
       timed(result, "algorithm", [&] { EMIRI.runEMIR(); });
       timed(result, "destroy", [&] { EMIRI.destroyEMIR(); });
     } else if (stage == "filler" || stage == "metal" || stage == "antenna") {
-      ZHI.setDesignSource(&source);
+      MJI.setDesignSource(&source);
       timed(result, "algorithm_writeback", [&] {
-        if (stage == "filler") ZHI.insertFiller(config);
-        else if (stage == "metal") ZHI.insertMetal(config);
+        if (stage == "filler") MJI.insertFiller(config);
+        else if (stage == "metal") MJI.insertMetal(config);
         else {
-          ZHI.checkAntenna(config);
-          const auto& antenna = ZHI.lastAntennaSummary();
+          MJI.checkAntenna(config);
+          const auto& antenna = MJI.lastAntennaSummary();
           result["antenna"] = {
               {"checked", antenna.checked},
               {"net_count", antenna.net_count},

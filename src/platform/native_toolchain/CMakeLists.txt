@@ -7,7 +7,7 @@ target_include_directories(ecc_native_toolchain PUBLIC ${CMAKE_CURRENT_SOURCE_DI
 target_link_libraries(ecc_native_toolchain
   PUBLIC eccdb_database_owner eccdb_core
   PRIVATE ifp_interface icts_interface irt_interface idrc_interface
-          ircx_interface ista_interface ilvs_interface iemir_interface izh_interface
+          ircx_interface ista_interface ilvs_interface iemir_interface imj_interface
           IdbBuilder ilvs_data_manager liberty spef
 )
 
