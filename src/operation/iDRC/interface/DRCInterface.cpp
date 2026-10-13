@@ -135,11 +135,19 @@ void DRCInterface::checkDef()
   bool origin_quiet = DRCLOG.isQuiet();
   DRCLOG.disableQuiet();
 
-  std::set<size_t> obs_shape_idx_set;
-  std::vector<ids::Shape> env_shape_list = buildEnvShapeList(obs_shape_idx_set);
   std::map<std::string, std::vector<ids::Violation>> type_violation_map;
-  for (ids::Violation& ids_violation : getViolationList(env_shape_list, buildResultShapeList(), {}, {}, obs_shape_idx_set)) {
-    type_violation_map[ids_violation.violation_type].push_back(ids_violation);
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    std::set<size_t> obs_shape_idx_set;
+    std::vector<ids::Shape> env_shape_list = buildEnvShapeListFromEnTT(&obs_shape_idx_set);
+    for (ids::Violation& ids_violation : getViolationList(env_shape_list, buildResultShapeListFromEnTT(), {}, {}, obs_shape_idx_set)) {
+      type_violation_map[ids_violation.violation_type].push_back(std::move(ids_violation));
+    }
+  } else {
+    std::vector<DRCShape> env_shape_list = buildEnvDrcShapeList();
+    std::vector<DRCShape> result_shape_list = buildResultDrcShapeList();
+    for (ids::Violation& ids_violation : getViolationList(std::move(env_shape_list), std::move(result_shape_list), {}, {})) {
+      type_violation_map[ids_violation.violation_type].push_back(std::move(ids_violation));
+    }
   }
   for (const auto& [type, violations] : type_violation_map) {
     _last_violation_counts.emplace(type, violations.size());
@@ -217,10 +225,20 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
                                                            const std::set<std::string>& ids_check_type_set,
                                                            const std::vector<ids::Shape>& ids_check_region_list)
 {
+  return getViolationList(ids_env_shape_list, ids_result_shape_list, ids_check_type_set, ids_check_region_list, std::set<size_t>{});
+}
+
+std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids::Shape>& ids_env_shape_list,
+                                                           const std::vector<ids::Shape>& ids_result_shape_list,
+                                                           const std::set<std::string>& ids_check_type_set,
+                                                           const std::vector<ids::Shape>& ids_check_region_list,
+                                                           const std::set<size_t>& obs_shape_idx_set)
+{
   std::vector<DRCShape> drc_env_shape_list;
   drc_env_shape_list.reserve(ids_env_shape_list.size());
-  for (const ids::Shape& ids_env_shape : ids_env_shape_list) {
-    drc_env_shape_list.push_back(convertToDRCShape(ids_env_shape));
+  for (size_t shape_idx = 0; shape_idx < ids_env_shape_list.size(); ++shape_idx) {
+    drc_env_shape_list.push_back(convertToDRCShape(ids_env_shape_list[shape_idx]));
+    drc_env_shape_list.back().set_is_obs(obs_shape_idx_set.contains(shape_idx));
   }
   std::vector<DRCShape> drc_result_shape_list;
   drc_result_shape_list.reserve(ids_result_shape_list.size());
@@ -441,8 +459,21 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
     return buildEnvShapeListFromEnTT(nullptr);
   }
 
-  std::set<size_t> obs_shape_idx_set;
-  return buildEnvShapeList(obs_shape_idx_set);
+  std::vector<DRCShape> drc_shape_list = buildEnvDrcShapeList();
+  std::vector<ids::Shape> shape_list;
+  shape_list.reserve(drc_shape_list.size());
+  for (const DRCShape& drc_shape : drc_shape_list) {
+    ids::Shape shape;
+    shape.net_idx = drc_shape.get_net_idx();
+    shape.ll_x = drc_shape.get_ll_x();
+    shape.ll_y = drc_shape.get_ll_y();
+    shape.ur_x = drc_shape.get_ur_x();
+    shape.ur_y = drc_shape.get_ur_y();
+    shape.layer_idx = drc_shape.get_layer_idx();
+    shape.is_routing = drc_shape.get_is_routing();
+    shape_list.push_back(shape);
+  }
+  return shape_list;
 }
 namespace {
 
@@ -795,6 +826,29 @@ std::vector<DRCShape> DRCInterface::buildResultDrcShapeList()
   }
   DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
   return result_shape_list;
+}
+
+std::vector<ids::Shape> DRCInterface::buildResultShapeList()
+{
+  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    return buildResultShapeListFromEnTT();
+  }
+
+  std::vector<DRCShape> drc_shape_list = buildResultDrcShapeList();
+  std::vector<ids::Shape> shape_list;
+  shape_list.reserve(drc_shape_list.size());
+  for (const DRCShape& drc_shape : drc_shape_list) {
+    ids::Shape shape;
+    shape.net_idx = drc_shape.get_net_idx();
+    shape.ll_x = drc_shape.get_ll_x();
+    shape.ll_y = drc_shape.get_ll_y();
+    shape.ur_x = drc_shape.get_ur_x();
+    shape.ur_y = drc_shape.get_ur_y();
+    shape.layer_idx = drc_shape.get_layer_idx();
+    shape.is_routing = drc_shape.get_is_routing();
+    shape_list.push_back(shape);
+  }
+  return shape_list;
 }
 
 std::string DRCInterface::getNetName(int32_t net_idx)
