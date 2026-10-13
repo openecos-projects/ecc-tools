@@ -139,8 +139,6 @@ class STAInterface
   void setDesignSource(eccdb::DatabaseContext& context) noexcept { setDesignSource(&context); }
   void setTimingInputs(NativeTimingInputs inputs);
   void wrapDatabaseFromEccdb();
-  void wrapVcdActivity();
-  std::string wrapVcdPinName(std::string& vcd_signal_name);
   void wrapDBInfo();
   void wrapConstraintFilePath();
   void wrapInstanceList();
