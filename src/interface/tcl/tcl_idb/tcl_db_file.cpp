@@ -17,11 +17,8 @@
 #include "utility/logger/Logger.hpp"
 #include "tcl_db_file.h"
 
-#include "db_fm/file_soc.h"
 #include "idm.h"
 #include "report_manager.h"
-#include "tool_manager.h"
-#include "view_json_io.h"
 namespace tcl {
 
 CmdInitIdb::CmdInitIdb(const char* cmd_name) : TclCmd(cmd_name)
@@ -50,7 +47,7 @@ unsigned CmdInitIdb::exec()
 
   auto data_config = option->getStringVal();
 
-  if (iplf::tmInst->idbStart(data_config)) {
+  if (dmInst->init(data_config)) {
     ECCLOG.info(ecc::Loc::current(), "idb start.");
   }
 
@@ -249,6 +246,7 @@ CmdInitLib::CmdInitLib(const char* cmd_name) : TclCmd(cmd_name)
 {
   auto* path = new TclStringListOption(TCL_PATH, 1);
   addOption(path);
+  addOption(new TclIntOption("-thread_number", 0, 4));
 }
 
 unsigned CmdInitLib::check()
@@ -265,6 +263,10 @@ unsigned CmdInitLib::exec()
   }
 
   TclOption* path = getOptionOrArg(TCL_PATH);
+  TclOption* thread_number = getOptionOrArg("-thread_number");
+  if (thread_number != nullptr && thread_number->is_set_val()) {
+    dmInst->get_config().set_thread_number(thread_number->getIntVal());
+  }
   auto lib_path_list = path->getStringList();
   if (!lib_path_list.empty()) {
     dmInst->get_config().set_lib_paths(lib_path_list);
@@ -378,6 +380,32 @@ CmdSaveDef::CmdSaveDef(const char* cmd_name) : TclCmd(cmd_name)
   addOption(path);
 }
 
+CmdSaveMacroTCL::CmdSaveMacroTCL(const char* cmd_name) : TclCmd(cmd_name)
+{
+  addOption(new TclStringOption(TCL_PATH, 1));
+}
+
+unsigned CmdSaveMacroTCL::check()
+{
+  auto* path = getOptionOrArg(TCL_PATH);
+  ecc::checkTclOption(path, TCL_PATH);
+  return 1;
+}
+
+unsigned CmdSaveMacroTCL::exec()
+{
+  if (!check()) {
+    return 0;
+  }
+  auto path = getOptionOrArg(TCL_PATH)->getStringVal();
+  if (path == nullptr || !dmInst->saveMacroTCL(path)) {
+    ECCLOG.error(ecc::Loc::current(), "save macro Tcl failed.");
+    return 0;
+  }
+  ECCLOG.info(ecc::Loc::current(), "save macro Tcl success: ", path);
+  return 1;
+}
+
 unsigned CmdSaveDef::check()
 {
   TclOption* option = getOptionOrArg(TCL_NAME);
@@ -397,7 +425,7 @@ unsigned CmdSaveDef::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->idbSave(name)) {
+    if (dmInst->save(name)) {
       ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
@@ -491,7 +519,7 @@ unsigned CmdSaveNetlist::exec()
   TclOption* option = getOptionOrArg(TCL_NAME);
   auto name = option->getStringVal();
   if (name != nullptr) {
-    if (iplf::tmInst->idbSave(name)) {
+    if (dmInst->save(name)) {
       ECCLOG.info(ecc::Loc::current(), "idb save success.");
       return 1;
     }
@@ -534,8 +562,8 @@ CmdSaveGDS::CmdSaveGDS(const char* cmd_name) : TclCmd(cmd_name)
   auto* path = new TclStringOption(TCL_PATH, 1);
   addOption(path);
 
-  auto* harden_option = new TclSwitchOption("-harden");
-  addOption(harden_option);
+  auto* layer_map_option = new TclStringOption("-layer_map", 1, nullptr);
+  addOption(layer_map_option);
 }
 
 unsigned CmdSaveGDS::check()
@@ -546,8 +574,14 @@ unsigned CmdSaveGDS::check()
   TclOption* path = getOptionOrArg(TCL_PATH);
   ecc::checkTclOption(path, TCL_PATH);
 
-  TclOption* harden_option = getOptionOrArg("-harden");
-  ecc::checkTclOption(harden_option, "-harden");
+  TclOption* layer_map_option = getOptionOrArg("-layer_map");
+  ecc::checkTclOption(layer_map_option, "-layer_map");
+  const char* layer_map_path = layer_map_option == nullptr ? nullptr : layer_map_option->getStringVal();
+  if (layer_map_option == nullptr || !layer_map_option->is_set_val() || layer_map_path == nullptr
+      || std::string(layer_map_path).empty()) {
+    ECCLOG.error(ecc::Loc::current(), "gds_save requires -layer_map <path>.");
+    return 0;
+  }
 
   return 1;
 }
@@ -560,13 +594,12 @@ unsigned CmdSaveGDS::exec()
 
   TclOption* def_path = getOptionOrArg(TCL_PATH);
   auto str_path = def_path->getStringVal();
-  TclOption* harden_option = getOptionOrArg("-harden");
-  bool is_harden = false;
-  if (harden_option->is_set_val()) {
-    is_harden = true;
-  }
   if (str_path != nullptr) {
-    dmInst->saveGDSII(str_path, is_harden);
+    TclOption* layer_map_option = getOptionOrArg("-layer_map");
+    const char* layer_map_path = layer_map_option == nullptr ? nullptr : layer_map_option->getStringVal();
+    if (!dmInst->saveGDSII(str_path, layer_map_path == nullptr ? "" : layer_map_path)) {
+      return 0;
+    }
     return 1;
   }
   return 1;
@@ -620,146 +653,6 @@ unsigned CmdSaveJSON::exec()
   return 1;
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-CmdSaveViewJson::CmdSaveViewJson(const char* cmd_name) : TclCmd(cmd_name)
-{
-  auto* path = new TclStringOption(TCL_PATH, 1);
-  addOption(path);
-
-  auto* json_format = new TclStringOption("-json_format", 1, "pretty");
-  addOption(json_format);
-
-  auto* compress = new TclIntOption("-compress", 1, 0);
-  addOption(compress);
-}
-
-unsigned CmdSaveViewJson::check()
-{
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  ecc::checkTclOption(path, TCL_PATH);
-  TclOption* json_format = getOptionOrArg("-json_format");
-  ecc::checkTclOption(json_format, "-json_format");
-  TclOption* compress = getOptionOrArg("-compress");
-  ecc::checkTclOption(compress, "-compress");
-  return 1;
-}
-
-unsigned CmdSaveViewJson::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  auto* str_path = path->getStringVal();
-  if (str_path == nullptr) {
-    return 0;
-  }
-
-  TclOption* json_format_option = getOptionOrArg("-json_format");
-  const char* json_format_value = json_format_option == nullptr ? "pretty" : json_format_option->getStringVal();
-  idb::ViewJsonWriteOptions options;
-  if (!idb::parseViewJsonFormat(json_format_value == nullptr ? "pretty" : json_format_value, options.format)) {
-    ECCLOG.warn(ecc::Loc::current(), "Save view json failed: unsupported -json_format `", json_format_value, "`, expected `pretty` or `compact`.");
-    return 0;
-  }
-
-  TclOption* compress_option = getOptionOrArg("-compress");
-  options.compress = compress_option != nullptr && compress_option->getIntVal() != 0;
-
-  return dmInst->saveViewJson(str_path, options) ? 1 : 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-CmdApplyViewJsonEdits::CmdApplyViewJsonEdits(const char* cmd_name) : TclCmd(cmd_name)
-{
-  auto* path = new TclStringOption(TCL_PATH, 1);
-  addOption(path);
-
-  auto* compress = new TclIntOption("-compress", 1, 0);
-  addOption(compress);
-}
-
-unsigned CmdApplyViewJsonEdits::check()
-{
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  ecc::checkTclOption(path, TCL_PATH);
-  TclOption* compress = getOptionOrArg("-compress");
-  ecc::checkTclOption(compress, "-compress");
-  return 1;
-}
-
-unsigned CmdApplyViewJsonEdits::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  auto* str_path = path->getStringVal();
-  if (str_path == nullptr) {
-    return 0;
-  }
-
-  TclOption* compress_option = getOptionOrArg("-compress");
-  const bool compress = compress_option != nullptr && compress_option->getIntVal() != 0;
-  return dmInst->applyViewJsonEdits(str_path, compress) ? 1 : 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-CmdWriteSocJson::CmdWriteSocJson(const char* cmd_name) : TclCmd(cmd_name)
-{
-  auto* path = new TclStringOption(TCL_PATH, 1);
-  addOption(path);
-
-  auto* harden_cores = new TclStringListOption("-harden_cores", 1);
-  addOption(harden_cores);
-}
-
-unsigned CmdWriteSocJson::check()
-{
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  ecc::checkTclOption(path, TCL_PATH);
-
-  TclOption* harden_cores = getOptionOrArg("-harden_cores");
-  ecc::checkTclOption(harden_cores, "-harden_cores");
-
-  return 1;
-}
-
-unsigned CmdWriteSocJson::exec()
-{
-  if (!check()) {
-    return 0;
-  }
-
-  TclOption* path = getOptionOrArg(TCL_PATH);
-  auto* str_path = path->getStringVal();
-  if (str_path == nullptr) {
-    return 0;
-  }
-
-  TclOption* harden_cores = getOptionOrArg("-harden_cores");
-  std::vector<std::string> harden_core_list;
-  if (harden_cores) {
-    harden_core_list = harden_cores->getStringList();
-  }
-
-  idb::JsonSoc soc_file(str_path, harden_core_list);
-  return soc_file.saveFileData() ? 1 : 0;
-}
-
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 CmdWriteAbstractLef::CmdWriteAbstractLef(const char* cmd_name) : TclCmd(cmd_name)
 {
   auto* path = new TclStringOption(TCL_PATH, 1);

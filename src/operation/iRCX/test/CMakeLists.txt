@@ -101,3 +101,10 @@ if(BUILD_TESTING)
 
   add_test(NAME ircx_spef_name_canonicalization_test COMMAND ircx_spef_name_canonicalization_test)
 endif()
+
+if(BUILD_TESTING)
+  add_executable(ircx_pattern_test RCXPatternTest.cpp)
+  target_link_libraries(ircx_pattern_test PRIVATE ircx_cap_extractor)
+  target_compile_options(ircx_pattern_test PRIVATE -UNDEBUG)
+  add_test(NAME ircx_pattern_test COMMAND ircx_pattern_test)
+endif()

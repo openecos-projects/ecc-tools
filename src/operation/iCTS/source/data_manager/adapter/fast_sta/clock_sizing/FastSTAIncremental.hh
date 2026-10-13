@@ -32,20 +32,36 @@
 
 namespace icts {
 
-struct FastStaClockContext;
+struct FastStaContext;
 
 class FastStaIncremental
 {
  public:
   FastStaIncremental() = delete;
 
-  static auto changeBufferMaster(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master) -> bool;
-  static auto validateBufferMasterChanges(const FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
-  static auto changeBufferMasters(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
-  static auto changeBufferMastersIncremental(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+  static auto changeBufferMaster(FastStaContext& context, FastStaNodeId node_id, std::string_view cell_master) -> bool;
+  static auto validateBufferMasterChanges(const FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
+  static auto describeBufferMasterRegion(const FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
       -> std::optional<FastStaDirtyRegion>;
-  static auto changeBufferMasterIncremental(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master)
+  // Clock-sizing trials only update the physical clock domain.  The complete
+  // timing graph remains resident for publication, but trial discovery must
+  // not walk data-path nets that happen to leave a clock sink.
+  static auto describeClockBufferMasterRegion(const FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
       -> std::optional<FastStaDirtyRegion>;
+  static auto changeBufferMasters(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
+  static auto changeBufferMastersIncremental(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+      -> std::optional<FastStaDirtyRegion>;
+  static auto changeBufferMastersClockIncremental(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+      -> std::optional<FastStaDirtyRegion>;
+  static auto changeBufferMasterIncremental(FastStaContext& context, FastStaNodeId node_id, std::string_view cell_master) -> std::optional<FastStaDirtyRegion>;
+
+ private:
+  friend class FastSTA;
+
+  // Used synchronously after describeClockBufferMasterRegion on this unchanged
+  // context. Keeping this private prevents callers from bypassing owner/region
+  // validation or retaining a prepared region across model mutations.
+  static auto applyPreparedClockBufferMasters(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
 };
 
 }  // namespace icts

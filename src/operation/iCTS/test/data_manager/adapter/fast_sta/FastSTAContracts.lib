@@ -1,0 +1,142 @@
+/* FastSTA rollback fixture: explicit zero capacitance and cell power, with
+ * a deliberately incomplete BADBUF fall model. These are declared test inputs. */
+library(FastSTAContracts) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  capacitive_load_unit(1, pf);
+  voltage_unit : "1V";
+  current_unit : "1mA";
+  leakage_power_unit : "1nW";
+  nom_voltage : 1;
+  nom_temperature : 25;
+  nom_process : 1;
+  input_threshold_pct_rise : 50;
+  input_threshold_pct_fall : 50;
+  output_threshold_pct_rise : 50;
+  output_threshold_pct_fall : 50;
+  slew_lower_threshold_pct_rise : 20;
+  slew_upper_threshold_pct_rise : 80;
+  slew_lower_threshold_pct_fall : 20;
+  slew_upper_threshold_pct_fall : 80;
+  lu_table_template(delay) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1("0.01, 1");
+    index_2("0, 1");
+  }
+  power_lut_template(power) {
+    variable_1 : input_transition_time;
+    variable_2 : total_output_net_capacitance;
+    index_1("0.01, 1");
+    index_2("0, 1");
+  }
+  cell(GOODBUF) {
+    area : 1;
+    cell_leakage_power : 0;
+    pin(A) { direction : input; capacitance : 0; max_transition : 0.06; }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 1;
+      timing() {
+        related_pin : "A";
+        timing_sense : positive_unate;
+        timing_type : combinational;
+        cell_rise(delay) { values("0.1, 0.1", "0.1, 0.1"); }
+        cell_fall(delay) { values("0.2, 0.2", "0.2, 0.2"); }
+        rise_transition(delay) { values("0.04, 0.04", "0.04, 0.04"); }
+        fall_transition(delay) { values("0.08, 0.08", "0.08, 0.08"); }
+      }
+      internal_power() {
+        related_pin : "A";
+        rise_power(power) { values("0, 0", "0, 0"); }
+        fall_power(power) { values("0, 0", "0, 0"); }
+      }
+    }
+  }
+  cell(SLOWBUF) {
+    area : 1;
+    cell_leakage_power : 0;
+    pin(A) { direction : input; capacitance : 0.02; max_transition : 0.06; }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      max_capacitance : 1;
+      timing() {
+        related_pin : "A";
+        timing_sense : positive_unate;
+        timing_type : combinational;
+        cell_rise(delay) { values("0.3, 0.3", "0.3, 0.3"); }
+        cell_fall(delay) { values("0.4, 0.4", "0.4, 0.4"); }
+        rise_transition(delay) { values("0.06, 0.06", "0.06, 0.06"); }
+        fall_transition(delay) { values("0.10, 0.10", "0.10, 0.10"); }
+      }
+      internal_power() {
+        related_pin : "A";
+        rise_power(power) { values("0, 0", "0, 0"); }
+        fall_power(power) { values("0, 0", "0, 0"); }
+      }
+    }
+  }
+  cell(BADBUF) {
+    area : 1;
+    cell_leakage_power : 0;
+    pin(A) { direction : input; capacitance : 0.02; }
+    pin(Y) {
+      direction : output;
+      function : "A";
+      timing() {
+        related_pin : "A";
+        timing_sense : positive_unate;
+        timing_type : combinational;
+        cell_rise(delay) { values("0.1, 0.1", "0.1, 0.1"); }
+        rise_transition(delay) { values("0.04, 0.04", "0.04, 0.04"); }
+      }
+      internal_power() {
+        related_pin : "A";
+        rise_power(power) { values("0, 0", "0, 0"); }
+        fall_power(power) { values("0, 0", "0, 0"); }
+      }
+    }
+  }
+  lu_table_template(constraint) {
+    variable_1 : constrained_pin_transition;
+    variable_2 : related_pin_transition;
+    index_1("0.01, 1");
+    index_2("0.01, 1");
+  }
+  cell(SEQ) {
+    area : 1;
+    cell_leakage_power : 0;
+    ff(IQ, IQN) { clocked_on : "CLK"; next_state : "D"; }
+    pin(CLK) { direction : input; clock : true; capacitance : 0.01; max_transition : 1; }
+    pin(D) {
+      direction : input; capacitance : 0.01; max_transition : 1;
+      timing() {
+        related_pin : "CLK"; timing_type : setup_rising;
+        rise_constraint(constraint) { values("0.02, 0.04", "0.06, 0.08"); }
+        fall_constraint(constraint) { values("0.03, 0.05", "0.07, 0.09"); }
+      }
+      timing() {
+        related_pin : "CLK"; timing_type : hold_rising;
+        rise_constraint(constraint) { values("0.01, 0.02", "0.03, 0.04"); }
+        fall_constraint(constraint) { values("0.02, 0.03", "0.04, 0.05"); }
+      }
+    }
+    pin(Q) {
+      direction : output; function : "IQ"; max_capacitance : 1;
+      timing() {
+        related_pin : "CLK"; timing_type : rising_edge;
+        cell_rise(delay) { values("0.1, 0.2", "0.3, 0.4"); }
+        cell_fall(delay) { values("0.2, 0.3", "0.4, 0.5"); }
+        rise_transition(delay) { values("0.03, 0.05", "0.06, 0.08"); }
+        fall_transition(delay) { values("0.05, 0.07", "0.08, 0.10"); }
+      }
+      internal_power() {
+        related_pin : "CLK";
+        rise_power(power) { values("0, 0", "0, 0"); }
+        fall_power(power) { values("0, 0", "0, 0"); }
+      }
+    }
+  }
+}

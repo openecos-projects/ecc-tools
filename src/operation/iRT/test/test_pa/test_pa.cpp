@@ -66,7 +66,6 @@ int32_t main()
     for (int32_t node : component) {
       ECCLOG.info(ecc::Loc::current(), node, " ");
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
 
   return 0;

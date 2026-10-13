@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 INPUTS = {
+    "antenna": ("route_in.def.gz", "route_in.v.gz"),
     "combined_io": ("route_in.def.gz", "route_in.v.gz"),
     "cts": ("cts_in.def.gz", "cts_in.v.gz"),
     "def_round_trip": ("route_in.def.gz",),
@@ -16,6 +17,12 @@ INPUTS = {
     "floorplan": ("floorplan_in.v.gz",),
     "harden": ("harden_in.def.gz", "harden_in.v.gz"),
     "lvs": ("harden_in.def.gz", "harden_in.v.gz"),
+    "placement_map": ("cts_in.def.gz",),
+    "pyplacedb_rows": (),
+    "pyplacedb_timing": ("route_in.def.gz", "route_in.v.gz"),
+    "sizing_mutation": ("route_in.def.gz", "route_in.v.gz"),
+    "buffer_mutation": ("route_in.def.gz", "route_in.v.gz"),
+    "full_refresh_mutation": ("route_in.def.gz", "route_in.v.gz"),
     "rcx": ("route_in.def.gz", "route_in.v.gz"),
     "routing": ("route_in.def.gz",),
     "sta": ("route_in.def.gz", "route_in.v.gz"),
@@ -71,7 +78,7 @@ def run_scenario(
     environment.setdefault("ECC_LOGGER_THROW_ON_ERROR", "1")
     environment.setdefault("OMP_NUM_THREADS", "2")
     command = [
-        sys.executable,
+        os.environ.get("ECC_TOOLS_TEST_PYTHON_LAUNCHER", sys.executable),
         str(roots.repo_root / "test" / "native_scenarios.py"),
         str(manifest_path),
     ]
@@ -138,6 +145,7 @@ def _prepare_manifest(
         "config": {
             key.removesuffix(".json"): str(value) for key, value in config_paths.items()
         },
+        "gds_layer_map": str(roots.fixture_root / "config" / "gcd.gds.map"),
         "inputs": {key: str(value) for key, value in inputs.items()},
         "name": name,
         "output_dir": str(output_dir),

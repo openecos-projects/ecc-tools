@@ -29,7 +29,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#include "utility/logger/Logger.hpp"
 #include "IdbDesign.h"
 
 #include <algorithm>
@@ -38,6 +37,8 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
 
@@ -141,6 +142,8 @@ IdbDesign::~IdbDesign()
     _instance_list = nullptr;
   }
   if (_io_pin_list != nullptr) {
+    // The design owns IO pins; regular nets, special nets and buses only reference them.
+    _io_pin_list->reset();
     delete _io_pin_list;
     _io_pin_list = nullptr;
   }
@@ -474,13 +477,17 @@ std::string IdbDesign::makeUniqueNetName(const std::string& prefix) const
   }
 
   std::string base_name = prefix.empty() ? "net" : prefix;
-  if (_net_list->find_net(base_name) == nullptr) {
+  const auto available = [this](const std::string& name) {
+    return _net_list->find_net(name) == nullptr && _io_pin_list->find_pin(name) == nullptr
+           && _instance_list->find_instance(name) == nullptr;
+  };
+  if (available(base_name)) {
     return base_name;
   }
 
   for (uint64_t index = 0;; ++index) {
     std::string candidate = base_name + std::to_string(index);
-    if (_net_list->find_net(candidate) == nullptr) {
+    if (available(candidate)) {
       return candidate;
     }
   }
@@ -760,6 +767,43 @@ bool IdbDesign::connectPinToSpecialNet(IdbPin* pin, IdbSpecialNet* net)
   return true;
 }
 
+bool IdbDesign::connectPinsToSpecialNet(const std::vector<IdbPin*>& pins, IdbSpecialNet* net)
+{
+  if (net == nullptr || std::find(pins.begin(), pins.end(), nullptr) != pins.end()) {
+    return false;
+  }
+
+  const auto connected_pins = pins;
+  std::vector<IdbPin*> io_pins;
+  std::vector<IdbPin*> instance_pins;
+  std::vector<IdbInstance*> instances;
+  instance_pins.reserve(pins.size());
+  instances.reserve(pins.size());
+  for (auto* pin : pins) {
+    if (pin->is_io_pin()) {
+      io_pins.emplace_back(pin);
+    } else {
+      instance_pins.emplace_back(pin);
+      if (pin->get_instance() != nullptr) {
+        instances.emplace_back(pin->get_instance());
+      }
+    }
+  }
+  if (!net->get_instance_list()->add_instance_refs(instances)) {
+    return false;
+  }
+  net->get_io_pin_list()->add_pin_refs_unique(io_pins);
+  net->get_instance_pin_list()->add_pin_refs_unique(instance_pins);
+  for (auto* pin : connected_pins) {
+    if (pin->get_special_net() != nullptr && pin->get_special_net() != net) {
+      disconnectPinFromSpecialNet(pin);
+    }
+    pin->set_special_net(net);
+    refreshPinNetName(pin);
+  }
+  return true;
+}
+
 IdbSpecialNet* IdbDesign::findSpecialNetForInstancePin(IdbPin* pin) const
 {
   if (pin == nullptr || pin->is_io_pin()) {
@@ -1010,7 +1054,7 @@ void IdbDesign::clearBlockage(std::string type)
 }
 
 void IdbDesign::addRoutingBlockage(int32_t llx, int32_t lly, int32_t urx, int32_t ury, const std::vector<std::string>& layers,
-                                  const bool& is_except_pgnet)
+                                   const bool& is_except_pgnet)
 {
   if (_layout == nullptr || _blockage_list == nullptr || _layout->get_layers() == nullptr) {
     return;
@@ -1141,7 +1185,7 @@ IdbConnectivityCheckResult IdbDesign::validateConnectivity(bool check_floating) 
         if (!pin->get_net_name().empty() && pin->get_net_name() != net->get_net_name()) {
           result.pin_reverse_mismatch_count++;
           pushLimitedMessage(result.messages, "regular pin net name mismatch: " + pinDisplayName(pin) + " has " + pin->get_net_name()
-                                                + " but is listed in " + net->get_net_name());
+                                                  + " but is listed in " + net->get_net_name());
         }
         if (!pin->is_io_pin()) {
           auto* instance = pin->get_instance();
@@ -1226,9 +1270,8 @@ IdbConnectivityCheckResult IdbDesign::validateConnectivity(bool check_floating) 
   }
 
   result.ok = result.duplicate_net_count == 0 && result.duplicate_instance_count == 0 && result.duplicate_io_pin_count == 0
-              && result.stale_regular_pin_ref_count == 0 && result.stale_pin_net_ref_count == 0
-              && result.stale_special_pin_ref_count == 0 && result.pin_reverse_mismatch_count == 0
-              && result.net_instance_mismatch_count == 0 && result.duplicate_pin_ref_count == 0
+              && result.stale_regular_pin_ref_count == 0 && result.stale_pin_net_ref_count == 0 && result.stale_special_pin_ref_count == 0
+              && result.pin_reverse_mismatch_count == 0 && result.net_instance_mismatch_count == 0 && result.duplicate_pin_ref_count == 0
               && (!check_floating || result.floating_pin_count == 0);
   return result;
 }
@@ -1268,7 +1311,8 @@ bool IdbDesign::writeConnectivitySnapshot(const std::string& path, bool check_fl
 
 bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point_list, IdbLayer* layer)
 {
-  if (point_list.size() < _POINT_MAX_ || layer == nullptr || _layout == nullptr || _io_pin_list == nullptr || _special_net_list == nullptr) {
+  if (point_list.size() < _POINT_MAX_ || layer == nullptr || _layout == nullptr || _io_pin_list == nullptr
+      || _special_net_list == nullptr) {
     return false;
   }
 
@@ -1279,7 +1323,6 @@ bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point
     for (IdbCoordinate<int32_t>* pt : point_list) {
       ECCLOG.info(ecc::Loc::current(), " ( ", pt->get_x(), " , ", pt->get_y(), " )");
     }
-    ECCLOG.info(ecc::Loc::current(), "");
     return false;
   }
 

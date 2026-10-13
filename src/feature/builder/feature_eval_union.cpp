@@ -143,8 +143,8 @@ bool FeatureBuilder::buildNetEval(std::string csv_path)
   std::vector<char> buffer(buffer_size);
   csv_file.rdbuf()->pubsetbuf(buffer.data(), buffer_size);
 
-  std::ostringstream oss;
-  oss.str().reserve(buffer_size);  // Pre-allocate memory
+  // std::ostringstream oss;
+  // oss.str().reserve(buffer_size);  // Pre-allocate memory
 
   for (size_t i = 0; i < idb_design->get_net_list()->get_net_list().size(); i++) {
     auto* idb_net = idb_design->get_net_list()->get_net_list()[i];
@@ -209,15 +209,15 @@ bool FeatureBuilder::buildNetEval(std::string csv_path)
              << ',' << avg_x_nn_dist << "," << std_x_nn_dist << "," << ratio_x_nn_dist << "," << avg_y_nn_dist << "," << std_y_nn_dist
              << "," << ratio_y_nn_dist << '\n';
 
-    if (oss.tellp() >= buffer_size / 2) {
-      csv_file << oss.str();
-      oss.str("");
-      oss.clear();
-    }
+    // if (oss.tellp() >= buffer_size / 2) {
+    //   csv_file << oss.str();
+    //   oss.str("");
+    //   oss.clear();
+    // }
   }
-  if (oss.tellp() > 0) {
-    csv_file << oss.str();
-  }
+  // if (oss.tellp() > 0) {
+  //   csv_file << oss.str();
+  // }
   csv_file.close();
   return true;
 }

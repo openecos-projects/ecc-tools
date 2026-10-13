@@ -19,6 +19,7 @@
 #include "IdbObs.h"
 #include "IdbViaMaster.h"
 #include "IdbVias.h"
+#include "json.hpp"
 
 #include <cassert>
 #include <filesystem>
@@ -3726,6 +3727,53 @@ void test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_f
   std::filesystem::remove_all(output_dir);
 }
 
+void test_geometry_snapshot_writer_publishes_hierarchical_drc_in_same_epoch()
+{
+  GeometryStore store;
+  const std::filesystem::path output_dir =
+      std::filesystem::temp_directory_path() / "geometry_drc_snapshot_test";
+  std::filesystem::remove_all(output_dir);
+
+  SnapshotWriteOptions options{output_dir};
+  options.drc.emplace();
+  (*options.drc)["MetalShort"]["MET1"].push_back(
+      GeometryDrcViolation{Rect32{10, 20, 30, 40}, {"clk", "vdd"}, {}, 12});
+  (*options.drc)["MetalShort"]["MET2"].push_back(
+      GeometryDrcViolation{Rect32{50, 60, 70, 80}, {}, {}, 0});
+
+  GeometrySnapshotWriter writer;
+  const SnapshotWriteResult first = writer.write(store, options);
+  assert(first.ok);
+  const std::filesystem::path manifest = output_dir / "geometry.manifest";
+  const std::string drc_path = manifest_value(manifest, "drc");
+  assert(!drc_path.empty());
+  const std::filesystem::path first_drc = output_dir / drc_path;
+  assert(std::filesystem::exists(first_drc));
+  const auto json = nlohmann::json::parse(read_text_file(first_drc));
+  assert(json["drc"]["number"] == 2);
+  assert(json["drc"]["distribution"]["MetalShort"]["number"] == 2);
+  assert(json["drc"]["distribution"]["MetalShort"]["layers"]["MET1"]["number"] == 1);
+  assert(json["drc"]["distribution"]["MetalShort"]["layers"]["MET1"]["list"][0]
+         == nlohmann::json({{"llx", 10}, {"lly", 20}, {"urx", 30}, {"ury", 40},
+                            {"net", {"clk", "vdd"}}, {"inst", nlohmann::json::array()}, {"required_size", 12}}));
+  assert(json["drc"]["distribution"]["MetalShort"]["layers"]["MET2"]["list"][0]["required_size"] == 0);
+
+  const SnapshotWriteResult second = writer.write(store, SnapshotWriteOptions{output_dir});
+  assert(second.ok);
+  assert(manifest_value(manifest, "drc").empty());
+  assert(std::filesystem::exists(first_drc));
+
+  SnapshotWriteOptions empty_options{output_dir};
+  empty_options.drc.emplace();
+  const SnapshotWriteResult third = writer.write(store, empty_options);
+  assert(third.ok);
+  const auto empty_json = nlohmann::json::parse(read_text_file(output_dir / manifest_value(manifest, "drc")));
+  assert(empty_json["drc"]["number"] == 0);
+  assert(empty_json["drc"]["distribution"] == nlohmann::json::object());
+
+  std::filesystem::remove_all(output_dir);
+}
+
 void test_geometry_snapshot_writer_reuses_unchanged_binary_side_files()
 {
   GeometryStore store;
@@ -4041,6 +4089,7 @@ int main()
   test_geometry_builder_collects_site_and_master_metadata();
   test_geometry_snapshot_exporter_writes_current_idb_design();
   test_geometry_snapshot_writer_switches_epoch_without_overwriting_previous_files();
+  test_geometry_snapshot_writer_publishes_hierarchical_drc_in_same_epoch();
   test_geometry_snapshot_writer_reuses_unchanged_binary_side_files();
   test_geometry_snapshot_reader_round_trips_core_binary_files();
   test_geometry_snapshot_reload_preserves_shape_id_and_version_during_rebuild();

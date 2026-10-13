@@ -1,4 +1,5 @@
 add_library(gds_builder
+    gds_layer_map.cpp
     gds_write.cpp
 )
 

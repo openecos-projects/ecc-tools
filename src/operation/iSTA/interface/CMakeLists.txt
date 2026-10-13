@@ -1,6 +1,8 @@
 add_library(ista_interface
     ${ISTA_INTERFACE}/STAInterface.cpp
     ${CMAKE_SOURCE_DIR}/src/database/eccdb/adapters/ista/STAInterfaceEccdb.cpp
+    ${ISTA_INTERFACE}/LibertyExportAdapter.cpp
+    ${ISTA_INTERFACE}/TimingExportAdapter.cpp
 )
 
 target_link_libraries(ista_interface

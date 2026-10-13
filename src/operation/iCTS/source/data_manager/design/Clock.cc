@@ -79,8 +79,9 @@ auto Clock::validatePropagationArc(const ClockPropagationArc& arc) const -> Cloc
   if (!IsInputDirection(arc.input_pin->get_type()) || !IsOutputDirection(arc.output_pin->get_type())) {
     return Failure(ClockPropagationMutationCode::kInvalidPinDirection, "invalid_clock_propagation_pin_direction");
   }
-  const bool physical_kind_matches
-      = (arc.kind == ClockPropagationKind::kBuffer && arc.inst->is_buffer()) || (arc.kind == ClockPropagationKind::kInverter && arc.inst->is_inverter());
+  const bool physical_kind_matches = (arc.kind == ClockPropagationKind::kBuffer && arc.inst->is_buffer())
+                                     || (arc.kind == ClockPropagationKind::kInverter && arc.inst->is_inverter())
+                                     || (arc.kind == ClockPropagationKind::kClockGate && arc.inst->is_clock_gate());
   if (!physical_kind_matches) {
     return Failure(ClockPropagationMutationCode::kPhysicalKindMismatch, "clock_propagation_physical_kind_mismatch");
   }

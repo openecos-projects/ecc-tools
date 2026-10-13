@@ -27,6 +27,7 @@
 #include <limits>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "HTreeTopologyChar.hh"
@@ -49,6 +50,7 @@ struct TopologyPatternNode
   TerminalSemantic terminal_semantic = TerminalSemantic::kLeafUnbuffered;
   MonotonicBoundaryState monotonic_boundary_state{};
   std::size_t source_exposed_load_count = 1U;
+  PatternGeometryState geometry_state{};
   TopologyPatternNodeKind kind = TopologyPatternNodeKind::kSeed;
   PatternId segment_pattern_id{PatternDomain::kSegmentPattern, 0U};
   PatternId upstream_pattern_id{PatternDomain::kTopologyPattern, 0U};
@@ -65,12 +67,16 @@ struct TopologyPatternLibrary
     if (pattern_id.local_id != nodes.size()) {
       CTSLOG.error(Loc::current(), "HTree: topology library requires sequential topology pattern IDs.");
     }
+    auto geometry_state = composition_state.geometry_state;
+    geometry_state.source_unbuffered_level_count = geometry_state.has_buffer ? 0U : 1U;
+    geometry_state.sink_unbuffered_level_count = geometry_state.has_buffer ? 0U : 1U;
     nodes.push_back(TopologyPatternNode{
         .pattern_id = pattern_id,
         .levels = 1U,
         .terminal_semantic = composition_state.terminal_semantic,
         .monotonic_boundary_state = composition_state.monotonic_boundary_state,
         .source_exposed_load_count = composition_state.source_exposed_load_count,
+        .geometry_state = std::move(geometry_state),
         .kind = TopologyPatternNodeKind::kSeed,
         .segment_pattern_id = segment_pattern_id,
     });
@@ -91,6 +97,7 @@ struct TopologyPatternLibrary
         .terminal_semantic = composition_state.terminal_semantic,
         .monotonic_boundary_state = composition_state.monotonic_boundary_state,
         .source_exposed_load_count = composition_state.source_exposed_load_count,
+        .geometry_state = composition_state.geometry_state,
         .kind = TopologyPatternNodeKind::kConcat,
         .upstream_pattern_id = upstream_pattern_id,
         .downstream_pattern_id = downstream_pattern_id,
@@ -115,6 +122,7 @@ struct TopologyPatternLibrary
         .terminal_semantic = node->terminal_semantic,
         .monotonic_boundary_state = node->monotonic_boundary_state,
         .source_exposed_load_count = node->source_exposed_load_count,
+        .geometry_state = node->geometry_state,
     };
   }
 
@@ -254,12 +262,40 @@ class TopologyPatternLibraryCombiner
 
   auto composeState(PatternId upstream, PatternId downstream) const -> PatternCompositionState
   {
+    const auto* upstream_node = _library->findNode(upstream);
+    const auto* downstream_node = _library->findNode(downstream);
+    if (upstream_node == nullptr || downstream_node == nullptr) {
+      CTSLOG.error(Loc::current(), "HTree: missing topology pattern during composition-state resolution.");
+    }
     const auto upstream_state = _library->getCompositionState(upstream);
     const auto downstream_state = _library->getCompositionState(downstream);
+    PatternGeometryState geometry_state;
+    geometry_state.has_buffer = upstream_state.geometry_state.has_buffer || downstream_state.geometry_state.has_buffer;
+    if (upstream_state.geometry_state.has_buffer) {
+      geometry_state.source_buffer_position = upstream_state.geometry_state.source_buffer_position;
+      geometry_state.source_buffer_master = upstream_state.geometry_state.source_buffer_master;
+      geometry_state.source_unbuffered_level_count = upstream_state.geometry_state.source_unbuffered_level_count;
+    } else {
+      geometry_state.source_buffer_position = downstream_state.geometry_state.source_buffer_position;
+      geometry_state.source_buffer_master = downstream_state.geometry_state.source_buffer_master;
+      geometry_state.source_unbuffered_level_count
+          = static_cast<std::size_t>(upstream_node->levels) + downstream_state.geometry_state.source_unbuffered_level_count;
+    }
+    if (downstream_state.geometry_state.has_buffer) {
+      geometry_state.sink_buffer_position = downstream_state.geometry_state.sink_buffer_position;
+      geometry_state.sink_buffer_master = downstream_state.geometry_state.sink_buffer_master;
+      geometry_state.sink_unbuffered_level_count = downstream_state.geometry_state.sink_unbuffered_level_count;
+    } else {
+      geometry_state.sink_buffer_position = upstream_state.geometry_state.sink_buffer_position;
+      geometry_state.sink_buffer_master = upstream_state.geometry_state.sink_buffer_master;
+      geometry_state.sink_unbuffered_level_count
+          = static_cast<std::size_t>(downstream_node->levels) + upstream_state.geometry_state.sink_unbuffered_level_count;
+    }
     return PatternCompositionState{
         .terminal_semantic = downstream_state.terminal_semantic,
         .monotonic_boundary_state = MonotonicBoundaryState::compose(upstream_state.monotonic_boundary_state, downstream_state.monotonic_boundary_state),
         .source_exposed_load_count = resolveMergedSourceLoadCount(upstream_state, downstream_state),
+        .geometry_state = std::move(geometry_state),
     };
   }
 

@@ -95,7 +95,15 @@ auto FastStaLibertyTable::valid() const -> bool
 
 auto FastStaLibertyTable::lookup(double input_slew_ns, double output_load_pf) const -> std::optional<double>
 {
-  if (!valid() || !std::isfinite(input_slew_ns) || !std::isfinite(output_load_pf)) {
+  if (!valid()) {
+    return std::nullopt;
+  }
+  return lookupValidated(input_slew_ns, output_load_pf);
+}
+
+auto FastStaLibertyTable::lookupValidated(double input_slew_ns, double output_load_pf) const -> std::optional<double>
+{
+  if (!std::isfinite(input_slew_ns) || !std::isfinite(output_load_pf)) {
     return std::nullopt;
   }
   if (axes.empty()) {

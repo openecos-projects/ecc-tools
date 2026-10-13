@@ -52,15 +52,15 @@ Rect32 rect_from_idb(idb::IdbRect& rect)
   return Rect32{rect.get_low_x(), rect.get_low_y(), rect.get_high_x(), rect.get_high_y()};
 }
 
-Rect32 rect_from_delta_rect(idb::IdbRect* delta_rect, idb::IdbCoordinate<int32_t>* origin)
-{
-  if (delta_rect == nullptr || origin == nullptr) {
-    return Rect32{};
-  }
+// Rect32 rect_from_delta_rect(idb::IdbRect* delta_rect, idb::IdbCoordinate<int32_t>* origin)
+// {
+//   if (delta_rect == nullptr || origin == nullptr) {
+//     return Rect32{};
+//   }
 
-  return Rect32{origin->get_x() + delta_rect->get_low_x(), origin->get_y() + delta_rect->get_low_y(),
-                origin->get_x() + delta_rect->get_high_x(), origin->get_y() + delta_rect->get_high_y()};
-}
+//   return Rect32{origin->get_x() + delta_rect->get_low_x(), origin->get_y() + delta_rect->get_low_y(),
+//                 origin->get_x() + delta_rect->get_high_x(), origin->get_y() + delta_rect->get_high_y()};
+// }
 
 LayerId layer_id_from_idb(idb::IdbLayer* layer)
 {

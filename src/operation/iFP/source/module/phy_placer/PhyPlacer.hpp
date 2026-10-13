@@ -17,8 +17,11 @@
 #pragma once
 
 #include "CellMaster.hpp"
+#include "Instance.hpp"
 #include "PPModel.hpp"
 #include "Row.hpp"
+
+#include <unordered_map>
 
 namespace ifp {
 
@@ -78,6 +81,9 @@ class PhyPlacer
   std::vector<PPRegion> getEmptyPPRegionList(PPModel& pp_model, PPRegion& boundary_region);
   void fillEdgeEndcap(PPModel& pp_model, PPRegion& empty_region, std::vector<std::string>& endcap_name_list, int32_t& endcap_idx);
   std::string getFittingCellMasterName(std::vector<std::string>& cell_master_name_list, int32_t max_width, PlacementOrientation orient);
+
+  std::vector<Instance*> _placed_macro_list;
+  std::unordered_map<int32_t, std::vector<size_t>> _occupied_region_indices;
 };
 
 }  // namespace ifp

@@ -7,7 +7,7 @@ add_library(tcl_config
 target_link_libraries(tcl_config
     PUBLIC
         tcl
-        tool_manager
+        idm
         ecc_logger
 )
 

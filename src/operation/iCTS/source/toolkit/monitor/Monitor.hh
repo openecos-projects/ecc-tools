@@ -34,6 +34,8 @@ class Monitor final
   ~Monitor() = default;
 
   auto getStatsInfo() -> std::string;
+  auto getElapsedSeconds() const -> double;
+  auto getCPUSeconds() const -> double;
   auto getElapsedTime() const -> std::string;
   auto getCPUTime() const -> std::string;
   auto getUsageMemory() const -> std::string;

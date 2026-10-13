@@ -24,7 +24,6 @@ class NetlistData : public DesignData
 {
  public:
   NetlistData() = default;
-  ~NetlistData() = default;
 };
 
 }  // namespace ilvs

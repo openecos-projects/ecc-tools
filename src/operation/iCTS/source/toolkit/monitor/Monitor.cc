@@ -47,14 +47,24 @@ auto Monitor::getStatsInfo() -> std::string
   return stats_info;
 }
 
+auto Monitor::getElapsedSeconds() const -> double
+{
+  return getCurrentElapsedTime() - _initial_elapsed_time;
+}
+
+auto Monitor::getCPUSeconds() const -> double
+{
+  return getCurrentCPUTime() - _initial_cpu_time;
+}
+
 auto Monitor::getElapsedTime() const -> std::string
 {
-  return formatSeconds(getCurrentElapsedTime() - _initial_elapsed_time);
+  return formatSeconds(getElapsedSeconds());
 }
 
 auto Monitor::getCPUTime() const -> std::string
 {
-  return formatSeconds(getCurrentCPUTime() - _initial_cpu_time);
+  return formatSeconds(getCPUSeconds());
 }
 
 auto Monitor::getUsageMemory() const -> std::string

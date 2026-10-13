@@ -26,6 +26,7 @@ class AdjacentCutSpacingRule
   AdjacentCutSpacingRule() = default;
   ~AdjacentCutSpacingRule() = default;
 
+  bool has_rule = false;
   int32_t cut_spacing = -1;
   int32_t adjacnet_cuts = -1;
   int32_t cut_within = -1;

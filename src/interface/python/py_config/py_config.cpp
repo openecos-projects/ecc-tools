@@ -17,7 +17,6 @@
 #include "py_config.h"
 
 #include <idm.h>
-#include <tool_manager.h>
 
 namespace python_interface {
 

@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <ostream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -39,7 +40,7 @@
 namespace icts {
 namespace {
 
-auto normalizeBufferInputNodeId(const FastStaClockContext& context, FastStaNodeId node_id) -> FastStaNodeId
+auto normalizeBufferInputNodeId(const FastStaContext& context, FastStaNodeId node_id) -> FastStaNodeId
 {
   if (node_id >= context.nodes.size()) {
     return kInvalidFastStaNodeId;
@@ -62,7 +63,7 @@ auto normalizeBufferInputNodeId(const FastStaClockContext& context, FastStaNodeI
   return kInvalidFastStaNodeId;
 }
 
-auto normalizeBufferOutputNodeId(const FastStaClockContext& context, FastStaNodeId node_id) -> FastStaNodeId
+auto normalizeBufferOutputNodeId(const FastStaContext& context, FastStaNodeId node_id) -> FastStaNodeId
 {
   if (node_id >= context.nodes.size()) {
     return kInvalidFastStaNodeId;
@@ -85,18 +86,32 @@ auto normalizeBufferOutputNodeId(const FastStaClockContext& context, FastStaNode
   return kInvalidFastStaNodeId;
 }
 
-auto markReachableFromNode(const FastStaClockContext& context, FastStaNodeId node_id, FastStaDirtyRegion& dirty_region, std::vector<std::uint8_t>& node_seen,
-                           std::vector<std::uint8_t>& net_seen) -> void
+auto isClockTrialNode(const FastStaContext& context, FastStaNodeId node_id) -> bool
+{
+  if (node_id >= context.nodes.size() || context.nodes.at(node_id).domain != FastStaNodeDomain::kClock) {
+    return false;
+  }
+  if (!context.owner_clock_scope_available) {
+    return true;
+  }
+  return std::ranges::find(context.owned_clock_node_ids, node_id) != context.owned_clock_node_ids.end();
+}
+
+auto markReachableFromNode(const FastStaContext& context, FastStaNodeId node_id, FastStaDirtyRegion& dirty_region, std::unordered_set<FastStaNodeId>& node_seen,
+                           std::unordered_set<FastStaNetId>& net_seen, bool clock_only) -> void
 {
   std::vector<FastStaNodeId> pending_nodes{node_id};
   while (!pending_nodes.empty()) {
     const auto current_node_id = pending_nodes.back();
     pending_nodes.pop_back();
-    if (current_node_id >= context.nodes.size() || node_seen.at(current_node_id) != 0U) {
+    if (current_node_id >= context.nodes.size() || node_seen.contains(current_node_id)) {
       continue;
     }
 
-    node_seen.at(current_node_id) = 1U;
+    node_seen.insert(current_node_id);
+    if (clock_only && context.nodes.at(current_node_id).domain != FastStaNodeDomain::kClock) {
+      continue;
+    }
     dirty_region.node_ids.push_back(current_node_id);
     const auto& node = context.nodes.at(current_node_id);
     if (node.kind == FastStaNodeKind::kBufferInput) {
@@ -111,8 +126,11 @@ auto markReachableFromNode(const FastStaClockContext& context, FastStaNodeId nod
       if (net_id >= context.nets.size()) {
         continue;
       }
-      if (net_seen.at(net_id) == 0U) {
-        net_seen.at(net_id) = 1U;
+      if (clock_only && context.nets.at(net_id).domain != FastStaNetDomain::kClock) {
+        continue;
+      }
+      if (!net_seen.contains(net_id)) {
+        net_seen.insert(net_id);
         dirty_region.net_ids.push_back(net_id);
       }
       for (const auto load_node_id : context.nets.at(net_id).load_node_ids) {
@@ -122,7 +140,7 @@ auto markReachableFromNode(const FastStaClockContext& context, FastStaNodeId nod
   }
 }
 
-auto dirtyRegionStartNode(const FastStaClockContext& context, FastStaNodeId changed_input_node_id) -> FastStaNodeId
+auto dirtyRegionStartNode(const FastStaContext& context, FastStaNodeId changed_input_node_id) -> FastStaNodeId
 {
   if (changed_input_node_id >= context.nodes.size()) {
     return kInvalidFastStaNodeId;
@@ -144,7 +162,7 @@ auto dirtyRegionStartNode(const FastStaClockContext& context, FastStaNodeId chan
   return start_node_id;
 }
 
-auto parentNodeId(const FastStaClockContext& context, FastStaNodeId node_id) -> FastStaNodeId
+auto parentNodeId(const FastStaContext& context, FastStaNodeId node_id) -> FastStaNodeId
 {
   if (node_id >= context.nodes.size()) {
     return kInvalidFastStaNodeId;
@@ -160,37 +178,35 @@ auto parentNodeId(const FastStaClockContext& context, FastStaNodeId node_id) -> 
   return kInvalidFastStaNodeId;
 }
 
-auto lowestCommonAncestor(const FastStaClockContext& context, FastStaNodeId lhs, FastStaNodeId rhs) -> FastStaNodeId
+auto lowestCommonAncestor(const FastStaContext& context, FastStaNodeId lhs, FastStaNodeId rhs) -> FastStaNodeId
 {
   if (lhs >= context.nodes.size() || rhs >= context.nodes.size()) {
     return kInvalidFastStaNodeId;
   }
-  std::vector<std::uint8_t> lhs_ancestors(context.nodes.size(), 0U);
+  std::unordered_set<FastStaNodeId> lhs_ancestors;
   auto current = lhs;
   for (std::size_t step = 0U; current < context.nodes.size() && step <= context.nodes.size(); ++step) {
-    if (lhs_ancestors.at(current) != 0U) {
+    if (!lhs_ancestors.insert(current).second) {
       return kInvalidFastStaNodeId;
     }
-    lhs_ancestors.at(current) = 1U;
     current = parentNodeId(context, current);
   }
 
-  std::vector<std::uint8_t> rhs_seen(context.nodes.size(), 0U);
+  std::unordered_set<FastStaNodeId> rhs_seen;
   current = rhs;
   for (std::size_t step = 0U; current < context.nodes.size() && step <= context.nodes.size(); ++step) {
-    if (lhs_ancestors.at(current) != 0U) {
+    if (lhs_ancestors.contains(current)) {
       return current;
     }
-    if (rhs_seen.at(current) != 0U) {
+    if (!rhs_seen.insert(current).second) {
       return kInvalidFastStaNodeId;
     }
-    rhs_seen.at(current) = 1U;
     current = parentNodeId(context, current);
   }
   return kInvalidFastStaNodeId;
 }
 
-auto collectDirtyRegionFromStart(const FastStaClockContext& context, FastStaNodeId start_node_id) -> FastStaDirtyRegion
+auto collectDirtyRegionFromStart(const FastStaContext& context, FastStaNodeId start_node_id, bool clock_only = false) -> FastStaDirtyRegion
 {
   FastStaDirtyRegion dirty_region;
   if (start_node_id >= context.nodes.size()) {
@@ -202,23 +218,26 @@ auto collectDirtyRegionFromStart(const FastStaClockContext& context, FastStaNode
       return dirty_region;
     }
   }
+  if (clock_only && context.nodes.at(start_node_id).domain != FastStaNodeDomain::kClock) {
+    return dirty_region;
+  }
 
   dirty_region.valid = true;
   dirty_region.start_node_id = start_node_id;
-  std::vector<std::uint8_t> node_seen(context.nodes.size(), 0U);
-  std::vector<std::uint8_t> net_seen(context.nets.size(), 0U);
-  markReachableFromNode(context, start_node_id, dirty_region, node_seen, net_seen);
+  std::unordered_set<FastStaNodeId> node_seen;
+  std::unordered_set<FastStaNetId> net_seen;
+  markReachableFromNode(context, start_node_id, dirty_region, node_seen, net_seen, clock_only);
   return dirty_region;
 }
 
-auto collectDirtyRegion(const FastStaClockContext& context, FastStaNodeId changed_input_node_id) -> FastStaDirtyRegion
+auto collectDirtyRegion(const FastStaContext& context, FastStaNodeId changed_input_node_id) -> FastStaDirtyRegion
 {
   return collectDirtyRegionFromStart(context, dirtyRegionStartNode(context, changed_input_node_id));
 }
 
-auto prepareBufferMasterChanges(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
+auto prepareBufferMasterChanges(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool;
 
-auto applyBufferMasterChange(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master, bool invalidate_context) -> FastStaNodeId
+auto applyBufferMasterChange(FastStaContext& context, FastStaNodeId node_id, std::string_view cell_master, bool invalidate_context) -> FastStaNodeId
 {
   if (node_id >= context.nodes.size()) {
     CTSLOG.warn(Loc::current(), "FastStaIncremental: buffer master change skipped because node id is invalid.");
@@ -255,8 +274,25 @@ auto applyBufferMasterChange(FastStaClockContext& context, FastStaNodeId node_id
   auto& output_node = context.nodes.at(output_node_id);
   input_node.cell_master = target_master;
   input_node.input_cap_pf = context.liberty_cell_by_master.at(target_master).input_cap_pf;
-  input_node.max_slew_ns = context.liberty_cell_by_master.at(target_master).input_slew_limit_ns;
+  input_node.input_cap_pf_by_timing = context.liberty_cell_by_master.at(target_master).input_cap_pf_by_timing;
+  input_node.input_cap_profile_available = context.liberty_cell_by_master.at(target_master).input_cap_profile_available;
+  if (input_node.slew_limit_from_master) {
+    input_node.max_slew_ns = context.liberty_cell_by_master.at(target_master).input_slew_limit_ns;
+  }
   output_node.cell_master = target_master;
+  for (auto& arc : context.timing_arcs) {
+    if (arc.from_node_id == input_node_id && arc.to_node_id == output_node_id) {
+      arc.cell_master = target_master;
+    }
+  }
+  if (output_node.slew_limit_from_master) {
+    output_node.max_slew_ns = context.liberty_cell_by_master.at(target_master).output_slew_limit_ns;
+  }
+  for (const auto net_id : output_node.output_net_ids) {
+    if (net_id < context.nets.size() && context.nets.at(net_id).cap_limit_from_master) {
+      context.nets.at(net_id).max_cap_pf = context.liberty_cell_by_master.at(target_master).output_cap_limit_pf;
+    }
+  }
   if (invalidate_context) {
     context.timing_valid = false;
     context.power_valid = false;
@@ -264,7 +300,7 @@ auto applyBufferMasterChange(FastStaClockContext& context, FastStaNodeId node_id
   return input_node_id;
 }
 
-auto validateBufferMasterChange(const FastStaClockContext& context, const FastStaBufferMasterChange& change) -> bool
+auto validateBufferMasterChange(const FastStaContext& context, const FastStaBufferMasterChange& change) -> bool
 {
   if (change.node_id >= context.nodes.size()) {
     CTSLOG.warn(Loc::current(), "FastStaIncremental: buffer master change skipped because node id is invalid.");
@@ -290,7 +326,7 @@ auto validateBufferMasterChange(const FastStaClockContext& context, const FastSt
   return true;
 }
 
-auto prepareBufferMasterChanges(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+auto prepareBufferMasterChanges(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
 {
   if (!FastStaIncremental::validateBufferMasterChanges(context, changes)) {
     return false;
@@ -316,17 +352,28 @@ auto prepareBufferMasterChanges(FastStaClockContext& context, const std::vector<
   for (auto& [cell_master, liberty_cell] : missing_cells) {
     context.liberty_cell_by_master.emplace(std::move(cell_master), std::move(liberty_cell));
   }
+  for (const auto& change : changes) {
+    const auto& current = context.nodes.at(change.node_id);
+    const auto source = context.liberty_cell_by_master.find(current.cell_master);
+    const auto& target = context.liberty_cell_by_master.at(change.cell_master);
+    if (source == context.liberty_cell_by_master.end() || source->second.input_port != target.input_port || source->second.output_port != target.output_port
+        || source->second.timing_arc.positive_unate != target.timing_arc.positive_unate
+        || source->second.timing_arc.negative_unate != target.timing_arc.negative_unate) {
+      CTSLOG.warn(Loc::current(), "FastStaIncremental: master change has incompatible ports or timing sense for \"", current.name, "\".");
+      return false;
+    }
+  }
   return true;
 }
 
 }  // namespace
 
-auto FastStaIncremental::changeBufferMaster(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master) -> bool
+auto FastStaIncremental::changeBufferMaster(FastStaContext& context, FastStaNodeId node_id, std::string_view cell_master) -> bool
 {
   return applyBufferMasterChange(context, node_id, cell_master, true) != kInvalidFastStaNodeId;
 }
 
-auto FastStaIncremental::validateBufferMasterChanges(const FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+auto FastStaIncremental::validateBufferMasterChanges(const FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
 {
   for (const auto& change : changes) {
     if (!validateBufferMasterChange(context, change)) {
@@ -336,7 +383,7 @@ auto FastStaIncremental::validateBufferMasterChanges(const FastStaClockContext& 
   return true;
 }
 
-auto FastStaIncremental::changeBufferMasters(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+auto FastStaIncremental::changeBufferMasters(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
 {
   if (!prepareBufferMasterChanges(context, changes)) {
     return false;
@@ -353,27 +400,125 @@ auto FastStaIncremental::changeBufferMasters(FastStaClockContext& context, const
   return true;
 }
 
-auto FastStaIncremental::changeBufferMastersIncremental(FastStaClockContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+auto FastStaIncremental::describeBufferMasterRegion(const FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
     -> std::optional<FastStaDirtyRegion>
 {
-  if (changes.empty() || !prepareBufferMasterChanges(context, changes)) {
+  if (changes.empty() || !validateBufferMasterChanges(context, changes)) {
     return std::nullopt;
   }
-  auto common_start_node_id = kInvalidFastStaNodeId;
+  std::vector<FastStaNodeId> starts;
   for (const auto& change : changes) {
     const auto input_node_id = normalizeBufferInputNodeId(context, change.node_id);
     const auto start_node_id = dirtyRegionStartNode(context, input_node_id);
     if (start_node_id == kInvalidFastStaNodeId) {
       return std::nullopt;
     }
-    common_start_node_id = common_start_node_id == kInvalidFastStaNodeId ? start_node_id : lowestCommonAncestor(context, common_start_node_id, start_node_id);
-    if (common_start_node_id == kInvalidFastStaNodeId) {
-      return std::nullopt;
+    bool merged = false;
+    for (auto& start : starts) {
+      const auto ancestor = lowestCommonAncestor(context, start, start_node_id);
+      if (ancestor != kInvalidFastStaNodeId) {
+        start = ancestor;
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) {
+      starts.push_back(start_node_id);
     }
   }
-  auto dirty_region = collectDirtyRegionFromStart(context, common_start_node_id);
-  if (!dirty_region.valid) {
+  if (starts.size() == 1U) {
+    return collectDirtyRegionFromStart(context, starts.front());
+  }
+  FastStaDirtyRegion dirty_region{
+      .valid = true, .start_node_id = starts.front(), .node_ids = {}, .net_ids = {}, .load_update_net_ids = {}, .start_node_ids = starts};
+  std::unordered_set<FastStaNodeId> node_seen;
+  std::unordered_set<FastStaNetId> net_seen;
+  for (const auto start : starts) {
+    markReachableFromNode(context, start, dirty_region, node_seen, net_seen, false);
+  }
+  return dirty_region;
+}
+
+auto FastStaIncremental::describeClockBufferMasterRegion(const FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+    -> std::optional<FastStaDirtyRegion>
+{
+  if (changes.empty() || !validateBufferMasterChanges(context, changes)) {
     return std::nullopt;
+  }
+  std::vector<FastStaNodeId> starts;
+  starts.reserve(changes.size());
+  for (const auto& change : changes) {
+    const auto input_node_id = normalizeBufferInputNodeId(context, change.node_id);
+    const auto output_node_id = normalizeBufferOutputNodeId(context, change.node_id);
+    if (input_node_id == kInvalidFastStaNodeId || output_node_id == kInvalidFastStaNodeId || input_node_id >= context.nodes.size()
+        || output_node_id >= context.nodes.size() || !isClockTrialNode(context, input_node_id) || !isClockTrialNode(context, output_node_id)) {
+      return std::nullopt;
+    }
+    const auto start_node_id = dirtyRegionStartNode(context, input_node_id);
+    if (start_node_id == kInvalidFastStaNodeId || start_node_id >= context.nodes.size()
+        || context.nodes.at(start_node_id).domain != FastStaNodeDomain::kClock) {
+      return std::nullopt;
+    }
+    bool merged = false;
+    for (auto& start : starts) {
+      const auto ancestor = lowestCommonAncestor(context, start, start_node_id);
+      if (ancestor != kInvalidFastStaNodeId) {
+        if (context.nodes.at(ancestor).domain != FastStaNodeDomain::kClock) {
+          return std::nullopt;
+        }
+        start = ancestor;
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) {
+      starts.push_back(start_node_id);
+    }
+  }
+  if (starts.empty()) {
+    return std::nullopt;
+  }
+  auto dirty_region = FastStaDirtyRegion{};
+  if (starts.size() == 1U) {
+    dirty_region = collectDirtyRegionFromStart(context, starts.front(), true);
+  } else {
+    dirty_region = {.valid = true, .start_node_id = starts.front(), .node_ids = {}, .net_ids = {}, .load_update_net_ids = {}, .start_node_ids = starts};
+    std::unordered_set<FastStaNodeId> node_seen;
+    std::unordered_set<FastStaNetId> net_seen;
+    for (const auto start : starts) {
+      markReachableFromNode(context, start, dirty_region, node_seen, net_seen, true);
+    }
+  }
+  if (!dirty_region.valid || dirty_region.node_ids.empty()) {
+    return std::nullopt;
+  }
+  for (const auto& change : changes) {
+    const auto input_node_id = normalizeBufferInputNodeId(context, change.node_id);
+    const auto incoming_net_id = context.nodes.at(input_node_id).incoming_net_id;
+    if (incoming_net_id < context.nets.size()
+        && std::ranges::find(dirty_region.load_update_net_ids, incoming_net_id) == dirty_region.load_update_net_ids.end()) {
+      dirty_region.load_update_net_ids.push_back(incoming_net_id);
+    }
+  }
+  return dirty_region;
+}
+
+auto FastStaIncremental::changeBufferMastersIncremental(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+    -> std::optional<FastStaDirtyRegion>
+{
+  auto dirty_region = describeBufferMasterRegion(context, changes);
+  if (!dirty_region.has_value() || !prepareBufferMasterChanges(context, changes)) {
+    return std::nullopt;
+  }
+  for (const auto& change : changes) {
+    const auto input_node_id = normalizeBufferInputNodeId(context, change.node_id);
+    if (input_node_id < context.nodes.size()) {
+      const auto incoming_net_id = context.nodes.at(input_node_id).incoming_net_id;
+      if (incoming_net_id < context.nets.size()
+          && std::ranges::find(dirty_region->load_update_net_ids, incoming_net_id) == dirty_region->load_update_net_ids.end()) {
+        dirty_region->load_update_net_ids.push_back(incoming_net_id);
+      }
+    }
   }
   for (const auto& change : changes) {
     if (applyBufferMasterChange(context, change.node_id, change.cell_master, false) == kInvalidFastStaNodeId) {
@@ -385,7 +530,33 @@ auto FastStaIncremental::changeBufferMastersIncremental(FastStaClockContext& con
   return dirty_region;
 }
 
-auto FastStaIncremental::changeBufferMasterIncremental(FastStaClockContext& context, FastStaNodeId node_id, std::string_view cell_master)
+auto FastStaIncremental::changeBufferMastersClockIncremental(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes)
+    -> std::optional<FastStaDirtyRegion>
+{
+  auto dirty_region = describeClockBufferMasterRegion(context, changes);
+  if (!dirty_region.has_value() || !applyPreparedClockBufferMasters(context, changes)) {
+    return std::nullopt;
+  }
+  return dirty_region;
+}
+
+auto FastStaIncremental::applyPreparedClockBufferMasters(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes) -> bool
+{
+  if (!prepareBufferMasterChanges(context, changes)) {
+    return false;
+  }
+  for (const auto& change : changes) {
+    if (applyBufferMasterChange(context, change.node_id, change.cell_master, false) == kInvalidFastStaNodeId) {
+      context.timing_valid = false;
+      context.clock_timing_valid = false;
+      context.power_valid = false;
+      return false;
+    }
+  }
+  return true;
+}
+
+auto FastStaIncremental::changeBufferMasterIncremental(FastStaContext& context, FastStaNodeId node_id, std::string_view cell_master)
     -> std::optional<FastStaDirtyRegion>
 {
   const auto input_node_id = applyBufferMasterChange(context, node_id, cell_master, false);

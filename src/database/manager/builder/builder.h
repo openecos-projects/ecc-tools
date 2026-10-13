@@ -51,7 +51,6 @@
 #include "lef_service.h"
 #include "verilog_read.h"
 #include "verilog_write.h"
-#include "view_write.h"
 
 namespace idb {
 
@@ -81,10 +80,8 @@ class IdbBuilder
   // Write def
   bool saveDef(string file, DefWriteType type = DefWriteType::kChip);
   void saveVerilog(std::string verilog_file_name, std::set<std::string>& exclude_cell_names, bool is_add_space_for_escape_name);
-  bool saveGDSII(string file, bool is_hardened = false);
+  bool saveGDSII(string file, string layer_map_path = "");
   bool saveJSON(string file, string options);
-  bool saveViewJson(string output_dir, ViewJsonWriteOptions options = {});
-  bool applyViewJsonEdits(string edits_path, bool compressed_hint = false);
   bool saveLef(string file);
   // Write layout
   void saveLayout(string folder);
@@ -112,20 +109,20 @@ class IdbBuilder
 
   /// loger
   void log();
-  void logModule(string mudule, int32_t number = -1)
+  void logModule(const std::string& module, int32_t number = -1)
   {
     logSeperate();
-    logNumber(mudule, number);
+    logNumber(module, number);
     // logSeperate();
   }
   void logSeperate() { ECCLOG.info(ecc::Loc::current(), "**************************************************************"); }
-  void logNumber(string mudule, int32_t number = -1)
+  void logNumber(const std::string& module, int32_t number = -1)
   {
-    ECCLOG.info(ecc::Loc::current(), mudule);
-    if (number != -1) {
-      ECCLOG.info(ecc::Loc::current(), " number : ", number);
+    if (number == -1) {
+      ECCLOG.info(ecc::Loc::current(), module);
+    } else {
+      ECCLOG.info(ecc::Loc::current(), module, number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
   void logInfo(string info, int32_t number = -1)
   {
@@ -133,7 +130,6 @@ class IdbBuilder
     if (number != -1) {
       ECCLOG.info(ecc::Loc::current(), " number : ", number);
     }
-    ECCLOG.info(ecc::Loc::current(), "");
   }
 
  private:

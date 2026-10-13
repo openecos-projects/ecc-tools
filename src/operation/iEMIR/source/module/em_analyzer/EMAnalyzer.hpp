@@ -18,6 +18,7 @@
 
 #include "Database.hpp"
 #include "EAModel.hpp"
+#include "EMTech.hpp"
 #include "PowerEdge.hpp"
 #include "PowerGraph.hpp"
 
@@ -50,6 +51,13 @@ class EMAnalyzer
   EAModel initEAModel();
   void analyzePowerEdgeList(PowerGraph& power_graph, EAModel& ea_model);
   void analyzePowerEdge(PowerGraph& power_graph, PowerEdge& power_edge, EAModel& ea_model);
+  double getDBUToMicronRatio();
+  double getMicronValue(int32_t dbu_value);
+  EMMetalRule* getMetalRule(const std::string& layer_name);
+  EMViaRule* getViaRule(const std::string& via_name);
+  std::string getNormalizedRuleName(const std::string& rule_name);
+  double calcWireEMLimit(PowerEdge& power_edge, EMMetalRule& metal_rule);
+  double calcViaEMLimit(PowerEdge& power_edge, EMViaRule& via_rule);
 };
 
 }  // namespace iemir

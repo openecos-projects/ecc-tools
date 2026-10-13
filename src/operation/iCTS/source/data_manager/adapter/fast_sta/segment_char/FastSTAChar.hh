@@ -25,6 +25,7 @@
 
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "FastSTA.hh"
 #include "clock_state/FastSTAClockState.hh"
@@ -36,17 +37,33 @@ class FastStaChar
  public:
   FastStaChar() = delete;
 
+  class Context
+  {
+   public:
+    Context(Context&&) = default;
+    auto operator=(Context&&) -> Context& = default;
+
+   private:
+    friend class FastStaChar;
+
+    explicit Context(FastStaContext context) : _timing(std::move(context)) {}
+
+    // Only setLoad and runSample may mutate a prepared characterization model.
+    FastStaContext _timing;
+    bool _load_valid = true;
+  };
+
   struct BuildResult
   {
-    std::optional<FastStaClockContext> context = std::nullopt;
+    std::optional<Context> context = std::nullopt;
     std::string failure_reason;
 
     auto ok() const -> bool { return context.has_value(); }
   };
 
   static auto buildContext(const FastStaCharTopologySpec& spec) -> BuildResult;
-  static auto setLoad(FastStaClockContext& context, double effective_load_pf) -> bool;
-  static auto runSample(FastStaClockContext& context, double input_slew_ns) -> FastStaCharSampleResult;
+  static auto setLoad(Context& context, double effective_load_pf) -> bool;
+  static auto runSample(Context& context, double input_slew_ns) -> FastStaCharSampleResult;
 };
 
 }  // namespace icts

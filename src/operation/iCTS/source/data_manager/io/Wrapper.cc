@@ -87,6 +87,8 @@ auto Wrapper::init(idb::IdbBuilder* idb) -> void
 {
   _native_adapter.reset();
   _native_liberty_cell_lookup = {};
+  _liberty_generation.reset();
+  _liberty_loaded = false;
   _idb = idb;
   _idb_design = _idb->get_def_service()->get_design();
   _idb_layout = _idb->get_lef_service()->get_layout();
@@ -98,7 +100,7 @@ auto Wrapper::initNative(eccdb::DatabaseContext* context, LibertyCellLookup libe
   _idb_design = nullptr;
   _idb_layout = nullptr;
   _liberty_loaded = false;
-  _lib_libraries.clear();
+  _liberty_generation.reset();
   _lib_cell_by_master.clear();
   _native_liberty_cell_lookup = std::move(liberty_cell_lookup);
   _native_adapter = context == nullptr ? nullptr
@@ -120,8 +122,8 @@ auto Wrapper::reset() -> void
   _idb_design = nullptr;
   _idb_layout = nullptr;
   _liberty_loaded = false;
-  _lib_libraries.clear();
   _lib_cell_by_master.clear();
+  _liberty_generation.reset();
   _native_liberty_cell_lookup = {};
   _native_adapter.reset();
   _cts2idb_inst_map.clear();

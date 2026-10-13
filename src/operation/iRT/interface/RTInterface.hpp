@@ -173,12 +173,6 @@ class RTInterface
   ids::Shape getIDSShape(int32_t net_idx, LayerRect layer_rect, bool is_routing);
 #endif
 
-#if 1  // iSTA
-  void updateTiming(std::vector<std::map<std::string, std::vector<LayerCoord>>>& real_pin_coord_map_list,
-                    std::vector<std::vector<Segment<LayerCoord>>>& routing_segment_list_list,
-                    std::map<std::string, std::map<std::string, double>>& clock_timing);
-#endif
-
 #endif
 
  private:
@@ -197,7 +191,6 @@ class RTInterface
   void finishRT(bool write_output);
   void abortIDRC();
   // function
-
   // Legacy pointer callers do not provide a context. Keep the fallback here
   // for the entire source attachment lifetime rather than creating one for
   // every writeback operation.
@@ -207,6 +200,8 @@ class RTInterface
   bool _topo_initialized = false;
   bool _drc_engine_initialized = false;
   bool _idrc_initialized = false;
+  void initRegionRoute();
+  void runRoutingFlow();
 };
 
 }  // namespace irt

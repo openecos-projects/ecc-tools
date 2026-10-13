@@ -111,20 +111,30 @@ auto RunCharacterizationFlow(const Tree& topology, int32_t dbu_per_um, const Cha
   auto requested_lengths_um = CollectRequestedLevelLengthsUm(topology, dbu_per_um);
   std::vector<double> coverage_lengths_um;
   AppendPositiveLengths(coverage_lengths_um, input.additional_characterization_lengths_um);
-  const auto char_grid_plan = ResolveCharacterizationGridPlan(base_char_config, requested_lengths_um, coverage_lengths_um);
-  EmitLogTable(Loc::current(), "HTree Characterization Grid Plan", {"Property", "Value"},
-               {{"Source", ToCharGridSourceName(char_grid_plan.source)},
-                {"Configured Unit (um)", ToLogTableCell(char_grid_plan.configured_wirelength_unit_um)},
-                {"Auto-derived Unit (um)", ToLogTableCell(char_grid_plan.auto_derived_wirelength_unit_um)},
-                {"Selected Unit (um)", ToLogTableCell(char_grid_plan.wirelength_unit_um)},
-                {"Configured Iterations", ToLogTableCell(char_grid_plan.configured_wirelength_iterations)},
-                {"Required Iterations", ToLogTableCell(char_grid_plan.required_covering_iterations)},
-                {"Selected Iterations", ToLogTableCell(char_grid_plan.wirelength_iterations)},
-                {"Requested Lengths", ToLogTableCell(char_grid_plan.requested_level_lengths)},
-                {"Unique Bins", ToLogTableCell(char_grid_plan.unique_level_bins)},
-                {"Adapted", ToLogTableCell(char_grid_plan.adapted)},
-                {"Configured Unit Missing", ToLogTableCell(char_grid_plan.configured_wirelength_missing)},
-                {"Configured Grid Collapsed", ToLogTableCell(char_grid_plan.configured_grid_collapsed)}});
+  const auto unit_limits = ResolveCharacterizationWirelengthUnitLimits(base_char_input, base_char_config);
+  const auto char_grid_plan = ResolveCharacterizationGridPlan(base_char_config, requested_lengths_um, coverage_lengths_um, unit_limits);
+  EmitLogTable(
+      Loc::current(), "HTree Characterization Grid Plan", {"Property", "Value"},
+      {{"Source", ToCharGridSourceName(char_grid_plan.source)},
+       {"Configured Unit (um)", ToLogTableCell(char_grid_plan.configured_wirelength_unit_um)},
+       {"Auto-derived Unit (um)", ToLogTableCell(char_grid_plan.auto_derived_wirelength_unit_um)},
+       {"Selected Unit (um)", ToLogTableCell(char_grid_plan.wirelength_unit_um)},
+       {"Configured Iterations", ToLogTableCell(char_grid_plan.configured_wirelength_iterations)},
+       {"Required Iterations", ToLogTableCell(char_grid_plan.required_covering_iterations)},
+       {"Planned Iterations", ToLogTableCell(char_grid_plan.wirelength_iterations)},
+       {"Requested Lengths", ToLogTableCell(char_grid_plan.requested_level_lengths)},
+       {"Unique Bins", ToLogTableCell(char_grid_plan.unique_level_bins)},
+       {"Adapted", ToLogTableCell(char_grid_plan.adapted)},
+       {"Configured Unit Missing", ToLogTableCell(char_grid_plan.configured_wirelength_missing)},
+       {"Configured Grid Collapsed", ToLogTableCell(char_grid_plan.configured_grid_collapsed)},
+       {"Physical Scale Unit (um)", char_grid_plan.physical_scale_unit_um.has_value() ? ToLogTableCell(*char_grid_plan.physical_scale_unit_um) : "n/a"},
+       {"Unit Selected From Physical Scale", ToLogTableCell(char_grid_plan.unit_selected_from_physical_scale)},
+       {"Electrical Unit Ceiling (um)", char_grid_plan.max_unit_um.has_value() ? ToLogTableCell(*char_grid_plan.max_unit_um) : "n/a"},
+       {"Unit Clamped To Ceiling", ToLogTableCell(char_grid_plan.unit_clamped_to_electrical_ceiling)},
+       {"Requested Length Indices", JoinValues(char_grid_plan.requested_length_indices)},
+       {"Planned Direct Length Indices", JoinValues(char_grid_plan.direct_length_indices)},
+       {"Primitive Characterization", ToLogTableCell(char_grid_plan.uses_primitive_characterization)},
+       {"Characterization Grid Override", char_grid_plan.preserves_explicit_indices ? "preserve explicit iterations/indices" : "apply auto plan"}});
   std::vector<unsigned> direct_length_indices;
   if (char_grid_plan.adapted) {
     direct_length_indices = ResolveDirectCharacterizationLengthIndices(requested_lengths_um, char_grid_plan);
@@ -135,9 +145,12 @@ auto RunCharacterizationFlow(const Tree& topology, int32_t dbu_per_um, const Cha
   auto char_config = base_char_config;
   if (char_grid_plan.adapted) {
     char_config.wirelength_unit_um = char_grid_plan.wirelength_unit_um;
-    char_config.wirelength_iterations = char_grid_plan.wirelength_iterations;
-    if (!direct_length_indices.empty()) {
-      char_config.wirelength_indices = std::move(direct_length_indices);
+    if (!char_grid_plan.preserves_explicit_indices) {
+      char_config.wirelength_iterations = char_grid_plan.wirelength_iterations;
+      char_config.use_boundary_primitive_patterns = char_grid_plan.uses_primitive_characterization;
+      if (!direct_length_indices.empty()) {
+        char_config.wirelength_indices = std::move(direct_length_indices);
+      }
     }
   }
   const auto ensure_result = char_library.ensure(base_char_input, char_config);
@@ -160,6 +173,7 @@ auto RunCharacterizationFlow(const Tree& topology, int32_t dbu_per_um, const Cha
                 {"Wirelength Values (um)", JoinValues(char_builder.get_wirelengths_um())},
                 {"Wirelength Unit Source", char_builder.get_wirelength_unit_source()},
                 {"Wirelength Iterations", ToLogTableCell(char_builder.get_wirelength_iterations())},
+                {"Boundary Primitive Patterns", ToLogTableCell(char_builder.uses_boundary_primitive_patterns())},
                 {"Routing Layer", ToLogTableCell(char_builder.get_routing_layer())},
                 {"DBU per um", ToLogTableCell(route_rc.dbu_per_um)},
                 {"Resistance (ohm/um)", ToLogTableCell(route_rc.resistance_per_um_ohm)},
@@ -196,6 +210,14 @@ auto RunCharacterizationFlow(const Tree& topology, int32_t dbu_per_um, const Cha
                 {"Maximum Capacitance (pF)", ToLogTableCell(char_builder.get_max_cap())},
                 {"Slew Steps", ToLogTableCell(char_builder.get_slew_steps())},
                 {"Capacitance Steps", ToLogTableCell(char_builder.get_cap_steps())},
+                {"Evaluated Patterns", ToLogTableCell(char_builder.get_evaluated_patterns())},
+                {"Feasible Patterns", ToLogTableCell(char_builder.get_feasible_patterns())},
+                {"Infeasible Patterns", ToLogTableCell(char_builder.get_skipped_patterns_infeasible())},
+                {"Wire-only Patterns", ToLogTableCell(char_builder.get_wire_only_patterns())},
+                {"Leaf-buffered Patterns", ToLogTableCell(char_builder.get_leaf_buffered_patterns())},
+                {"Terminal-branch Patterns", ToLogTableCell(char_builder.get_terminal_branch_patterns())},
+                {"Mixed-master Patterns", ToLogTableCell(char_builder.get_mixed_master_patterns())},
+                {"Skipped Load Points", ToLogTableCell(char_builder.get_skipped_load_points())},
                 {"Executed STA Samples", ToLogTableCell(char_builder.get_executed_sta_samples())},
                 {"Skipped STA Samples", ToLogTableCell(char_builder.get_skipped_sta_samples())},
                 {"Output Slew Overflow Samples", ToLogTableCell(char_builder.get_output_slew_overflow_samples())},

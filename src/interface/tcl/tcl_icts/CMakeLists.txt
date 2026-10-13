@@ -6,7 +6,6 @@ add_library(tcl_icts
 
 target_link_libraries(tcl_icts
     PUBLIC
-        tcl_util
         tcl
         icts_interface
     PRIVATE

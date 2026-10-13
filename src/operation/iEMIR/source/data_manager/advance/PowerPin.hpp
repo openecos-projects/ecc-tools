@@ -38,6 +38,11 @@ class PowerPin
   int32_t get_ur_y() { return _ur_y; }
   bool has_port_id() { return _has_port_id; }
   uint64_t get_port_id() { return _port_id; }
+  // Compatibility aliases used by the extracted-parasitics graph builder.
+  int32_t get_low_x() { return _ll_x; }
+  int32_t get_low_y() { return _ll_y; }
+  int32_t get_high_x() { return _ur_x; }
+  int32_t get_high_y() { return _ur_y; }
   bool get_is_source() { return _is_source; }
   // setter
   void set_instance_id(uint64_t instance_id) { _instance_id = instance_id; }
@@ -60,6 +65,10 @@ class PowerPin
     _has_port_id = true;
     _port_id = port_id;
   }
+  void set_low_x(int32_t low_x) { _ll_x = low_x; _has_bounds = true; }
+  void set_low_y(int32_t low_y) { _ll_y = low_y; _has_bounds = true; }
+  void set_high_x(int32_t high_x) { _ur_x = high_x; _has_bounds = true; }
+  void set_high_y(int32_t high_y) { _ur_y = high_y; _has_bounds = true; }
   void set_is_source(bool is_source) { _is_source = is_source; }
   // function
 

@@ -263,7 +263,8 @@ class ClockTopologySynthesis
       return false;
     }
 
-    const auto source_trunk_prefix = ClockTreeRealization::makeSinkDomainPrefix(*_clock, _clock_index, source_trunk_domain);
+    const auto source_trunk_prefix
+        = ClockTreeRealization::makeSinkDomainPrefix(*_clock, _clock_index, source_trunk_domain) + _clock->get_synthesis_region_suffix();
     topology::SourceTrunkInput source_trunk_input{
         .config = _config,
         .design = _design,

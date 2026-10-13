@@ -210,9 +210,9 @@ void IdbBuilder::buildPinFeatureCoord(IdbNet* net)
       idb_pin->set_grid_coordinate(point_list[min_idx].get_x(), point_list[min_idx].get_y());
     }
 
-    if (idb_pin->get_grid_coordinate()->get_x() == -1 || idb_pin->get_grid_coordinate()->get_y() == -1) {
-      ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin =  ", idb_pin->get_pin_name());
-    }
+    // if (idb_pin->get_grid_coordinate()->get_x() == -1 || idb_pin->get_grid_coordinate()->get_y() == -1) {
+    //   ECCLOG.warn(ecc::Loc::current(), "Error pin grid coordinate, pin =  ", idb_pin->get_pin_name());
+    // }
   }
 }
 

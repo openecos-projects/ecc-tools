@@ -41,6 +41,7 @@ class PRNet
   const ConnectType& get_connect_type() const { return _connect_type; }
   const std::vector<PRPin>& get_pr_pin_list() const { return _pr_pin_list; }
   const BoundingBox& get_bounding_box() const { return _bounding_box; }
+  const std::unordered_set<RoutingEdge*>& get_routing_edge_set() const { return _routing_edge_set; }
   // setter
   void set_origin_net(Net* origin_net) { _origin_net = origin_net; }
   void set_net_idx(const int32_t net_idx) { _net_idx = net_idx; }
@@ -63,69 +64,36 @@ class PRNet
 
 struct CmpPRNet
 {
-  bool operator()(const PRNet* a, const PRNet* b) const
+  bool operator()(const PRNet* first_net, const PRNet* second_net) const
   {
-    SortStatus sort_status = SortStatus::kEqual;
     // 时钟线网优先
-    if (sort_status == SortStatus::kEqual) {
-      ConnectType a_connect_type = a->get_connect_type();
-      ConnectType b_connect_type = b->get_connect_type();
-      if (a_connect_type == ConnectType::kClock && b_connect_type != ConnectType::kClock) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_connect_type != ConnectType::kClock && b_connect_type == ConnectType::kClock) {
-        sort_status = SortStatus::kFalse;
-      } else {
-        sort_status = SortStatus::kEqual;
-      }
+    bool first_is_clock = first_net->get_connect_type() == ConnectType::kClock;
+    bool second_is_clock = second_net->get_connect_type() == ConnectType::kClock;
+    if (first_is_clock != second_is_clock) {
+      return first_is_clock;
     }
     // BoundingBox 大小升序
-    if (sort_status == SortStatus::kEqual) {
-      double a_total_size = a->get_bounding_box().getTotalSize();
-      double b_total_size = b->get_bounding_box().getTotalSize();
-      if (a_total_size < b_total_size) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_total_size == b_total_size) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
+    double first_total_size = first_net->get_bounding_box().getTotalSize();
+    double second_total_size = second_net->get_bounding_box().getTotalSize();
+    if (first_total_size != second_total_size) {
+      return first_total_size < second_total_size;
     }
     // 长宽比 降序
-    if (sort_status == SortStatus::kEqual) {
-      double a_length_width_ratio = a->get_bounding_box().getXSize() / 1.0 / a->get_bounding_box().getYSize();
-      if (a_length_width_ratio < 1) {
-        a_length_width_ratio = 1 / a_length_width_ratio;
-      }
-      double b_length_width_ratio = b->get_bounding_box().getXSize() / 1.0 / b->get_bounding_box().getYSize();
-      if (b_length_width_ratio < 1) {
-        b_length_width_ratio = 1 / b_length_width_ratio;
-      }
-      if (a_length_width_ratio > b_length_width_ratio) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_length_width_ratio == b_length_width_ratio) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
+    double first_length_width_ratio = first_net->get_bounding_box().getXSize() / 1.0 / first_net->get_bounding_box().getYSize();
+    if (first_length_width_ratio < 1) {
+      first_length_width_ratio = 1 / first_length_width_ratio;
+    }
+    double second_length_width_ratio = second_net->get_bounding_box().getXSize() / 1.0 / second_net->get_bounding_box().getYSize();
+    if (second_length_width_ratio < 1) {
+      second_length_width_ratio = 1 / second_length_width_ratio;
+    }
+    if (first_length_width_ratio != second_length_width_ratio) {
+      return first_length_width_ratio > second_length_width_ratio;
     }
     // PinNum 降序
-    if (sort_status == SortStatus::kEqual) {
-      int32_t a_pin_num = static_cast<int32_t>(a->get_pr_pin_list().size());
-      int32_t b_pin_num = static_cast<int32_t>(b->get_pr_pin_list().size());
-      if (a_pin_num > b_pin_num) {
-        sort_status = SortStatus::kTrue;
-      } else if (a_pin_num == b_pin_num) {
-        sort_status = SortStatus::kEqual;
-      } else {
-        sort_status = SortStatus::kFalse;
-      }
-    }
-    if (sort_status == SortStatus::kTrue) {
-      return true;
-    } else if (sort_status == SortStatus::kFalse) {
-      return false;
-    }
-    return false;
+    int32_t first_pin_num = static_cast<int32_t>(first_net->get_pr_pin_list().size());
+    int32_t second_pin_num = static_cast<int32_t>(second_net->get_pr_pin_list().size());
+    return first_pin_num > second_pin_num;
   }
 };
 

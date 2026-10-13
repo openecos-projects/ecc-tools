@@ -24,7 +24,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "characterization/Characterization.hh"
 #include "synthesis/htree/HTree.hh"
@@ -59,6 +61,17 @@ struct CharacterizationGridPlan
   bool configured_grid_collapsed = false;
   bool adapted = false;
   CharGridSource source = CharGridSource::kNone;
+  // Electrical ceiling on the length unit, and whether the configured unit had to be
+  // pulled down to it. A unit above the ceiling makes every characterization sweep
+  // point overflow the cap lattice, which yields no segment characters at all.
+  std::optional<double> max_unit_um = std::nullopt;
+  bool unit_clamped_to_electrical_ceiling = false;
+  std::optional<double> physical_scale_unit_um = std::nullopt;
+  bool unit_selected_from_physical_scale = false;
+  bool uses_primitive_characterization = false;
+  bool preserves_explicit_indices = false;
+  std::vector<unsigned> requested_length_indices;
+  std::vector<unsigned> direct_length_indices;
 };
 
 struct CharacterizationSummary

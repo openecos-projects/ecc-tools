@@ -41,20 +41,22 @@
 namespace icts {
 namespace {
 
-constexpr std::array<std::string_view, 18> kSupportedConfigKeys = {
+// The externally configurable surface: the values a design owner decides. The sweep
+// and iteration counts are not among them - how finely the characterization samples,
+// how many wirelength points it sweeps, and how many iterations it allows are
+// properties of the characterizer, not of the design - so a config naming one is
+// reported as an unrecognized key rather than silently taking effect.
+constexpr std::array<std::string_view, 15> kSupportedConfigKeys = {
     "skew_bound",
     "max_buf_tran",
     "root_input_slew",
     "max_sink_tran",
     "max_cap",
-    "wirelength_unit_um",
-    "wirelength_iterations",
-    "slew_steps",
-    "cap_steps",
-    "wire_width",
     "max_fanout",
     "routing_layer",
     "buffer_type",
+    "wirelength_unit_um",
+    "wire_width",
     "char_buf_redundancy_pct",
     "force_branch_buffer",
     "htree_topology_tolerance",
@@ -67,6 +69,20 @@ auto containsKey(const std::array<std::string_view, N>& keys, std::string_view k
 {
   return std::ranges::find(keys, key) != keys.end();
 }
+
+// Feasible ranges for the exposed values, and the default each falls back to when a
+// configured value is outside its range. These are the bounds the flow's own
+// preconditions imply, not tuning knobs: a non-positive bound describes nothing, and a
+// fanout or step count of zero empties the structure it sizes. A value outside its
+// range is reported and replaced rather than rejected, so a typo degrades a result
+// visibly instead of stopping the run.
+constexpr double kDefaultSkewBoundNs = 0.04;
+constexpr double kDefaultMaxBufTranNs = 1.5;
+constexpr double kDefaultRootInputSlewNs = 0.0;
+constexpr double kDefaultMaxSinkTranNs = 1.5;
+constexpr double kDefaultMaxCapPf = 1.5;
+constexpr unsigned kDefaultMaxFanout = 32U;
+constexpr unsigned kMaxFanout = 1024U;
 
 auto buildInvalidConfigKeyWarning(const std::string& key, const std::string& json_file) -> std::string
 {
@@ -354,18 +370,6 @@ auto Config::parse(const std::string& json_file) -> bool
   if (!ApplyDoubleIfPresent(json, "wirelength_unit_um", *this, &Config::set_wirelength_unit_um, json_file)) {
     return false;
   }
-  if (!ApplyUnsignedIfPresent(json, "wirelength_iterations", *this, &Config::set_wirelength_iterations, json_file)) {
-    return false;
-  }
-  if (!ApplyUnsignedIfPresent(json, "slew_steps", *this, &Config::set_slew_steps, json_file)) {
-    return false;
-  }
-  if (!ApplyUnsignedIfPresent(json, "cap_steps", *this, &Config::set_cap_steps, json_file)) {
-    return false;
-  }
-  if (!ApplyDoubleIfPresent(json, "wire_width", *this, &Config::set_wire_width, json_file)) {
-    return false;
-  }
   if (!ApplyUnsignedIfPresent(json, "max_fanout", *this, &Config::set_max_fanout, json_file)) {
     return false;
   }
@@ -373,6 +377,9 @@ auto Config::parse(const std::string& json_file) -> bool
     return false;
   }
   ApplyBufferTypesIfPresent(json, *this);
+  if (!ApplyDoubleIfPresent(json, "wire_width", *this, &Config::set_wire_width, json_file)) {
+    return false;
+  }
   if (!ApplyDoubleIfPresent(json, "char_buf_redundancy_pct", *this, &Config::set_char_buf_redundancy_pct, json_file)) {
     return false;
   }
@@ -388,7 +395,49 @@ auto Config::parse(const std::string& json_file) -> bool
   if (!ApplyBoolIfPresent(json, "enable_sink_clustering", is_enable_sink_clustering(), *this, &Config::set_enable_sink_clustering, json_file)) {
     return false;
   }
+  // The sweep and iteration counts stay at their defaults; a config naming one is
+  // reported as an unrecognized key by the loop above and parsed no further.
+  SanitizeExposedValues();
   return true;
+}
+
+auto Config::SanitizeExposedValues() -> void
+{
+  const auto fall_back = [&](const char* key, double configured, double fallback, const char* requirement) -> double {
+    _warnings.push_back(std::string(key) + ": configured " + std::to_string(configured) + " is outside " + requirement + "; using " + std::to_string(fallback));
+    CTSLOG.warn(Loc::current(), "CTS config warning: ", _warnings.back());
+    return fallback;
+  };
+
+  if (!std::isfinite(_skew_bound) || _skew_bound <= 0.0) {
+    _skew_bound = fall_back("skew_bound", _skew_bound, kDefaultSkewBoundNs, "(0, inf) ns");
+  }
+  if (!std::isfinite(_max_buf_tran) || _max_buf_tran <= 0.0) {
+    // A missing bound is derived from Liberty; an unusable one is not derived, it is
+    // replaced, so the two cases stay distinguishable.
+    _max_buf_tran = fall_back("max_buf_tran", _max_buf_tran, kDefaultMaxBufTranNs, "(0, inf) ns");
+    _has_max_buf_tran = true;
+  }
+  if (!std::isfinite(_root_input_slew) || _root_input_slew < 0.0) {
+    _root_input_slew = fall_back("root_input_slew", _root_input_slew, kDefaultRootInputSlewNs, "[0, inf) ns");
+  }
+  if (!std::isfinite(_max_sink_tran) || _max_sink_tran < 0.0) {
+    _max_sink_tran = fall_back("max_sink_tran", _max_sink_tran, kDefaultMaxSinkTranNs, "[0, inf) ns");
+  }
+  if (_has_max_cap && (!std::isfinite(_max_cap) || _max_cap <= 0.0)) {
+    _max_cap = fall_back("max_cap", _max_cap, kDefaultMaxCapPf, "(0, inf) pF");
+  }
+  if (_max_fanout == 0U || _max_fanout > kMaxFanout) {
+    _warnings.push_back("max_fanout: configured " + std::to_string(_max_fanout) + " is outside [1, " + std::to_string(kMaxFanout) + "]; using "
+                        + std::to_string(kDefaultMaxFanout));
+    CTSLOG.warn(Loc::current(), "CTS config warning: ", _warnings.back());
+    _max_fanout = kDefaultMaxFanout;
+  }
+  if (_wirelength_unit_um > 0.0 && !std::isfinite(_wirelength_unit_um)) {
+    // A non-finite unit cannot be a length; zero already means "derive it", which is
+    // the safe reading of a value that describes no positive length.
+    _wirelength_unit_um = fall_back("wirelength_unit_um", _wirelength_unit_um, 0.0, "(0, inf) um or absent");
+  }
 }
 
 }  // namespace icts

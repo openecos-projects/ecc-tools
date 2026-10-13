@@ -35,9 +35,11 @@ class PowerNet
   std::vector<PowerWireSegment>& get_wire_segment_list() { return _wire_segment_list; }
   std::vector<PowerVia>& get_via_list() { return _via_list; }
   std::vector<PowerPin>& get_pin_list() { return _pin_list; }
+  bool get_has_explicit_parasitics() { return _has_explicit_parasitics; }
   // setter
   void set_net_name(const std::string& net_name) { _net_name = net_name; }
   void set_type(PowerNetType type) { _type = type; }
+  void set_has_explicit_parasitics(bool has_explicit_parasitics) { _has_explicit_parasitics = has_explicit_parasitics; }
   // function
 
  private:
@@ -46,6 +48,7 @@ class PowerNet
   std::vector<PowerWireSegment> _wire_segment_list;
   std::vector<PowerVia> _via_list;
   std::vector<PowerPin> _pin_list;
+  bool _has_explicit_parasitics = false;
 };
 
 }  // namespace iemir

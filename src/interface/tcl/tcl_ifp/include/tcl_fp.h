@@ -36,6 +36,16 @@ class TclInitFP : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
+class TclRunSimpleFP : public TclCmd
+{
+ public:
+  explicit TclRunSimpleFP(const char* cmd_name);
+  ~TclRunSimpleFP() override = default;
+
+  unsigned check() override { return 1; };
+  unsigned exec() override;
+};
+
 class TclRunFP : public TclCmd
 {
  public:
@@ -69,9 +79,7 @@ class TclDebugInputMacro : public TclCmd
  public:
   explicit TclDebugInputMacro(const char* cmd_name);
   ~TclDebugInputMacro() override = default;
-
-  unsigned check() override { return 1; };
-
+  unsigned check() override { return 1; }
   unsigned exec() override;
 
  private:

@@ -112,10 +112,15 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
                                                                        {"drc", [this]() { return buildSummaryDRC(); }},
                                                                        {"route", [this]() { return buildSummaryRT(); }}};
 
+  const auto builder_it = stepToBuilder.find(step);
+  if (builder_it == stepToBuilder.end()) {
+    return false;
+  }
+
   std::ofstream& file_stream = ecc::getOutputFileStream(json_path);
   json root;
 
-  root[step] = stepToBuilder[step]();
+  root[step] = builder_it->second();
 
   file_stream << std::setw(4) << root;
 
@@ -226,7 +231,6 @@ bool FeatureParser::buildSummaryEval(std::string json_path)
   ECCLOG.info(ecc::Loc::current(), "Save eval json success, path = ", json_path);
   return true;
 }
-
 
 bool FeatureParser::buildSummaryTimingEval(std::string json_path)
 {

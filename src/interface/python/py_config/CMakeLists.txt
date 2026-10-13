@@ -4,7 +4,7 @@ add_library(py_config ${PY_CONFIG_SRC})
 
 target_link_libraries(py_config
     PUBLIC
-        tool_manager
+        idm
         pybind11::pybind11
 )
 target_include_directories(py_config

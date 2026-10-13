@@ -247,6 +247,7 @@ class IdbInstanceList
   IdbInstance* add_instance(IdbInstance* instance = nullptr);
   IdbInstance* add_instance(string name);
   bool add_instance_ref(IdbInstance* instance);
+  bool add_instance_refs(const std::vector<IdbInstance*>& instances);
   bool erase_instance_ref(string name);
   bool erase_instance_ref(IdbInstance* instance);
   bool remove_instance(string name);

@@ -22,6 +22,7 @@
 #include "PGLayerPair.hpp"
 #include "PGRail.hpp"
 #include "PGStripe.hpp"
+#include "PlacementMode.hpp"
 
 namespace ifp {
 
@@ -36,6 +37,7 @@ class Config
   int32_t thread_number;                                   // optional
   double macro_placement_halo;                             // optional
   double macro_routing_halo;                               // optional
+  std::string input_macro_path;                            // optional; non-empty loads macro placement file
   DieMode die_mode;                                        // optional
   std::string die_site_name;                               // optional
   double die_aspect_ratio;                                 // optional
@@ -46,7 +48,9 @@ class Config
   double die_margin_right_micron;                          // optional
   double die_margin_top_micron;                            // optional
   double die_margin_bottom_micron;                         // optional
+  PlacementMode io_pin_placement_mode;                     // required
   std::vector<std::string> io_pin_layer_name_list;         // optional
+  std::string input_io_pin_path;                           // optional
   std::vector<PGGlobalConnect> pg_connect_list;            // optional
   std::vector<PGRail> pg_rail_list;                        // optional
   std::vector<PGStripe> pg_stripe_list;                    // optional

@@ -47,6 +47,8 @@
 
 namespace idb {
 
+constexpr auto kParseProgressInterval = 100000;
+
 DefRead::DefRead(IdbDefService* def_service)
 {
   _def_service = def_service;
@@ -297,6 +299,7 @@ bool DefRead::createDb(const char* file)
       return false;
     }
 
+    _def_service->get_design()->canonicalizeNetNames();
     return true;
   }
 }
@@ -489,6 +492,7 @@ bool DefRead::createDbGzip(const char* gzip_file)
     return false;
   }
 
+  _def_service->get_design()->canonicalizeNetNames();
   return true;
 }
 
@@ -769,7 +773,6 @@ int32_t DefRead::parse_die(defiBox* def_box)
   // IdbDesign* design = _def_service->get_design();
   IdbLayout* layout = _def_service->get_layout();
   IdbDie* die = layout->get_die();
-
   defiPoints points = def_box->getPoint();
   for (int i = 0; i < points.numPoints; ++i) {
     die->add_point(points.x[i], points.y[i]);
@@ -1007,11 +1010,9 @@ int32_t DefRead::parse_component(defiComponent* def_component)
 
   instance->set_coodinate(def_component->placementX(), def_component->placementY());
 
-  if (design->get_instance_list()->get_num() % 1000 == 0) {
-    ECCLOG.info(ecc::Loc::current(), "-");
-    if (design->get_instance_list()->get_num() % 100000 == 0) {
-      ECCLOG.info(ecc::Loc::current(), "");
-    }
+  const auto instance_num = design->get_instance_list()->get_num();
+  if (instance_num > 0 && instance_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", instance_num, " components.");
   }
 
   /// clear def_component
@@ -1029,7 +1030,6 @@ int32_t DefRead::componentEndCallback(defrCallbackType_e type, void*, defiUserDa
     return kDbFail;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "");
   def_reader->set_end_time(clock());
 
   return kDbSuccess;
@@ -1231,8 +1231,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
             int y;
             int ext;
             def_path->getFlushPoint(&x, &y, &ext);
-            //--------------tbd----------------
-            segment->add_point(x, y);
+            segment->add_flush_point(x, y, ext);
 
             break;
           }
@@ -1271,12 +1270,9 @@ int32_t DefRead::parse_net(defiNet* def_net)
     }
   }
 
-  if (design->get_net_list()->get_num() % 1000 == 0) {
-    ECCLOG.info(ecc::Loc::current(), "-");
-
-    if (design->get_net_list()->get_num() % 100000 == 0) {
-      ECCLOG.info(ecc::Loc::current(), "");
-    }
+  const auto net_num = design->get_net_list()->get_num();
+  if (net_num > 0 && net_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", net_num, " nets.");
   }
 
   //   ECCLOG.info(ecc::Loc::current(), "Parse net success, net name = ", net->get_net_name());
@@ -1292,7 +1288,6 @@ int32_t DefRead::netEndCallback(defrCallbackType_e type, void*, defiUserData dat
     return kDbFail;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "");
 
   return kDbSuccess;
 }
@@ -1377,6 +1372,8 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
     net->set_original_net_name(def_net->original());
   }
 
+  std::vector<IdbPin*> connected_pins;
+  connected_pins.reserve(def_net->numConnections());
   for (int i = 0; i < def_net->numConnections(); i++) {
     string io_name = def_net->instance(i);
     std::erase(io_name, '\\');
@@ -1392,7 +1389,7 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
       if (pin == nullptr) {
         ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
       } else {
-        design->connectPinToSpecialNet(pin, net);
+        connected_pins.emplace_back(pin);
       }
     } else {
       IdbInstance* instance = instance_list->find_instance(io_name);
@@ -1403,12 +1400,17 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
         if (pin == nullptr) {
           ECCLOG.warn(ecc::Loc::current(), "Can not find Pin in Pin list ... pin name = ", def_net->pin(i));
         } else {
-          design->connectPinToSpecialNet(pin, net);
+          connected_pins.emplace_back(pin);
         }
       } else {
         ECCLOG.warn(ecc::Loc::current(), "Can not find instance in instance list ... instance name = ", io_name);
       }
     }
+  }
+
+  if (!design->connectPinsToSpecialNet(connected_pins, net)) {
+    ECCLOG.warn(ecc::Loc::current(), "Connect Special Net pins failed ... net name = ", def_net->name());
+    return kDbFail;
   }
 
   if (net->has_wildcard_instance_pins() && std::getenv("IDB_MATERIALIZE_SPECIALNET_WILDCARD_PINS") != nullptr) {
@@ -1419,12 +1421,9 @@ int32_t DefRead::parse_pdn(defiNet* def_net)
   parse_pdn_wire(def_net, wire_list);
   parse_pdn_rects(def_net, wire_list);
 
-  if (design->get_special_net_list()->get_num() % 1000 == 0) {
-    ECCLOG.info(ecc::Loc::current(), "-");
-
-    if (design->get_special_net_list()->get_num() % 100000 == 0) {
-      ECCLOG.info(ecc::Loc::current(), "");
-    }
+  const auto special_net_num = design->get_special_net_list()->get_num();
+  if (special_net_num > 0 && special_net_num % kParseProgressInterval == 0) {
+    ECCLOG.info(ecc::Loc::current(), "Parsed ", special_net_num, " special nets.");
   }
 
   return kDbSuccess;
@@ -1489,8 +1488,14 @@ int32_t DefRead::parse_pdn_wire(defiNet* def_net, IdbSpecialWireList* wire_list)
             break;
           }
 
-          case DEFIPATH_FLUSHPOINT:
+          case DEFIPATH_FLUSHPOINT: {
+            int32_t x;
+            int32_t y;
+            int32_t ext;
+            def_path->getFlushPoint(&x, &y, &ext);
+            segment->add_flush_point(x, y, ext);
             break;
+          }
           case DEFIPATH_SHAPE: {
             segment->set_shape_type(def_path->getShape());
             break;
@@ -1580,7 +1585,6 @@ int32_t DefRead::specialNetEndCallback(defrCallbackType_e type, void*, defiUserD
     return kDbFail;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "");
 
   ECCLOG.info(ecc::Loc::current(), "End parse Specialnet.");
 

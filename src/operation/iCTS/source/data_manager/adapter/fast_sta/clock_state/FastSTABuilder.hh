@@ -18,21 +18,23 @@
  * @file FastSTABuilder.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-18
- * @brief Initialization bridge from committed CTS state to fast STA context.
+ * @brief Initialization bridge from committed CTS state to a fast STA context.
  */
 
 #pragma once
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "clock_state/FastSTAClockState.hh"
 
 namespace icts {
 
 class Net;
-struct FastStaClockBuildInput;
+struct FastStaBuildInput;
 struct FastStaEnvironment;
+struct WrapperTimingGraph;
 template <typename T>
 class ClockSteinerTree;
 
@@ -43,14 +45,29 @@ class FastStaBuilder
 
   struct BuildResult
   {
-    std::optional<FastStaClockContext> context = std::nullopt;
-    std::string failure_reason;
+    std::optional<FastStaContext> context = std::nullopt;
+    std::string failure_reason = "";
 
     auto ok() const -> bool { return context.has_value(); }
   };
 
-  static auto buildClockContext(const FastStaEnvironment& environment, const FastStaClockBuildInput& input) -> BuildResult;
-  static auto injectNetRouteTree(FastStaClockContext& context, const Net& net, const ClockSteinerTree<int>& route_tree) -> bool;
+  static auto buildContext(const FastStaEnvironment& environment, const FastStaBuildInput& input, const FastStaContext* prepared_context = nullptr)
+      -> BuildResult;
+  static auto spliceClockContext(FastStaContext& context, FastStaContext overlay, const SdcClockData& constraints) -> std::optional<std::string>;
+  static auto extractClockContext(const FastStaContext& source, const FastStaBuildInput& input) -> BuildResult;
+  static auto matchesClockInput(const FastStaContext& context, const FastStaBuildInput& input) -> bool;
+  static auto injectNetRouteTree(FastStaContext& context, const Net& net, const ClockSteinerTree<int>& route_tree) -> bool;
+  static auto validateTimingGraphJoins(const WrapperTimingGraph& graph, const FastStaContext& context) -> std::optional<std::string>;
+
+ private:
+  struct MatchingClockOverlay
+  {
+    FastStaContext context;
+    std::vector<FastStaNodeId> source_node_ids;
+    std::vector<FastStaNetId> source_net_ids;
+  };
+
+  static auto buildMatchingClockOverlay(const FastStaContext& context, const FastStaBuildInput& input) -> std::optional<MatchingClockOverlay>;
 };
 
 }  // namespace icts

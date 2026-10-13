@@ -24,8 +24,10 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "FastSTA.hh"
@@ -43,7 +45,7 @@ inline constexpr double kClockSizingEpsilon = 1e-12;
 
 struct ClockSizingBufferMaster
 {
-  std::string cell_master;
+  std::string cell_master = "";
   double input_cap_pf = 0.0;
   double output_cap_limit_pf = 0.0;
   double area_um2 = 0.0;
@@ -54,13 +56,14 @@ struct ClockSizingBuffer
 {
   FastStaNodeId node_id = kInvalidFastStaNodeId;
   Inst* inst = nullptr;
-  std::string inst_name;
-  std::string current_master;
+  std::string inst_name = "";
+  std::string current_master = "";
   std::vector<ClockSizingBufferMaster> candidates;
 };
 
 struct ClockSizingCapLimit
 {
+  FastStaNetId net_id = kInvalidFastStaNetId;
   double load_cap_pf = 0.0;
   double max_cap_pf = 0.0;
   bool violated = false;
@@ -74,6 +77,7 @@ struct ClockSizingCapCheck
 
 struct ClockSizingSlewLimit
 {
+  FastStaNodeId node_id = kInvalidFastStaNodeId;
   double slew_ns = 0.0;
   double max_slew_ns = 0.0;
   FastStaSlewRole role = FastStaSlewRole::kUnknown;
@@ -87,22 +91,26 @@ struct ClockSizingSlewCheck
   std::size_t violation_count = 0U;
   std::size_t buffer_violation_count = 0U;
   std::size_t sink_violation_count = 0U;
+  std::size_t unavailable_count = 0U;
+  std::optional<FastStaSlewStatus> worst_violation = std::nullopt;
+  double worst_baseline_slew_ns = 0.0;
+  double worst_allowed_slew_ns = 0.0;
 };
 
 struct ClockSizingTimingState
 {
   bool valid = false;
-  FastStaSkewSummary skew;
-  FastStaPowerSummary power;
-  ClockSizingCapCheck cap;
-  ClockSizingSlewCheck slew;
+  FastStaSkewSummary skew{};
+  FastStaPowerSummary power{};
+  ClockSizingCapCheck cap{};
+  ClockSizingSlewCheck slew{};
 };
 
 struct ClockSizingEdit
 {
   std::size_t buffer_index = 0U;
-  std::string from_master;
-  std::string to_master;
+  std::string from_master = "";
+  std::string to_master = "";
   int drive_step = 0;
   double area_delta_um2 = 0.0;
 };
@@ -111,33 +119,50 @@ struct ClockSizingEditBatch
 {
   bool valid = false;
   std::vector<ClockSizingEdit> edits;
-  ClockSizingTimingState state;
+  ClockSizingTimingState state{};
+  std::optional<FastStaTimingStageFact> rejected_slew_stage = std::nullopt;
+  std::optional<FastStaTimingStageFact> restored_slew_stage = std::nullopt;
 };
 
 struct ClockSizingAcceptedEdit
 {
-  std::string inst_name;
-  std::string from_master;
-  std::string to_master;
+  std::string inst_name = "";
+  std::string from_master = "";
+  std::string to_master = "";
   double area_delta_um2 = 0.0;
 };
 
 struct ClockSizingRuntimeProfile
 {
   double build_route_tree_cache_s = 0.0;
-  double build_fast_sta_context_s = 0.0;
+  double build_clock_sizing_context_s = 0.0;
+  double build_clock_sizing_context_cpu_s = 0.0;
+  double separate_timing_relations_s = 0.0;
+  double separate_timing_relations_cpu_s = 0.0;
   double inject_route_trees_s = 0.0;
   double collect_optimizable_buffers_s = 0.0;
+  double collect_optimizable_buffers_cpu_s = 0.0;
   double collect_cap_baseline_s = 0.0;
+  double collect_cap_baseline_cpu_s = 0.0;
   double collect_slew_baseline_s = 0.0;
+  double collect_slew_baseline_cpu_s = 0.0;
   double solve_clock_s = 0.0;
+  double solve_clock_cpu_s = 0.0;
   double apply_accepted_edits_s = 0.0;
+  double apply_accepted_edits_cpu_s = 0.0;
+  double refresh_timing_contexts_s = 0.0;
+  double refresh_timing_contexts_cpu_s = 0.0;
+  double finalize_clock_context_s = 0.0;
+  double finalize_clock_context_cpu_s = 0.0;
+  double clock_total_s = 0.0;
+  double clock_total_cpu_s = 0.0;
   double capture_initial_state_s = 0.0;
   double build_topology_index_s = 0.0;
   double generate_batch_candidates_s = 0.0;
   double batch_trial_eval_s = 0.0;
   double apply_accepted_batch_s = 0.0;
   std::size_t node_count = 0U;
+  std::size_t owned_clock_node_count = 0U;
   std::size_t net_count = 0U;
   std::size_t sink_count = 0U;
   std::size_t buffer_input_count = 0U;
@@ -151,10 +176,14 @@ struct ClockSizingSummary
   bool valid = false;
   bool target_met = false;
   bool changed = false;
-  std::string solve_mode;
-  std::string stop_reason;
-  ClockSizingTimingState before;
-  ClockSizingTimingState after;
+  std::string solve_mode = "";
+  std::string stop_reason = "";
+  ClockSizingTimingState before{};
+  ClockSizingTimingState after{};
+  std::optional<ClockSizingTimingState> rejected_state = std::nullopt;
+  std::optional<FastStaTimingStageFact> rejected_slew_stage = std::nullopt;
+  std::optional<FastStaTimingStageFact> restored_slew_stage = std::nullopt;
+  std::vector<std::pair<std::string, ClockSizingEdit>> rejected_edits;
   unsigned iteration_count = 0U;
   unsigned trial_count = 0U;
   unsigned batch_trial_count = 0U;
@@ -163,7 +192,7 @@ struct ClockSizingSummary
   unsigned rejected_candidate_count = 0U;
   unsigned cap_rejected_count = 0U;
   unsigned slew_rejected_count = 0U;
-  ClockSizingRuntimeProfile profile;
+  ClockSizingRuntimeProfile profile{};
   std::vector<ClockSizingAcceptedEdit> accepted_edits;
 };
 
@@ -186,7 +215,7 @@ struct ClockSizingArrivalWindow
 
 struct ScoredClockSizingEdit
 {
-  ClockSizingEdit edit;
+  ClockSizingEdit edit{};
   double score = 0.0;
 };
 

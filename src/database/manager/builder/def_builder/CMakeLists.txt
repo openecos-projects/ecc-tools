@@ -37,4 +37,10 @@ if(BUILD_TESTING)
   )
   target_link_libraries(def_reader_error_test PRIVATE def_builder def_service idb ecc_logger ZLIB::ZLIB)
   add_test(NAME def_reader_error_test COMMAND def_reader_error_test)
+
+  add_executable(def_flush_point_test
+      validation/def_flush_point_test.cpp
+  )
+  target_link_libraries(def_flush_point_test PRIVATE def_builder def_service idb ecc_logger)
+  add_test(NAME def_flush_point_test COMMAND def_flush_point_test)
 endif()

@@ -27,17 +27,32 @@
 
 namespace icts {
 
-struct FastStaClockContext;
+struct FastStaContext;
 struct FastStaDirtyRegion;
+class FastStaChar;
 
 class FastStaTiming
 {
  public:
   FastStaTiming() = delete;
 
-  static auto update(FastStaClockContext& context) -> bool;
-  static auto updateRegion(FastStaClockContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
-  static auto calcSkew(const FastStaClockContext& context) -> FastStaSkewSummary;
+  static auto update(FastStaContext& context) -> bool;
+  // Local branch uses the identical clock driver/load kernels, with measured four-state seeds.
+  static auto updateBranch(FastStaContext& context, FastStaNodeId input_node, const FastStaBranchStates& states) -> bool;
+  static auto updateClockTopology(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
+  static auto updateRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
+  static auto collectAffectedLogicNodes(const FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> std::optional<std::vector<FastStaNodeId>>;
+  static auto updateClockTrialRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
+  static auto separate(const FastStaContext& context, const FastStaSeparationQuery& query) -> FastStaSeparationResult;
+  static auto calcSkew(const FastStaContext& context) -> FastStaSkewSummary;
+
+ private:
+  friend class FastStaChar;
+
+  static auto prepare(FastStaContext& context) -> bool;
+  // The char owner preserves topology, constraints and Liberty, and reduces
+  // every changed load net before requesting slew-dependent propagation.
+  static auto updatePrepared(FastStaContext& context) -> bool;
 };
 
 }  // namespace icts

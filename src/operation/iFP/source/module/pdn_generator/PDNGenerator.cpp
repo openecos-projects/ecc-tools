@@ -54,8 +54,17 @@ void PDNGenerator::generate()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
+  _placed_macro_list.clear();
+  _macro_top_layer_order.clear();
+  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (instance.get_macro() && instance.get_placed()) {
+      _placed_macro_list.push_back(&instance);
+    }
+  }
+
   PGModel pg_model;
   generatePDN(pg_model);
+  outputPowerLocation(pg_model);
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -66,6 +75,7 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   buildRail(pg_model);
   buildStripe(pg_model);
   alignStripeSegmentList();
+  initPowerLayerPair(pg_model);
   buildLayerConnect(pg_model);
   buildMacroConnect(pg_model);
 }
@@ -296,8 +306,9 @@ std::vector<std::pair<int32_t, int32_t>> PDNGenerator::getMacroBlockageIntervalL
   int32_t line_end = horizontal ? std::max(start_x, end_x) : std::max(start_y, end_y);
   int32_t line_coord = horizontal ? start_y : start_x;
   int32_t half_width = width / 2;
-  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-    if (!instance.get_macro() || !instance.get_placed() || routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
+  for (Instance* instance_ptr : _placed_macro_list) {
+    Instance& instance = *instance_ptr;
+    if (routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
       continue;
     }
     PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
@@ -328,6 +339,10 @@ std::vector<std::pair<int32_t, int32_t>> PDNGenerator::getMacroBlockageIntervalL
 
 int32_t PDNGenerator::getMacroTopLayerOrder(Instance& instance)
 {
+  auto iter = _macro_top_layer_order.find(&instance);
+  if (iter != _macro_top_layer_order.end()) {
+    return iter->second;
+  }
   int32_t top_layer_order = -1;
   for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
     RoutingLayer* routing_layer = findRoutingLayer(pin_shape.get_layer_name());
@@ -335,6 +350,7 @@ int32_t PDNGenerator::getMacroTopLayerOrder(Instance& instance)
       top_layer_order = std::max(top_layer_order, routing_layer->get_order());
     }
   }
+  _macro_top_layer_order[&instance] = top_layer_order;
   return top_layer_order;
 }
 
@@ -424,8 +440,9 @@ void PDNGenerator::alignStripeSegment(PGSegment& stripe_segment)
 
   bool vertical = stripe_segment.is_vertical();
   int32_t half_width = stripe_segment.get_width() / 2;
-  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-    if (!instance.get_macro() || !instance.get_placed() || routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
+  for (Instance* instance_ptr : _placed_macro_list) {
+    Instance& instance = *instance_ptr;
+    if (routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
       continue;
     }
 
@@ -650,6 +667,27 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
   return closest_full_overlap_coord != INT32_MAX ? closest_full_overlap_coord : closest_contact_coord;
 }
 
+void PDNGenerator::initPowerLayerPair(PGModel& pg_model)
+{
+  std::map<int32_t, std::string> stripe_layer_map;
+  for (PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (pg_segment.get_type() != PGSegmentType::kStripe) {
+      continue;
+    }
+    RoutingLayer* routing_layer = findRoutingLayer(pg_segment.get_layer_name());
+    if (routing_layer != nullptr) {
+      stripe_layer_map[routing_layer->get_order()] = routing_layer->get_name();
+    }
+  }
+  if (stripe_layer_map.size() < 2) {
+    return;
+  }
+  std::map<int32_t, std::string>::reverse_iterator layer_iter = stripe_layer_map.rbegin();
+  pg_model.get_power_layer_pair().set_second_layer_name(layer_iter->second);
+  layer_iter++;
+  pg_model.get_power_layer_pair().set_first_layer_name(layer_iter->second);
+}
+
 void PDNGenerator::buildLayerConnect(PGModel& pg_model)
 {
   Monitor monitor;
@@ -690,9 +728,15 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
           if (overlap_rect.get_width() <= 0 || overlap_rect.get_height() <= 0) {
             continue;
           }
-          addViaSegment(pg_model, pg_net.get_name(), bottom_layer->get_name(), top_layer->get_name(), "",
-                        (overlap_rect.get_ll_x() + overlap_rect.get_ur_x()) / 2, (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2,
-                        overlap_rect.get_width(), overlap_rect.get_height());
+          int32_t x = (overlap_rect.get_ll_x() + overlap_rect.get_ur_x()) / 2;
+          int32_t y = (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2;
+          addViaSegment(pg_model, pg_net.get_name(), bottom_layer->get_name(), top_layer->get_name(), "", x, y, overlap_rect.get_width(),
+                        overlap_rect.get_height());
+          if (bottom_layer->get_name() == pg_model.get_power_layer_pair().get_first_layer_name()
+              && top_layer->get_name() == pg_model.get_power_layer_pair().get_second_layer_name()
+              && bottom_segment.get_type() == PGSegmentType::kStripe && top_segment.get_type() == PGSegmentType::kStripe) {
+            pg_model.get_power_net_coord_map()[pg_net.get_name()].emplace(x, y);
+          }
         }
       }
     }
@@ -739,10 +783,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   Database& database = FPDM.getDatabase();
   int32_t macro_pin_num = 0;
   for (PGNet& pg_net : database.get_pg_net_list()) {
-    for (Instance& instance : database.get_instance_list()) {
-      if (!instance.get_macro() || !instance.get_placed()) {
-        continue;
-      }
+    for (Instance* instance_ptr : _placed_macro_list) {
+      Instance& instance = *instance_ptr;
       for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
         if (std::find(pg_net.get_instance_pin_name_list().begin(), pg_net.get_instance_pin_name_list().end(), pin_shape.get_pin_name())
             != pg_net.get_instance_pin_name_list().end()) {
@@ -756,10 +798,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   int32_t processed_macro_pin_num = 0;
   Monitor stage_monitor;
   for (PGNet& pg_net : database.get_pg_net_list()) {
-    for (Instance& instance : database.get_instance_list()) {
-      if (!instance.get_macro() || !instance.get_placed()) {
-        continue;
-      }
+    for (Instance* instance_ptr : _placed_macro_list) {
+      Instance& instance = *instance_ptr;
       for (InstancePinShape& pin_shape : instance.get_pin_shape_list()) {
         if (std::find(pg_net.get_instance_pin_name_list().begin(), pg_net.get_instance_pin_name_list().end(), pin_shape.get_pin_name())
             == pg_net.get_instance_pin_name_list().end()) {
@@ -824,6 +864,31 @@ void PDNGenerator::connectMacroPin(PGModel& pg_model, PGNet& pg_net, InstancePin
                   (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2, overlap_rect.get_width(), overlap_rect.get_height());
   }
 }
+
+#if 1  // output
+
+void PDNGenerator::outputPowerLocation(PGModel& pg_model)
+{
+  Monitor monitor;
+  FPLOG.info(Loc::current(), "Starting...");
+
+  int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
+  std::ofstream* power_file = FPUTIL.getOutputFileStream(FPUTIL.getString(FPDM.getConfig().pg_temp_directory_path, "power.ploc"));
+  power_file->precision(std::numeric_limits<double>::max_digits10);
+  FPUTIL.pushStream(power_file, "# name x_um y_um layer net\n");
+  for (auto& [net_name, coord_set] : pg_model.get_power_net_coord_map()) {
+    int32_t source_idx = 0;
+    for (const auto& [x, y] : coord_set) {
+      FPUTIL.pushStream(power_file, net_name, "_", source_idx++, " ", x / 1.0 / micron_dbu, " ", y / 1.0 / micron_dbu, " ",
+                        pg_model.get_power_layer_pair().get_second_layer_name(), " ", net_name, "\n");
+    }
+  }
+  FPUTIL.closeFileStream(power_file);
+
+  FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+#endif
 
 // private
 

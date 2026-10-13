@@ -31,6 +31,12 @@ bool init_fp(const std::string& config)
   return true;
 }
 
+bool run_simple_fp()
+{
+  FPI.runSimpleFP();
+  return true;
+}
+
 bool run_fp()
 {
   FPI.runFP();

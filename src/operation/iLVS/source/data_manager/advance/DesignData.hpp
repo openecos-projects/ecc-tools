@@ -27,19 +27,18 @@ class DesignData
 {
  public:
   DesignData() = default;
-  ~DesignData() = default;
   // getter
   std::string& get_design_name() { return _design_name; }
   std::vector<std::string>& get_io_terminal_name_list() { return _io_terminal_name_list; }
-  std::map<std::string, ConnectType>& get_terminal_connect_type_map() { return _terminal_connect_type_map; }
-  std::set<std::string>& get_instance_name_set() { return _instance_name_set; }
-  std::map<std::string, Net>& get_net_map() { return _net_map; }
+  std::unordered_map<std::string, ConnectType>& get_terminal_connect_type_map() { return _terminal_connect_type_map; }
+  std::unordered_set<std::string>& get_instance_name_set() { return _instance_name_set; }
+  std::unordered_map<std::string, Net>& get_net_map() { return _net_map; }
   // const getter
   const std::string& get_design_name() const { return _design_name; }
   const std::vector<std::string>& get_io_terminal_name_list() const { return _io_terminal_name_list; }
-  const std::map<std::string, ConnectType>& get_terminal_connect_type_map() const { return _terminal_connect_type_map; }
-  const std::set<std::string>& get_instance_name_set() const { return _instance_name_set; }
-  const std::map<std::string, Net>& get_net_map() const { return _net_map; }
+  const std::unordered_map<std::string, ConnectType>& get_terminal_connect_type_map() const { return _terminal_connect_type_map; }
+  const std::unordered_set<std::string>& get_instance_name_set() const { return _instance_name_set; }
+  const std::unordered_map<std::string, Net>& get_net_map() const { return _net_map; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
   void set_io_terminal_name_list(const std::vector<std::string>& io_terminal_name_list) { _io_terminal_name_list = io_terminal_name_list; }
@@ -64,9 +63,9 @@ class DesignData
  private:
   std::string _design_name;
   std::vector<std::string> _io_terminal_name_list;
-  std::map<std::string, ConnectType> _terminal_connect_type_map;
-  std::set<std::string> _instance_name_set;
-  std::map<std::string, Net> _net_map;
+  std::unordered_map<std::string, ConnectType> _terminal_connect_type_map;
+  std::unordered_set<std::string> _instance_name_set;
+  std::unordered_map<std::string, Net> _net_map;
 };
 
 }  // namespace ilvs

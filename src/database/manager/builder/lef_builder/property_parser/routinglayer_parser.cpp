@@ -19,7 +19,6 @@
 
 #include <memory>
 
-#include "absl/strings/match.h"
 #include "db_property/IdbRoutingLayerLef58Property.h"
 #include "lef58_property/routinglayer_property_parser.h"
 #include "property_parser/lef58_property/routinglayer_property.h"
@@ -316,10 +315,10 @@ bool RoutingLayerParser::parse_lef58_spacingtable_jogtojog(const std::string& va
 
 bool RoutingLayerParser::parse_lef58_spacing(const std::string& value, IdbLayerRouting* data)
 {
-  if (absl::StrContains(value, "NOTCHLENGTH")) {
+  if (value.find("NOTCHLENGTH") != std::string::npos) {
     return parse_lef58_spacing_notchlength(value, data);
   }
-  if (absl::StrContains(value, "ENDOFLINE")) {
+  if (value.find("ENDOFLINE") != std::string::npos) {
     return parse_lef58_spacing_eol(value, data);
   }
   ECCLOG.warn(ecc::Loc::current(), "Unhandled LEF58_SPACING value: ", value);
@@ -328,7 +327,7 @@ bool RoutingLayerParser::parse_lef58_spacing(const std::string& value, IdbLayerR
 
 bool RoutingLayerParser::parse_lef58_spacingtable(const std::string& value, IdbLayerRouting* data)
 {
-  if (absl::StrContains(value, "JOGTOJOGSPACING")) {
+  if (value.find("JOGTOJOGSPACING") != std::string::npos) {
     return parse_lef58_spacingtable_jogtojog(value, data);
   }
   ECCLOG.warn(ecc::Loc::current(), "Unhandled LEF58_SPACINGTABLE value: ", value);

@@ -182,10 +182,10 @@ auto FindLibPort(idb::LibCell* lib_cell, idb::IdbPin* pin) -> idb::LibPort*
 
 auto IsSequentialCell(idb::IdbInstance* inst, idb::LibCell* lib_cell) -> bool
 {
-  if (lib_cell != nullptr && lib_cell->isSequentialCell() && !lib_cell->isICG()) {
-    return true;
+  if (lib_cell != nullptr && lib_cell->isSequentialCell()) {
+    return !lib_cell->isICG();
   }
-  return inst != nullptr && inst->is_flip_flop();
+  return inst != nullptr && inst->is_flip_flop() && (lib_cell == nullptr || !lib_cell->isICG());
 }
 
 auto IsClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool
@@ -195,7 +195,12 @@ auto IsClockSinkPin(idb::IdbPin* pin, idb::LibCell* lib_cell) -> bool
   }
   auto* term = pin->get_term();
   auto* lib_port = FindLibPort(lib_cell, pin);
-  if (lib_port != nullptr && lib_port->isClock() && lib_cell != nullptr && lib_cell->isSequentialCell() && !lib_cell->isICG()) {
+  if (lib_cell != nullptr
+      && (pin->is_flip_flop_clk() || (lib_port != nullptr && lib_port->isClock()) || (term != nullptr && term->get_type() == idb::IdbConnectType::kClock))
+      && lib_cell->isICG()) {
+    return false;
+  }
+  if (lib_port != nullptr && lib_port->isClock() && lib_cell != nullptr && lib_cell->isSequentialCell()) {
     return true;
   }
   if (pin->is_flip_flop_clk()) {

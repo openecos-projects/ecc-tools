@@ -26,12 +26,12 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
 
-#include "absl/container/btree_map.h"
 #include "Type.hh"
 
 namespace idb {
@@ -156,7 +156,7 @@ class AocvLibrary
   std::string _version_number;                                                 //!< The version of the aocv file.
   std::string _aocv_name;                                                      //!< The name of the aocv file.
   std::vector<std::unique_ptr<AocvObjectSpecSet>> _object_spec_sets;           //!< The all object specs of the aocv file.
-  absl::btree_multimap<std::string_view, AocvObjectSpecSet*> _obj_name_to_spec_set;  //!< The obj name map to the object spec set.
+  std::multimap<std::string_view, AocvObjectSpecSet*> _obj_name_to_spec_set;  //!< The obj name map to the object spec set.
 
   FORBIDDEN_COPY(AocvLibrary);
 };

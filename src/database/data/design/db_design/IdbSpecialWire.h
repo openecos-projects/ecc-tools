@@ -32,7 +32,9 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "../../../basic/geometry/IdbGeometry.h"
@@ -120,6 +122,7 @@ class IdbSpecialWireSegment : public IdbObject
   IdbCoordinate<int32_t>* get_point_top();
   IdbCoordinate<int32_t>* get_point_bottom();
   IdbRect* get_delta_rect() { return _delta_rect; }
+  std::optional<int32_t> get_point_ext(IdbCoordinate<int32_t>* point);
   const bool is_rect() { return _is_rect; }
   bool is_horizontal();
   bool is_vertical();
@@ -138,6 +141,7 @@ class IdbSpecialWireSegment : public IdbObject
   void set_delta_rect(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y);
   IdbVia* copy_via(IdbVia* via);
   IdbCoordinate<int32_t>* add_point(int32_t x, int32_t y);
+  IdbCoordinate<int32_t>* add_flush_point(int32_t x, int32_t y, int32_t ext);
 
   bool set_bounding_box();
 
@@ -160,6 +164,8 @@ class IdbSpecialWireSegment : public IdbObject
   bool _is_via;
   bool _is_rect;
   vector<IdbCoordinate<int32_t>*> _point_list;
+  /// per-point DEF flush extension `( x y ext )`; a point absent from the map carries no ext
+  std::unordered_map<IdbCoordinate<int32_t>*, int32_t> _point_ext_map;
   IdbRect* _delta_rect;
 };
 

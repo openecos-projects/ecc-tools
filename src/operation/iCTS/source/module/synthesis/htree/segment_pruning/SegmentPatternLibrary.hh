@@ -55,6 +55,57 @@ struct SegmentPatternCompositionKeyHash
   }
 };
 
+inline auto BuildSegmentPatternGeometryState(const BufferingPattern& pattern) -> PatternGeometryState
+{
+  const auto& positions = pattern.get_buffer_positions();
+  const auto& masters = pattern.get_cell_masters();
+  if (positions.empty() && masters.empty()) {
+    return {};
+  }
+  if (positions.size() != masters.size() || positions.empty()) {
+    CTSLOG.error(Loc::current(), "HTree: segment pattern positions and masters must be one-to-one.");
+  }
+  return PatternGeometryState{
+      .has_buffer = true,
+      .source_buffer_position = positions.front(),
+      .source_buffer_master = masters.front(),
+      .sink_buffer_position = positions.back(),
+      .sink_buffer_master = masters.back(),
+      .source_unbuffered_level_count = 0U,
+      .sink_unbuffered_level_count = 0U,
+  };
+}
+
+inline auto ComposeSegmentPatternGeometryState(const BufferingPattern& upstream_pattern, const PatternGeometryState& upstream_state,
+                                               const BufferingPattern& downstream_pattern, const PatternGeometryState& downstream_state) -> PatternGeometryState
+{
+  const unsigned total_length_idx = upstream_pattern.get_length_idx() + downstream_pattern.get_length_idx();
+  if (total_length_idx == 0U || (!upstream_state.has_buffer && !downstream_state.has_buffer)) {
+    return {};
+  }
+
+  const double upstream_ratio = static_cast<double>(upstream_pattern.get_length_idx()) / static_cast<double>(total_length_idx);
+  PatternGeometryState result;
+  result.has_buffer = true;
+  result.source_unbuffered_level_count = 0U;
+  result.sink_unbuffered_level_count = 0U;
+  if (upstream_state.has_buffer) {
+    result.source_buffer_position = upstream_state.source_buffer_position * upstream_ratio;
+    result.source_buffer_master = upstream_state.source_buffer_master;
+  } else {
+    result.source_buffer_position = upstream_ratio + downstream_state.source_buffer_position * (1.0 - upstream_ratio);
+    result.source_buffer_master = downstream_state.source_buffer_master;
+  }
+  if (downstream_state.has_buffer) {
+    result.sink_buffer_position = upstream_ratio + downstream_state.sink_buffer_position * (1.0 - upstream_ratio);
+    result.sink_buffer_master = downstream_state.sink_buffer_master;
+  } else {
+    result.sink_buffer_position = upstream_state.sink_buffer_position * upstream_ratio;
+    result.sink_buffer_master = upstream_state.sink_buffer_master;
+  }
+  return result;
+}
+
 struct BufferPatternLibrary
 {
   explicit BufferPatternLibrary(Wrapper& wrapper) : _strength_table(wrapper) {}
@@ -71,6 +122,7 @@ struct BufferPatternLibrary
     composition_states[pattern_id] = PatternCompositionState{
         .terminal_semantic = pattern.hasTerminalBranchBuffer() ? TerminalSemantic::kBranchBuffered : TerminalSemantic::kLeafUnbuffered,
         .monotonic_boundary_state = pattern.get_monotonic_boundary_state(),
+        .geometry_state = BuildSegmentPatternGeometryState(pattern),
     };
     patterns[pattern_id] = std::move(pattern);
     return true;
@@ -228,12 +280,19 @@ class SegmentPatternLibraryCombiner
 
   auto composeState(PatternId upstream, PatternId downstream) const -> PatternCompositionState
   {
+    const auto* upstream_pattern = _library->find(upstream);
+    const auto* downstream_pattern = _library->find(downstream);
+    if (upstream_pattern == nullptr || downstream_pattern == nullptr) {
+      CTSLOG.error(Loc::current(), "HTree: missing segment pattern during composition-state resolution.");
+    }
     const auto upstream_state = _library->getCompositionState(upstream);
     const auto downstream_state = _library->getCompositionState(downstream);
     return PatternCompositionState{
         .terminal_semantic = downstream_state.terminal_semantic,
         .monotonic_boundary_state = MonotonicBoundaryState::compose(upstream_state.monotonic_boundary_state, downstream_state.monotonic_boundary_state),
         .source_exposed_load_count = upstream_state.source_exposed_load_count,
+        .geometry_state
+        = ComposeSegmentPatternGeometryState(*upstream_pattern, upstream_state.geometry_state, *downstream_pattern, downstream_state.geometry_state),
     };
   }
 

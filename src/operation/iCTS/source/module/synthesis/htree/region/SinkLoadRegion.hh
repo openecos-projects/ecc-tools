@@ -139,6 +139,7 @@ struct SinkLoadRegionLegalityContext
   std::string first_monotone_hard_fail_reason;
   UniformValueLattice cap_lattice;
   SinkLoadRegionLegalityInput input;
+  SinkLoadRegionLegalitySummary monotone_pruned_result{};
 };
 
 struct SinkLoadRegionEntryFilterOutput
@@ -212,9 +213,12 @@ struct SinkLoadRegionSplitPlan
 auto SplitSinkLoadRegionGroup(const std::vector<Pin*>& loads, std::size_t max_fanout) -> SinkLoadRegionSplitPlan;
 auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>& anchor, const SinkLoadRegionLegalityInput& input) -> SinkLoadRegionSplitPlan;
 
+// Borrows a context-owned result. Cached entries remain valid for the context's
+// lifetime; monotone-pruned results are valid until the next resolve. Callers
+// retaining a result beyond that scope must copy it.
 auto ResolveSinkLoadRegionLegality(const Tree& topology, PatternId topology_pattern_id, const TopologyPatternLibrary& topology_library,
                                    const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context)
-    -> SinkLoadRegionLegalitySummary;
+    -> const SinkLoadRegionLegalitySummary&;
 auto FilterSinkLoadRegionLegalEntries(const std::vector<HTreeTopologyChar>& entries, const Tree& topology, const TopologyPatternLibrary& topology_library,
                                       const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context)
     -> SinkLoadRegionEntryFilterBuild;

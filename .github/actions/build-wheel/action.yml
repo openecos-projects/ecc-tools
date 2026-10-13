@@ -10,12 +10,33 @@ runs:
         dnf install -y epel-release
         dnf config-manager --set-enabled crb || true
         dnf install -y \
-          cmake ninja-build pkgconfig patchelf mold lld \
-          boost-devel cairo-devel gflags-devel glog-devel \
+          cmake ninja-build pkgconfig patchelf mold lld curl gcc-c++ \
+          cairo-devel gflags-devel glog-devel \
           flex flex-devel bison eigen3-devel gtest-devel \
           tbb-devel hwloc-devel libcurl-devel libunwind-devel \
           metis-devel gmp-devel tcl-devel \
-          unzip zip
+          unzip zip bzip2
+
+    - name: Install Boost 1.91.0
+      shell: bash
+      run: |
+        boost_version="1.91.0"
+        boost_source_dir="boost_${boost_version//./_}"
+        boost_archive="${boost_source_dir}.tar.bz2"
+        boost_prefix="${GITHUB_WORKSPACE}/.deps/boost-${boost_version}"
+        boost_sha256="de5e6b0e4913395c6bdfa90537febd9028ea4c0735d2cdb0cd9b45d5f51264f5"
+        boost_build_dir="$(mktemp -d)"
+
+        cd "$boost_build_dir"
+        curl --fail --location --retry 3 --output "$boost_archive" \
+          "https://archives.boost.io/release/${boost_version}/source/${boost_archive}"
+        echo "${boost_sha256}  ${boost_archive}" | sha256sum --check --status
+        tar -xf "$boost_archive"
+        cd "$boost_source_dir"
+        ./bootstrap.sh --prefix="$boost_prefix"
+        ./b2 -j"$(nproc)" --with-headers install
+
+        echo "ECC_BOOST_ROOT=${boost_prefix}" >> "$GITHUB_ENV"
 
     - name: Setup Python 3.11
       shell: bash
@@ -34,18 +55,29 @@ runs:
       uses: actions/cache@v4
       with:
         path: build
-        key: cmake-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+        key: cmake-${{ runner.os }}-boost-1.91.0-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
         restore-keys: |
-          cmake-${{ runner.os }}-
+          cmake-${{ runner.os }}-boost-1.91.0-
 
     - name: Build repaired wheel
       shell: bash
       env:
         SCCACHE_GHA_ENABLED: "true"
       run: |
-        export CMAKE_ARGS="-DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
+        export CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${ECC_BOOST_ROOT} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
         uv sync --no-install-project
         uv build --wheel --no-build-isolation --verbose
         mkdir -p dist/wheel/repaired
         uv run --no-sync -m auditwheel show dist/*.whl
         uv run --no-sync -m auditwheel repair dist/*.whl -w dist/wheel/repaired
+
+    - name: Verify bundled Tcl script library
+      shell: bash
+      run: |
+        # The embedded SDC Tcl interpreter needs init.tcl; without the bundled
+        # script library Tcl_Init fails on distros without /usr/share/tcl8.6.
+        # Note: no grep -q here — its early exit SIGPIPEs unzip and pipefail
+        # would turn a successful match into a step failure.
+        wheel="$(ls dist/wheel/repaired/*.whl)"
+        unzip -l "$wheel" | grep 'ecc_tools_bin/tcl8.6/init.tcl' \
+          || { echo "::error::repaired wheel is missing ecc_tools_bin/tcl8.6/init.tcl"; exit 1; }

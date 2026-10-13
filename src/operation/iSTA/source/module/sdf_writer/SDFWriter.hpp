@@ -99,6 +99,7 @@ class SDFWriter
   bool hasSDFDelay(SDFDelay& sdf_delay);
   double getSDFTimingCheckDelay(Instance& instance, TimingCheckArc& timing_check_arc, TimingArc& timing_arc, AnalysisType analysis_type,
                                 TransType data_trans_type);
+  double getSDFDataSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
   double getSDFTimingCheckSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType data_trans_type);
   double getSDFSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
   AnalysisType getCaptureAnalysisType(AnalysisType analysis_type);

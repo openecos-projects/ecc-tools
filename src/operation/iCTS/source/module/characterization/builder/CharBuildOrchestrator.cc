@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "BufferingPattern.hh"
+#include "LogTable.hh"
 #include "Logger.hh"
 #include "SegmentChar.hh"
 #include "Utility.hh"
@@ -51,6 +52,14 @@ auto calcRatio(std::size_t numerator, std::size_t denominator) -> double
 auto CharBuildOrchestrator::build() -> void
 {
   _impl._build_failure_reason.clear();
+  _impl._evaluated_patterns = 0U;
+  _impl._feasible_patterns = 0U;
+  _impl._skipped_patterns_infeasible = 0U;
+  _impl._wire_only_patterns = 0U;
+  _impl._leaf_buffered_patterns = 0U;
+  _impl._terminal_branch_patterns = 0U;
+  _impl._mixed_master_patterns = 0U;
+  _impl._skipped_load_points = 0U;
   _impl._executed_sta_samples = 0U;
   _impl._skipped_sta_samples = 0U;
   _impl._output_slew_overflow_samples = 0U;
@@ -75,6 +84,8 @@ auto CharBuildOrchestrator::build() -> void
     return;
   }
 
+  LogTableRows sweep_rows;
+  sweep_rows.reserve(_impl._wirelengths_um.size());
   for (std::size_t wirelength_index = 0; wirelength_index < _impl._wirelengths_um.size(); ++wirelength_index) {
     const unsigned length_idx = _impl._wirelength_indices.at(wirelength_index);
     const double wirelength_um = _impl._wirelengths_um.at(wirelength_index);
@@ -86,6 +97,14 @@ auto CharBuildOrchestrator::build() -> void
     build_progress.estimated_sta_samples = estimated_sta_samples_per_wirelength;
     _impl.patternEnumerator().enumerateWirelength(length_idx, wirelength_um, build_progress);
 
+    _impl._evaluated_patterns += build_progress.evaluated_patterns;
+    _impl._feasible_patterns += build_progress.feasible_patterns;
+    _impl._skipped_patterns_infeasible += build_progress.skipped_patterns_infeasible;
+    _impl._wire_only_patterns += build_progress.wire_only_patterns;
+    _impl._leaf_buffered_patterns += build_progress.leaf_buffered_patterns;
+    _impl._terminal_branch_patterns += build_progress.terminal_branch_patterns;
+    _impl._mixed_master_patterns += build_progress.mixed_master_patterns;
+    _impl._skipped_load_points += build_progress.skipped_load_points;
     _impl._output_slew_overflow_samples += build_progress.output_slew_overflow_samples;
     _impl._executed_sta_samples += build_progress.executed_sta_samples;
     _impl._skipped_sta_samples += build_progress.skipped_sta_samples;
@@ -95,7 +114,19 @@ auto CharBuildOrchestrator::build() -> void
     _impl._max_observed_output_slew_idx = std::max(_impl._max_observed_output_slew_idx, build_progress.max_observed_output_slew_idx);
     _impl._max_observed_driven_cap_pf = std::max(_impl._max_observed_driven_cap_pf, build_progress.max_observed_driven_cap_pf);
     _impl._max_observed_driven_cap_idx = std::max(_impl._max_observed_driven_cap_idx, build_progress.max_observed_driven_cap_idx);
+    sweep_rows.push_back({ToLogTableCell(length_idx), ToLogTableCell(wirelength_um), ToLogTableCell(build_progress.estimated_patterns),
+                          ToLogTableCell(build_progress.evaluated_patterns), ToLogTableCell(build_progress.feasible_patterns),
+                          ToLogTableCell(build_progress.wire_only_patterns), ToLogTableCell(build_progress.leaf_buffered_patterns),
+                          ToLogTableCell(build_progress.terminal_branch_patterns), ToLogTableCell(build_progress.mixed_master_patterns),
+                          ToLogTableCell(build_progress.skipped_patterns_infeasible), ToLogTableCell(build_progress.skipped_load_points),
+                          ToLogTableCell(build_progress.executed_sta_samples), ToLogTableCell(build_progress.skipped_sta_samples),
+                          ToLogTableCell(build_progress.output_slew_overflow_samples), ToLogTableCell(build_progress.driven_cap_overflow_samples)});
   }
+
+  EmitLogTable(Loc::current(), "CharBuilder Wirelength Sweep",
+               {"Length Idx", "Length (um)", "Estimated", "Evaluated", "Feasible", "Wire", "Leaf", "Branch", "Mixed", "Infeasible", "Load Skip", "STA Run",
+                "STA Skip", "Slew Overflow", "Cap Overflow"},
+               sweep_rows);
 
   const double output_slew_overflow_ratio = calcRatio(_impl._output_slew_overflow_samples, _impl._executed_sta_samples);
   if (_impl._output_slew_overflow_samples > 0U && output_slew_overflow_ratio >= 0.10) {

@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <string>
@@ -64,7 +65,9 @@ struct FastStaRcNode
   double downstream_cap_pf = 0.0;
   double driver_downstream_cap_pf = 0.0;
   double elmore_delay_ns = 0.0;
+  std::array<std::array<double, 2U>, 2U> elmore_delay_ns_by_timing{};
   FastStaNodeId terminal_node_id = kInvalidFastStaNodeId;
+  std::vector<FastStaNodeId> terminal_node_ids;
 };
 
 struct FastStaRcEdge
@@ -87,6 +90,8 @@ struct FastStaNetParasitic
   FastStaRcNodeId root_rc_node_id = kInvalidFastStaRcNodeId;
   FastStaPiModel pi;
   FastStaPiModel driver_pi;
+  std::array<std::array<FastStaPiModel, 2U>, 2U> pi_by_timing{};
+  std::array<std::array<FastStaPiModel, 2U>, 2U> driver_pi_by_timing{};
   double ground_cap_pf = 0.0;
   double coupling_cap_pf = 0.0;
   double timing_coupling_factor = 0.0;

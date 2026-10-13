@@ -1,0 +1,14 @@
+add_library(ipw_power_reporter
+    ${IPW_MODULE}/power_reporter/PowerReporter.cpp
+)
+
+target_link_libraries(ipw_power_reporter
+    PUBLIC
+    ipw_data_manager
+    ipw_toolkit
+)
+
+target_include_directories(ipw_power_reporter
+    PUBLIC
+    ${IPW_MODULE}/power_reporter
+)

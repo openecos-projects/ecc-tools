@@ -261,112 +261,112 @@ bool DataManager::place_macro_loc_rand(std::string tcl_path)
   return true;
 }
 
-void DataManager::scale_macro_loc()
-{
-  auto isOverlap = [](const Macro& macro1, const Macro& macro2) {
-    // 判断两个矩形是否重叠
-    double left1 = macro1.center_x - macro1.width / 2;
-    double right1 = macro1.center_x + macro1.width / 2;
-    double top1 = macro1.center_y - macro1.height / 2;
-    double bottom1 = macro1.center_y + macro1.height / 2;
+// void DataManager::scale_macro_loc()
+// {
+//   auto isOverlap = [](const Macro& macro1, const Macro& macro2) {
+//     // 判断两个矩形是否重叠
+//     double left1 = macro1.center_x - macro1.width / 2;
+//     double right1 = macro1.center_x + macro1.width / 2;
+//     double top1 = macro1.center_y - macro1.height / 2;
+//     double bottom1 = macro1.center_y + macro1.height / 2;
 
-    double left2 = macro2.center_x - macro2.width / 2;
-    double right2 = macro2.center_x + macro2.width / 2;
-    double top2 = macro2.center_y - macro2.height / 2;
-    double bottom2 = macro2.center_y + macro2.height / 2;
+//     double left2 = macro2.center_x - macro2.width / 2;
+//     double right2 = macro2.center_x + macro2.width / 2;
+//     double top2 = macro2.center_y - macro2.height / 2;
+//     double bottom2 = macro2.center_y + macro2.height / 2;
 
-    return (left1 < right2 && right1 > left2 && top1 < bottom2 && bottom1 > top2);
-  };
+//     return (left1 < right2 && right1 > left2 && top1 < bottom2 && bottom1 > top2);
+//   };
 
-  double cur_width = _layout->get_die()->get_width();
-  double cur_height = _layout->get_die()->get_height();
-  double tar_width;
-  double tar_height;
+//   double cur_width = _layout->get_die()->get_width();
+//   double cur_height = _layout->get_die()->get_height();
+//   double tar_width;
+//   double tar_height;
 
-  // 计算平面的缩放比例
-  double scale_x = tar_width / cur_width;
-  double scale_y = tar_height / cur_height;
+//   // 计算平面的缩放比例
+//   double scale_x = tar_width / cur_width;
+//   double scale_y = tar_height / cur_height;
 
-  std::vector<Macro> Avaliable_macro;
-  // 将所有macro按大小排序存入Avalible_macro;
-  for (auto* instance : _design->get_instance_list()->get_instance_list()) {
-    if (instance->get_bounding_box()->get_height() > _layout->get_rows()->get_row_height()) {  // 这个判断macro的方式可能有问题
-      int inst_id = instance->get_id();
-      string inst_name = instance->get_name();
-      auto orient = instance->get_orient();
-      int width, height;
-      if (orient == IdbOrient::kN_R0 || orient == IdbOrient::kS_R180 || orient == IdbOrient::kFN_MY || orient == IdbOrient::kFS_MX) {
-        width = instance->get_bounding_box()->get_width();
-        height = instance->get_bounding_box()->get_height();
-      } else if (orient == IdbOrient::kW_R90 || orient == IdbOrient::kE_R270 || orient == IdbOrient::kFE_MY90
-                 || orient == IdbOrient::kFW_MX90) {
-        width = instance->get_bounding_box()->get_height();
-        height = instance->get_bounding_box()->get_width();
-      }
-      double cx = instance->get_coordinate()->get_x() + width / 2;
-      double cy = instance->get_coordinate()->get_y() + height / 2;
-      Macro macro(inst_id, inst_name, cx, cy, IdbOrient::kN_R0, width, height);
-      Avaliable_macro.push_back(macro);
-    }
-  }
-  // std::vector<Rectangle> rectangles;
+//   std::vector<Macro> Avaliable_macro;
+//   // 将所有macro按大小排序存入Avalible_macro;
+//   for (auto* instance : _design->get_instance_list()->get_instance_list()) {
+//     if (instance->get_bounding_box()->get_height() > _layout->get_rows()->get_row_height()) {  // 这个判断macro的方式可能有问题
+//       int inst_id = instance->get_id();
+//       string inst_name = instance->get_name();
+//       auto orient = instance->get_orient();
+//       int width, height;
+//       if (orient == IdbOrient::kN_R0 || orient == IdbOrient::kS_R180 || orient == IdbOrient::kFN_MY || orient == IdbOrient::kFS_MX) {
+//         width = instance->get_bounding_box()->get_width();
+//         height = instance->get_bounding_box()->get_height();
+//       } else if (orient == IdbOrient::kW_R90 || orient == IdbOrient::kE_R270 || orient == IdbOrient::kFE_MY90
+//                  || orient == IdbOrient::kFW_MX90) {
+//         width = instance->get_bounding_box()->get_height();
+//         height = instance->get_bounding_box()->get_width();
+//       }
+//       double cx = instance->get_coordinate()->get_x() + width / 2;
+//       double cy = instance->get_coordinate()->get_y() + height / 2;
+//       Macro macro(inst_id, inst_name, cx, cy, IdbOrient::kN_R0, width, height);
+//       Avaliable_macro.push_back(macro);
+//     }
+//   }
+//   // std::vector<Rectangle> rectangles;
 
-  // // 填充原始矩形列表，包括矩形的初始中心坐标、宽度和高度
-  // rectangles.emplace_back();
+//   // // 填充原始矩形列表，包括矩形的初始中心坐标、宽度和高度
+//   // rectangles.emplace_back();
 
-  for (auto& macro : Avaliable_macro) {
-    // 计算新中心坐标
-    double new_center_x = macro.center_x * scale_x;
-    double new_center_y = macro.center_y * scale_y;
+//   for (auto& macro : Avaliable_macro) {
+//     // 计算新中心坐标
+//     double new_center_x = macro.center_x * scale_x;
+//     double new_center_y = macro.center_y * scale_y;
 
-    // 更新矩形的中心坐标
-    macro.center_x = new_center_x;
-    macro.center_y = new_center_y;
+//     // 更新矩形的中心坐标
+//     macro.center_x = new_center_x;
+//     macro.center_y = new_center_y;
 
-    if (scale_x < 1 && scale_y < 1) {
-      for (auto& macro1 : Avaliable_macro) {
-        for (auto& macro2 : Avaliable_macro) {
-          if (abs(macro1.center_x - macro2.center_x) > 1e-3 || abs(macro1.center_y - macro2.center_y) > 1e-3) {
-            if (isOverlap(macro1, macro2)) {
-              ECCLOG.warn(ecc::Loc::current(), "error, is overlap");
-              return;
-            }
-          }
-        }
-      }
-    }
-  }
+//     if (scale_x < 1 && scale_y < 1) {
+//       for (auto& macro1 : Avaliable_macro) {
+//         for (auto& macro2 : Avaliable_macro) {
+//           if (abs(macro1.center_x - macro2.center_x) > 1e-3 || abs(macro1.center_y - macro2.center_y) > 1e-3) {
+//             if (isOverlap(macro1, macro2)) {
+//               ECCLOG.warn(ecc::Loc::current(), "error, is overlap");
+//               return;
+//             }
+//           }
+//         }
+//       }
+//     }
+//   }
 
-  // 写出摆放macro的脚本
-  std::ofstream outputFile("random_macro_loc.tcl");
-  for (const Macro& macro : Avaliable_macro) {
-    // 构造写入的字符串
-    auto instance = _design->get_instance_list()->find_instance(macro.id);
-    string ori;
-    if (instance->get_orient() == IdbOrient::kN_R0)
-      ori = "R0";
-    else if (instance->get_orient() == IdbOrient::kW_R90)
-      ori = "R90";
-    else if (instance->get_orient() == IdbOrient::kS_R180)
-      ori = "R180";
-    else if (instance->get_orient() == IdbOrient::kE_R270)
-      ori = "R270";
-    else if (instance->get_orient() == IdbOrient::kFS_MX)
-      ori = "MX";
-    else if (instance->get_orient() == IdbOrient::kFN_MY)
-      ori = "MY";
-    else if (instance->get_orient() == IdbOrient::kFW_MX90)
-      ori = "MX90";
-    else if (instance->get_orient() == IdbOrient::kFE_MY90)
-      ori = "MY90";
+//   // 写出摆放macro的脚本
+//   std::ofstream outputFile("random_macro_loc.tcl");
+//   for (const Macro& macro : Avaliable_macro) {
+//     // 构造写入的字符串
+//     auto instance = _design->get_instance_list()->find_instance(macro.id);
+//     string ori;
+//     if (instance->get_orient() == IdbOrient::kN_R0)
+//       ori = "R0";
+//     else if (instance->get_orient() == IdbOrient::kW_R90)
+//       ori = "R90";
+//     else if (instance->get_orient() == IdbOrient::kS_R180)
+//       ori = "R180";
+//     else if (instance->get_orient() == IdbOrient::kE_R270)
+//       ori = "R270";
+//     else if (instance->get_orient() == IdbOrient::kFS_MX)
+//       ori = "MX";
+//     else if (instance->get_orient() == IdbOrient::kFN_MY)
+//       ori = "MY";
+//     else if (instance->get_orient() == IdbOrient::kFW_MX90)
+//       ori = "MX90";
+//     else if (instance->get_orient() == IdbOrient::kFE_MY90)
+//       ori = "MY90";
 
-    std::string outputLine = "placeInstance " + macro.name + " {" + std::to_string(macro.center_x - macro.width / 2) + " "
-                             + std::to_string(macro.center_y - macro.height / 2) + "} " + ori + " -fixed\n";
+//     std::string outputLine = "placeInstance " + macro.name + " {" + std::to_string(macro.center_x - macro.width / 2) + " "
+//                              + std::to_string(macro.center_y - macro.height / 2) + "} " + ori + " -fixed\n";
 
-    // 写入字符串到文件
-    outputFile << outputLine;
-  }
-  outputFile.close();
-}
+//     // 写入字符串到文件
+//     outputFile << outputLine;
+//   }
+//   outputFile.close();
+// }
 
 }  // namespace idm

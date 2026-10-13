@@ -25,7 +25,7 @@
 
 namespace icts {
 
-struct FastStaClockContext;
+struct FastStaContext;
 struct FastStaDirtyRegion;
 
 class FastStaPower
@@ -33,8 +33,13 @@ class FastStaPower
  public:
   FastStaPower() = delete;
 
-  static auto update(FastStaClockContext& context) -> bool;
-  static auto updateRegion(FastStaClockContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
+  static auto update(FastStaContext& context) -> bool;
+  static auto updateRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
+
+ private:
+  friend class FastSTA;
+  // Authority journals prove unchanged nodes/nets already carry complete power.
+  static auto updatePreparedRegion(FastStaContext& context, const FastStaDirtyRegion& dirty_region) -> bool;
 };
 
 }  // namespace icts

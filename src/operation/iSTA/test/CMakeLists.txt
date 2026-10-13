@@ -1,12 +1,8 @@
-if(BUILD_TESTING)
-  add_executable(ista_arc_timing_arc_delay_test
-      ArcTimingArcDelayTest.cpp
-  )
+add_executable(test_ista_sdc_compatibility EXCLUDE_FROM_ALL
+    sdc_compatibility_test.cpp
+)
 
-  target_link_libraries(ista_arc_timing_arc_delay_test
-      PRIVATE
-      ista_data_manager
-  )
+target_link_libraries(test_ista_sdc_compatibility PRIVATE ista_sdc_command ista_data_manager)
 
-  add_test(NAME ista_arc_timing_arc_delay_test COMMAND ista_arc_timing_arc_delay_test)
-endif()
+add_test(NAME ista_sdc_compatibility COMMAND test_ista_sdc_compatibility)
+set_tests_properties(ista_sdc_compatibility PROPERTIES TIMEOUT 30)

@@ -166,9 +166,9 @@ Roadmap -->
 
 ## **Contribution Guide**
 
-Fork this iEDA repository，after adding and commiting code, please summit [Pull Request](https://gitee.com/oscc-project/iEDA/pulls)。
-
-Please note the using [Coding Style][Code-conduct-md] of iEDA。
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for branch, commit message,
+pull request, formatting, and validation requirements. Pull requests should
+target the `main` branch and use [.github/pull_request_template.md](.github/pull_request_template.md).
 
 ## **Citation**
 ```
@@ -212,7 +212,6 @@ In the development of iEDA, some sub-modules from the open-source community are 
 | Sub-module     | Source                                                                                                | Detail                                                                                                        |
 | -------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | flute3         | [FastRoute](https://github.com/The-OpenROAD-Project-Attic/flute3)                                        | Generate rectange steiner tree by flute3.                                                                     |
-| abseil-cpp     | [Google abseil](https://github.com/abseil/abseil-cpp.git)                                                | Use Google's high performance C++ container and algorithm library to improve performance compared to STL.     |
 | json           | [JSON for Modern C++](https://github.com/nlohmann/json)                                                  | Json C++ library, used to parse the program Json configuration file.                                          |
 | libfort        | [Seleznev Anton libfort](https://github.com/seleznevae/libfort.git)                                      | The C/C++ library produces formatted ASCII tables.                                                            |
 | pegtl          | [PEGTL（Parsing Expression Grammar Template Library）](https://github.com/taocpp/PEGTL/)                 | Use PEGTL to parse SPEF files easily.                                                                         |

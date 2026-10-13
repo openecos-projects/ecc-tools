@@ -548,7 +548,7 @@ IdbPin* IdbPins::find_pin(IdbPin* pin)
   }
 
   for (IdbPin* pin_iter : _pin_list) {
-    if (pin_iter->get_pin_name() == pin->get_pin_name() && pin->get_instance() == pin_iter->get_instance()) {
+    if (pin->get_instance() == pin_iter->get_instance() && pin_iter->get_pin_name() == pin->get_pin_name()) {
       return pin_iter;
     }
   }
@@ -706,6 +706,39 @@ IdbPin* IdbPins::add_pin_ref_unique(IdbPin* pin)
   _pin_list.emplace_back(pin);
   update_pin_ref_index(pin);
   return pin;
+}
+
+void IdbPins::add_pin_refs_unique(const std::vector<IdbPin*>& pins)
+{
+  struct PinHash
+  {
+    size_t operator()(IdbPin* pin) const
+    {
+      return std::hash<IdbInstance*>{}(pin->get_instance()) ^ (std::hash<std::string>{}(pin->get_pin_name()) << 1);
+    }
+  };
+  struct PinEqual
+  {
+    bool operator()(IdbPin* first, IdbPin* second) const
+    {
+      return first->get_instance() == second->get_instance() && first->get_pin_name() == second->get_pin_name();
+    }
+  };
+
+  std::unordered_set<IdbPin*, PinHash, PinEqual> pin_index;
+  pin_index.reserve(_pin_list.size() + pins.size());
+  for (auto* pin : _pin_list) {
+    if (pin != nullptr) {
+      pin_index.insert(pin);
+    }
+  }
+  _pin_list.reserve(_pin_list.size() + pins.size());
+  for (auto* pin : pins) {
+    if (pin != nullptr && pin_index.insert(pin).second) {
+      _pin_list.emplace_back(pin);
+      update_pin_ref_index(pin);
+    }
+  }
 }
 
 void IdbPins::update_pin_ref_index(IdbPin* pin)

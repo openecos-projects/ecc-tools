@@ -749,6 +749,9 @@ bool GraphBuilder::disableLoopArc(Arc& arc)
     return false;
   }
   arc.set_is_loop_disable(true);
+  STALOG.warn(Loc::current(), "Static timing-loop cut: ", arc.get_source_pin(), " -> ", arc.get_sink_pin(),
+              ", type=", GetArcTypeName()(arc.get_type()), ", owner=", arc.get_owner_name(),
+              ". Timing propagation skips this arc; paths through it are not analyzed.");
   return true;
 }
 
@@ -786,7 +789,39 @@ void GraphBuilder::traverseFloatingDataPath(std::string& pin_name, std::map<std:
   if (isBlack(color_map, pin_name)) {
     return;
   }
-  (void) traverseDataPath(pin_name, true, color_map, disabled_loop_num);
+  // Topological ordering includes every enabled arc, including arcs crossing
+  // data start/end points. The final cleanup must cover that same graph.
+  // Use explicit frames so a deep floating component cannot exhaust the stack.
+  struct Frame
+  {
+    std::string pin;
+    std::size_t next_arc = 0;
+  };
+  Database& database = STADM.getDatabase();
+  std::vector<Frame> stack{{pin_name}};
+  color_map[pin_name] = GBColorType::kGray;
+  while (!stack.empty()) {
+    Frame& frame = stack.back();
+    const auto& outgoing = database.get_outgoing_arc_list_map()[frame.pin];
+    if (frame.next_arc == outgoing.size()) {
+      color_map[frame.pin] = GBColorType::kBlack;
+      stack.pop_back();
+      continue;
+    }
+    Arc& arc = database.get_arc_list()[outgoing[frame.next_arc++]];
+    if (isDisableArc(arc)) {
+      continue;
+    }
+    std::string& next_pin = arc.get_sink_pin();
+    if (isGray(color_map, next_pin)) {
+      if (disableLoopArc(arc)) {
+        ++disabled_loop_num;
+      }
+    } else if (!isBlack(color_map, next_pin)) {
+      color_map[next_pin] = GBColorType::kGray;
+      stack.push_back({next_pin});
+    }
+  }
 }
 
 void GraphBuilder::buildTimingOrder()
@@ -862,9 +897,11 @@ void GraphBuilder::updateSinkIndegree(Arc& arc, std::map<std::string, std::size_
 void GraphBuilder::printLoopInfo()
 {
   Database& database = STADM.getDatabase();
-  std::size_t loop_pin_num = database.get_timing_point_map().size() - database.get_timing_order_list().size();
-  if (loop_pin_num > 0) {
-    STALOG.warn(Loc::current(), "Detected ", loop_pin_num, " vertex(es) in combinational loop or unresolved dependency.");
+  const std::size_t point_num = database.get_timing_point_map().size();
+  const std::size_t order_num = database.get_timing_order_list().size();
+  if (point_num != order_num) {
+    STALOG.error(Loc::current(), "Invalid timing order after loop cleanup: ordered=", order_num, ", total=", point_num,
+                 ". Timing propagation requires every timing point; inspect graph dependencies and loop-cut diagnostics.");
   }
 }
 

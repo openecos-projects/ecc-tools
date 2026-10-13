@@ -48,6 +48,7 @@ class CutLayer;
 class DRCShape;
 class Database;
 enum class Direction;
+enum class ViolationType;
 }  // namespace idrc
 
 #endif
@@ -75,7 +76,6 @@ class DRCInterface
   bool saveDRC(std::string path);
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list);
-  void cmpViolation(std::map<std::string, std::any> config_map);
 #endif
 
 #endif
@@ -123,6 +123,11 @@ class DRCInterface
   std::vector<ids::Shape> buildResultShapeList();
   std::vector<ids::Shape> buildResultShapeListFromEnTT();
   std::string getNetName(int32_t net_idx);
+  // IDB-only shape conversion path. EccDB keeps the ids::Shape builders above
+  // as its public adapter contract; these helpers avoid a return-type-only
+  // overload collision with that contract.
+  std::vector<DRCShape> buildEnvDrcShapeList();
+  std::vector<DRCShape> buildResultDrcShapeList();
   void printSummary(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputViolationJson(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputViolationFile(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
@@ -160,6 +165,8 @@ class DRCInterface
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list,
                                                const std::set<size_t>& obs_shape_idx_set);
+  std::vector<ids::Violation> getViolationList(std::vector<DRCShape> drc_env_shape_list, std::vector<DRCShape> drc_result_shape_list,
+                                               std::set<ViolationType> drc_check_type_set, std::vector<DRCShape> drc_check_region_list);
 };
 
 }  // namespace idrc

@@ -1,0 +1,96 @@
+// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// WHETHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+#pragma once
+
+#include "Database.hpp"
+#include "PPModel.hpp"
+
+namespace ipw {
+
+#define PWPP (ipw::PowerPropagator::getInst())
+
+class PowerPropagator
+{
+ public:
+  static void initInst();
+  static PowerPropagator& getInst();
+  static void destroyInst();
+  // function
+  void propagate();
+
+ private:
+ // self
+  static PowerPropagator* _pp_instance;
+
+  PowerPropagator() = default;
+  PowerPropagator(const PowerPropagator& other) = delete;
+  PowerPropagator(PowerPropagator&& other) = delete;
+  ~PowerPropagator() = default;
+  PowerPropagator& operator=(const PowerPropagator& other) = delete;
+  PowerPropagator& operator=(PowerPropagator&& other) = delete;
+  // function
+  PPModel initPPModel();
+  void buildMinimumClockPeriod(PPModel& pp_model);
+  void buildSeedPinList(PPModel& pp_model);
+  void buildSequentialInstanceNameList(PPModel& pp_model);
+  bool isSequentialForPower(Instance& instance);
+  void propagateActivity(PPModel& pp_model);
+  void clearPowerActivity();
+  void seedVcdActivity();
+  bool setPinActivity(std::string& pin_name, PowerActivity& activity);
+  void limitTransitionDensity(std::string& pin_name, PowerActivity& activity);
+  double getMinimumSlew(std::string& pin_name);
+  double getMinimumSlew(std::map<AnalysisType, std::map<TransType, double>>& slew_map);
+  int32_t getActivityPriority(PowerActivityOrigin origin);
+  bool isActivityChanged(PowerActivity& left_activity, PowerActivity& right_activity);
+  double getRelativeChange(double value, double previous_value);
+  void seedCaseAnalysisActivity();
+  void seedActivity(PPModel& pp_model);
+  PowerActivity getSeedActivity(std::string& pin_name, PPModel& pp_model);
+  PowerActivity getClockActivity(std::string& pin_name);
+  PowerActivity getClockActivity(TimingClock& timing_clock);
+  PowerActivity getInputActivity(PPModel& pp_model);
+  PowerActivity getDefaultInputActivity(double minimum_clock_period);
+  double getDefaultTransitionDensity(double minimum_clock_period);
+  void seedSequentialStateActivity(PPModel& pp_model);
+  PowerActivity getInitialSequentialOutputActivity();
+  void propagateCombinationalActivity(PPModel& pp_model);
+  PowerActivity getPropagatedActivity(PowerActivity source_activity);
+  void propagateOutputActivity(std::string& pin_name, PPModel& pp_model);
+  PowerActivity getOutputActivity(std::string& pin_name, PPModel& pp_model);
+  void limitDataActivity(Database& database, std::string& pin_name, PowerActivity& activity, double minimum_clock_period);
+  bool shouldLimitDataActivity(Database& database, std::string& pin_name, PowerActivity& activity);
+  double getProbabilityLimitedTransitionDensity(PowerActivity& activity, double minimum_clock_period);
+  void scaleTransitionDensity(PowerActivity& activity, double maximum_transition_density);
+  PowerActivity getClockGateOutputActivity(std::string& pin_name, Instance& instance);
+  PowerActivity getClockGateOutputActivity(PowerActivity& clock_activity, PowerActivity& enable_activity);
+  PowerActivity getClockGateEnableActivity(Instance& instance, std::string& clock_pin_name, std::string& output_pin_name);
+  bool isClockGateOutputPin(std::string& pin_name, Instance& instance);
+  bool isClockGateClockPin(std::string& pin_name, TimingCellPort& timing_cell_port);
+  PowerActivity normalizeConstantActivity(PowerActivity activity);
+  std::map<std::string, PowerActivity> getInputActivityMap(Instance& instance);
+  PowerActivity getFallbackInputActivity(std::string& pin_name);
+  void propagateNetActivity(Arc& arc);
+  void propagateSequentialActivity(PPModel& pp_model);
+  PowerActivity getSequentialOutputActivity(Instance& instance);
+  void limitSequentialOutputActivity(PowerActivity& output_activity, PowerActivity& data_activity, PowerActivity& clock_activity);
+  PowerActivity getPinActivity(std::string& pin_name);
+  bool isOutputPin(std::string& pin_name);
+  bool isClockSource(std::string& pin_name);
+  bool simulateVectorlessActivity(double reference_period);
+};
+
+}  // namespace ipw

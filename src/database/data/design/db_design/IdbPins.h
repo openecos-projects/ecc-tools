@@ -157,6 +157,7 @@ class IdbPins
   IdbPin* add_pin_list(IdbPin* pin = nullptr);
   IdbPin* add_pin_list(string pin_name);
   IdbPin* add_pin_ref_unique(IdbPin* pin);
+  void add_pin_refs_unique(const std::vector<IdbPin*>& pins);
   void reset();
   void init(int32_t size) { _pin_list.reserve(size); }
 

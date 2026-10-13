@@ -23,8 +23,6 @@ target_include_directories(lef_builder
 )
 
 target_link_libraries(lef_builder PRIVATE lef geometry_db ecc_logger)
-target_link_libraries(lef_builder PUBLIC absl::strings)
-
 option(TEST_LEFPARSER "If ON, test db." OFF)
 if(TEST_LEFPARSER)
     find_package(GTest REQUIRED)

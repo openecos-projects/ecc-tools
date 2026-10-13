@@ -26,6 +26,7 @@ int registerCmdFP()
 {
   // fp
   registerTclCmd(TclInitFP, "init_fp");
+  registerTclCmd(TclRunSimpleFP, "run_simple_fp");
   registerTclCmd(TclRunFP, "run_fp");
   registerTclCmd(TclDestroyFP, "destroy_fp");
   registerTclCmd(TclDebugInputMacro, "debug_input_macro");

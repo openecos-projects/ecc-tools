@@ -29,6 +29,7 @@
 
 #include "utility/logger/Logger.hpp"
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 
 #include "idm.h"
@@ -78,15 +79,24 @@ bool DataManager::saveLef(string lef_path)
 }
 bool DataManager::saveMacroTCL(string tcl_path)
 {
-  std::ofstream out;
-  out.open(tcl_path);
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
     return false;
   }
+  if (_design == nullptr || _layout->get_units() == nullptr || tcl_path.empty()) {
+    return false;
+  }
+  std::ofstream out(tcl_path);
+  if (!out.is_open()) {
+    return false;
+  }
+  out << std::fixed << std::setprecision(6);
   std::string status = "fixed";
   auto dbu = _layout->get_units()->get_micron_dbu();
   for (auto& idb_inst : _design->get_instance_list()->get_instance_list()) {
     if (idb_inst->get_cell_master()->is_block()) {
+      if (!idb_inst->is_placed() && !idb_inst->is_fixed()) {
+        continue;
+      }
       out << "placeInstance " << idb_inst->get_name() << " " << 1.* idb_inst->get_coordinate()->get_x() / dbu << " "
           << 1.* idb_inst->get_coordinate()->get_y() / dbu << " " << IdbEnum::GetInstance()->get_orient_type_str(idb_inst->get_orient())
           << std::endl;
@@ -106,12 +116,12 @@ void DataManager::saveVerilog(string verilog_path, std::set<std::string>&& exclu
   return _idb_builder->saveVerilog(verilog_path, exclude_cell_names, is_add_space_for_escape_name);
 }
 
-bool DataManager::saveGDSII(string path, bool is_hardened /* = false */)
+bool DataManager::saveGDSII(string path, string layer_map_path /* = "" */)
 {
   if (_idb_builder == nullptr || _idb_lef_service == nullptr || _layout == nullptr) {
     return false;
   }
-  return _idb_builder->saveGDSII(path, is_hardened);
+  return _idb_builder->saveGDSII(path, layer_map_path);
 }
 bool DataManager::saveJSON(string path, string options)
 {
@@ -119,22 +129,6 @@ bool DataManager::saveJSON(string path, string options)
     return false;
   }
   return _idb_builder->saveJSON(path, options);
-}
-
-bool DataManager::saveViewJson(string output_dir, ViewJsonWriteOptions options)
-{
-  if (_idb_builder == nullptr || _idb_def_service == nullptr || _layout == nullptr) {
-    return false;
-  }
-  return _idb_builder->saveViewJson(output_dir, options);
-}
-
-bool DataManager::applyViewJsonEdits(string edits_path, bool compressed_hint)
-{
-  if (_idb_builder == nullptr || _idb_def_service == nullptr || _layout == nullptr) {
-    return false;
-  }
-  return _idb_builder->applyViewJsonEdits(edits_path, compressed_hint);
 }
 
 bool DataManager::saveData(string data_path)

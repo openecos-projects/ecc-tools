@@ -50,6 +50,17 @@ void DieBuilder::destroyInst()
 
 // function
 
+namespace {
+
+bool isDBURepresentable(double micron, int32_t micron_dbu)
+{
+  const double dbu = std::round(micron * static_cast<double>(micron_dbu));
+  return std::isfinite(dbu) && dbu >= static_cast<double>(std::numeric_limits<int32_t>::min())
+         && dbu <= static_cast<double>(std::numeric_limits<int32_t>::max());
+}
+
+}  // namespace
+
 void DieBuilder::build()
 {
   Monitor monitor;
@@ -115,6 +126,49 @@ void DieBuilder::buildFloorplan()
               (margin_bottom + core_height) / static_cast<double>(micron_dbu), config.die_site_name);
     return;
   } else if (config.die_mode == DieMode::kDieSize) {
+    Database& database = FPDM.getDatabase();
+    const double left = config.die_margin_left_micron;
+    const double right = config.die_margin_right_micron;
+    const double bottom = config.die_margin_bottom_micron;
+    const double top = config.die_margin_top_micron;
+    if (database.get_micron_dbu() <= 0 || !std::isfinite(config.die_width_micron) || !std::isfinite(config.die_height_micron)
+        || config.die_width_micron <= 0.0 || config.die_height_micron <= 0.0 || !std::isfinite(left) || !std::isfinite(right)
+        || !std::isfinite(bottom) || !std::isfinite(top) || left < 0.0 || right < 0.0 || bottom < 0.0 || top < 0.0) {
+      FPLOG.error(Loc::current(), "Die size, margins, and micron DBU must be valid!");
+      return;
+    }
+    if (config.die_width_micron <= left + right || config.die_height_micron <= bottom + top) {
+      FPLOG.error(Loc::current(), "Die size must exceed its margins!");
+      return;
+    }
+
+    auto site_iter = database.get_site_map().find(config.die_site_name);
+    if (site_iter == database.get_site_map().end() || site_iter->second.get_width() <= 0 || site_iter->second.get_height() <= 0) {
+      FPLOG.error(Loc::current(), "The site '", config.die_site_name, "' does not exist or has invalid dimensions!");
+      return;
+    }
+
+    const int32_t micron_dbu = database.get_micron_dbu();
+    if (!isDBURepresentable(config.die_width_micron, micron_dbu) || !isDBURepresentable(config.die_height_micron, micron_dbu)
+        || !isDBURepresentable(left, micron_dbu) || !isDBURepresentable(right, micron_dbu)
+        || !isDBURepresentable(bottom, micron_dbu) || !isDBURepresentable(top, micron_dbu)
+        || !isDBURepresentable(config.die_width_micron - right, micron_dbu)
+        || !isDBURepresentable(config.die_height_micron - top, micron_dbu)) {
+      FPLOG.error(Loc::current(), "Die size is outside the supported DBU range!");
+      return;
+    }
+
+    const Site& site = site_iter->second;
+    const int32_t requested_lx = FPUTIL.transMicronToDBU(left, micron_dbu);
+    const int32_t requested_ly = FPUTIL.transMicronToDBU(bottom, micron_dbu);
+    const int32_t requested_ux = FPUTIL.transMicronToDBU(config.die_width_micron - right, micron_dbu);
+    const int32_t requested_uy = FPUTIL.transMicronToDBU(config.die_height_micron - top, micron_dbu);
+    if (FPUTIL.alignDown(requested_ux - requested_lx, site.get_width()) < site.get_width()
+        || FPUTIL.alignDown(requested_uy - requested_ly, site.get_height()) < site.get_height()) {
+      FPLOG.error(Loc::current(), "Die size leaves less than one site after alignment!");
+      return;
+    }
+
     die_width_micron = config.die_width_micron;
     die_height_micron = config.die_height_micron;
   } else {
@@ -138,7 +192,12 @@ void DieBuilder::buildDie(double die_lx, double die_ly, double die_ux, double di
 void DieBuilder::buildCore(double core_lx, double core_ly, double core_ux, double core_uy, std::string site_name)
 {
   Database& database = FPDM.getDatabase();
-  Site& core_site = database.get_site_map()[site_name];
+  auto site_iter = database.get_site_map().find(site_name);
+  if (site_iter == database.get_site_map().end()) {
+    FPLOG.error(Loc::current(), "The site '", site_name, "' does not exist!");
+    return;
+  }
+  Site& core_site = site_iter->second;
 
   int32_t site_width = core_site.get_width();
   int32_t site_height = core_site.get_height();

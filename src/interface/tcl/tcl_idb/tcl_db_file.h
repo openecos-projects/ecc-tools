@@ -192,6 +192,15 @@ class CmdSaveDef : public TclCmd
   // private data
 };
 
+class CmdSaveMacroTCL : public TclCmd
+{
+ public:
+  explicit CmdSaveMacroTCL(const char* cmd_name);
+  ~CmdSaveMacroTCL() override = default;
+  unsigned check() override;
+  unsigned exec() override;
+};
+
 class CmdSaveLef : public TclCmd
 {
  public:
@@ -262,34 +271,6 @@ class CmdSaveJSON : public TclCmd
   // private data
 };
 
-class CmdSaveViewJson : public TclCmd
-{
- public:
-  explicit CmdSaveViewJson(const char* cmd_name);
-  ~CmdSaveViewJson() override = default;
-
-  unsigned check() override;
-  unsigned exec() override;
-
- private:
-  // private function
-  // private data
-};
-
-class CmdApplyViewJsonEdits : public TclCmd
-{
- public:
-  explicit CmdApplyViewJsonEdits(const char* cmd_name);
-  ~CmdApplyViewJsonEdits() override = default;
-
-  unsigned check() override;
-  unsigned exec() override;
-
- private:
-  // private function
-  // private data
-};
-
 class CmdSaveData : public TclCmd
 {
  public:
@@ -337,20 +318,6 @@ class CmdValidateIdb : public TclCmd
  public:
   explicit CmdValidateIdb(const char* cmd_name);
   ~CmdValidateIdb() override = default;
-
-  unsigned check() override;
-  unsigned exec() override;
-
- private:
-  // private function
-  // private data
-};
-
-class CmdWriteSocJson : public TclCmd
-{
- public:
-  explicit CmdWriteSocJson(const char* cmd_name);
-  ~CmdWriteSocJson() override = default;
 
   unsigned check() override;
   unsigned exec() override;

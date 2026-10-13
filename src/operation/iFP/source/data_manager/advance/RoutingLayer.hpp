@@ -33,6 +33,7 @@ class RoutingLayer
   int32_t get_pitch_x() const { return _pitch_x; }
   int32_t get_pitch_y() const { return _pitch_y; }
   int32_t get_min_width() const { return _min_width; }
+  int32_t get_min_area() const { return _min_area; }
   int32_t get_prefer_track_pitch() const { return _prefer_track_pitch; }
   int32_t get_nonprefer_track_pitch() const { return _nonprefer_track_pitch; }
   int32_t get_prefer_track_offset() const { return _prefer_track_offset; }
@@ -49,6 +50,7 @@ class RoutingLayer
   void set_pitch_x(int32_t pitch_x) { _pitch_x = pitch_x; }
   void set_pitch_y(int32_t pitch_y) { _pitch_y = pitch_y; }
   void set_min_width(int32_t min_width) { _min_width = min_width; }
+  void set_min_area(int32_t min_area) { _min_area = min_area; }
   void set_prefer_track_pitch(int32_t prefer_track_pitch) { _prefer_track_pitch = prefer_track_pitch; }
   void set_nonprefer_track_pitch(int32_t nonprefer_track_pitch) { _nonprefer_track_pitch = nonprefer_track_pitch; }
   void set_prefer_track_offset(int32_t prefer_track_offset) { _prefer_track_offset = prefer_track_offset; }
@@ -64,6 +66,7 @@ class RoutingLayer
   int32_t _pitch_x = -1;
   int32_t _pitch_y = -1;
   int32_t _min_width = -1;
+  int32_t _min_area = 0;
   int32_t _prefer_track_pitch = -1;
   int32_t _nonprefer_track_pitch = -1;
   int32_t _prefer_track_offset = -1;

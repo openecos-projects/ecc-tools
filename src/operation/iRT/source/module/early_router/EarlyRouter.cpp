@@ -2893,6 +2893,7 @@ void EarlyRouter::outputLayerSupplyCSV(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
   std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
@@ -2903,9 +2904,11 @@ void EarlyRouter::outputLayerSupplyCSV(ERModel& er_model)
     GridMap<EREdge>& edge_map = routing_layer.isPreferH() ? layer_h_edge_map[layer_idx] : layer_v_edge_map[layer_idx];
     std::ofstream* supply_csv_file
         = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "supply_map_", routing_layer.get_layer_name(), ".csv"));
-    for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
-        RTUTIL.pushStream(supply_csv_file, edge_map[x][y].get_supply(), ",");
+    // Keep every layer on the gcell grid so evaluation can combine H/V maps.
+    // Boundary gcells without an outgoing edge contribute zero.
+    for (int32_t y = gcell_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
+        RTUTIL.pushStream(supply_csv_file, edge_map.isInside(x, y) ? edge_map[x][y].get_supply() : 0, ",");
       }
       RTUTIL.pushStream(supply_csv_file, "\n");
     }
@@ -2996,6 +2999,7 @@ void EarlyRouter::outputLayerOverflowCSV(ERModel& er_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<GridMap<EREdge>>& layer_h_edge_map = er_model.get_layer_h_edge_map();
   std::vector<GridMap<EREdge>>& layer_v_edge_map = er_model.get_layer_v_edge_map();
@@ -3007,9 +3011,11 @@ void EarlyRouter::outputLayerOverflowCSV(ERModel& er_model)
     std::ofstream* overflow_csv_file
         = RTUTIL.getOutputFileStream(RTUTIL.getString(er_temp_directory_path, "overflow_map_", routing_layer.get_layer_name(), ".csv"));
 
-    for (int32_t y = edge_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
-        RTUTIL.pushStream(overflow_csv_file, getReportedOverflow(edge_map, x, y), ",");
+    // Keep every layer on the gcell grid so evaluation can combine H/V maps.
+    // Boundary gcells without an outgoing edge contribute zero.
+    for (int32_t y = gcell_map.get_y_size() - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < gcell_map.get_x_size(); x++) {
+        RTUTIL.pushStream(overflow_csv_file, edge_map.isInside(x, y) ? getReportedOverflow(edge_map, x, y) : 0, ",");
       }
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }

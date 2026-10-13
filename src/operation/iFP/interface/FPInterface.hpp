@@ -59,6 +59,7 @@ class FPInterface
 
 #if 1  // iFP
   void initFP(std::map<std::string, std::any> config_map);
+  void runSimpleFP();
   void runFP();
   void destroyFP();
   // Drops the private iFP work model after a failed stage.  Unlike destroyFP,
@@ -149,6 +150,7 @@ class FPInterface
   FPInterface& operator=(const FPInterface& other) = delete;
   FPInterface& operator=(FPInterface&& other) = delete;
   // function
+  void inputMacroPlacement(const std::string& macro_place_file_path);
 };
 
 }  // namespace ifp

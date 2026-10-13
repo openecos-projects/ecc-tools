@@ -17,10 +17,17 @@
 #pragma once
 
 #include "Config.hpp"
-#include "DRCInterface.hpp"
 #include "Database.hpp"
 
+namespace idb {
+class IdbLayerRouting;
+class IdbLayerCut;
+enum class IdbLayerDirection : uint8_t;
+}  // namespace idb
+
 namespace idrc {
+
+class DRCInterface;
 
 #define DRCDM (idrc::DataManager::getInst())
 
@@ -32,20 +39,25 @@ class DataManager
   static void destroyInst();
   // function
   void input(std::map<std::string, std::any>& config_map);
-  void output();
 
 #if 1  // 获得唯一的pitch
   int32_t getOnlyPitch();
 #endif
 
+  const std::vector<int32_t>& getAdjacentCutLayerIdxList(int32_t routing_layer_idx);
+  const std::vector<int32_t>& getAdjacentRoutingLayerIdxList(int32_t cut_layer_idx);
+
   Config& getConfig() { return _config; }
   Database& getDatabase() { return _database; }
 
  private:
+  friend class DRCInterface;
+
   static DataManager* _dm_instance;
   // config & database
   Config _config;
   Database _database;
+  int32_t _only_pitch = -1;
 
   DataManager() = default;
   DataManager(const DataManager& other) = delete;
@@ -54,11 +66,24 @@ class DataManager
   DataManager& operator=(const DataManager& other) = delete;
   DataManager& operator=(DataManager&& other) = delete;
 
+  void wrapConfig(std::map<std::string, std::any>& config_map);
+  void wrapDatabase();
+  void wrapDBInfo();
+  void wrapMicronDBU();
+  void wrapManufactureGrid();
+  void wrapDie();
+  void wrapDesignRule();
+  void wrapLayerList();
+  void wrapTrackAxis(RoutingLayer& routing_layer, idb::IdbLayerRouting* idb_layer);
+  void wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLayerRouting* idb_layer);
+  void wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_layer);
+  void wrapLayerInfo();
+  Direction getDRCDirectionByDB(idb::IdbLayerDirection idb_direction);
+
 #if 1  // build
   void buildConfig();
   void buildDatabase();
   void buildDie();
-  void makeDie();
   void checkDie();
   void buildDesignRule();
   void buildLayerList();

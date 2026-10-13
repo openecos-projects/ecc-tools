@@ -21,6 +21,7 @@
 #include "EMIRReporter.hpp"
 #include "GraphBuilder.hpp"
 #include "IRAnalyzer.hpp"
+#include "IRLinearSolver.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PowerNet.hpp"
@@ -65,6 +66,49 @@ void EMIRInterface::destroyInst()
 void EMIRInterface::initEMIR(std::map<std::string, std::any> config_map)
 {
   Logger::initInst();
+  const auto pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
+  const auto ploc_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
+  const auto def_sources = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0);
+  if (def_sources != 0 && def_sources != 1)
+    throw std::invalid_argument("add_ploc_from_top_def must be 0 or 1");
+  if (!pad_files.empty() && !ploc_path.empty())
+    throw std::invalid_argument("pad_files and ploc_file_path are mutually exclusive");
+  if (config_map.count("-pad_files") && pad_files.empty())
+    throw std::invalid_argument("pad_files must contain at least one supply input file");
+  if (def_sources == 1 && (!pad_files.empty() || !ploc_path.empty()))
+    throw std::invalid_argument("add_ploc_from_top_def and supply files (pad_files or ploc_file_path) are mutually exclusive");
+  if (def_sources == 0 && pad_files.empty() && ploc_path.empty())
+    throw std::invalid_argument("No supply inputs: provide -pad_files or -ploc_file_path, or explicitly enable -add_ploc_from_top_def 1");
+  // Initialization clears its output directory. Reject inputs inside it before
+  // mutating either the analysis database or the filesystem, including aliases.
+  namespace fs = std::filesystem;
+  auto output = fs::weakly_canonical(fs::absolute(
+      EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory"))).lexically_normal();
+  if (output.filename().empty()) output = output.parent_path();
+  std::vector<std::string> inputs = pad_files;
+  for (const char* key : {"-ploc_file_path", "-instance_power_file_path", "-technology_file_path", "-em_limit_file_path"}) {
+    auto path = EMIRUTIL.getConfigValue<std::string>(config_map, key, "");
+    if (!path.empty()) inputs.push_back(path);
+  }
+  for (const auto& path : inputs) {
+    if (path.empty()) throw std::invalid_argument("empty supply input path");
+    auto input = fs::weakly_canonical(fs::absolute(path));
+    // A symlink can point outside the output tree while its directory entry
+    // (or a symlinked parent directory) is still removed by cleanup. Check each
+    // path component as well as the final target before accepting the input.
+    for (auto entry = fs::absolute(path); !entry.empty();) {
+      auto resolved = fs::weakly_canonical(entry);
+      auto mismatch = std::mismatch(output.begin(), output.end(), resolved.begin(), resolved.end());
+      if (mismatch.first == output.end())
+        throw std::invalid_argument("input is inside the analysis output directory: " + path);
+      auto parent = entry.parent_path();
+      if (parent == entry) break;
+      entry = parent;
+    }
+    if (!fs::is_regular_file(input)) throw std::invalid_argument("cannot read input file: " + path);
+  }
+  if (!dmInst->get_idb_design() || !dmInst->get_idb_layout())
+    throw std::invalid_argument("load DEF/LEF before initializing EMIR");
   // clang-format off
   EMIRLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   EMIRLOG.info(Loc::current(), "____________________  _________________     _____________________________________  ");
@@ -81,6 +125,7 @@ void EMIRInterface::initEMIR(std::map<std::string, std::any> config_map)
   Monitor monitor;
   EMIRLOG.info(Loc::current(), "Starting...");
 
+  IRAnalyzer::destroyInst();
   DataManager::initInst();
   EMIRDM.input(config_map);
 
@@ -98,7 +143,6 @@ void EMIRInterface::runEMIR()
 
   IRAnalyzer::initInst();
   EMIRIA.analyze();
-  IRAnalyzer::destroyInst();
 
   EMAnalyzer::initInst();
   EMIREA.analyze();
@@ -117,6 +161,7 @@ void EMIRInterface::destroyEMIR()
   EMIRLOG.info(Loc::current(), "Starting...");
 
   EMIRDM.output();
+  IRAnalyzer::destroyInst();
   DataManager::destroyInst();
 
   EMIRLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -168,7 +213,30 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   /////////////////////////////////////////////
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
   EMIRDM.getConfig().instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-instance_power_file_path", "");
+  EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
+  EMIRDM.getConfig().pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
+  EMIRDM.getConfig().add_ploc_from_top_def = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0) == 1;
+  EMIRDM.getConfig().technology_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-technology_file_path", "");
+  EMIRDM.getConfig().em_limit_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-em_limit_file_path", "");
+  EMIRDM.getConfig().temperature_c = EMIRUTIL.getConfigValue<double>(config_map, "-temperature_c", 25.0);
+  EMIRDM.getConfig().em_violation_threshold_percent = EMIRUTIL.getConfigValue<double>(config_map, "-em_violation_threshold_percent", 100.0);
   EMIRDM.getConfig().thread_number = EMIRUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
+  auto& config = EMIRDM.getConfig();
+  config.ir_solver = EMIRUTIL.getConfigValue<std::string>(config_map, "-ir_solver", "auto");
+  config.ir_solver_tolerance = EMIRUTIL.getConfigValue<double>(config_map, "-ir_solver_tolerance", 1.e-10);
+  config.ir_solver_max_iterations = EMIRUTIL.getConfigValue<int32_t>(config_map, "-ir_solver_max_iterations", 2000);
+  IRSolverOptions options;
+  options.method = config.ir_solver;
+  options.relative_tolerance = config.ir_solver_tolerance;
+  options.max_iterations = config.ir_solver_max_iterations;
+  try {
+    IRLinearSolver::validateOptions(options);
+    if (options.relative_tolerance > 1.e-8) {
+      throw std::invalid_argument("ir_solver_tolerance must be <= 1e-8 to preserve IR residual/current-balance checks");
+    }
+  } catch (const std::exception& error) {
+    EMIRLOG.error(Loc::current(), "Invalid IR solver configuration: ", error.what());
+  }
   omp_set_num_threads(std::max(EMIRDM.getConfig().thread_number, 1));
   /////////////////////////////////////////////
 }
@@ -194,10 +262,13 @@ void EMIRInterface::wrapDBInfo()
 void EMIRInterface::wrapInstanceIdSet()
 {
   std::set<uint64_t>& instance_id_set = EMIRDM.getDatabase().get_instance_id_set();
+  std::map<std::string, uint64_t>& instance_name_to_id_map = EMIRDM.getDatabase().get_instance_name_to_id_map();
   instance_id_set.clear();
+  instance_name_to_id_map.clear();
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
   for (idb::IdbInstance* idb_instance : idb_design->get_instance_list()->get_instance_list()) {
     instance_id_set.insert(idb_instance->get_id());
+    instance_name_to_id_map[idb_instance->get_name()] = idb_instance->get_id();
   }
 }
 
@@ -284,6 +355,14 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
   idb::IdbCoordinate<int32_t>* coordinate = idb_via->get_coordinate();
   idb::IdbViaMaster* idb_via_master = idb_via->get_instance();
   PowerVia power_via;
+  std::string via_name = idb_via->get_name();
+  if (via_name.empty() && idb_via_master != nullptr) {
+    via_name = idb_via_master->get_name();
+  }
+  power_via.set_via_name(via_name);
+  power_via.set_bottom_layer_name(bottom_layer_shape.get_layer()->get_name());
+  power_via.set_top_layer_name(top_layer_shape.get_layer()->get_name());
+  power_via.set_cut_layer_name(cut_layer_shape.get_layer()->get_name());
   power_via.set_bottom_layer_idx(bottom_layer_shape.get_layer()->get_id());
   power_via.set_top_layer_idx(top_layer_shape.get_layer()->get_id());
   power_via.set_x(coordinate->get_x());
@@ -297,6 +376,21 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
     power_via.add_top_rect(
         {.ll_x = rectangle->get_low_x(), .ll_y = rectangle->get_low_y(), .ur_x = rectangle->get_high_x(), .ur_y = rectangle->get_high_y()});
   }
+  int32_t micron_dbu = EMIRDM.getDatabase().get_micron_dbu();
+  double cut_area_um2 = 0.0;
+  for (idb::IdbRect* cut_rect : cut_layer_shape.get_rect_list()) {
+    if (cut_rect == nullptr || micron_dbu <= 0) {
+      continue;
+    }
+    cut_area_um2 += static_cast<double>(cut_rect->get_width()) * static_cast<double>(cut_rect->get_height()) / static_cast<double>(micron_dbu)
+                    / static_cast<double>(micron_dbu);
+  }
+  power_via.set_cut_area_um2(cut_area_um2);
+  idb::IdbRect cut_bounding_box = idb_via->get_cut_bounding_box();
+  power_via.set_cut_low_x(cut_bounding_box.get_low_x() - coordinate->get_x());
+  power_via.set_cut_low_y(cut_bounding_box.get_low_y() - coordinate->get_y());
+  power_via.set_cut_high_x(cut_bounding_box.get_high_x() - coordinate->get_x());
+  power_via.set_cut_high_y(cut_bounding_box.get_high_y() - coordinate->get_y());
   if (idb_via_master->get_resistance() > 0.0) {
     power_via.set_resistance(idb_via_master->get_resistance());
   } else if (idb_via_master->get_master_generate() != nullptr
@@ -347,11 +441,31 @@ double EMIRInterface::getGeneratedViaResistance(idb::IdbViaMaster* idb_via_maste
 
 void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* idb_power_net)
 {
+  std::unordered_set<idb::IdbPin*> wrapped_pins;
   for (idb::IdbPin* idb_pin : idb_power_net->get_instance_pin_list()->get_pin_list()) {
-    wrapPowerPin(power_net, idb_pin, false);
+    if (idb_pin != nullptr && wrapped_pins.insert(idb_pin).second) {
+      wrapPowerPin(power_net, idb_pin, false);
+    }
   }
-  for (idb::IdbPin* idb_pin : idb_power_net->get_io_pin_list()->get_pin_list()) {
-    wrapPowerPin(power_net, idb_pin, true);
+  idb::IdbDesign* idb_design = dmInst->get_idb_design();
+  if (idb_power_net->has_wildcard_instance_pins()) {
+    for (idb::IdbInstance* idb_instance : idb_design->get_instance_list()->get_instance_list()) {
+      if (idb_instance == nullptr || idb_instance->get_pin_list() == nullptr) {
+        continue;
+      }
+      for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
+        if (idb_pin != nullptr && idb_design->findSpecialNetForInstancePin(idb_pin) == idb_power_net && wrapped_pins.insert(idb_pin).second) {
+          wrapPowerPin(power_net, idb_pin, false);
+        }
+      }
+    }
+  }
+  if (EMIRDM.getConfig().add_ploc_from_top_def) {
+    for (idb::IdbPin* idb_pin : idb_power_net->get_io_pin_list()->get_pin_list()) {
+      if (idb_pin != nullptr && wrapped_pins.insert(idb_pin).second) {
+        wrapPowerPin(power_net, idb_pin, true);
+      }
+    }
   }
 }
 

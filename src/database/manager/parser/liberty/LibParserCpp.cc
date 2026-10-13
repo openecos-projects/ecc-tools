@@ -22,7 +22,6 @@
  * @date 2023-10-13
  *
  */
-#include "absl/container/btree_set.h"
 #include "CppLibertyDriver.hh"
 #include "Lib.hh"
 #include "LibParserCpp.hh"
@@ -34,6 +33,7 @@
 #include <cstdlib>
 #include <memory>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -41,6 +41,57 @@
 #include <vector>
 
 namespace idb {
+
+LibertyReader::LibertyReader(const char* file_name) : _file_name(file_name == nullptr ? "" : file_name)
+{
+}
+
+LibertyReader::~LibertyReader()
+{
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+    _lib_file = nullptr;
+  }
+}
+
+LibertyReader::LibertyReader(LibertyReader&& other) noexcept
+    : _lib_file(std::exchange(other._lib_file, nullptr)),
+      _build_cells(std::move(other._build_cells)),
+      _file_name(std::move(other._file_name)),
+      _library_builder(std::move(other._library_builder))
+{
+}
+
+LibertyReader& LibertyReader::operator=(LibertyReader&& rhs) noexcept
+{
+  if (this == &rhs) {
+    return *this;
+  }
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+  }
+  _lib_file = std::exchange(rhs._lib_file, nullptr);
+  _build_cells = std::move(rhs._build_cells);
+  _file_name = std::move(rhs._file_name);
+  _library_builder = std::move(rhs._library_builder);
+  return *this;
+}
+
+void LibertyReader::set_library_builder(LibBuilder* library_builder)
+{
+  _library_builder.reset(library_builder);
+}
+
+std::unique_ptr<LibLibrary> LibertyReader::takeLib()
+{
+  if (_library_builder == nullptr) {
+    return nullptr;
+  }
+  auto library = _library_builder->takeLib();
+  _library_builder.reset();
+  return library;
+}
+
 namespace {
 
 double getRawFloatValue(const liberty_ast::LibValue* value) {
@@ -291,6 +342,8 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
       current_lib->set_time_unit(TimeUnit::kFS);
     } else if (isEqual(time_unit, "1ps")) {
       current_lib->set_time_unit(TimeUnit::kPS);
+    } else if (isEqual(time_unit, "1ns")) {
+      current_lib->set_time_unit(TimeUnit::kNS);
     }
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("current_unit")) {
@@ -365,6 +418,15 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     bool clock_gate_enable_pin1 = convert_string_to_bool(clock_gate_enable_pin);
     lib_port->set_clock_gate_enable_pin(clock_gate_enable_pin1);
     liberty_free_string_value(attri_value_handle);
+  } else if (is_attri("clock_gate_test_pin") || is_attri("clock_gate_out_pin")) {
+    auto* attri_value_handle = liberty_convert_string_value(attri_value);
+    const bool value = convert_string_to_bool(attri_value_handle->value);
+    if (is_attri("clock_gate_test_pin")) {
+      lib_port->set_clock_gate_test_pin(value);
+    } else {
+      lib_port->set_clock_gate_out_pin(value);
+    }
+    liberty_free_string_value(attri_value_handle);
   } else if (is_attri("default_fanout_load")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double default_fanout_load_val = attri_value_handle->value;
@@ -379,6 +441,10 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     const char* default_wire_load = attri_value_handle->value;
     current_lib->set_default_wire_load(default_wire_load);
     liberty_free_string_value(attri_value_handle);
+  } else if (is_attri("max_fanout")) {
+    auto* attri_value_handle = liberty_convert_float_value(attri_value);
+    lib_port->set_max_fanout(attri_value_handle->value);
+    liberty_free_float_value(attri_value_handle);
   } else if (is_attri("fanout_load")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double fanout_load_val = attri_value_handle->value;
@@ -713,9 +779,12 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((static_cast<int>(liberty_convert_float_value(attri_0)->value) == 1)
+    if ((liberty_convert_float_value(attri_0)->value == 1.0)
         && (isEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
+    } else if (liberty_convert_float_value(attri_0)->value == 1.0
+               && isEqual(liberty_convert_string_value(attri_1)->value, "ff")) {
+      the_lib->set_cap_unit(CapacitiveUnit::kFF);
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = liberty_convert_float_value(attri_0)->value;
@@ -920,9 +989,11 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((static_cast<int>(getRawFloatValue(attri_0)) == 1) &&
+    if ((getRawFloatValue(attri_0) == 1.0) &&
         (isEqual(getRawStringValue(attri_1), "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
+    } else if (getRawFloatValue(attri_0) == 1.0 && isEqual(getRawStringValue(attri_1), "ff")) {
+      the_lib->set_cap_unit(CapacitiveUnit::kFF);
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = getRawFloatValue(attri_0);
@@ -1157,6 +1228,50 @@ unsigned LibertyReader::visitCell(LibertyGroupStmt* group) {
 }
 
 /**
+ * @brief Preserve ff/latch state definitions without changing cell timing data.
+ *
+ * @param group
+ * @return unsigned
+ */
+unsigned LibertyReader::visitSequential(LibertyGroupStmt* group) {
+  LibBuilder* lib_builder = get_library_builder();
+  LibCell* lib_cell = lib_builder->get_cell();
+  LibSequential sequential;
+  sequential.is_latch = isEqual(group->group_name, "latch");
+  void* parameter;
+  FOREACH_LIBERTY_VEC_ELEM(&group->attri_values, void, parameter) {
+    // Ignore an unsupported definition as a whole; do not shift state names.
+    if (!liberty_is_string_value(parameter)) {
+      return 1;
+    }
+    auto* value = liberty_convert_string_value(parameter);
+    sequential.state_variables.emplace_back(value->value);
+    liberty_free_string_value(value);
+    if (sequential.state_variables.back().empty()) {
+      return 1;
+    }
+  }
+  if (sequential.state_variables.empty()) {
+    return 1;
+  }
+  void* statement;
+  FOREACH_LIBERTY_VEC_ELEM(&group->stmts, void, statement) {
+    if (liberty_is_simple_attri_stmt(statement)) {
+      auto* attr = liberty_convert_simple_attribute_stmt(statement);
+      void* attri_value = const_cast<void*>(attr->attri_value);
+      if (liberty_is_string_value(attri_value)) {
+        auto* value = liberty_convert_string_value(attri_value);
+        sequential.attributes[attr->attri_name] = value->value;
+        liberty_free_string_value(value);
+      }
+      liberty_free_simple_attribute_stmt(attr);
+    }
+  }
+  lib_cell->addSequential(std::move(sequential));
+  return 1;
+}
+
+/**
  * @brief Visit leakage power.
  *
  * @param group
@@ -1190,6 +1305,8 @@ unsigned LibertyReader::visitLeakagePower(LibertyGroupStmt* group) {
 unsigned LibertyReader::visitBus(LibertyGroupStmt* group) {
   LibBuilder* lib_builder = get_library_builder();
   LibCell* cell = lib_builder->get_cell();
+  LibPort* previous_port = lib_builder->get_port();
+  LibPortBus* previous_bus = lib_builder->get_port_bus();
 
   const char* bus_port_name = getGroupAttriName(group);
   auto lib_port_bus = std::make_unique<LibPortBus>(bus_port_name);
@@ -1201,7 +1318,8 @@ unsigned LibertyReader::visitBus(LibertyGroupStmt* group) {
   unsigned is_ok = visitStmtInGroup(group);
 
   // reset the port bus pointer.
-  lib_builder->set_port_bus(nullptr);
+  lib_builder->set_port(previous_port);
+  lib_builder->set_port_bus(previous_bus);
 
   return is_ok;
 }
@@ -1213,60 +1331,55 @@ unsigned LibertyReader::visitBus(LibertyGroupStmt* group) {
  * @return unsigned return 1 if success, else 0
  */
 unsigned LibertyReader::visitPin(LibertyGroupStmt* group) {
+  return visitPinGroup(group);
+}
+
+template <typename Group>
+unsigned LibertyReader::visitPinGroup(Group* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* cell = lib_builder->get_cell();
-
+  LibPortBus* port_bus = lib_builder->get_port_bus();
+  LibPort* previous_port = lib_builder->get_port();
   const char* port_name = getGroupAttriName(group);
+  unsigned is_ok = 1;
 
-  auto create_port = [lib_builder, cell](const char* port_name) {
-    auto lib_port = std::make_unique<LibPort>(port_name);
+  auto create_port = [&](const char* name) {
+    std::unique_ptr<LibPort> lib_port = std::make_unique<LibPort>(name);
     lib_port->set_ower_cell(cell);
-
-    if (auto* port_bus = lib_builder->get_port_bus(); !port_bus) {
-      lib_builder->set_port(lib_port.get());
-      cell->addLibertyPort(std::move(lib_port));
-    } else {
-      // Each pin nested in a bus has its own Liberty attributes.  Keep the
-      // concrete pin as the current port while visiting those attributes;
-      // otherwise the first nested pin clears the builder's port and the
-      // second pin can dereference nullptr on rise/fall_capacitance_range.
-      lib_builder->set_port(lib_port.get());
-      lib_port->set_port_type(port_bus->get_port_type());
+    if (port_bus) {
+      lib_port->inheritBusAttributes(*port_bus);
+    }
+    lib_builder->set_port(lib_port.get());
+    if (port_bus) {
       port_bus->addlibertyPort(std::move(lib_port));
+    } else {
+      cell->addLibertyPort(std::move(lib_port));
     }
+    // Every bit owns its attributes and tables, including conditional arcs.
+    is_ok &= visitStmtInGroup(group);
   };
 
-  auto has_bus_range_marker = [](const char* port_name) {
-    for (const char* ch = port_name; *ch != '\0'; ++ch) {
-      if (*ch == '[') {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  std::vector<std::string> ret_val;
-  if (has_bus_range_marker(port_name)) {
-    std::string regex_pattern = "([A-Za-z]+)\\[(\\d+):(\\d+)\\]";
-    ret_val = matchPattern(port_name, regex_pattern);
+  std::vector<std::string> range;
+  if (std::string_view(port_name).find('[') != std::string_view::npos) {
+    range = matchPattern(port_name, "(.+)\\[(-?\\d+):(-?\\d+)\\]");
   }
-  if (ret_val.empty()) {
+  if (range.empty()) {
     create_port(port_name);
   } else {
-    std::string port_bus_name = ret_val[1];
-    int port_range_left = std::atoi(ret_val[2].c_str());
-    int port_range_right = std::atoi(ret_val[3].c_str());
-
-    for (int index = port_range_left; index >= port_range_right; --index) {
-      std::string one_port_name = makeIndexedName(port_bus_name, index);
-      create_port(one_port_name.c_str());
+    int left = std::stoi(range[2]);
+    int right = std::stoi(range[3]);
+    int step = left <= right ? 1 : -1;
+    for (int index = left;; index += step) {
+      std::string name = makeIndexedName(range[1], index);
+      create_port(name.c_str());
+      if (index == right) {
+        break;
+      }
     }
   }
 
-  unsigned is_ok = visitStmtInGroup(group);
-  // reset the port pointer.
-  lib_builder->set_port(nullptr);
-
+  lib_builder->set_port(previous_port);
   return is_ok;
 }
 
@@ -1536,11 +1649,10 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
   unsigned is_ok = 1;
   const char* group_name = group->group_name;
 
-  static const absl::btree_set<std::string> table_names = {
+  static const std::set<std::string> table_names = {
       "cell_rise",       "cell_fall",       "rise_transition",
       "fall_transition", "rise_constraint", "fall_constraint"};
-  static const absl::btree_set<std::string> power_table_names = {"rise_power",
-                                                                "fall_power"};
+  static const std::set<std::string> power_table_names = {"rise_power", "fall_power"};
 
   if (isEqual(group_name, "library")) {
     is_ok = visitLibrary(group);
@@ -1555,6 +1667,8 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
     is_ok = visitOutputCurrentTemplate(group);
   } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
+  } else if (isEqual(group_name, "ff") || isEqual(group_name, "latch")) {
+    is_ok = visitSequential(group);
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
   } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
@@ -1705,6 +1819,36 @@ unsigned LibertyReader::visitCell(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
+unsigned LibertyReader::visitSequential(liberty_ast::LibGroup* group) {
+  LibBuilder* lib_builder = get_library_builder();
+  LibCell* lib_cell = lib_builder->get_cell();
+  LibSequential sequential;
+  sequential.is_latch = isEqual(group->getGroupType(), "latch");
+  if (auto* parameters = group->getParams()) {
+    for (auto& parameter : *parameters) {
+      // Ignore an unsupported definition as a whole; do not shift state names.
+      if (!parameter || !parameter->isString() || getRawStringValue(parameter.get())[0] == '\0') {
+        return 1;
+      }
+      sequential.state_variables.emplace_back(getRawStringValue(parameter.get()));
+    }
+  }
+  if (sequential.state_variables.empty()) {
+    return 1;
+  }
+  for (auto* statement : group->getStatements()) {
+    if (statement->isSimpleAttr()) {
+      auto* attr = static_cast<liberty_ast::LibSimpleAttribute*>(statement);
+      auto* value = attr->getFirstValue();
+      if (value && value->isString()) {
+        sequential.attributes[attr->getName()] = getRawStringValue(value);
+      }
+    }
+  }
+  lib_cell->addSequential(std::move(sequential));
+  return 1;
+}
+
 unsigned LibertyReader::visitLeakagePower(liberty_ast::LibGroup* group) {
   LibBuilder* lib_builder = get_library_builder();
   LibCell* lib_cell = lib_builder->get_cell();
@@ -1727,6 +1871,8 @@ unsigned LibertyReader::visitLeakagePower(liberty_ast::LibGroup* group) {
 unsigned LibertyReader::visitBus(liberty_ast::LibGroup* group) {
   LibBuilder* lib_builder = get_library_builder();
   LibCell* cell = lib_builder->get_cell();
+  LibPort* previous_port = lib_builder->get_port();
+  LibPortBus* previous_bus = lib_builder->get_port_bus();
 
   const char* port_bus_name = getGroupAttriName(group);
 
@@ -1739,67 +1885,14 @@ unsigned LibertyReader::visitBus(liberty_ast::LibGroup* group) {
 
   unsigned is_ok = visitStmtInGroup(group);
   // reset the port bus pointer.
-  lib_builder->set_port_bus(nullptr);
+  lib_builder->set_port(previous_port);
+  lib_builder->set_port_bus(previous_bus);
 
   return is_ok;
 }
 
 unsigned LibertyReader::visitPin(liberty_ast::LibGroup* group) {
-  LibBuilder* lib_builder = get_library_builder();
-  LibCell* cell = lib_builder->get_cell();
-
-  const char* port_name = getGroupAttriName(group);
-
-  auto create_port = [lib_builder, cell](const char* port_name) {
-    auto lib_port = std::make_unique<LibPort>(port_name);
-    lib_port->set_ower_cell(cell);
-
-    if (auto* port_bus = lib_builder->get_port_bus(); !port_bus) {
-      lib_builder->set_port(lib_port.get());
-      cell->addLibertyPort(std::move(lib_port));
-    } else {
-      // A bus contains independent pin groups. Keep the concrete nested pin
-      // as the current port while visiting its attributes; otherwise the
-      // previous pin clears the builder port and the next pin can dereference
-      // nullptr on rise/fall_capacitance_range.
-      lib_builder->set_port(lib_port.get());
-      lib_port->set_port_type(port_bus->get_port_type());
-      port_bus->addlibertyPort(std::move(lib_port));
-    }
-  };
-
-  auto has_bus_range_marker = [](const char* port_name) {
-    for (const char* ch = port_name; *ch != '\0'; ++ch) {
-      if (*ch == '[') {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  std::vector<std::string> ret_val;
-  if (has_bus_range_marker(port_name)) {
-    std::string regex_pattern = "([A-Za-z]+)\\[(\\d+):(\\d+)\\]";
-    ret_val = matchPattern(port_name, regex_pattern);
-  }
-  if (ret_val.empty()) {
-    create_port(port_name);
-  } else {
-    std::string port_bus_name = ret_val[1];
-    int port_range_left = std::atoi(ret_val[2].c_str());
-    int port_range_right = std::atoi(ret_val[3].c_str());
-
-    for (int index = port_range_left; index >= port_range_right; --index) {
-      std::string one_port_name = makeIndexedName(port_bus_name, index);
-      create_port(one_port_name.c_str());
-    }
-  }
-
-  unsigned is_ok = visitStmtInGroup(group);
-  // reset the port pointer.
-  lib_builder->set_port(nullptr);
-
-  return is_ok;
+  return visitPinGroup(group);
 }
 
 unsigned LibertyReader::visitTiming(liberty_ast::LibGroup* group) {
@@ -2013,11 +2106,10 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
   unsigned is_ok = 1;
   const char* group_name = group->getGroupType();
 
-  static const absl::btree_set<std::string> table_names = {
+  static const std::set<std::string> table_names = {
       "cell_rise",       "cell_fall",       "rise_transition",
       "fall_transition", "rise_constraint", "fall_constraint"};
-  static const absl::btree_set<std::string> power_table_names = {"rise_power",
-                                                                "fall_power"};
+  static const std::set<std::string> power_table_names = {"rise_power", "fall_power"};
 
   if (isEqual(group_name, "library")) {
     is_ok = visitLibrary(group);
@@ -2032,6 +2124,25 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
     is_ok = visitOutputCurrentTemplate(group);
   } else if (isEqual(group_name, "cell")) {
     is_ok = visitCell(group);
+  } else if (isEqual(group_name, "ff") || isEqual(group_name, "latch")) {
+    is_ok = visitSequential(group);
+    // A latch group additionally carries the clock-gate data/enable
+    // expressions used by the CTS cell model; keep that extraction on the
+    // "latch" group only, alongside the generic sequential record above.
+    if (isEqual(group_name, "latch")) {
+      auto* cell = get_library_builder()->get_cell();
+      if (cell == nullptr) {
+        return 0;
+      }
+      const auto attribute = [&](const char* name) -> std::string {
+        auto* attr = group->findAttribute(name);
+        auto* value = attr == nullptr ? nullptr : attr->getFirstValue();
+        return value != nullptr && value->isString() ? value->asString() : "";
+      };
+      cell->addLatch(LibLatch{group->getFirstParamName() == nullptr ? "" : group->getFirstParamName(),
+                              group->getSecondParamName() == nullptr ? "" : group->getSecondParamName(),
+                              attribute("data_in"), attribute("enable")});
+    }
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
   } else if (isEqual(group_name, "bus") || isEqual(group_name, "bundle")) {
@@ -2062,23 +2173,36 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
 }
 
 unsigned LibertyReader::readLib() {
-  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
+  }
 
-  auto* driver = new liberty_ast::LibertyDriver();
+  if (_lib_file != nullptr) {
+    liberty_free_lib_group(_lib_file);
+    _lib_file = nullptr;
+  }
+  _library_builder.reset();
+
+  auto driver = std::make_unique<liberty_ast::LibertyDriver>();
   if (!driver->parse(_file_name.c_str())) {
-    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
-    delete driver;
+    if (!Lib::isSilentOutput()) {
+      ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    }
     return 0;
   }
 
-  _lib_file = driver;
+  _lib_file = driver.release();
 
   if (!_lib_file) {
-    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    if (!Lib::isSilentOutput()) {
+      ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " failed.");
+    }
     return 0;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name, " success.");
+  }
   return 1;
 }
 
@@ -2095,7 +2219,12 @@ unsigned LibertyReader::linkLib() {
     auto* driver = reinterpret_cast<liberty_ast::LibertyDriver*>(_lib_file);
     auto* lib_group = driver ? driver->getParseResult() : nullptr;
     if (!lib_group) {
-      ECCLOG.error(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      liberty_free_lib_group(_lib_file);
+      _lib_file = nullptr;
+      if (!Lib::isSilentOutput()) {
+        ECCLOG.warn(ecc::Loc::current(), "parsed liberty root group is null: ", _file_name);
+      }
+      return 0;
     }
     unsigned result = visitGroup(lib_group);
     liberty_free_lib_group(_lib_file);
@@ -2107,8 +2236,11 @@ unsigned LibertyReader::linkLib() {
     return result;
   }
 
-  ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
+  if (!Lib::isSilentOutput()) {
+    ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " failed.");
+  }
   return 0;
 }
 
 }  // namespace idb
+

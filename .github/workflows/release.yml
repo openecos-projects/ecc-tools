@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag to release (e.g., v0.1.0-alpha.11)'
+        description: 'Tag to release (e.g., v0.1.0-alpha.13)'
         required: true
-        default: 'v0.1.0-alpha.11'
+        default: 'v0.1.0-alpha.13'
       publish_target:
         description: 'Artifacts to publish'
         required: true
