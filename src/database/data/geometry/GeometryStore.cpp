@@ -43,6 +43,17 @@ ShapeVersion next_version(ShapeVersion version)
   return version == std::numeric_limits<ShapeVersion>::max() ? version : version + 1;
 }
 
+int32_t saturate_to_int32(int64_t value)
+{
+  if (value > static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
+    return std::numeric_limits<int32_t>::max();
+  }
+  if (value < static_cast<int64_t>(std::numeric_limits<int32_t>::min())) {
+    return std::numeric_limits<int32_t>::min();
+  }
+  return static_cast<int32_t>(value);
+}
+
 }  // namespace
 
 size_t OwnerShapeKeyHash::operator()(const OwnerShapeKey& key) const
@@ -184,7 +195,8 @@ void GeometryStore::append_delta(GeometryDeltaOp op, ShapeId shape_id, ShapeVers
 ShapeId GeometryStore::add_rect(LayerId layer_id, Rect32 rect, OwnerRef owner, uint32_t flags)
 {
   rect = normalize(rect);
-  const uint16_t record_flags = static_cast<uint16_t>(flags);
+  // Only the low 16 bits are stored; callers must keep flags within range.
+  const uint16_t record_flags = static_cast<uint16_t>(flags & 0xFFFFu);
   const AllocatedShapeIdentity identity =
       allocate_shape_identity(owner, layer_id, ShapeKind::kRect, record_flags, rect);
   const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
@@ -211,7 +223,8 @@ ShapeId GeometryStore::add_rect(LayerId layer_id, Rect32 rect, OwnerRef owner, u
 ShapeId GeometryStore::add_point(LayerId layer_id, PointPayload point, OwnerRef owner, uint32_t flags)
 {
   const Rect32 bbox{point.point.x, point.point.y, point.point.x, point.point.y};
-  const uint16_t record_flags = static_cast<uint16_t>(flags);
+  // Only the low 16 bits are stored; callers must keep flags within range.
+  const uint16_t record_flags = static_cast<uint16_t>(flags & 0xFFFFu);
   const AllocatedShapeIdentity identity =
       allocate_shape_identity(owner, layer_id, ShapeKind::kPoint, record_flags, bbox);
   const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
@@ -236,13 +249,15 @@ ShapeId GeometryStore::add_point(LayerId layer_id, PointPayload point, OwnerRef 
 
 ShapeId GeometryStore::add_line(LayerId layer_id, LinePayload line, OwnerRef owner, uint32_t flags)
 {
-  const int32_t half_width = (std::abs(line.width) + 1) / 2;
-  const int32_t lx = std::min(line.begin.x, line.end.x) - half_width;
-  const int32_t ly = std::min(line.begin.y, line.end.y) - half_width;
-  const int32_t hx = std::max(line.begin.x, line.end.x) + half_width;
-  const int32_t hy = std::max(line.begin.y, line.end.y) + half_width;
-  const Rect32 bbox{lx, ly, hx, hy};
-  const uint16_t record_flags = static_cast<uint16_t>(flags);
+  // int64 math with saturation: abs(INT_MIN) and min-half/max+half overflow int32.
+  const int64_t half_width = (std::llabs(static_cast<int64_t>(line.width)) + 1) / 2;
+  const int64_t min_x = std::min<int64_t>(line.begin.x, line.end.x) - half_width;
+  const int64_t min_y = std::min<int64_t>(line.begin.y, line.end.y) - half_width;
+  const int64_t max_x = std::max<int64_t>(line.begin.x, line.end.x) + half_width;
+  const int64_t max_y = std::max<int64_t>(line.begin.y, line.end.y) + half_width;
+  const Rect32 bbox{saturate_to_int32(min_x), saturate_to_int32(min_y), saturate_to_int32(max_x), saturate_to_int32(max_y)};
+  // Only the low 16 bits are stored; callers must keep flags within range.
+  const uint16_t record_flags = static_cast<uint16_t>(flags & 0xFFFFu);
   const AllocatedShapeIdentity identity =
       allocate_shape_identity(owner, layer_id, ShapeKind::kLine, record_flags, bbox);
   const uint32_t owner_index = static_cast<uint32_t>(_owners.size());
@@ -312,7 +327,7 @@ bool GeometryStore::update_rect(ShapeId id, Rect32 rect, uint64_t command_id)
 
   const ShapeRecord old_record = *current;
   ShapeRecord updated = old_record;
-  updated.version = current->version + 1;
+  updated.version = next_version(current->version);
   updated.bbox = rect;
 
   const RectPayload payload{rect};
@@ -340,7 +355,7 @@ bool GeometryStore::delete_shape(ShapeId id)
   }
 
   const ShapeRecord* deleted_record = _shapes.find(id);
-  const ShapeVersion new_version = deleted_record == nullptr ? old_record.version + 1 : deleted_record->version;
+  const ShapeVersion new_version = deleted_record == nullptr ? next_version(old_record.version) : deleted_record->version;
   _lod_pyramid.mark_dirty_record_delete(old_record);
   append_delta(GeometryDeltaOp::kDelete, id, old_record.version, new_version, old_record.bbox, old_record.bbox);
   return true;
