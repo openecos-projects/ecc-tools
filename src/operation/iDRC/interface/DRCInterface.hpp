@@ -161,7 +161,6 @@ class DRCInterface
   void refreshEccdbNetIndex();
   void clearEccdbNetIndex();
   void finishDRC(bool write_output);
-  std::vector<ids::Shape> buildEnvShapeList(std::set<size_t>& obs_shape_idx_set);
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list,
                                                const std::set<size_t>& obs_shape_idx_set);
