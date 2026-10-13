@@ -120,7 +120,7 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
   RuleValidator::initInst();
   _drc_initialized = true;
 
-  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
+  DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void DRCInterface::runDRC()
