@@ -135,7 +135,6 @@ class PlanarRouter
 
   // pattern route
   std::vector<Segment<PlanarCoord>> routeSegmentListByPattern(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net, PRRouteMode pr_route_mode);
-  void splitLongPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, std::vector<Segment<PlanarCoord>>& planar_topo_list);
   bool needCongestionAware(const PRGridGraph::NetRouteTrial& trial);
   std::vector<Segment<PlanarCoord>> getPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, PRNet& pr_net, PRTopoMode pr_topo_mode);
   std::vector<Segment<PlanarCoord>> getRoutingSegmentListByPattern(const PRGridGraph::NetRouteTrial& trial, Segment<PlanarCoord>& planar_topo,

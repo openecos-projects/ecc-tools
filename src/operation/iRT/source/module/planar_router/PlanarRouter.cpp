@@ -111,17 +111,15 @@ void PlanarRouter::initPRGridGraph()
 
 void PlanarRouter::setPRComParam()
 {
-  int32_t topo_spilt_length = 100;
   int32_t expand_step_num = 30;
   int32_t astar_search_margin = 30;
   double overflow_unit = 20;
   double corner_weight = 2.5;
   /**
-   * topo_spilt_length, expand_step_num, astar_search_margin, overflow_unit, corner_weight
+   * expand_step_num, astar_search_margin, overflow_unit, corner_weight
    */
 
-  PRComParam pr_com_param(topo_spilt_length, expand_step_num, astar_search_margin, overflow_unit, corner_weight);
-  RTLOG.info(Loc::current(), "topo_spilt_length: ", pr_com_param.get_topo_spilt_length());
+  PRComParam pr_com_param(expand_step_num, astar_search_margin, overflow_unit, corner_weight);
   RTLOG.info(Loc::current(), "expand_step_num: ", pr_com_param.get_expand_step_num());
   RTLOG.info(Loc::current(), "astar_search_margin: ", pr_com_param.get_astar_search_margin());
   RTLOG.info(Loc::current(), "overflow_unit: ", pr_com_param.get_overflow_unit());
@@ -230,9 +228,6 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByPattern(PRGrid
 {
   PRTopoMode pr_topo_mode = pr_route_mode == PRRouteMode::kInitialLZPattern ? PRTopoMode::kNormal : PRTopoMode::kCongestion;
   std::vector<Segment<PlanarCoord>> planar_topo_list = getPlanarTopoList(trial, pr_net, pr_topo_mode);
-  if (pr_route_mode == PRRouteMode::kAllPattern) {
-    splitLongPlanarTopoList(trial, planar_topo_list);
-  }
 
   std::vector<Segment<PlanarCoord>> routing_segment_list;
   for (Segment<PlanarCoord>& planar_topo : planar_topo_list) {
@@ -286,62 +281,6 @@ bool PlanarRouter::needCongestionAware(const PRGridGraph::NetRouteTrial& trial)
     }
   }
   return false;
-}
-
-void PlanarRouter::splitLongPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, std::vector<Segment<PlanarCoord>>& planar_topo_list)
-{
-  constexpr int32_t min_subsegment_length = 30;
-  int32_t split_length = _pr_com_param.get_topo_spilt_length();
-  std::vector<Segment<PlanarCoord>> split_topo_list;
-  split_topo_list.reserve(planar_topo_list.size() * 3);
-  for (Segment<PlanarCoord>& planar_topo : planar_topo_list) {
-    PlanarCoord first_coord = planar_topo.get_first();
-    PlanarCoord second_coord = planar_topo.get_second();
-    int32_t topo_length = RTUTIL.getManhattanDistance(first_coord, second_coord);
-    if (!RTUTIL.isOblique(first_coord, second_coord) || topo_length < split_length) {
-      split_topo_list.push_back(planar_topo);
-      continue;
-    }
-
-    // split twice if topo length very long
-    int32_t split_num = topo_length <= 2 * split_length ? 1 : 2;
-    int32_t piece_num = split_num + 1;
-    std::vector<PlanarCoord> legal_coord_list{first_coord};
-    bool has_legal_split = true;
-    for (int32_t i = 1; i <= split_num; i++) {
-      PlanarCoord ideal_coord(std::round(first_coord.get_x() + ((second_coord.get_x() - first_coord.get_x()) * i / static_cast<double>(piece_num))),
-                              std::round(first_coord.get_y() + ((second_coord.get_y() - first_coord.get_y()) * i / static_cast<double>(piece_num))));
-      bool has_escape = false;
-      for (const PlanarCoord& neighbor :
-           {PlanarCoord(ideal_coord.get_x() - 1, ideal_coord.get_y()), PlanarCoord(ideal_coord.get_x() + 1, ideal_coord.get_y()),
-            PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() - 1), PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() + 1)}) {
-        if (std::isfinite(_grid_graph.get_segment_cost(trial, ideal_coord, neighbor, _pr_com_param.get_overflow_unit()))) {
-          has_escape = true;
-          break;
-        }
-      }
-      if (!has_escape) {
-        has_legal_split = false;
-        break;
-      }
-      legal_coord_list.push_back(ideal_coord);
-    }
-    legal_coord_list.push_back(second_coord);
-
-    for (int32_t i = 1; has_legal_split && i <= piece_num; i++) {
-      if (RTUTIL.getManhattanDistance(legal_coord_list[i - 1], legal_coord_list[i]) < min_subsegment_length) {
-        has_legal_split = false;
-      }
-    }
-    if (!has_legal_split) {
-      split_topo_list.push_back(planar_topo);
-      continue;
-    }
-    for (int32_t i = 1; i <= piece_num; i++) {
-      split_topo_list.emplace_back(legal_coord_list[i - 1], legal_coord_list[i]);
-    }
-  }
-  planar_topo_list = std::move(split_topo_list);
 }
 
 std::vector<Segment<PlanarCoord>> PlanarRouter::getRoutingSegmentListByPattern(const PRGridGraph::NetRouteTrial& trial, Segment<PlanarCoord>& planar_topo,
