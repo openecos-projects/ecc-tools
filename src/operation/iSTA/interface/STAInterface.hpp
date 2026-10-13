@@ -48,11 +48,20 @@ enum class IdbConnectType : uint8_t;
 enum class IdbConnectDirection : uint8_t;
 }  // namespace idb
 
+namespace eccdb {
+class DatabaseContext;
+}  // namespace eccdb
+
 namespace spef {
 struct ConnEntry;
 struct Net;
 struct ResCap;
+class SpefReader;
 }  // namespace spef
+
+namespace vcd {
+class VcdReader;
+}  // namespace vcd
 
 struct LibertyExpr;
 
@@ -91,6 +100,17 @@ namespace ista {
 
 #define STAI (ista::STAInterface::getInst())
 
+// Native EccDB designs borrow timing data from the surrounding toolchain.
+// The libraries, SPEF/VCD readers, and paths remain owned by that provider.
+struct NativeTimingInputs
+{
+  std::vector<idb::LibLibrary*> liberty_libraries;
+  spef::SpefReader* spef_reader = nullptr;
+  vcd::VcdReader* vcd_reader = nullptr;
+  std::string sdc_path;
+  std::string spef_path;
+};
+
 class STAInterface
 {
  public:
@@ -104,6 +124,8 @@ class STAInterface
   void runSTA();
   void extractLib();
   void destroySTA();
+  // Releases an incomplete read-only STA session without producing reports.
+  void abortSTA() noexcept;
 #endif
 
 #endif
@@ -116,6 +138,11 @@ class STAInterface
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
+  // Passing nullptr clears the borrowed native design source and restores iDB.
+  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
+  void setDesignSource(eccdb::DatabaseContext& context) noexcept { setDesignSource(&context); }
+  void setTimingInputs(NativeTimingInputs inputs);
+  void wrapDatabaseFromEccdb();
   void wrapVcdActivity();
   std::string wrapVcdPinName(std::string& vcd_signal_name);
   void wrapDBInfo();
@@ -141,9 +168,9 @@ class STAInterface
   void wrapNetPinNameList(Net& net, std::string& pin_name);
   void wrapNetToDatabase(Net& net);
   void wrapTimingLibrary();
-  void wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  void wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
-  idb::LibLibrary* wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list);
+  void wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list);
+  void wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list);
+  idb::LibLibrary* wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list);
   TimingCapacitiveUnit wrapTimingCapacitiveUnit(idb::LibLibrary* lib_library);
   TimingResistanceUnit wrapTimingResistanceUnit(idb::LibLibrary* lib_library);
   TimingTimeUnit wrapTimingTimeUnit(idb::LibLibrary* lib_library);
@@ -213,6 +240,8 @@ class STAInterface
 
  private:
   static STAInterface* _sta_interface_instance;
+  eccdb::DatabaseContext* _database_context = nullptr;
+  NativeTimingInputs _native_timing_inputs;
 
   STAInterface() = default;
   STAInterface(const STAInterface& other) = delete;

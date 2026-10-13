@@ -242,6 +242,45 @@ TEST_F(DesignStorageTest, IndividualAndSubsetRestoresKeepOwnerOrder)
   EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
 }
 
+TEST_F(DesignStorageTest, RestoringDetachedNetGeometryUsesGeometricCapacityAndKeepsStableIds)
+{
+  const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});
+  std::vector<GeometryShapeId> original;
+  original.reserve(17);
+  for (int32_t index = 0; index < 17; ++index) {
+    original.push_back(design.geometryStorage().appendNetShape(
+        net, DesignNetRectangle{.layer = routing_layer, .rectangle = {index * 20, 0, index * 20 + 10, 10}}));
+  }
+
+  DatabaseContext context(design);
+  GeometryEditService edit(context);
+  std::vector<uint64_t> ids;
+  ids.reserve(original.size());
+  for (const auto shape : original) ids.push_back(shape.packed());
+  ASSERT_TRUE(edit.removeShapes(ids));
+  EXPECT_EQ(design.routingStorage().netGeometry(net), nullptr);
+
+  for (const auto shape : original) {
+    const auto* before_relation = design.routingStorage().netGeometry(net);
+    const auto old_size = before_relation == nullptr ? 0u : before_relation->shapes.size();
+    const auto old_capacity = before_relation == nullptr ? 0u : before_relation->shapes.capacity();
+    ASSERT_TRUE(edit.restoreShape(shape.packed()));
+    const auto* relation = design.routingStorage().netGeometry(net);
+    ASSERT_NE(relation, nullptr);
+    ASSERT_EQ(relation->shapes.size(), old_size + 1u);
+    if (old_size == old_capacity) {
+      EXPECT_GE(relation->shapes.capacity(), old_capacity == 0u ? 1u : old_capacity * 2u);
+    } else {
+      EXPECT_EQ(relation->shapes.capacity(), old_capacity);
+    }
+    EXPECT_TRUE(design.geometryStorage().contains(shape));
+  }
+
+  ASSERT_NE(design.routingStorage().netGeometry(net), nullptr);
+  EXPECT_EQ(design.routingStorage().netGeometry(net)->shapes, original);
+  EXPECT_NO_THROW(design.geometryStorage().validateRestoredState());
+}
+
 TEST_F(DesignStorageTest, PermanentRemovalClosesJournalOrdinalAndReleasesIndexRestoreSlot)
 {
   const auto net = design.netlistStorage().createSpecialNet(DesignNet{.name = "VDD"});

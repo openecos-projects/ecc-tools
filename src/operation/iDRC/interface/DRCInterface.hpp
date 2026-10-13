@@ -17,6 +17,7 @@
 #pragma once
 
 #include <any>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
@@ -38,6 +39,7 @@ namespace eccdb {
 class DesignStore;
 class TechStore;
 class LibraryStore;
+class DatabaseContext;
 }  // namespace eccdb
 
 namespace idrc {
@@ -66,7 +68,10 @@ class DRCInterface
   void initDRC(std::map<std::string, std::any> config_map, bool enable_quiet = true);
   void runDRC();
   void checkDef();
+  [[nodiscard]] const std::map<std::string, std::size_t>& lastViolationCounts() const noexcept;
   void destroyDRC();
+  // Releases a partially initialized run without publishing DRC output.
+  void abortDRC();
   bool saveDRC(std::string path);
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list);
@@ -82,6 +87,10 @@ class DRCInterface
 #if 1  // input
   void setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
                        eccdb::LibraryStore* library);
+  // Borrow the caller-owned Context for the lifetime of a native run. Passing
+  // nullptr detaches it and clears the native source selection.
+  void setDesignSource(eccdb::DatabaseContext* context);
+  void setDesignSource(eccdb::DatabaseContext& context);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
@@ -109,7 +118,7 @@ class DRCInterface
 
 #if 1  // check
   std::vector<ids::Shape> buildEnvShapeList();
-  std::vector<ids::Shape> buildEnvShapeListFromEnTT();
+  std::vector<ids::Shape> buildEnvShapeListFromEnTT(std::set<size_t>* obs_shape_idx_set = nullptr);
   bool isSkipping(idb::IdbNet* idb_net);
   std::vector<ids::Shape> buildResultShapeList();
   std::vector<ids::Shape> buildResultShapeListFromEnTT();
@@ -128,6 +137,14 @@ class DRCInterface
   eccdb::DesignStore* _design = nullptr;
   eccdb::TechStore* _tech = nullptr;
   eccdb::LibraryStore* _library = nullptr;
+  eccdb::DatabaseContext* _database_context = nullptr;
+  bool _drc_initialized = false;
+  std::map<std::string, std::size_t> _last_violation_counts;
+  // iDRC uses regular-then-special net ordinals. Build this snapshot
+  // before parallel queries and keep it read-only for the initialized run.
+  // A changed source/netlist is picked up by the next initDRC, not per box.
+  int32_t _eccdb_regular_net_count = 0;
+  std::vector<std::string> _eccdb_net_names;
 
   DRCInterface() = default;
   DRCInterface(const DRCInterface& other) = delete;
@@ -136,6 +153,9 @@ class DRCInterface
   DRCInterface& operator=(const DRCInterface& other) = delete;
   DRCInterface& operator=(DRCInterface&& other) = delete;
   // function
+  void refreshEccdbNetIndex();
+  void clearEccdbNetIndex();
+  void finishDRC(bool write_output);
   std::vector<ids::Shape> buildEnvShapeList(std::set<size_t>& obs_shape_idx_set);
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list,

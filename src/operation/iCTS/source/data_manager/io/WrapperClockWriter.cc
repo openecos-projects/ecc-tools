@@ -38,6 +38,7 @@
 #include "IdbTerm.h"
 #include "Logger.hh"
 #include "Wrapper.hh"
+#include "CtsEccdbAdapter.hh"
 #include "design/Clock.hh"
 #include "design/ClockDAG.hh"
 #include "design/Design.hh"
@@ -597,11 +598,24 @@ class Wrapper::CtsClockIdbWriter
 
 auto Wrapper::writeClock(Design& design, Clock& clock) -> bool
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->writeClocks(design, {&clock}).success;
+  }
   return CtsClockIdbWriter(*this, design).writeClocksDetailed({&clock}).success;
 }
 
 auto Wrapper::writeClocksDetailed(Design& design, const std::vector<Clock*>& clocks) -> WrapperWriteSummary
 {
+  if (_native_adapter != nullptr) {
+    const auto native_summary = _native_adapter->writeClocks(design, clocks);
+    return WrapperWriteSummary{.success = native_summary.success,
+                               .failed_clock = native_summary.failed_clock,
+                               .failed_net = native_summary.failed_net,
+                               .idb_clock_tree_restored = false,
+                               .inserted_inst_count = native_summary.inserted_inst_count,
+                               .inserted_net_count = native_summary.inserted_net_count,
+                               .reason = native_summary.reason};
+  }
   return CtsClockIdbWriter(*this, design).writeClocksDetailed(clocks);
 }
 

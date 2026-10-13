@@ -35,6 +35,10 @@ enum class IdbConnectType : uint8_t;
 class IdbRegularWireSegment;
 }  // namespace idb
 
+namespace eccdb {
+class DatabaseContext;
+}  // namespace eccdb
+
 namespace izh {
 class RoutingLayer;
 class CutLayer;
@@ -62,6 +66,17 @@ class FeatureManager;
 
 namespace izh {
 
+struct NativeAntennaSummary
+{
+  bool checked = false;
+  uint64_t net_count = 0;
+  uint64_t connected_net_count = 0;
+  uint64_t wire_count = 0;
+  uint64_t violation_count = 0;
+  std::string rule_file;
+  std::vector<std::string> violations;
+};
+
 #define ZHI (izh::ZHInterface::getInst())
 
 class ZHInterface
@@ -80,8 +95,23 @@ class ZHInterface
 
 #endif
 
+  // A non-null native source selects the EccDB adapter path.  Clearing it
+  // restores the legacy iDB path for callers that still use it.
+  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
+  void setDesignSource(eccdb::DatabaseContext& context) noexcept;
+
+  // Runtime-only native checker result.  The summary is replaced on every
+  // successful native check and is intentionally not persisted in EccDB.
+  [[nodiscard]] const NativeAntennaSummary& lastAntennaSummary() const noexcept { return _last_antenna_summary; }
+
  private:
   static ZHInterface* _zh_interface_instance;
+  eccdb::DatabaseContext* _database_context = nullptr;
+  NativeAntennaSummary _last_antenna_summary;
+
+  void insertFillerFromEccdb(std::map<std::string, std::any>& config_map);
+  void insertMetalFromEccdb(std::map<std::string, std::any>& config_map);
+  void checkAntennaFromEccdb(std::map<std::string, std::any>& config_map);
 
   ZHInterface() = default;
   ZHInterface(const ZHInterface& other) = delete;

@@ -37,7 +37,10 @@
 #include "DataManager.hpp"
 #include "Database.hpp"
 #include "Logger.hpp"
+#include "context/DatabaseContext.h"
 #include "design/DesignStore.h"
+#include "design/geometry/DesignGeometryStorage.h"
+#include "design/routing/component/RoutingComponents.h"
 #include "idm.h"
 #include "def/DefDesignImporter.h"
 #include "lef/LefLibraryImporter.h"
@@ -126,6 +129,17 @@ SITE CORE
   SYMMETRY X Y ;
   SIZE 0.20 BY 0.40 ;
 END CORE
+
+MACRO OBS_CELL
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 0.20 BY 0.20 ;
+  SYMMETRY X Y ;
+  OBS
+    LAYER M1 ;
+      RECT 0 0 0.20 0.20 ;
+  END
+END OBS_CELL
 END LIBRARY
 )LEF";
 
@@ -151,7 +165,9 @@ VIAS 1 ;
   ;
 END VIAS
 
-COMPONENTS 0 ;
+COMPONENTS 2 ;
+- placed_obs OBS_CELL + PLACED ( 200 400 ) N ;
+- unplaced_obs OBS_CELL + UNPLACED ;
 END COMPONENTS
 PINS 0 ;
 END PINS
@@ -161,12 +177,55 @@ SPECIALNETS 1 ;
   + ROUTED M1 0 + SHAPE STRIPE ( 1000 1000 ) GENERATED12
   ;
 END SPECIALNETS
+BLOCKAGES 1 ;
+- LAYER M2
+  RECT ( 1400 1400 ) ( 1600 1600 ) ;
+END BLOCKAGES
 NETS 2 ;
 - z_sig
   + ROUTED M1 ( 100 100 ) ( 500 100 ) VIA12
   ;
 - a_sig
   + ROUTED M1 ( 100 300 ) ( 500 300 )
+  ;
+END NETS
+END DESIGN
+)DEF";
+
+// A boundary route is intentionally centered on y=0.  DEF describes the
+// centerline, so its physical M1 geometry extends to y=-50 and must not be
+// clipped by the iDRC input projection.  The VIA12 at the second endpoint
+// also verifies that an overlapping negative-coordinate via is retained.
+constexpr std::string_view kBoundaryWireFixtureDef = R"DEF(VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN idrc_boundary_wire_fixture ;
+UNITS DISTANCE MICRONS 1000 ;
+
+DIEAREA ( 0 0 ) ( 1000 1000 ) ;
+PINS 2 ;
+- boundary_io
+  + NET boundary
+  + DIRECTION INPUT
+  + USE SIGNAL
+  + PORT
+    + LAYER M1 ( -50 -50 ) ( 50 50 )
+    + PLACED ( 250 50 ) N
+  ;
+- boundary_peer
+  + NET boundary
+  + DIRECTION OUTPUT
+  + USE SIGNAL
+  + PORT
+    + LAYER M1 ( -25 -25 ) ( 25 25 )
+    + PLACED ( 750 750 ) N
+  ;
+END PINS
+NETS 1 ;
+- boundary
+  ( PIN boundary_io )
+  ( PIN boundary_peer )
+  + ROUTED M1 ( 250 0 ) ( 500 0 ) VIA12
   ;
 END NETS
 END DESIGN
@@ -337,23 +396,34 @@ struct ViolationKey
   int32_t ll_y = 0;
   int32_t ur_x = 0;
   int32_t ur_y = 0;
-  std::vector<int32_t> net_indices;
+  std::vector<std::string> net_names;
   int32_t required_size = 0;
 
   [[nodiscard]] auto tuple() const
   {
-    return std::make_tuple(violation_type, layer_idx, is_routing, ll_x, ll_y, ur_x, ur_y, net_indices, required_size);
+    return std::make_tuple(violation_type, layer_idx, is_routing, ll_x, ll_y, ur_x, ur_y, net_names, required_size);
   }
 
   [[nodiscard]] bool operator<(const ViolationKey& other) const { return tuple() < other.tuple(); }
   [[nodiscard]] bool operator==(const ViolationKey& other) const { return tuple() == other.tuple(); }
 };
 
-std::vector<ViolationKey> canonicalViolations(const std::vector<ids::Violation>& violations)
+std::vector<ViolationKey> canonicalViolations(const std::vector<ids::Violation>& violations, const NetNames& net_names)
 {
   std::vector<ViolationKey> keys;
   keys.reserve(violations.size());
   for (const auto& violation : violations) {
+    std::vector<std::string> violation_net_names;
+    violation_net_names.reserve(violation.violation_net_set.size());
+    for (const auto net_idx : violation.violation_net_set) {
+      if (net_idx < 0) {
+        violation_net_names.emplace_back("<invalid>");
+      } else {
+        const auto index = static_cast<size_t>(net_idx);
+        violation_net_names.emplace_back(index < net_names.size() ? net_names[index] : "<invalid>");
+      }
+    }
+    std::sort(violation_net_names.begin(), violation_net_names.end());
     keys.push_back(ViolationKey{.violation_type = violation.violation_type,
                                 .layer_idx = violation.layer_idx,
                                 .is_routing = violation.is_routing,
@@ -361,7 +431,7 @@ std::vector<ViolationKey> canonicalViolations(const std::vector<ids::Violation>&
                                 .ll_y = violation.ll_y,
                                 .ur_x = violation.ur_x,
                                 .ur_y = violation.ur_y,
-                                .net_indices = {violation.violation_net_set.begin(), violation.violation_net_set.end()},
+                                .net_names = std::move(violation_net_names),
                                 .required_size = violation.required_size});
   }
   std::sort(keys.begin(), keys.end());
@@ -373,20 +443,21 @@ std::string violationToString(const ViolationKey& violation)
   std::ostringstream out;
   out << "type=" << violation.violation_type << " layer=" << violation.layer_idx << " routing=" << (violation.is_routing ? "true" : "false")
       << " rect=(" << violation.ll_x << ',' << violation.ll_y << ',' << violation.ur_x << ',' << violation.ur_y << ") nets={";
-  for (size_t index = 0; index < violation.net_indices.size(); ++index) {
+  for (size_t index = 0; index < violation.net_names.size(); ++index) {
     if (index != 0) {
       out << ',';
     }
-    out << violation.net_indices[index];
+    out << violation.net_names[index];
   }
   out << "} required=" << violation.required_size;
   return out.str();
 }
 
-void expectViolationListsEqual(std::string_view tag, const std::vector<ids::Violation>& left, const std::vector<ids::Violation>& right)
+void expectViolationListsEqual(std::string_view tag, const std::vector<ids::Violation>& left, const NetNames& left_names,
+                               const std::vector<ids::Violation>& right, const NetNames& right_names)
 {
-  const auto left_keys = canonicalViolations(left);
-  const auto right_keys = canonicalViolations(right);
+  const auto left_keys = canonicalViolations(left, left_names);
+  const auto right_keys = canonicalViolations(right, right_names);
   std::ostringstream details;
   if (left_keys.size() != right_keys.size()) {
     details << tag << "\nleft:";
@@ -500,6 +571,19 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
 
   expectShapeListsEqual("env", idb_env, idb_names, entt_env, entt_names);
   expectShapeListsEqual("result", idb_result, idb_names, entt_result, entt_names);
+  const auto env_keys = canonicalShapes(entt_env, entt_names);
+  const auto has_env_shape = [&](const ShapeKey& expected) {
+    return std::find(env_keys.begin(), env_keys.end(), expected) != env_keys.end();
+  };
+  EXPECT_TRUE(has_env_shape(ShapeKey{.net_name = "<invalid>", .layer_idx = 0, .is_routing = true,
+                                     .ll_x = 200, .ll_y = 400, .ur_x = 400, .ur_y = 600}))
+      << "placed instance obstruction must be part of the environment";
+  EXPECT_FALSE(has_env_shape(ShapeKey{.net_name = "<invalid>", .layer_idx = 0, .is_routing = true,
+                                      .ll_x = 0, .ll_y = 0, .ur_x = 200, .ur_y = 200}))
+      << "unplaced instance obstruction must be excluded from the environment";
+  EXPECT_TRUE(has_env_shape(ShapeKey{.net_name = "<invalid>", .layer_idx = 1, .is_routing = true,
+                                     .ll_x = 1400, .ll_y = 1400, .ur_x = 1600, .ur_y = 1600}))
+      << "routing blockage must be part of the environment";
   const auto result_keys = canonicalShapes(idb_result, idb_names);
   EXPECT_NE(std::find(result_keys.begin(), result_keys.end(),
                       ShapeKey{.net_name = "a_sig", .layer_idx = 0, .is_routing = true, .ll_x = 50, .ll_y = 250, .ur_x = 550, .ur_y = 350}),
@@ -528,8 +612,294 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
   const auto idb_violations = run_violations(false, "idb-drc");
   const auto entt_violations = run_violations(true, "entt-drc");
   DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  expectViolationListsEqual("violations", idb_violations, idb_names, entt_violations, entt_names);
+
+  DRCI.setDesignSource(design.get(), &tech, library.get());
+  std::map<std::string, std::any> count_config;
+  count_config.insert({"-temp_directory_path", workspace.path("entt-counts").string()});
+  count_config.insert({"-thread_number", 1});
+  DRCI.initDRC(count_config, true);
+  DRCI.checkDef();
+  const auto cached_counts = DRCI.lastViolationCounts();
+  ASSERT_FALSE(cached_counts.empty()) << "checkDef must expose its violation categories";
+  size_t cached_total = 0;
+  for (const auto& [type, count] : cached_counts) {
+    static_cast<void>(type);
+    cached_total += count;
+  }
+  EXPECT_GT(cached_total, 0U);
+  DRCI.destroyDRC();
+  EXPECT_EQ(DRCI.lastViolationCounts(), cached_counts);
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
   dmInst->reset();
-  expectViolationListsEqual("violations", idb_violations, entt_violations);
+
+  const auto special = design->netlistStorage().findSpecialNet("VDD");
+  ASSERT_TRUE(special);
+  const auto m2 = eccdb::TechRoutingLayerId{tech.findLayer("M2").entity()};
+  static_cast<void>(design->geometryStorage().appendNetShape(
+      special, eccdb::DesignNetRectangle{.layer = m2, .rectangle = {1500, 300, 1600, 400}}));
+  DRCI.setDesignSource(design.get(), &tech, library.get());
+  const auto standalone_result = DRCI.buildResultShapeListFromEnTT();
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  const auto standalone_keys = canonicalShapes(standalone_result, enttNetNames(*design));
+  EXPECT_NE(std::find(standalone_keys.begin(), standalone_keys.end(),
+                      ShapeKey{.net_name = "VDD", .layer_idx = 1, .is_routing = true,
+                               .ll_x = 1500, .ll_y = 300, .ur_x = 1600, .ur_y = 400}),
+            standalone_keys.end())
+      << "standalone SPECIALNET geometry must reach iDRC result input";
+}
+
+TEST(Shapes, GeneratedViaOriginOffsetMatchesAndShiftsOnlyMetal)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("generated-via-origin-offset.lef");
+  const auto def = workspace.path("generated-via-origin-offset.def");
+  writeText(lef, kShapeFixtureLef);
+  auto def_text = std::string{kShapeFixtureDef};
+  const auto row_col = def_text.find("  + ROWCOL 2 3\n");
+  ASSERT_NE(row_col, std::string::npos);
+  def_text.insert(row_col + std::string_view{"  + ROWCOL 2 3\n"}.size(), "  + ORIGIN 10 -20\n  + OFFSET 3 4 -5 -6\n");
+  writeText(def, def_text);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+  loadIspd18IntoIdb(lef, def);
+
+  Logger::initInst();
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  DataManager::initInst();
+  DRCI.wrapDatabase();
+  const auto idb_result = DRCI.buildResultShapeList();
+  DataManager::destroyInst();
+
+  DRCI.setDesignSource(&design, &tech, &library);
+  DataManager::initInst();
+  DRCI.wrapDatabase();
+  const auto entt_result = DRCI.buildResultShapeList();
+  DataManager::destroyInst();
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+
+  const auto idb_names = idbNetNames();
+  const auto entt_names = enttNetNames(design);
+  expectShapeListsEqual("generated via origin/offset", idb_result, idb_names, entt_result, entt_names);
+
+  const auto result_keys = canonicalShapes(idb_result, idb_names);
+  const auto has_result = [&](const ShapeKey& expected) {
+    return std::find(result_keys.begin(), result_keys.end(), expected) != result_keys.end();
+  };
+  EXPECT_TRUE(has_result(ShapeKey{.net_name = "VDD", .layer_idx = 0, .is_routing = true,
+                                   .ll_x = 813, .ll_y = 809, .ur_x = 1213, .ur_y = 1159}));
+  EXPECT_TRUE(has_result(ShapeKey{.net_name = "VDD", .layer_idx = 1, .is_routing = true,
+                                   .ll_x = 785, .ll_y = 779, .ur_x = 1225, .ur_y = 1169}));
+  EXPECT_TRUE(has_result(ShapeKey{.net_name = "VDD", .layer_idx = 0, .is_routing = false,
+                                   .ll_x = 840, .ll_y = 845, .ur_x = 940, .ur_y = 965}));
+  dmInst->reset();
+}
+
+TEST(Shapes, BoundaryWireKeepsNegativeEnvelopeAndViaFootprint)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("boundary-wire.lef");
+  const auto def = workspace.path("boundary-wire.def");
+  writeText(lef, kShapeFixtureLef);
+  writeText(def, kBoundaryWireFixtureDef);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+  loadIspd18IntoIdb(lef, def);
+
+  Logger::initInst();
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  DataManager::initInst();
+  DRCI.wrapDatabase();
+  const auto idb_env = DRCI.buildEnvShapeList();
+  const auto idb_result = DRCI.buildResultShapeList();
+  DataManager::destroyInst();
+
+  DRCI.setDesignSource(&design, &tech, &library);
+  DataManager::initInst();
+  DRCI.wrapDatabase();
+  const auto entt_env = DRCI.buildEnvShapeList();
+  const auto entt_result = DRCI.buildResultShapeList();
+  DataManager::destroyInst();
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+
+  const auto idb_names = idbNetNames();
+  const auto entt_names = enttNetNames(design);
+  expectShapeListsEqual("boundary env", idb_env, idb_names, entt_env, entt_names);
+  expectShapeListsEqual("boundary result", idb_result, idb_names, entt_result, entt_names);
+
+  const auto env_keys = canonicalShapes(idb_env, idb_names);
+  const auto result_keys = canonicalShapes(idb_result, idb_names);
+  const auto has_env = [&](const ShapeKey& expected) {
+    return std::find(env_keys.begin(), env_keys.end(), expected) != env_keys.end();
+  };
+  const auto has_result = [&](const ShapeKey& expected) {
+    return std::find(result_keys.begin(), result_keys.end(), expected) != result_keys.end();
+  };
+
+  EXPECT_TRUE(has_env(ShapeKey{.net_name = "boundary", .layer_idx = 0, .is_routing = true,
+                                .ll_x = 200, .ll_y = 0, .ur_x = 300, .ur_y = 100}))
+      << "the DEF IO-port local rectangle must be translated by its PORT placement";
+  EXPECT_TRUE(has_result(ShapeKey{.net_name = "boundary", .layer_idx = 0, .is_routing = true,
+                                   .ll_x = 200, .ll_y = -50, .ur_x = 550, .ur_y = 50}))
+      << "a y=0 centerline must retain its negative half-width envelope";
+  EXPECT_TRUE(has_result(ShapeKey{.net_name = "boundary", .layer_idx = 0, .is_routing = true,
+                                   .ll_x = 420, .ll_y = -80, .ur_x = 580, .ur_y = 80}))
+      << "the lower routing footprint of VIA12 must retain negative coordinates";
+  EXPECT_TRUE(has_result(ShapeKey{.net_name = "boundary", .layer_idx = 1, .is_routing = true,
+                                   .ll_x = 420, .ll_y = -80, .ur_x = 580, .ur_y = 80}))
+      << "the upper routing footprint of VIA12 must retain negative coordinates";
+
+  dmInst->reset();
+}
+
+TEST(NetIndex, EccdbRunSnapshotTracksShapeOrdinalsAndRefreshesAfterStructuralChanges)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("net-index-fixture.lef");
+  const auto def = workspace.path("net-index-fixture.def");
+  writeText(lef, kShapeFixtureLef);
+  writeText(def, kShapeFixtureDef);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+
+  auto& netlist = design.netlistStorage();
+  const auto retired_regular = netlist.createNet(eccdb::DesignNet{.name = "retired_regular"});
+  const auto retired_special = netlist.createSpecialNet(eccdb::DesignNet{.name = "retired_special"});
+
+  const auto init = [&](std::string_view directory) {
+    std::map<std::string, std::any> config;
+    config.emplace("-temp_directory_path", workspace.path(directory).string());
+    config.emplace("-thread_number", 1);
+    DRCI.initDRC(std::move(config), true);
+  };
+  const auto expect_snapshot = [&]() {
+    const auto regular = netlist.regularNets();
+    const auto special = netlist.specialNets();
+    const auto names = enttNetNames(design);
+    EXPECT_EQ(names.size(), regular.size() + special.size());
+    for (size_t index = 0; index < regular.size(); ++index) {
+      EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(index)), netlist.net(regular[index]).name);
+    }
+    for (size_t index = 0; index < special.size(); ++index) {
+      EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(regular.size() + index)), netlist.net(special[index]).name);
+    }
+    EXPECT_EQ(DRCI.getNetName(-1), "obs");
+    EXPECT_EQ(DRCI.getNetName(-2), "<invalid_entt_net:-2>");
+    EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(names.size())),
+              "<invalid_entt_net:" + std::to_string(names.size()) + ">");
+    return names;
+  };
+
+  Logger::initInst();
+  DRCI.setDesignSource(&design, &tech, &library);
+  init("net-index-initial");
+  const auto initial_names = expect_snapshot();
+  const auto initial_shapes = DRCI.buildResultShapeList();
+  ASSERT_FALSE(initial_shapes.empty());
+  const auto shape_name = [&](int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
+    const auto shape = std::find_if(initial_shapes.begin(), initial_shapes.end(), [&](const ids::Shape& candidate) {
+      return candidate.ll_x == ll_x && candidate.ll_y == ll_y && candidate.ur_x == ur_x && candidate.ur_y == ur_y;
+    });
+    EXPECT_NE(shape, initial_shapes.end());
+    return shape == initial_shapes.end() ? std::string{} : DRCI.getNetName(shape->net_idx);
+  };
+  EXPECT_EQ(shape_name(50, 50, 550, 150), "z_sig");
+  EXPECT_EQ(shape_name(50, 250, 550, 350), "a_sig");
+  DRCI.destroyDRC();
+
+  // Change the object set, rather than merely renaming an old entry.  The
+  // second run has one additional regular net and one additional special net.
+  ASSERT_TRUE(netlist.destroyNet(retired_regular));
+  ASSERT_TRUE(netlist.destroyNet(retired_special));
+  static_cast<void>(netlist.createNet(eccdb::DesignNet{.name = "late_regular_0"}));
+  static_cast<void>(netlist.createNet(eccdb::DesignNet{.name = "late_regular_1"}));
+  const auto late_special_0 = netlist.createSpecialNet(eccdb::DesignNet{.name = "late_special_0"});
+  static_cast<void>(netlist.createSpecialNet(eccdb::DesignNet{.name = "late_special_1"}));
+  const auto m2 = eccdb::TechRoutingLayerId{tech.findLayer("M2").entity()};
+  static_cast<void>(design.geometryStorage().appendNetShape(
+      late_special_0, eccdb::DesignNetRectangle{.layer = m2, .rectangle = {1700, 300, 1800, 400}}));
+
+  init("net-index-refreshed");
+  const auto refreshed_names = expect_snapshot();
+  EXPECT_GT(refreshed_names.size(), initial_names.size());
+  EXPECT_EQ(std::find(refreshed_names.begin(), refreshed_names.end(), "retired_regular"), refreshed_names.end());
+  EXPECT_EQ(std::find(refreshed_names.begin(), refreshed_names.end(), "retired_special"), refreshed_names.end());
+  EXPECT_NE(std::find(refreshed_names.begin(), refreshed_names.end(), "late_regular_0"), refreshed_names.end());
+  EXPECT_NE(std::find(refreshed_names.begin(), refreshed_names.end(), "late_regular_1"), refreshed_names.end());
+  EXPECT_NE(std::find(refreshed_names.begin(), refreshed_names.end(), "late_special_0"), refreshed_names.end());
+  EXPECT_NE(std::find(refreshed_names.begin(), refreshed_names.end(), "late_special_1"), refreshed_names.end());
+
+  const auto refreshed_shapes = DRCI.buildResultShapeList();
+  const auto late_shape = std::find_if(refreshed_shapes.begin(), refreshed_shapes.end(), [](const ids::Shape& candidate) {
+    return candidate.ll_x == 1700 && candidate.ll_y == 300 && candidate.ur_x == 1800 && candidate.ur_y == 400;
+  });
+  ASSERT_NE(late_shape, refreshed_shapes.end());
+  EXPECT_EQ(DRCI.getNetName(late_shape->net_idx), "late_special_0");
+  DRCI.destroyDRC();
+
+  // Once the run ends, the public lookup intentionally returns to the live
+  // source; this also proves destroy cleared the stale run table.
+  const auto live_names = enttNetNames(design);
+  ASSERT_FALSE(live_names.empty());
+  EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(live_names.size() - 1)), live_names.back());
+  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+}
+
+TEST(Source, DatabaseContextCanAttachAndDetachNativeSource)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("context-fixture.lef");
+  const auto def = workspace.path("context-fixture.def");
+  writeText(lef, kShapeFixtureLef);
+  writeText(def, kShapeFixtureDef);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+  loadIspd18IntoIdb(lef, def);
+
+  Logger::initInst();
+  eccdb::DatabaseContext context(tech, library, design);
+  DRCI.setDesignSource(context);
+  const auto from_reference = DRCI.buildResultShapeList();
+  DRCI.setDesignSource(&context);
+  const auto from_pointer = DRCI.buildResultShapeList();
+  DRCI.setDesignSource(nullptr);
+  const auto after_detach = DRCI.buildResultShapeList();
+  DRCI.setDesignSource(&context);
+  const auto after_reattach = DRCI.buildResultShapeList();
+  DRCI.setDesignSource(nullptr);
+
+  expectShapeListsEqual("context pointer", from_reference, enttNetNames(design), from_pointer, enttNetNames(design));
+  expectShapeListsEqual("context detach", from_reference, enttNetNames(design), after_detach, idbNetNames());
+  expectShapeListsEqual("context reattach", from_reference, enttNetNames(design), after_reattach, enttNetNames(design));
+  dmInst->reset();
 }
 
 TEST(Shapes, DISABLED_UsesViaExitLayerAndAllSegmentsForRegularWire)

@@ -5,6 +5,7 @@ add_library(
   ${ICTS_DATA_MANAGER_IO}/WrapperRC.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperClockReader.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperClockWriter.cc
+  ${HOME_DATABASE}/eccdb/adapters/icts/CtsEccdbAdapter.cpp
 )
 
 target_include_directories(
@@ -13,6 +14,7 @@ target_include_directories(
   ${ICTS_DATA_MANAGER_IO}
   ${ICTS_DATA_MANAGER}
   PRIVATE
+  ${HOME_DATABASE}/eccdb/adapters/icts
   ${HOME_DATABASE}/data/design
   ${HOME_DATABASE}/data/design/db_design
   ${HOME_DATABASE}/data/design/db_layout
@@ -24,6 +26,7 @@ target_link_libraries(
   PUBLIC
   icts_source_data_manager_spatial
   icts_source_data_manager_routing
+  eccdb_core
   PRIVATE
   idm
   icts_source_data_manager_adapter_sdc

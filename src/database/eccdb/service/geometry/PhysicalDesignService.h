@@ -243,6 +243,9 @@ class PhysicalDesignService
   [[nodiscard]] PhysicalRoutingViaLayers routingViaLayers(TechViaMasterId tech_via, DesignViaId design_via) const;
 
   [[nodiscard]] bool isPlaced(DesignInstanceId instance) const;
+  // Transforms a master-local point using the same placement transform as
+  // the instance geometry visitors. The instance must be placed.
+  [[nodiscard]] Point placeInstanceMasterPoint(DesignInstanceId instance, Point point) const;
   // Visits one LEF PORT / dbMPin in master-local coordinates. The visitor
   // borrows only for the callback duration; it does not create design-domain
   // Shape objects for library geometry.

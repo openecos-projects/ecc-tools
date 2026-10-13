@@ -219,10 +219,15 @@ std::string removeEscapes(const std::string& name)
 {
   std::string result;
   result.reserve(name.size());
-  for (char ch : name) {
-    if (ch != '\\') {
-      result.push_back(ch);
+  for (std::size_t index = 0; index < name.size(); ++index) {
+    // SPEF identifiers use a slash only as an escape marker for the
+    // following character.  Removing every slash merges a literal escaped
+    // slash ("\\\\") with no slash at all.  Keep an unmatched trailing slash
+    // visible rather than silently dropping input data.
+    if (name[index] == '\\' && index + 1u < name.size()) {
+      ++index;
     }
+    result.push_back(name[index]);
   }
   return result;
 }
@@ -230,7 +235,7 @@ std::string removeEscapes(const std::string& name)
 std::string expandName(const Exchange& exchange, const std::string& name)
 {
   if (!text::startsWithNameIndex(name)) {
-    return name;
+    return removeEscapes(name);
   }
 
   const std::size_t begin = 1;
@@ -239,22 +244,20 @@ std::string expandName(const Exchange& exchange, const std::string& name)
       std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
   const auto map_it = exchange.index_to_name_map.find(index);
   if (map_it == exchange.index_to_name_map.end()) {
-    return name;
+    return removeEscapes(name);
   }
 
   std::string expanded = removeEscapes(map_it->second);
   if (colon != std::string::npos) {
-    expanded += name.substr(colon);
+    // The suffix is still a SPEF identifier fragment.  It can therefore
+    // contain escaped pin text rather than only a numeric parasitic node.
+    expanded += removeEscapes(name.substr(colon));
   }
   return expanded;
 }
 
 void expandAllNames(Exchange& exchange)
 {
-  if (exchange.index_to_name_map.empty()) {
-    return;
-  }
-
   for (auto& port : exchange.ports) {
     port.name = expandName(exchange, port.name);
   }

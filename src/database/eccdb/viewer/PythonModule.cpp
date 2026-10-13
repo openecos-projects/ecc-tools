@@ -52,6 +52,17 @@ PYBIND11_MODULE(eccdb_viewer, module)
         return std::make_unique<eccdb::Database>(eccdb::Database::open(
             eccdb::Config{.input = std::move(input)}));
       }, py::call_guard<py::gil_scoped_release>())
+      .def_static("open_lef_verilog", [](const std::vector<std::string>& lefs,
+                                          const std::string& verilog_file,
+                                          const std::string& top_module) {
+        eccdb::LefVerilogInput input;
+        input.verilog_file = verilog_file;
+        input.top_module = top_module;
+        for (const auto& lef : lefs) input.lef_files.emplace_back(lef);
+        return std::make_unique<eccdb::Database>(eccdb::Database::open(
+            eccdb::Config{.input = std::move(input)}));
+      }, py::arg("lefs"), py::arg("verilog_file"), py::arg("top_module") = "",
+         py::call_guard<py::gil_scoped_release>())
       .def("write_def", [](const eccdb::Database& database, const std::string& path) {
         database.writeDef(path);
       }, py::arg("path"), py::call_guard<py::gil_scoped_release>())

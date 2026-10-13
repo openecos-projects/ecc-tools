@@ -65,16 +65,20 @@ class NameExpander
 
   auto expand(const std::string& name) -> std::string
   {
+    // compare_spef reads the raw Exchange instead of calling
+    // SpefReader::expandName().  Direct names use the parser's canonical
+    // expansion.  For a mapped net, cache only the semantic base because a
+    // large SPEF can reuse it for many distinct parasitic-node suffixes.
     if (!startsWithNameIndex(name)) {
-      return name;
+      return spef::stripQuotes(spef::expandName(_exchange, name));
     }
 
     const Size begin = 1;
     const Size colon = name.find(':', begin);
     const Size index = static_cast<Size>(std::strtoull(name.substr(begin, colon - begin).c_str(), nullptr, 10));
-    const std::string* base_name = get_expanded_base_name(index);
+    const std::string* base_name = getExpandedBaseName(index);
     if (base_name == nullptr) {
-      return name;
+      return spef::stripQuotes(spef::expandName(_exchange, name));
     }
 
     if (colon == std::string::npos) {
@@ -83,7 +87,9 @@ class NameExpander
 
     std::string expanded = *base_name;
     expanded.reserve(base_name->size() + name.size() - colon);
-    expanded += name.substr(colon);
+    // Match spef::expandName(): a node suffix is still raw SPEF spelling and
+    // needs one pairwise escape pass, but the cached base is already semantic.
+    expanded += spef::removeEscapes(name.substr(colon));
     return expanded;
   }
 
@@ -93,7 +99,7 @@ class NameExpander
     return name.size() >= 2 && name.front() == '*' && std::isdigit(static_cast<unsigned char>(name[1]));
   }
 
-  auto get_expanded_base_name(Size index) -> const std::string*
+  auto getExpandedBaseName(Size index) -> const std::string*
   {
     const auto cache_it = _expanded_base_names.find(index);
     if (cache_it != _expanded_base_names.end()) {

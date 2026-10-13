@@ -84,6 +84,7 @@ void IRAnalyzer::analyzePowerGraph(PowerGraph& power_graph)
 IAModel IRAnalyzer::initIAModel(PowerGraph& power_graph)
 {
   IAModel ia_model;
+  ia_model.get_node_id_to_canonical_node_id_list() = power_graph.node_canonical_id_list();
   buildSourceVoltage(power_graph, ia_model);
   buildNodeMatrixIndex(power_graph, ia_model);
   buildNodeCurrentMap(power_graph, ia_model);
@@ -122,16 +123,18 @@ void IRAnalyzer::buildSourceVoltage(PowerGraph& power_graph, IAModel& ia_model)
 
 void IRAnalyzer::buildNodeMatrixIndex(PowerGraph& power_graph, IAModel& ia_model)
 {
+  const auto& canonical_node_ids = ia_model.get_node_id_to_canonical_node_id_list();
   for (std::size_t source_node_id : power_graph.get_source_node_id_list()) {
-    ia_model.get_source_node_id_set().insert(source_node_id);
+    ia_model.get_source_node_id_set().insert(canonical_node_ids[source_node_id]);
   }
   for (PowerNode& power_node : power_graph.get_node_list()) {
-    if (ia_model.get_source_node_id_set().count(power_node.get_node_id()) != 0) {
+    const auto canonical_node_id = canonical_node_ids[power_node.get_node_id()];
+    if (canonical_node_id != power_node.get_node_id() || ia_model.get_source_node_id_set().count(canonical_node_id) != 0) {
       continue;
     }
     std::size_t matrix_idx = ia_model.get_matrix_idx_to_node_id_list().size();
-    ia_model.get_node_id_to_matrix_idx_map()[power_node.get_node_id()] = matrix_idx;
-    ia_model.get_matrix_idx_to_node_id_list().push_back(power_node.get_node_id());
+    ia_model.get_node_id_to_matrix_idx_map()[canonical_node_id] = matrix_idx;
+    ia_model.get_matrix_idx_to_node_id_list().push_back(canonical_node_id);
   }
 }
 
@@ -161,8 +164,9 @@ void IRAnalyzer::buildInstanceNodeCurrent(PowerGraph& power_graph, uint64_t inst
   }
   std::set<std::size_t> node_id_set;
   for (std::size_t node_id : power_graph.get_instance_node_id_list_map()[instance_id]) {
-    if (ia_model.get_source_node_id_set().count(node_id) == 0) {
-      node_id_set.insert(node_id);
+    const auto canonical_node_id = ia_model.get_node_id_to_canonical_node_id_list()[node_id];
+    if (ia_model.get_source_node_id_set().count(canonical_node_id) == 0) {
+      node_id_set.insert(canonical_node_id);
     }
   }
   if (node_id_set.empty()) {
@@ -207,12 +211,16 @@ void IRAnalyzer::solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model)
   }
 
   std::vector<Eigen::Triplet<double>> conductance_triplet_list;
+  const auto& canonical_node_ids = ia_model.get_node_id_to_canonical_node_id_list();
   for (PowerEdge& power_edge : power_graph.get_edge_list()) {
     if (power_edge.get_resistance() <= EMIR_ERROR) {
       EMIRLOG.error(Loc::current(), "The power edge resistance is invalid!");
     }
-    std::size_t first_node_id = power_edge.get_first_node_id();
-    std::size_t second_node_id = power_edge.get_second_node_id();
+    std::size_t first_node_id = canonical_node_ids[power_edge.get_first_node_id()];
+    std::size_t second_node_id = canonical_node_ids[power_edge.get_second_node_id()];
+    if (first_node_id == second_node_id) {
+      continue;
+    }
     bool first_is_source = ia_model.get_source_node_id_set().count(first_node_id) != 0;
     bool second_is_source = ia_model.get_source_node_id_set().count(second_node_id) != 0;
     double conductance = 1.0 / power_edge.get_resistance();
@@ -258,14 +266,15 @@ void IRAnalyzer::solveNodeVoltage(PowerGraph& power_graph, IAModel& ia_model)
 void IRAnalyzer::updatePowerNodeVoltage(PowerGraph& power_graph, IAModel& ia_model, std::vector<double>& node_voltage_list)
 {
   for (PowerNode& power_node : power_graph.get_node_list()) {
-    if (ia_model.get_source_node_id_set().count(power_node.get_node_id()) != 0) {
+    const auto canonical_node_id = ia_model.get_node_id_to_canonical_node_id_list()[power_node.get_node_id()];
+    if (ia_model.get_source_node_id_set().count(canonical_node_id) != 0) {
       power_node.set_voltage(ia_model.get_source_voltage());
     } else {
-      std::size_t matrix_idx = ia_model.get_node_id_to_matrix_idx_map()[power_node.get_node_id()];
+      std::size_t matrix_idx = ia_model.get_node_id_to_matrix_idx_map()[canonical_node_id];
       power_node.set_voltage(node_voltage_list[matrix_idx]);
     }
-    if (ia_model.get_node_current_map().count(power_node.get_node_id()) != 0) {
-      power_node.set_current(ia_model.get_node_current_map()[power_node.get_node_id()]);
+    if (ia_model.get_node_current_map().count(canonical_node_id) != 0) {
+      power_node.set_current(ia_model.get_node_current_map()[canonical_node_id]);
     } else {
       power_node.set_current(0.0);
     }

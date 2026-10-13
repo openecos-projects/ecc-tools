@@ -30,6 +30,10 @@
 #include "library/LibraryStore.h"
 #include "tech/TechStore.h"
 
+#if ECCDB_HAS_VERILOG
+#include "import/verilog/VerilogNetlistImportService.h"
+#endif
+
 #if ECCDB_HAS_LEF_DEF
 #include "def/DefDesignImporter.h"
 #include "lef/LefLibraryImporter.h"
@@ -107,6 +111,33 @@ Database Database::open(const Config& config)
     technology = BinaryDatabaseImporter::loadTech(binary->files.technology);
     library = BinaryDatabaseImporter::loadLibrary(binary->files.library, *technology);
     design = BinaryDatabaseImporter::loadDesign(binary->files.design, *technology, *library);
+  } else if (const auto* lef_verilog = std::get_if<LefVerilogInput>(&config.input)) {
+    if (lef_verilog->lef_files.empty()) {
+      throw std::invalid_argument("LEF/Verilog input requires at least one LEF file");
+    }
+    for (const auto& lef : lef_verilog->lef_files) {
+      requirePath(lef, "LEF");
+    }
+    requirePath(lef_verilog->verilog_file, "Verilog");
+
+#if ECCDB_HAS_LEF_DEF
+    technology = std::make_unique<TechStore>();
+    LefTechImporter(*technology).import(lef_verilog->lef_files);
+
+    library = std::make_unique<LibraryStore>(technology->techRegistry());
+    LefLibraryImporter library_importer(*technology, *library);
+    library_importer.import(lef_verilog->lef_files);
+    for (const auto& diagnostic : library_importer.diagnostics()) {
+      diagnostics.push_back(ImportDiagnostic{.source = "LEF",
+                                            .statement = diagnostic.statement,
+                                            .occurrence_count = diagnostic.occurrence_count});
+    }
+    design = std::make_unique<DesignStore>(technology->techRegistry(), library->libraryRegistry(),
+                                           &technology->geometryRegistry());
+#else
+    throw std::runtime_error(
+        "this EccDB build has no LEF parser support; configure with ECCDB_STANDALONE_LEF_DEF=ON");
+#endif
   } else {
     const auto& lef_def = std::get<LefDefInput>(config.input);
     if (lef_def.lef_files.empty()) {
@@ -147,6 +178,9 @@ Database Database::open(const Config& config)
 
   Database database{std::make_unique<State>(std::move(technology), std::move(library), std::move(design),
                                           std::move(diagnostics))};
+  if (const auto* lef_verilog = std::get_if<LefVerilogInput>(&config.input)) {
+    static_cast<void>(database.importVerilog(lef_verilog->verilog_file, lef_verilog->top_module));
+  }
   if (config.binary_cache) {
     database.writeBinary(*config.binary_cache);
   }
@@ -179,6 +213,18 @@ const std::vector<ImportDiagnostic>& Database::diagnostics() const noexcept
 {
   static const std::vector<ImportDiagnostic> empty;
   return _state ? _state->diagnostics : empty;
+}
+
+VerilogNetlistImportResult Database::importVerilog(const std::filesystem::path& file,
+                                                   std::string_view top_module)
+{
+#if ECCDB_HAS_VERILOG
+  return VerilogNetlistImportService(state().context).import(file, top_module);
+#else
+  static_cast<void>(file);
+  static_cast<void>(top_module);
+  throw std::runtime_error("this EccDB build has no Verilog parser support");
+#endif
 }
 
 void Database::writeDef(const std::filesystem::path& file) const

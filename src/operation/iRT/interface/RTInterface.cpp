@@ -85,6 +85,7 @@ void RTInterface::initRT(std::map<std::string, std::any> config_map)
   TOPOBuilder::initInst();
   DRCEngine::initInst();
   GDSPlotter::initInst();
+  _rt_initialized = true;
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -95,6 +96,7 @@ void RTInterface::runERT(std::map<std::string, std::any> config_map)
   RTLOG.info(Loc::current(), "Starting...");
 
   RTTB.init();
+  _topo_initialized = true;
   RTGP.init();
 
   EarlyRouter::initInst();
@@ -102,6 +104,7 @@ void RTInterface::runERT(std::map<std::string, std::any> config_map)
   EarlyRouter::destroyInst();
 
   RTTB.destroy();
+  _topo_initialized = false;
   RTGP.destroy();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -113,7 +116,9 @@ void RTInterface::runRT()
   RTLOG.info(Loc::current(), "Starting...");
 
   RTTB.init();
+  _topo_initialized = true;
   RTGP.init();
+  _drc_engine_initialized = true;
   RTDE.init();
 
   PinAccessor::initInst();
@@ -153,23 +158,76 @@ void RTInterface::runRT()
   ViolationReporter::destroyInst();
 
   RTTB.destroy();
+  _topo_initialized = false;
   RTGP.destroy();
   RTDE.destroy();
+  _drc_engine_initialized = false;
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void RTInterface::destroyRT()
 {
+  finishRT(true);
+}
+
+void RTInterface::abortRT()
+{
+  // runRT owns these short-lived workers between their init/destroy pairs.
+  // An exception skips the pair's trailing destroy call, so release them
+  // before the persistent DataManager is torn down.
+  PinAccessor::destroyInst();
+  SupplyAnalyzer::destroyInst();
+  PlanarRouter::destroyInst();
+  LayerAssigner::destroyInst();
+  TrackAssigner::destroyInst();
+  DetailedRouter::destroyInst();
+  ViolationReporter::destroyInst();
+  EarlyRouter::destroyInst();
+  // RTDE may fail while iDRC is still only partially initialized, so do not
+  // rely on _idrc_initialized as the cleanup gate.
+  if (_drc_engine_initialized || _idrc_initialized) {
+    abortIDRC();
+  }
+  _drc_engine_initialized = false;
+  if (_topo_initialized) {
+    RTTB.destroy();
+  }
+  _topo_initialized = false;
+
+  if (_rt_initialized) {
+    RTGP.destroy();
+    finishRT(false);
+    return;
+  }
+
+  // initRT can fail before publishing _rt_initialized.  Static destruction
+  // is null-safe and releases the partially created persistent modules.
+  GDSPlotter::destroyInst();
+  DRCEngine::destroyInst();
+  TOPOBuilder::destroyInst();
+  DataManager::destroyInst();
+  Logger::destroyInst();
+}
+
+void RTInterface::finishRT(bool write_output)
+{
+  if (!_rt_initialized) {
+    return;
+  }
+
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
   GDSPlotter::destroyInst();
   DRCEngine::destroyInst();
   TOPOBuilder::destroyInst();
-  RTDM.output();
+  if (write_output) {
+    RTDM.output();
+  }
   DataManager::destroyInst();
   RTUTIL.releaseMemory("DataManager");
+  _rt_initialized = false;
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 
@@ -325,17 +383,33 @@ void RTInterface::setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* 
     _owned_database_context = std::make_unique<eccdb::DatabaseContext>(*_tech, *_library, *_design);
     _database_context = _owned_database_context.get();
   }
-  DRCI.setDesignSource(design, tech, library);
+  if (_database_context != nullptr) {
+    DRCI.setDesignSource(_database_context);
+  } else {
+    DRCI.setDesignSource(design, tech, library);
+  }
 }
 
 void RTInterface::setDesignSource(eccdb::DatabaseContext& context)
 {
+  setDesignSource(&context);
+}
+
+void RTInterface::setDesignSource(eccdb::DatabaseContext* context)
+{
   _owned_database_context.reset();
-  _database_context = &context;
-  _design = &context.design();
-  _tech = context.technology();
-  _library = context.library();
-  DRCI.setDesignSource(_design, _tech, _library);
+  _database_context = context;
+  if (_database_context == nullptr) {
+    _design = nullptr;
+    _tech = nullptr;
+    _library = nullptr;
+    DRCI.setDesignSource(nullptr);
+    return;
+  }
+  _design = &_database_context->design();
+  _tech = _database_context->technology();
+  _library = _database_context->library();
+  DRCI.setDesignSource(_database_context);
 }
 
 eccdb::DatabaseContext& RTInterface::databaseContext() const noexcept
@@ -1690,13 +1764,28 @@ void RTInterface::initIDRC()
   std::map<std::string, std::any> config_map;
   config_map.insert({"-temp_directory_path", RTUTIL.getString(temp_directory_path, "other_tools/idrc/")});
   config_map.insert({"-thread_number", thread_number});
-  DRCI.setDesignSource(_design, _tech, _library);
+  if (_database_context != nullptr) {
+    DRCI.setDesignSource(_database_context);
+  } else {
+    DRCI.setDesignSource(_design, _tech, _library);
+  }
   DRCI.initDRC(config_map, true);
+  _idrc_initialized = true;
 }
 
 void RTInterface::destroyIDRC()
 {
+  if (!_idrc_initialized) {
+    return;
+  }
   DRCI.destroyDRC();
+  _idrc_initialized = false;
+}
+
+void RTInterface::abortIDRC()
+{
+  DRCI.abortDRC();
+  _idrc_initialized = false;
 }
 
 std::vector<Violation> RTInterface::getViolationList(std::vector<std::pair<EXTLayerRect*, bool>>& env_shape_list,

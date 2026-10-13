@@ -99,6 +99,11 @@ RCXInterface& RCXInterface::getInst()
   return *_rcx_interface_instance;
 }
 
+void RCXInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
 void RCXInterface::destroyInst()
 {
   if (_rcx_interface_instance != nullptr) {
@@ -189,6 +194,33 @@ void RCXInterface::destroyRCX()
   RCXLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
   // clang-format on
   Logger::destroyInst();
+}
+
+void RCXInterface::abortRCX() noexcept
+{
+  try {
+    SPEFWriter::destroyInst();
+    CapExtractor::destroyInst();
+    ResExtractor::destroyInst();
+    VarProcessor::destroyInst();
+    EnvBuilder::destroyInst();
+    TopoBuilder::destroyInst();
+    DataManager::destroyInst();
+    Logger::destroyInst();
+  } catch (...) {
+  }
+}
+
+std::vector<std::string> RCXInterface::getSpefOutputPaths()
+{
+  std::vector<std::string> paths;
+  Database& database = RCXDM.getDatabase();
+  const std::filesystem::path output_directory = RCXDM.getConfig().sw_temp_directory_path;
+  paths.reserve(database.get_corner_data_list().size());
+  for (CornerData& corner : database.get_corner_data_list()) {
+    paths.push_back((output_directory / RCXUTIL.getString(database.get_design_name(), "_", corner.get_corner_name(), ".spef")).string());
+  }
+  return paths;
 }
 
 void RCXInterface::compareSpef(std::map<std::string, std::any> config_map)
@@ -339,9 +371,17 @@ void RCXInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
+  // The native flow runner gives every stage a private directory. RCX removes
+  // its temporary root during setup, so this must take precedence over a
+  // config-file output path (which may be a user input directory).
+  const std::string stage_directory = RCXUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "");
+
   // 通用配置
   config.thread_number = normalizeThreadNumber(config_json);
-  if (config_json.contains("output")) {
+  if (!stage_directory.empty()) {
+    config.output_directory_path = std::filesystem::absolute(stage_directory).string();
+    config.temp_directory_path = config.output_directory_path;
+  } else if (config_json.contains("output")) {
     std::string output_directory_path = config_json["output"].get<std::string>();
     if (!output_directory_path.empty()) {
       config.output_directory_path = RCXUTIL.getAbsolutePath(config_directory_path, output_directory_path);
@@ -377,6 +417,10 @@ void RCXInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void RCXInterface::wrapDatabase()
 {
+  if (_database_context != nullptr) {
+    wrapDatabaseFromEccdb();
+    return;
+  }
   if (dmInst == nullptr) {
     return;
   }
@@ -670,8 +714,8 @@ void RCXInterface::wrapVia(Net& net, idb::IdbVia* idb_via)
   idb::IdbLayerShape idb_cut_layer_shape = idb_via->get_cut_layer_shape();
   idb::IdbLayerShape idb_bottom_layer_shape = idb_via->get_bottom_layer_shape();
   if (idb_top_layer_shape.get_layer() == nullptr || idb_cut_layer_shape.get_layer() == nullptr || idb_bottom_layer_shape.get_layer() == nullptr
-      || idb_top_layer_shape.get_rect_list().size() != 1 || idb_cut_layer_shape.get_rect_list().size() != 1
-      || idb_bottom_layer_shape.get_rect_list().size() != 1) {
+      || idb_top_layer_shape.get_rect_list().empty() || idb_cut_layer_shape.get_rect_list().empty()
+      || idb_bottom_layer_shape.get_rect_list().empty()) {
     return;
   }
 
@@ -679,18 +723,20 @@ void RCXInterface::wrapVia(Net& net, idb::IdbVia* idb_via)
   via.set_via_name(getSPEFName(idb_via->get_name()));
   via.set_point(GTLPointInt(idb_via->get_coordinate()->get_x(), idb_via->get_coordinate()->get_y()));
 
-  idb::IdbRect* idb_top_shape = idb_top_layer_shape.get_rect_list().front();
-  idb::IdbRect* idb_cut_shape = idb_cut_layer_shape.get_rect_list().front();
-  idb::IdbRect* idb_bottom_shape = idb_bottom_layer_shape.get_rect_list().front();
+  // iDB's legacy rectangle accessors are not const-qualified. Keep local
+  // copies mutable while still using the layer-wide union rectangle.
+  idb::IdbRect idb_top_shape = idb_top_layer_shape.get_bounding_box();
+  idb::IdbRect idb_cut_shape = idb_cut_layer_shape.get_bounding_box();
+  idb::IdbRect idb_bottom_shape = idb_bottom_layer_shape.get_bounding_box();
   via.set_top_layer_shape(
       LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_top_layer_shape.get_layer()->get_name()),
-                 GTLRectInt(idb_top_shape->get_low_x(), idb_top_shape->get_low_y(), idb_top_shape->get_high_x(), idb_top_shape->get_high_y())));
+                 GTLRectInt(idb_top_shape.get_low_x(), idb_top_shape.get_low_y(), idb_top_shape.get_high_x(), idb_top_shape.get_high_y())));
   via.set_cut_layer_shape(
       LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_cut_layer_shape.get_layer()->get_name()),
-                 GTLRectInt(idb_cut_shape->get_low_x(), idb_cut_shape->get_low_y(), idb_cut_shape->get_high_x(), idb_cut_shape->get_high_y())));
+                 GTLRectInt(idb_cut_shape.get_low_x(), idb_cut_shape.get_low_y(), idb_cut_shape.get_high_x(), idb_cut_shape.get_high_y())));
   via.set_bottom_layer_shape(
       LayerShape(RCXDM.getDatabase().get_layer_table().get_design_idx(idb_bottom_layer_shape.get_layer()->get_name()),
-                 GTLRectInt(idb_bottom_shape->get_low_x(), idb_bottom_shape->get_low_y(), idb_bottom_shape->get_high_x(), idb_bottom_shape->get_high_y())));
+                 GTLRectInt(idb_bottom_shape.get_low_x(), idb_bottom_shape.get_low_y(), idb_bottom_shape.get_high_x(), idb_bottom_shape.get_high_y())));
   net.get_via_list().push_back(std::move(via));
 }
 
@@ -706,6 +752,7 @@ void RCXInterface::wrapSpecialNet()
     for (idb::IdbSpecialWire* idb_special_wire : idb_special_net->get_wire_list()->get_wire_list()) {
       for (idb::IdbSpecialWireSegment* idb_special_segment : idb_special_wire->get_segment_list()) {
         if (idb_special_segment->is_via()) {
+          wrapVia(special_net, idb_special_segment->get_via());
           continue;
         }
 

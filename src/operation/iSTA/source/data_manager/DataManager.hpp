@@ -32,7 +32,7 @@ class DataManager
   // function
   void input(std::map<std::string, std::any>& config_map);
   void output();
-  void readConstraint();
+  bool readConstraint();
 
   Config& getConfig() { return _config; }
   Database& getDatabase() { return _database; }

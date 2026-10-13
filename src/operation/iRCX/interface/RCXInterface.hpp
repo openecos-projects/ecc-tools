@@ -28,6 +28,10 @@ class IdbRegularWireSegment;
 class IdbVia;
 }  // namespace idb
 
+namespace eccdb {
+class DatabaseContext;
+}  // namespace eccdb
+
 namespace ircx {
 class Net;
 }  // namespace ircx
@@ -50,6 +54,10 @@ class RCXInterface
   void initRCX(std::map<std::string, std::any> config_map);
   void runRCX();
   void destroyRCX();
+  // Releases an incomplete read-only RCX session without producing output.
+  void abortRCX() noexcept;
+  // Paths written by the current RCX session, one per resolved process corner.
+  [[nodiscard]] std::vector<std::string> getSpefOutputPaths();
   void compareSpef(std::map<std::string, std::any> config_map);
   void dumpNetShape();
   void runRCXFromTopo(std::map<std::string, std::any> config_map);
@@ -68,6 +76,10 @@ class RCXInterface
 
 #if 1  // database
   void wrapDatabase();
+  // Borrowed native source. Passing nullptr restores the legacy iDB source.
+  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
+  void setDesignSource(eccdb::DatabaseContext& context) noexcept { setDesignSource(&context); }
+  void wrapDatabaseFromEccdb();
   void wrapDBInfo();
   void wrapLayerList();
   void wrapRoutingLayer(idb::IdbLayerRouting* idb_routing_layer);
@@ -96,6 +108,7 @@ class RCXInterface
 
  private:
   static RCXInterface* _rcx_interface_instance;
+  eccdb::DatabaseContext* _database_context = nullptr;
 
   RCXInterface() = default;
   RCXInterface(const RCXInterface& other) = delete;

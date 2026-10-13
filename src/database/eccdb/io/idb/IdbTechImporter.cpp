@@ -401,6 +401,10 @@ TechCutLayer importCutLayer(::idb::IdbLayerCut& source)
     target.flags |= TechCutLayerFlag::kHasWidth;
     target.width = source.get_width();
   }
+  if (source.get_resistance() > 0.0) {
+    target.flags |= TechCutLayerFlag::kHasResistance;
+    target.resistance_per_cut = source.get_resistance();
+  }
   return target;
 }
 
@@ -1133,11 +1137,10 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
       if (generated.row_count != 1u || generated.column_count != 1u) {
         generated.flags |= TechGeneratedViaMasterFlag::kHasRowCol;
       }
-      if (generated.origin_x != 0 || generated.origin_y != 0) {
+      if (source_generate->has_origin()) {
         generated.flags |= TechGeneratedViaMasterFlag::kHasOrigin;
       }
-      if (generated.bottom_offset_x != 0 || generated.bottom_offset_y != 0 || generated.top_offset_x != 0
-          || generated.top_offset_y != 0) {
+      if (source_generate->has_offset()) {
         generated.flags |= TechGeneratedViaMasterFlag::kHasOffset;
       }
       if (auto* pattern = source_generate->get_patttern(); pattern != nullptr) {

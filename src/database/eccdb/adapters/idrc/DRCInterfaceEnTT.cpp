@@ -44,6 +44,7 @@
 #include "design/DesignStore.h"
 #include "geometry/PolygonRectDecomposer.h"
 #include "library/LibraryStore.h"
+#include "service/geometry/PhysicalDesignService.h"
 #include "tech/TechStore.h"
 
 namespace idrc {
@@ -276,6 +277,14 @@ ViaShapes generatedViaShapes(const eccdb::DesignVia& via, eccdb::Point origin)
   const int32_t columns = static_cast<int32_t>(std::max(generated.column_count, 1u));
   const int32_t origin_x = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOrigin) != 0 ? generated.origin.x : 0;
   const int32_t origin_y = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOrigin) != 0 ? generated.origin.y : 0;
+  const int32_t bottom_offset_x
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.bottom_offset.x : 0;
+  const int32_t bottom_offset_y
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.bottom_offset.y : 0;
+  const int32_t top_offset_x
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.top_offset.x : 0;
+  const int32_t top_offset_y
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.top_offset.y : 0;
   const int32_t cut_width_total = columns * generated.cut_size_x + (columns - 1) * generated.cut_spacing_x;
   const int32_t cut_height_total = rows * generated.cut_size_y + (rows - 1) * generated.cut_spacing_y;
   const int32_t ll_x_min = (-cut_width_total / 2) + origin_x;
@@ -305,16 +314,16 @@ ViaShapes generatedViaShapes(const eccdb::DesignVia& via, eccdb::Point origin)
                                     .ur_x = ll_x_min + cut_width_total,
                                     .ur_y = ll_y_min + cut_height_total};
   append(eccdb::TechLayerId{generated.bottom_layer.entity()},
-         eccdb::Rect{.ll_x = cut_box.ll_x - generated.bottom_enclosure_x,
-                             .ll_y = cut_box.ll_y - generated.bottom_enclosure_y,
-                             .ur_x = cut_box.ur_x + generated.bottom_enclosure_x,
-                             .ur_y = cut_box.ur_y + generated.bottom_enclosure_y},
+         eccdb::Rect{.ll_x = cut_box.ll_x - generated.bottom_enclosure_x + bottom_offset_x,
+                     .ll_y = cut_box.ll_y - generated.bottom_enclosure_y + bottom_offset_y,
+                     .ur_x = cut_box.ur_x + generated.bottom_enclosure_x + bottom_offset_x,
+                     .ur_y = cut_box.ur_y + generated.bottom_enclosure_y + bottom_offset_y},
          false);
   append(eccdb::TechLayerId{generated.top_layer.entity()},
-         eccdb::Rect{.ll_x = cut_box.ll_x - generated.top_enclosure_x,
-                             .ll_y = cut_box.ll_y - generated.top_enclosure_y,
-                             .ur_x = cut_box.ur_x + generated.top_enclosure_x,
-                             .ur_y = cut_box.ur_y + generated.top_enclosure_y},
+         eccdb::Rect{.ll_x = cut_box.ll_x - generated.top_enclosure_x + top_offset_x,
+                     .ll_y = cut_box.ll_y - generated.top_enclosure_y + top_offset_y,
+                     .ur_x = cut_box.ur_x + generated.top_enclosure_x + top_offset_x,
+                     .ur_y = cut_box.ur_y + generated.top_enclosure_y + top_offset_y},
          false);
   return shapes;
 }
@@ -1038,7 +1047,7 @@ void DRCInterface::wrapDatabaseFromEnTT()
   wrapLayerInfo();
 }
 
-std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
+std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT(std::set<size_t>* obs_shape_idx_set)
 {
   std::vector<ids::Shape> env_shape_list;
   if (_design == nullptr || _tech == nullptr || _library == nullptr) {
@@ -1050,10 +1059,14 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
   const auto& tech = *_tech;
   const auto& library = *_library;
   const EnttLayerTable layers(tech);
+  const eccdb::PhysicalDesignService physical(tech, library, design);
   const NetIndexMap net_index_map = netIndexMap(design);
   NetSkipCache skip_cache;
 
   for (const auto instance_id : design.netlistStorage().instances()) {
+    if (!physical.isPlaced(instance_id)) {
+      continue;
+    }
     const auto& instance = design.netlistStorage().instance(instance_id);
     const auto& master = library.cellMasterStorage().cellMaster(instance.master);
     const int32_t width = static_cast<int32_t>(master.width);
@@ -1063,7 +1076,11 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
       const auto& obs = library.cellMasterStorage().obs(instance.master);
       for (const auto& clause : obs.layer_clauses) {
         for (const auto& rect : geometryRects(library.geometryStorage(), clause.geometry)) {
+          const auto shape_index = env_shape_list.size();
           appendShape(env_shape_list, layers, clause.layer, placeMasterRect(rect, instance.origin, instance.orientation, width, height), -1);
+          if (obs_shape_idx_set != nullptr && env_shape_list.size() != shape_index && env_shape_list.back().is_routing) {
+            obs_shape_idx_set->insert(shape_index);
+          }
         }
       }
     }
@@ -1129,6 +1146,20 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeListFromEnTT()
     }
   }
 
+  physical.forEachRoutingBlockage([&](const auto blockage_id, const auto&) {
+    physical.forEachRoutingBlockageGeometry(
+        blockage_id,
+        eccdb::PhysicalGeometryVisitor{
+            .rectangle = [&](const eccdb::PhysicalLayerRect& shape) {
+              appendShape(env_shape_list, layers, shape.layer, shape.rectangle, -1);
+            },
+            .polygon = [&](const eccdb::PhysicalLayerPolygon& shape) {
+              for (const auto& rect : eccdb::decomposePolygonToRectangles(shape.points)) {
+                appendShape(env_shape_list, layers, shape.layer, rect, -1);
+              }
+            }});
+  });
+
   return env_shape_list;
 }
 
@@ -1142,7 +1173,9 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeListFromEnTT()
 
   const auto& design = *_design;
   const auto& tech = *_tech;
+  const auto& library = *_library;
   const EnttLayerTable layers(tech);
+  const eccdb::PhysicalDesignService physical(tech, library, design);
   const NetIndexMap net_index_map = netIndexMap(design);
 
   const auto appendVia = [&](const eccdb::DesignRouteVia& route_via, int32_t net_idx) {
@@ -1189,6 +1222,26 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeListFromEnTT()
         });
   };
 
+  const auto appendStandaloneGeometry = [&](eccdb::DesignNetId net_id, int32_t net_idx) {
+    physical.forEachNetGeometry(
+        net_id,
+        eccdb::PhysicalNetGeometryVisitor{
+            .rectangle = [&](const eccdb::DesignGeometryRectangle& shape) {
+              appendShape(result_shape_list, layers, eccdb::TechLayerId{shape.layer.entity()}, shape.rectangle, net_idx);
+            },
+            .polygon = [&](const eccdb::DesignGeometryPolygon& shape) {
+              for (const auto& rect : eccdb::decomposePolygonToRectangles(shape.points)) {
+                appendShape(result_shape_list, layers, eccdb::TechLayerId{shape.layer.entity()}, rect, net_idx);
+              }
+            },
+            .via = [&](const eccdb::DesignGeometryNetVia& shape) {
+              for (const auto origin : shape.origins) {
+                appendViaShapes(result_shape_list, layers,
+                                resolveViaShapes(design, tech, shape.tech_via, shape.design_via, origin), net_idx);
+              }
+            }});
+  };
+
   for (const auto net_id : design.netlistStorage().regularNets()) {
     const int32_t net_idx = netIndex(net_id, net_index_map);
     for (const auto wire_id : design.routingStorage().wires(net_id)) {
@@ -1201,6 +1254,7 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeListFromEnTT()
     for (const auto wire_id : design.routingStorage().wires(net_id)) {
       appendWireShapes(wire_id, net_idx, true);
     }
+    appendStandaloneGeometry(net_id, net_idx);
   }
 
   return result_shape_list;

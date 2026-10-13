@@ -87,6 +87,12 @@ class DataManager final
   static auto getInst() -> DataManager&;
   static void destroyInst();
 
+  // Native callers borrow an EccDB service context.  The context and the
+  // external SDC/Liberty providers must outlive the active CTS session.
+  auto setDesignSource(eccdb::DatabaseContext* context) -> void;
+  auto setSdcPath(std::string sdc_path) -> void;
+  auto setLibertyCellLookup(Wrapper::LibertyCellLookup liberty_cell_lookup) -> void;
+
   auto input(const DataManagerInput& input) -> DataManagerStatus;
   void reset();
 
@@ -145,6 +151,9 @@ class DataManager final
   OptimizationSummary _optimization_summary;
   InstantiationSummary _instantiation_summary;
   EvaluationState _evaluation_state;
+  eccdb::DatabaseContext* _database_context = nullptr;
+  std::string _sdc_path;
+  Wrapper::LibertyCellLookup _liberty_cell_lookup;
   CTSRunState _state = CTSRunState::kEmpty;
 };
 

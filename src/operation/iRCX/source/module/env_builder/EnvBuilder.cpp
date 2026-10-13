@@ -16,6 +16,9 @@
 // ***************************************************************************************
 #include "EnvBuilder.hpp"
 
+#include <algorithm>
+#include <numeric>
+
 #include "EnvTrackOverlapMerger.hpp"
 #include "Utility.hpp"
 
@@ -66,8 +69,30 @@ void EnvBuilder::buildEBModel(EBModel& eb_model)
   eb_model.set_bucket_size_um(5.0);
   eb_model.set_cross_layer_num(3);
 
+  assignStableNetRanks();
+
   if (!buildNetEnvList(eb_model)) {
     RCXLOG.error(Loc::current(), "Build net env failed!");
+  }
+}
+
+void EnvBuilder::assignStableNetRanks()
+{
+  Database& database = RCXDM.getDatabase();
+  LayoutData& layout_data = database.get_layout_data();
+  TopoPool& topo_pool = database.get_topo_pool();
+  std::vector<Net>& net_list = layout_data.get_net_list();
+
+  std::vector<int32_t> net_idx_list(net_list.size());
+  std::iota(net_idx_list.begin(), net_idx_list.end(), 0);
+  std::sort(net_idx_list.begin(), net_idx_list.end(), [&net_list](int32_t lhs, int32_t rhs) {
+    return net_list[lhs].get_net_name() < net_list[rhs].get_net_name();
+  });
+
+  for (int32_t stable_net_rank = 0; stable_net_rank < static_cast<int32_t>(net_idx_list.size()); ++stable_net_rank) {
+    for (TopoEdge& edge : topo_pool.get_net_edge_list(net_idx_list[stable_net_rank])) {
+      edge.set_stable_net_rank(stable_net_rank);
+    }
   }
 }
 

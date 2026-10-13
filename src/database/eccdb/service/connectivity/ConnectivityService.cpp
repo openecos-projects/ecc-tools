@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/VectorCapacity.h"
 #include "design/DesignStore.h"
 #include "design/geometry/DesignGeometryStorage.h"
 #include "design/guide/storage/DesignGuideStorage.h"
@@ -293,12 +294,11 @@ void ConnectivityService::connect(DesignInstanceTermId term,
   const auto changed_net_span = source ? std::span<const DesignNetId>{changed_nets}
                                        : std::span<const DesignNetId>{changed_nets}.subspan(1u);
 
-  // Reserve before detaching source. The unchecked Storage connect then only
-  // appends into already-capacious target storage, so this path stays O(1)
-  // instead of copying every endpoint on a high-degree Net.
+  // Prepare capacity before detaching the source, using geometric growth so
+  // repeated connections to a high-degree Net remain amortized O(1).
   auto& registry = design().designRegistry().registry();
   auto& target = registry.get_or_emplace<DesignNetInstancePins>(net.entity()).values;
-  target.reserve(target.size() + 1u);
+  detail::reserveAppendSlot(target);
   if (source && source != net) {
     netlist.disconnect(term, source);
   }
@@ -335,7 +335,7 @@ void ConnectivityService::connect(DesignBlockTermId term,
 
   auto& registry = design().designRegistry().registry();
   auto& target = registry.get_or_emplace<DesignNetIoPins>(net.entity()).values;
-  target.reserve(target.size() + 1u);
+  detail::reserveAppendSlot(target);
   if (source && source != net) {
     netlist.disconnect(term, source);
   }

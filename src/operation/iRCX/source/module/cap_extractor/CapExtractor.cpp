@@ -67,7 +67,7 @@ void CapExtractor::extractCapacitance()
   for (int32_t corner_idx = 0; corner_idx < corner_num; ++corner_idx) {
     extractCornerCapacitance(corner_idx);
   }
-  RCXDM.getDatabase().get_rc_data().merge_net_coupling_cap_entry_list();
+  RCXDM.getDatabase().get_rc_data().merge_net_coupling_cap_entry_list(RCXDM.getDatabase().get_topo_pool());
 }
 
 void CapExtractor::extractCornerCapacitance(int32_t corner_idx)

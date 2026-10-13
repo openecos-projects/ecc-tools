@@ -32,6 +32,14 @@ const std::string kMissingMasterDef = "VERSION 5.8 ;\n"
                                       "END COMPONENTS\n"
                                       "END DESIGN\n";
 
+const std::string kZeroRouteHaloDef = "VERSION 5.8 ;\n"
+                                      "DESIGN def_reader_route_halo_test ;\n"
+                                      "UNITS DISTANCE MICRONS 1000 ;\n"
+                                      "COMPONENTS 1 ;\n"
+                                      "- zero_halo TEST_CELL + ROUTEHALO 0 M1 M2 + PLACED ( 0 0 ) N ;\n"
+                                      "END COMPONENTS\n"
+                                      "END DESIGN\n";
+
 void requireMissingMasterFailure(const std::filesystem::path& def_path)
 {
   idb::IdbLayout layout;
@@ -74,6 +82,36 @@ void testGzipComponentFailureIsReported()
   std::filesystem::remove(def_path);
 }
 
+void testZeroRouteHaloIsImported()
+{
+  const auto def_path = std::filesystem::temp_directory_path() / "def_reader_zero_route_halo_test.def";
+  {
+    std::ofstream def_file(def_path);
+    def_file << kZeroRouteHaloDef;
+  }
+
+  idb::IdbLayout layout;
+  auto* layers = layout.get_layers();
+  require(layers->set_layer("M1", "ROUTING") != nullptr, "failed to create M1 test layer");
+  require(layers->set_layer("M2", "ROUTING") != nullptr, "failed to create M2 test layer");
+  require(layout.get_cell_master_list()->set_cell_master("TEST_CELL") != nullptr, "failed to create test cell master");
+
+  idb::IdbDefService service(&layout);
+  idb::DefRead reader(&service);
+  require(reader.createDb(def_path.c_str()), "failed to parse DEF with ROUTEHALO 0");
+  std::filesystem::remove(def_path);
+
+  auto* instance = service.get_design()->get_instance_list()->find_instance("zero_halo");
+  require(instance != nullptr, "ROUTEHALO component was not imported");
+  auto* route_halo = instance->get_route_halo();
+  require(route_halo != nullptr, "zero-distance ROUTEHALO must remain present");
+  require(route_halo->get_route_distance() == 0, "zero-distance ROUTEHALO distance was not preserved");
+  require(route_halo->get_layer_bottom() != nullptr && route_halo->get_layer_bottom()->get_name() == "M1",
+          "ROUTEHALO minimum layer was not preserved");
+  require(route_halo->get_layer_top() != nullptr && route_halo->get_layer_top()->get_name() == "M2",
+          "ROUTEHALO maximum layer was not preserved");
+}
+
 }  // namespace
 
 int main()
@@ -81,6 +119,7 @@ int main()
   try {
     testComponentFailureIsReported();
     testGzipComponentFailureIsReported();
+    testZeroRouteHaloIsImported();
   } catch (const std::exception& error) {
     std::cout << error.what() << '\n';
     return 1;

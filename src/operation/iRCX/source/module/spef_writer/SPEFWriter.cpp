@@ -16,9 +16,95 @@
 // ***************************************************************************************
 #include "SPEFWriter.hpp"
 
+#include <bit>
+
 #include "Utility.hpp"
 
 namespace ircx {
+
+namespace {
+
+// Coupling references are collected from an unordered_map.  Their transient
+// edge ids are therefore not a suitable ordering key when the writer reduces
+// several references into one SPEF node capacitance.  Keep the key entirely
+// in terms of physical edge data (plus the semantic net rank/name) so the
+// floating-point reduction has the same order for equivalent databases.
+struct EdgeOrderKey
+{
+  std::string_view net_name;
+  std::string_view via_name;
+  std::array<int32_t, 6> endpoint_key{};
+  int32_t stable_net_rank = -1;
+  int32_t layer_idx = -1;
+  int32_t shape_min_x = 0;
+  int32_t shape_min_y = 0;
+  int32_t shape_max_x = 0;
+  int32_t shape_max_y = 0;
+  int32_t width = -1;
+  int32_t length = -1;
+  bool is_special_net = false;
+  bool is_via = false;
+
+  auto asTuple() const
+  {
+    return std::tie(net_name, stable_net_rank, is_special_net, is_via, via_name, layer_idx, shape_min_x, shape_min_y, shape_max_x,
+                    shape_max_y, width, length, endpoint_key);
+  }
+};
+
+std::array<int32_t, 3> makeNodeOrderKey(TopoPool& topo_pool, int32_t node_idx)
+{
+  if (node_idx < 0 || node_idx >= static_cast<int32_t>(topo_pool.get_node_pool().size())) {
+    return {INT32_MAX, INT32_MAX, INT32_MAX};
+  }
+
+  TopoNode& node = topo_pool.get_node(node_idx);
+  return {node.get_layer_idx(), RCXUTIL.x(node.get_point()), RCXUTIL.y(node.get_point())};
+}
+
+EdgeOrderKey makeEdgeOrderKey(TopoEdge& edge, TopoPool& topo_pool, LayoutData& layout_data)
+{
+  EdgeOrderKey key;
+  key.stable_net_rank = edge.get_stable_net_rank();
+  key.layer_idx = edge.get_layer_idx();
+  key.is_special_net = edge.get_is_special_net();
+  key.is_via = edge.get_is_via();
+  key.via_name = edge.get_via_name();
+  key.width = edge.get_width();
+  key.length = edge.get_length();
+
+  std::vector<Net>& net_list = layout_data.get_net_list();
+  if (edge.get_net_idx() >= 0 && edge.get_net_idx() < static_cast<int32_t>(net_list.size())) {
+    key.net_name = net_list[edge.get_net_idx()].get_net_name();
+  }
+
+  GTLRectInt& shape = edge.get_shape();
+  key.shape_min_x = RCXUTIL.minX(shape);
+  key.shape_min_y = RCXUTIL.minY(shape);
+  key.shape_max_x = RCXUTIL.maxX(shape);
+  key.shape_max_y = RCXUTIL.maxY(shape);
+
+  std::array<int32_t, 3> start = makeNodeOrderKey(topo_pool, edge.get_start_node_idx());
+  std::array<int32_t, 3> end = makeNodeOrderKey(topo_pool, edge.get_end_node_idx());
+  if (end < start) {
+    std::swap(start, end);
+  }
+  std::copy(start.begin(), start.end(), key.endpoint_key.begin());
+  std::copy(end.begin(), end.end(), key.endpoint_key.begin() + 3);
+  return key;
+}
+
+bool edgeOrderLess(const EdgeOrderKey& lhs, const EdgeOrderKey& rhs)
+{
+  return lhs.asTuple() < rhs.asTuple();
+}
+
+uint64_t exactDoubleBits(double value)
+{
+  return std::bit_cast<uint64_t>(value);
+}
+
+}  // namespace
 
 // public
 
@@ -155,6 +241,34 @@ void SPEFWriter::buildNetCouplingRefList(SWModel& sw_model, int32_t corner_idx)
     if (first_edge.get_net_idx() != second_edge.get_net_idx()) {
       net_coupling_ref_list[second_edge.get_net_idx()].emplace_back(second_edge_idx, first_edge_idx, coupling_capacitance);
     }
+  }
+
+  // The merged coupling map is intentionally unordered.  Sort each net's
+  // references by stable physical descriptors before writeDNet() performs its
+  // floating-point accumulation.  Do not use edge ids as a tie breaker: they
+  // are storage-local and can differ between equivalent database backends.
+  std::vector<EdgeOrderKey> edge_order_keys;
+  edge_order_keys.reserve(topo_pool.get_edge_pool().size());
+  for (TopoEdge& edge : topo_pool.get_edge_pool()) {
+    edge_order_keys.push_back(makeEdgeOrderKey(edge, topo_pool, database.get_layout_data()));
+  }
+
+  for (std::vector<SPEFCouplingRef>& refs : net_coupling_ref_list) {
+    std::sort(refs.begin(), refs.end(), [&edge_order_keys](const SPEFCouplingRef& lhs, const SPEFCouplingRef& rhs) {
+      const EdgeOrderKey& lhs_self = edge_order_keys[lhs.get_self_edge_idx()];
+      const EdgeOrderKey& rhs_self = edge_order_keys[rhs.get_self_edge_idx()];
+      if (lhs_self.asTuple() != rhs_self.asTuple()) {
+        return lhs_self.asTuple() < rhs_self.asTuple();
+      }
+
+      const EdgeOrderKey& lhs_other = edge_order_keys[lhs.get_other_edge_idx()];
+      const EdgeOrderKey& rhs_other = edge_order_keys[rhs.get_other_edge_idx()];
+      if (lhs_other.asTuple() != rhs_other.asTuple()) {
+        return lhs_other.asTuple() < rhs_other.asTuple();
+      }
+
+      return exactDoubleBits(lhs.get_coupling_capacitance()) < exactDoubleBits(rhs.get_coupling_capacitance());
+    });
   }
 }
 
@@ -330,12 +444,49 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
         += coupling_ref.get_coupling_capacitance();
   }
 
-  double total_capacitance = 0.0;
-  for (double ground_capacitance : node_ground_capacitance_list) {
-    total_capacitance += ground_capacitance;
+  // Keep the per-node values above unchanged for *CAP output, but do not use
+  // their storage-local accumulation order for *D_NET.  Equivalent adapters
+  // can enumerate edges and local nodes differently.  Sum raw physical edge
+  // contributions in a stable edge order and raw coupling references in the
+  // stable order established by buildNetCouplingRefList().
+  struct GroundCapRef
+  {
+    EdgeOrderKey edge_key;
+    int32_t local_edge_idx = -1;
+  };
+
+  std::vector<GroundCapRef> ground_cap_refs;
+  ground_cap_refs.reserve(edge_list.size());
+  for (int32_t edge_idx = 0; edge_idx < static_cast<int32_t>(edge_list.size()); ++edge_idx) {
+    TopoEdge& edge = edge_list[edge_idx];
+    if (edge.get_is_via() || ground_capacitance_list[edge_idx] <= 0.0) {
+      continue;
+    }
+    const int32_t global_edge_idx = topo_pool.get_edge_idx(net_idx, edge_idx);
+    ground_cap_refs.push_back({makeEdgeOrderKey(topo_pool.get_edge(global_edge_idx), topo_pool, database.get_layout_data()), edge_idx});
   }
-  for (auto& [node_coupling_key, coupling_capacitance] : node_coupling_capacitance_map) {
-    total_capacitance += coupling_capacitance;
+  std::sort(ground_cap_refs.begin(), ground_cap_refs.end(), [&ground_capacitance_list](const GroundCapRef& lhs, const GroundCapRef& rhs) {
+    if (edgeOrderLess(lhs.edge_key, rhs.edge_key)) {
+      return true;
+    }
+    if (edgeOrderLess(rhs.edge_key, lhs.edge_key)) {
+      return false;
+    }
+    return exactDoubleBits(ground_capacitance_list[lhs.local_edge_idx]) < exactDoubleBits(ground_capacitance_list[rhs.local_edge_idx]);
+  });
+
+  double total_capacitance = 0.0;
+  for (const GroundCapRef& ground_cap_ref : ground_cap_refs) {
+    total_capacitance += ground_capacitance_list[ground_cap_ref.local_edge_idx];
+  }
+  for (const SPEFCouplingRef& coupling_ref : sw_model.get_net_coupling_ref_list()[net_idx]) {
+    TopoEdge& self_edge = topo_pool.get_edge(coupling_ref.get_self_edge_idx());
+    TopoEdge& other_edge = topo_pool.get_edge(coupling_ref.get_other_edge_idx());
+    if (self_edge.get_start_node_idx() == -1 || self_edge.get_end_node_idx() == -1 || other_edge.get_start_node_idx() == -1
+        || other_edge.get_end_node_idx() == -1) {
+      continue;
+    }
+    total_capacitance += coupling_ref.get_coupling_capacitance();
   }
 
   double micron_per_dbu = 1 / 1.0 / database.get_layout_data().get_dbu_per_micron();

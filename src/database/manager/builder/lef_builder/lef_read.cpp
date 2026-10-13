@@ -492,6 +492,9 @@ int LefRead::parse_layer_cut(lefiLayer* lef_layer, IdbLayerCut* layer_cut)
   if (lef_layer->hasWidth()) {
     layer_cut->set_width(transUnitDB(lef_layer->width()));
   }
+  if (lef_layer->hasResistancePerCut()) {
+    layer_cut->set_resistance(lef_layer->resistancePerCut());
+  }
 
   // spacing
   int num_spacing = lef_layer->numSpacing();

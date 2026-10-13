@@ -21,9 +21,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <utility>
+#include <functional>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <boost/geometry.hpp>
@@ -93,6 +94,7 @@ class DesignGeometrySpatialIndex
 {
  public:
   using ShapeId = GeometryShapeId;
+  using ShapePredicate = std::function<bool(ShapeId)>;
 
   explicit DesignGeometrySpatialIndex(const DesignStore& design) noexcept : _design(design) {}
 
@@ -115,6 +117,14 @@ class DesignGeometrySpatialIndex
 
   [[nodiscard]] std::vector<ShapeId> query(Rect box) const;
   [[nodiscard]] std::vector<ShapeId> query(Rect box, const GeometryQueryFilter& filter) const;
+  // Return the first spatial candidate that passes the compact metadata
+  // filter and, when supplied, the caller's exact-shape predicate.  qbegin()
+  // keeps the R-tree traversal lazy, so boolean callers do not materialize a
+  // full candidate batch just to ask whether one match exists.
+  [[nodiscard]] std::optional<ShapeId> queryFirst(Rect box, const GeometryQueryFilter& filter = {},
+                                                   const ShapePredicate& predicate = {}) const;
+  [[nodiscard]] bool any(Rect box, const GeometryQueryFilter& filter = {},
+                         const ShapePredicate& predicate = {}) const;
   [[nodiscard]] std::vector<GeometrySpatialRecord> queryRecords(Rect box) const;
   [[nodiscard]] std::vector<ShapeId> query(DesignNetId net, Rect box) const;
   [[nodiscard]] std::vector<ShapeId> query(DesignWireId wire, Rect box) const;
@@ -144,6 +154,8 @@ class DesignGeometrySpatialIndex
   // every tree value.
   using RTreeValue = std::pair<IndexBox, uint32_t>;
   using RTree = boost::geometry::index::rtree<RTreeValue, boost::geometry::index::quadratic<16>>;
+
+  class CompiledFilter;
 
   void ensureCurrent() const;
   void rebuildImpl() const;

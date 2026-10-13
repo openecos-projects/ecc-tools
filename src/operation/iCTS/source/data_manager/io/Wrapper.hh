@@ -24,6 +24,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -45,6 +46,13 @@ class IdbCoordinate;
 class LibCell;
 class LibLibrary;
 }  // namespace idb
+
+namespace eccdb {
+class DatabaseContext;
+namespace adapter::icts {
+class CtsEccdbAdapter;
+}
+}  // namespace eccdb
 
 namespace icts {
 
@@ -81,6 +89,8 @@ struct WrapperWriteSummary
 class Wrapper
 {
  public:
+  using LibertyCellLookup = std::function<idb::LibCell*(const std::string&)>;
+
   Wrapper();
   ~Wrapper();
 
@@ -92,6 +102,10 @@ class Wrapper
 
   // Initialize with idb builder
   auto init(idb::IdbBuilder* idb) -> void;
+  // Borrow the caller-owned EccDB context.  Unlike the legacy path, this
+  // branch never consults the process-wide iDB design.
+  auto initNative(eccdb::DatabaseContext* context, LibertyCellLookup liberty_cell_lookup = {}) -> void;
+  auto setNativeLibertyCellLookup(LibertyCellLookup liberty_cell_lookup) -> void;
 
   // Reset wrapper
   auto reset() -> void;
@@ -142,8 +156,9 @@ class Wrapper
   };
 
   auto queryDbUnit() const -> std::optional<int32_t>;
-  auto is_design_ready() const -> bool { return _idb_design != nullptr; }
-  auto is_layout_ready() const -> bool { return _idb != nullptr && _idb_layout != nullptr; }
+  auto is_design_ready() const -> bool;
+  auto is_layout_ready() const -> bool;
+  auto is_native() const -> bool { return _native_adapter != nullptr; }
   auto queryWireResistance(int routing_layer, double length_um, std::optional<double> wire_width_um = std::nullopt) const -> std::optional<double>;
   auto queryWireCapacitance(int routing_layer, double length_um, std::optional<double> wire_width_um = std::nullopt) const -> std::optional<double>;
   auto queryRequiredWireResistance(int routing_layer, double length_um, std::optional<double> wire_width_um = std::nullopt) const -> double;
@@ -222,6 +237,8 @@ class Wrapper
   mutable bool _liberty_loaded = false;
   mutable std::vector<std::unique_ptr<idb::LibLibrary>> _lib_libraries;
   mutable std::unordered_map<std::string, idb::LibCell*> _lib_cell_by_master;
+  LibertyCellLookup _native_liberty_cell_lookup;
+  std::unique_ptr<eccdb::adapter::icts::CtsEccdbAdapter> _native_adapter;
 
   std::unordered_map<Inst*, idb::IdbInstance*> _cts2idb_inst_map;
   std::unordered_map<idb::IdbInstance*, Inst*> _idb2cts_inst_map;

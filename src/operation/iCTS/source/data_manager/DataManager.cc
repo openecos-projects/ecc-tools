@@ -40,6 +40,7 @@
 #include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Pin.hh"
+#include "context/DatabaseContext.h"
 #include "idm.h"
 #include "routing/ClockRouteSegmentRC.hh"
 
@@ -242,6 +243,22 @@ auto DataManager::getInst() -> DataManager&
   return *_instance;
 }
 
+auto DataManager::setDesignSource(eccdb::DatabaseContext* context) -> void
+{
+  _database_context = context;
+}
+
+auto DataManager::setSdcPath(std::string sdc_path) -> void
+{
+  _sdc_path = std::move(sdc_path);
+}
+
+auto DataManager::setLibertyCellLookup(Wrapper::LibertyCellLookup liberty_cell_lookup) -> void
+{
+  _liberty_cell_lookup = std::move(liberty_cell_lookup);
+  _wrapper.setNativeLibertyCellLookup(_liberty_cell_lookup);
+}
+
 void DataManager::destroyInst()
 {
   _instance = nullptr;
@@ -302,13 +319,22 @@ auto DataManager::input(const DataManagerInput& input_data) -> DataManagerStatus
     return status;
   }
 
-  auto* idb_builder = dmInst->get_idb_builder();
-  if (idb_builder == nullptr) {
-    _state = CTSRunState::kFailed;
-    CTSLOG.warn(Loc::current(), "CTS data input failed because the iDB builder is unavailable.");
-    return failureStatus(DataManagerStatusCode::kExternalDataError, "iDB builder is unavailable.");
+  if (_database_context != nullptr) {
+    if (_database_context->technology() == nullptr || _database_context->library() == nullptr) {
+      _state = CTSRunState::kFailed;
+      CTSLOG.warn(Loc::current(), "CTS native data input requires EccDB technology and library stores.");
+      return failureStatus(DataManagerStatusCode::kExternalDataError, "eccdb_context_missing_technology_or_library");
+    }
+    _wrapper.initNative(_database_context, _liberty_cell_lookup);
+  } else {
+    auto* idb_builder = dmInst->get_idb_builder();
+    if (idb_builder == nullptr) {
+      _state = CTSRunState::kFailed;
+      CTSLOG.warn(Loc::current(), "CTS data input failed because the iDB builder is unavailable.");
+      return failureStatus(DataManagerStatusCode::kExternalDataError, "iDB builder is unavailable.");
+    }
+    _wrapper.init(idb_builder);
   }
-  _wrapper.init(idb_builder);
   logRuntimeConfiguration(_config, _wrapper, input_data.config_file);
 
   auto status = readClockData();
@@ -328,7 +354,7 @@ auto DataManager::input(const DataManagerInput& input_data) -> DataManagerStatus
 
 auto DataManager::readClockData() -> DataManagerStatus
 {
-  const auto sdc_clock_data = SdcClockReader().readClockData();
+  const auto sdc_clock_data = _database_context != nullptr ? SdcClockReader(_sdc_path).readClockData() : SdcClockReader().readClockData();
   std::set<std::string> traceable_clock_names;
   std::map<std::string, double> period_by_clock;
   std::map<std::string, bool> period_resolved_by_clock;

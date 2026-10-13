@@ -29,6 +29,7 @@
 #include "design/fill/model/FillComponents.h"
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/pin_access/model/PinAccessComponents.h"
+#include "common/VectorCapacity.h"
 #include "geometry/GeometryMutation.h"
 
 namespace eccdb {
@@ -360,7 +361,7 @@ bool GeometryEditService::restoreShape(uint64_t id)
   auto& registry = design.geometryStorage().registry().registry();
   const auto shape = toShapeId(id);
   if (!registry.valid(shape.entity())) throw std::logic_error("removed geometry slot was released");
-  sequence.reserve(sequence.size() + 1);
+  detail::reserveAppendSlot(sequence);
   const auto epoch = design.geometryStorage().geometryEpoch();
   try {
     std::visit([&](const auto& value) { registry.emplace<std::remove_cvref_t<decltype(value)>>(shape.entity(), value); }, saved.payload);

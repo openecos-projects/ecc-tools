@@ -142,12 +142,12 @@ void PinAccessor::initAccessPointList(PAModel& pa_model)
     PAPin* pa_pin = net_pin_pair.second;
     std::vector<AccessPoint>& access_point_list = net_pin_pair.second->get_access_point_list();
     std::vector<LayerRect> legal_shape_list = getLegalShapeList(pa_model, net_pin_pair.first, pa_pin);
-    for (AccessPoint& access_point : getAccessPointList(pa_model, pa_pin->get_pin_idx(), legal_shape_list)) {
+    for (AccessPoint& access_point : getAccessPointList(pa_model, pa_pin, legal_shape_list)) {
       access_point_list.push_back(access_point);
     }
     std::ranges::sort(access_point_list, [](AccessPoint& a, AccessPoint& b) { return CmpLayerCoordByXASC()(a.getRealLayerCoord(), b.getRealLayerCoord()); });
     if (access_point_list.empty()) {
-      RTLOG.error(Loc::current(), "No access point was generated!");
+      RTLOG.error(Loc::current(), "No access point was generated for pin ", pa_pin->get_pin_name(), "!");
     }
     for (AccessPoint& access_point : pa_pin->get_access_point_list()) {
       pa_pin->get_pin_shape_coord_list().push_back(access_point.getRealLayerCoord());
@@ -363,7 +363,7 @@ std::vector<PlanarRect> PinAccessor::getPlanarLegalRectList(PAModel& pa_model, i
   return legal_rect_list;
 }
 
-std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int32_t pin_idx, std::vector<LayerRect>& legal_shape_list)
+std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, PAPin* pa_pin, std::vector<LayerRect>& legal_shape_list)
 {
   int32_t manufacture_grid = RTDM.getDatabase().get_manufacture_grid();
   Die& die = RTDM.getDatabase().get_die();
@@ -442,9 +442,13 @@ std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int3
   }
   {
     PlanarRect die_valid_rect = die.get_real_rect();
-    int32_t shrinked_size = RTDM.getOnlyPitch();
-    if (RTUTIL.hasShrinkedRect(die_valid_rect, shrinked_size)) {
-      die_valid_rect = RTUTIL.getShrinkedRect(die_valid_rect, shrinked_size);
+    // Top-level ports may legally touch the die boundary. Keep their real pin-box
+    // candidates instead of discarding every one through the interior margin.
+    if (!pa_pin->get_inst_name().empty()) {
+      int32_t shrinked_size = RTDM.getOnlyPitch();
+      if (RTUTIL.hasShrinkedRect(die_valid_rect, shrinked_size)) {
+        die_valid_rect = RTUTIL.getShrinkedRect(die_valid_rect, shrinked_size);
+      }
     }
     std::vector<LayerCoord> new_layer_coord_list;
     for (LayerCoord& layer_coord : layer_coord_list) {
@@ -470,7 +474,7 @@ std::vector<AccessPoint> PinAccessor::getAccessPointList(PAModel& pa_model, int3
   std::vector<AccessPoint> access_point_list;
   access_point_list.reserve(layer_coord_list.size());
   for (LayerCoord& layer_coord : layer_coord_list) {
-    access_point_list.emplace_back(pin_idx, layer_coord);
+    access_point_list.emplace_back(pa_pin->get_pin_idx(), layer_coord);
   }
   return access_point_list;
 }

@@ -17,7 +17,35 @@
 
 #include "FPHeader.hpp"
 
+#include <limits>
+#include <stdexcept>
+
 namespace ifp {
+
+struct BoundedTrackGrid
+{
+  int32_t start;
+  int32_t count;
+};
+
+// LEF offset specifies a grid phase; DEF start is its first in-die line.
+inline BoundedTrackGrid boundedTrackGrid(int32_t lower, int32_t upper, int32_t phase, int32_t pitch)
+{
+  if (pitch <= 0 || upper < lower) {
+    throw std::invalid_argument("iFP received invalid track bounds or pitch");
+  }
+  const int64_t delta = static_cast<int64_t>(lower) - phase;
+  const int64_t steps = delta > 0 ? (delta + pitch - 1) / pitch : delta / pitch;
+  const int64_t first = static_cast<int64_t>(phase) + steps * pitch;
+  if (first > upper) {
+    return {phase, 0};
+  }
+  const int64_t count = (static_cast<int64_t>(upper) - first) / pitch + 1;
+  if (count > std::numeric_limits<int32_t>::max()) {
+    throw std::overflow_error("iFP track count exceeds its model range");
+  }
+  return {static_cast<int32_t>(first), static_cast<int32_t>(count)};
+}
 
 class Track
 {

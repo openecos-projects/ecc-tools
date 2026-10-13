@@ -1226,6 +1226,11 @@ unsigned LibertyReader::visitPin(LibertyGroupStmt* group) {
       lib_builder->set_port(lib_port.get());
       cell->addLibertyPort(std::move(lib_port));
     } else {
+      // Each pin nested in a bus has its own Liberty attributes.  Keep the
+      // concrete pin as the current port while visiting those attributes;
+      // otherwise the first nested pin clears the builder's port and the
+      // second pin can dereference nullptr on rise/fall_capacitance_range.
+      lib_builder->set_port(lib_port.get());
       lib_port->set_port_type(port_bus->get_port_type());
       port_bus->addlibertyPort(std::move(lib_port));
     }
@@ -1753,6 +1758,11 @@ unsigned LibertyReader::visitPin(liberty_ast::LibGroup* group) {
       lib_builder->set_port(lib_port.get());
       cell->addLibertyPort(std::move(lib_port));
     } else {
+      // A bus contains independent pin groups. Keep the concrete nested pin
+      // as the current port while visiting its attributes; otherwise the
+      // previous pin clears the builder port and the next pin can dereference
+      // nullptr on rise/fall_capacitance_range.
+      lib_builder->set_port(lib_port.get());
       lib_port->set_port_type(port_bus->get_port_type());
       port_bus->addlibertyPort(std::move(lib_port));
     }

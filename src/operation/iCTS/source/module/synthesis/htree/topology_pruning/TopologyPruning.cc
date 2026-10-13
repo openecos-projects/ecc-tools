@@ -375,7 +375,6 @@ auto FilterBoundaryFeasibleHTreeChars(const std::vector<HTreeTopologyChar>& entr
 
 auto AppendTopologyPatternIds(const std::vector<HTreeTopologyChar>& entries, std::vector<PatternId>& pattern_ids) -> void
 {
-  pattern_ids.reserve(pattern_ids.size() + entries.size());
   for (const auto& entry : entries) {
     pattern_ids.push_back(entry.get_pattern_id());
   }

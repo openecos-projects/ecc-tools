@@ -85,11 +85,15 @@ void PDNGenerator::buildPGNet(PGModel& pg_model)
       int32_t pg_net_idx = static_cast<int32_t>(database.get_pg_net_list().size());
       database.get_pg_net_list().push_back(pg_net);
       database.get_pg_net_name_to_idx_map()[pg_connect.get_net_name()] = pg_net_idx;
-      if (pg_connect.get_net_type() == PGNetType::kPower && pg_model.get_default_power_net_name().empty()) {
-        pg_model.set_default_power_net_name(pg_connect.get_net_name());
-      } else if (pg_connect.get_net_type() == PGNetType::kGround && pg_model.get_default_ground_net_name().empty()) {
-        pg_model.set_default_ground_net_name(pg_connect.get_net_name());
-      }
+    }
+
+    // Native EccDB wrapping can pre-populate the PG net catalog.  Defaults
+    // must still be selected from the configured connection instead of only
+    // when a new legacy PGNet record is allocated.
+    if (pg_connect.get_net_type() == PGNetType::kPower && pg_model.get_default_power_net_name().empty()) {
+      pg_model.set_default_power_net_name(pg_connect.get_net_name());
+    } else if (pg_connect.get_net_type() == PGNetType::kGround && pg_model.get_default_ground_net_name().empty()) {
+      pg_model.set_default_ground_net_name(pg_connect.get_net_name());
     }
 
     PGNet& pg_net = getPGNet(pg_connect.get_net_name());

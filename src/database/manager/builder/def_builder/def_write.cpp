@@ -518,6 +518,14 @@ int32_t DefWrite::write_via()
           master_generate->get_enclosure_bottom_y(), master_generate->get_enclosure_top_x(), master_generate->get_enclosure_top_y(),
           master_generate->get_cut_rows(), master_generate->get_cut_cols());
 
+      if (master_generate->has_origin()) {
+        writestr(" + ORIGIN %d %d\n", master_generate->get_original_offset_x(), master_generate->get_original_offset_y());
+      }
+      if (master_generate->has_offset()) {
+        writestr(" + OFFSET %d %d %d %d\n", master_generate->get_offset_bottom_x(), master_generate->get_offset_bottom_y(),
+                 master_generate->get_offset_top_x(), master_generate->get_offset_top_y());
+      }
+
       if (nullptr != master_generate->get_patttern()) {
         writestr(" + PATTERN %s \n", master_generate->get_patttern()->get_pattern_string().c_str());
       }
@@ -744,6 +752,10 @@ int32_t DefWrite::write_blockage()
       IdbPlacementBlockage* placement_blockage = dynamic_cast<IdbPlacementBlockage*>(blockage);
 
       writestr("    - PLACEMENT ");
+
+      if (placement_blockage->is_soft()) {
+        writestr("+ SOFT ");
+      }
 
       if (placement_blockage->is_pushdown() == true) {
         writestr("+ PUSHDOWN ");

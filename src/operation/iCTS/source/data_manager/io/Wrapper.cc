@@ -45,6 +45,8 @@
 #include "lef_service.h"
 #include "liberty/Lib.hh"
 #include "spatial/Point.hh"
+#include "CtsEccdbAdapter.hh"
+#include "context/DatabaseContext.h"
 
 namespace icts {
 namespace {
@@ -83,9 +85,33 @@ Wrapper::~Wrapper() = default;
 
 auto Wrapper::init(idb::IdbBuilder* idb) -> void
 {
+  _native_adapter.reset();
+  _native_liberty_cell_lookup = {};
   _idb = idb;
   _idb_design = _idb->get_def_service()->get_design();
   _idb_layout = _idb->get_lef_service()->get_layout();
+}
+
+auto Wrapper::initNative(eccdb::DatabaseContext* context, LibertyCellLookup liberty_cell_lookup) -> void
+{
+  _idb = nullptr;
+  _idb_design = nullptr;
+  _idb_layout = nullptr;
+  _liberty_loaded = false;
+  _lib_libraries.clear();
+  _lib_cell_by_master.clear();
+  _native_liberty_cell_lookup = std::move(liberty_cell_lookup);
+  _native_adapter = context == nullptr ? nullptr
+                                       : std::make_unique<eccdb::adapter::icts::CtsEccdbAdapter>(*context, _native_liberty_cell_lookup);
+  clearCtsBindings();
+}
+
+auto Wrapper::setNativeLibertyCellLookup(LibertyCellLookup liberty_cell_lookup) -> void
+{
+  _native_liberty_cell_lookup = std::move(liberty_cell_lookup);
+  if (_native_adapter != nullptr) {
+    _native_adapter->setLibertyCellLookup(_native_liberty_cell_lookup);
+  }
 }
 
 auto Wrapper::reset() -> void
@@ -96,12 +122,24 @@ auto Wrapper::reset() -> void
   _liberty_loaded = false;
   _lib_libraries.clear();
   _lib_cell_by_master.clear();
+  _native_liberty_cell_lookup = {};
+  _native_adapter.reset();
   _cts2idb_inst_map.clear();
   _idb2cts_inst_map.clear();
   _cts2idb_net_map.clear();
   _idb2cts_net_map.clear();
   _cts2idb_pin_map.clear();
   _idb2cts_pin_map.clear();
+}
+
+auto Wrapper::is_design_ready() const -> bool
+{
+  return _native_adapter != nullptr ? _native_adapter->isDesignReady() : _idb_design != nullptr;
+}
+
+auto Wrapper::is_layout_ready() const -> bool
+{
+  return _native_adapter != nullptr ? _native_adapter->isLayoutReady() : (_idb != nullptr && _idb_layout != nullptr);
 }
 
 auto Wrapper::clearCtsBindings() -> void
@@ -116,6 +154,9 @@ auto Wrapper::clearCtsBindings() -> void
 
 auto Wrapper::queryDbUnit() const -> std::optional<int32_t>
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->queryDbUnit();
+  }
   if (_idb_design == nullptr || _idb_design->get_units() == nullptr) {
     return std::nullopt;
   }
@@ -125,6 +166,9 @@ auto Wrapper::queryDbUnit() const -> std::optional<int32_t>
 
 auto Wrapper::withinCore(int32_t point_x, int32_t point_y) const -> std::optional<bool>
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->withinCore(point_x, point_y);
+  }
   if (_idb_layout == nullptr) {
     return std::nullopt;
   }
@@ -162,6 +206,9 @@ auto Wrapper::ctsToIdb(const Point<int>& loc) -> idb::IdbCoordinate<int32_t>
 
 auto Wrapper::traceSdcClocks(const SdcClockTraceInput& input) const -> ClockTraceBuild
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->traceSdcClocks(input);
+  }
   if (input.clock_data == nullptr) {
     CTSLOG.error(Loc::current(), "Wrapper: SDC clock trace requires clock data.");
   }
@@ -175,6 +222,17 @@ auto Wrapper::traceSdcClocks(const SdcClockTraceInput& input) const -> ClockTrac
 
 auto Wrapper::collectLogicCellGeometries() const -> std::vector<WrapperCellGeometry>
 {
+  if (_native_adapter != nullptr) {
+    std::vector<WrapperCellGeometry> geometries;
+    for (const auto& geometry : _native_adapter->collectLogicCellGeometries()) {
+      geometries.push_back(WrapperCellGeometry{.name = geometry.name,
+                                               .cell_master = geometry.cell_master,
+                                               .origin = Point<int>{geometry.origin_x, geometry.origin_y},
+                                               .width_dbu = geometry.width_dbu,
+                                               .height_dbu = geometry.height_dbu});
+    }
+    return geometries;
+  }
   std::vector<WrapperCellGeometry> geometries;
   if (_idb_design == nullptr || _idb_design->get_instance_list() == nullptr) {
     CTSLOG.warn(Loc::current(), "Cannot collect iDB logic-cell geometry: iDB design or instance list is not ready.");
@@ -201,6 +259,17 @@ auto Wrapper::collectLogicCellGeometries() const -> std::vector<WrapperCellGeome
 
 auto Wrapper::queryInstGeometry(const std::string& inst_name) const -> std::optional<WrapperCellGeometry>
 {
+  if (_native_adapter != nullptr) {
+    const auto geometry = _native_adapter->queryInstGeometry(inst_name);
+    if (!geometry.has_value()) {
+      return std::nullopt;
+    }
+    return WrapperCellGeometry{.name = geometry->name,
+                               .cell_master = geometry->cell_master,
+                               .origin = Point<int>{geometry->origin_x, geometry->origin_y},
+                               .width_dbu = geometry->width_dbu,
+                               .height_dbu = geometry->height_dbu};
+  }
   if (inst_name.empty()) {
     return std::nullopt;
   }

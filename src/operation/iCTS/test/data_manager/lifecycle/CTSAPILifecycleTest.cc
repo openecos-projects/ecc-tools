@@ -29,6 +29,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -38,6 +39,7 @@
 #include "IdbLayer.h"
 #include "Logger.hh"
 #include "Utility.hh"
+#include "data_manager/adapter/fast_sta/liberty/FastSTALiberty.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "design/Clock.hh"
@@ -464,6 +466,7 @@ END DESIGN
 
   auto ready() const -> bool { return _ready; }
   auto configPath() const -> const std::filesystem::path& { return _config_path; }
+  auto libertyPath() const -> std::filesystem::path { return _output_dir / "native.lib"; }
   auto workDir() const -> const std::filesystem::path& { return _work_dir; }
   auto reportDir() const -> std::filesystem::path { return _output_dir / "report"; }
 
@@ -742,6 +745,48 @@ TEST(CTSAPILifecycleTest, NativeCharacterizationProducerPublishesExactBufferPair
   EXPECT_GT(sample.power_w, 0.0);
   EXPECT_GT(sample.source_boundary_net_switch_power_w, 0.0);
   EXPECT_TRUE(fast_sta.eraseCharContext(context_id));
+}
+
+TEST(CTSAPILifecycleTest, FfLibertyScalarCapacitancesStayNormalizedThroughCts)
+{
+  const ScopedNativeClockExternalIdb external_idb("ff_liberty_scalar_capacitance");
+  ASSERT_TRUE(external_idb.ready());
+
+  std::ifstream liberty_stream(external_idb.libertyPath());
+  ASSERT_TRUE(liberty_stream.good());
+  std::string liberty{std::istreambuf_iterator<char>(liberty_stream), std::istreambuf_iterator<char>()};
+  liberty_stream.close();
+  const auto replace_all = [&liberty](const std::string& source, const std::string& replacement) -> std::size_t {
+    std::size_t replacements = 0U;
+    std::size_t position = 0U;
+    while ((position = liberty.find(source, position)) != std::string::npos) {
+      liberty.replace(position, source.size(), replacement);
+      position += replacement.size();
+      ++replacements;
+    }
+    return replacements;
+  };
+  ASSERT_EQ(replace_all("capacitive_load_unit (1, pf)", "capacitive_load_unit (1, ff)"), 1U);
+  ASSERT_EQ(replace_all("capacitance : 0.01;", "capacitance : 484.009;"), 3U);
+  ASSERT_EQ(replace_all("max_capacitance : 1.0;", "max_capacitance : 484.009;"), 2U);
+  ASSERT_TRUE(WriteTextFile(external_idb.libertyPath(), liberty));
+
+  const auto init_status = icts::CTSAPI::init(external_idb.configPath().string(), external_idb.workDir().string());
+  ASSERT_EQ(init_status.code, icts::CTSStatusCode::kOk) << init_status.message;
+
+  constexpr double kExpectedCapPf = 0.484009;
+  auto& wrapper = CTSDM.getWrapper();
+  const auto wrapper_input_cap_pf = wrapper.queryCharInputPinCap("BUF_X1");
+  const auto wrapper_output_cap_pf = wrapper.queryCellOutPinCapLimit("BUF_X1");
+  ASSERT_TRUE(wrapper_input_cap_pf.has_value());
+  ASSERT_TRUE(wrapper_output_cap_pf.has_value());
+  EXPECT_DOUBLE_EQ(*wrapper_input_cap_pf, kExpectedCapPf);
+  EXPECT_DOUBLE_EQ(*wrapper_output_cap_pf, kExpectedCapPf);
+
+  const auto fast_sta_cell = icts::FastStaLiberty::extractBufferCell(wrapper, "BUF_X1");
+  ASSERT_TRUE(fast_sta_cell.has_value());
+  EXPECT_DOUBLE_EQ(fast_sta_cell->input_cap_pf, kExpectedCapPf);
+  EXPECT_DOUBLE_EQ(fast_sta_cell->output_cap_limit_pf, kExpectedCapPf);
 }
 
 TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitFrontierAndRepeatsSafely)

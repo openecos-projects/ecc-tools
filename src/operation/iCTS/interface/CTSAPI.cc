@@ -74,6 +74,30 @@ CTSAPI::CTSAPI() = default;
 
 CTSAPI::~CTSAPI() = default;
 
+auto CTSAPI::setDesignSource(eccdb::DatabaseContext* context) -> void
+{
+  _database_context = context;
+  if (_initialized) {
+    CTSDM.setDesignSource(context);
+  }
+}
+
+auto CTSAPI::setSdcPath(std::string sdc_path) -> void
+{
+  _sdc_path = std::move(sdc_path);
+  if (_initialized) {
+    CTSDM.setSdcPath(_sdc_path);
+  }
+}
+
+auto CTSAPI::setLibertyCellLookup(LibertyCellLookup liberty_cell_lookup) -> void
+{
+  _liberty_cell_lookup = std::move(liberty_cell_lookup);
+  if (_initialized) {
+    CTSDM.setLibertyCellLookup(_liberty_cell_lookup);
+  }
+}
+
 auto CTSAPI::setLastStatus(CTSStatus status) -> CTSStatus
 {
   _last_status = std::move(status);
@@ -168,6 +192,16 @@ auto CTSAPI::destroyCTS() -> CTSStatus
   return status;
 }
 
+auto CTSAPI::abortCTS() -> CTSStatus
+{
+  (void) destroyCTS();
+  auto& api = getInst();
+  api._database_context = nullptr;
+  api._sdc_path.clear();
+  api._liberty_cell_lookup = {};
+  return api.setLastStatus(buildOkStatus("CTS aborted and native input sources released."));
+}
+
 auto CTSAPI::init(const std::string& config_file, const std::string& work_dir) -> CTSStatus
 {
   (void) destroyCTS();
@@ -176,6 +210,9 @@ auto CTSAPI::init(const std::string& config_file, const std::string& work_dir) -
   Monitor monitor;
   CTSLOG.info(Loc::current(), "Starting CTS initialization...");
   DataManager::initInst();
+  CTSDM.setDesignSource(api._database_context);
+  CTSDM.setSdcPath(api._sdc_path);
+  CTSDM.setLibertyCellLookup(api._liberty_cell_lookup);
   const auto input_status = CTSDM.input(DataManagerInput{
       .config_file = config_file,
       .work_dir = work_dir,

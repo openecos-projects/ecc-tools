@@ -8,6 +8,7 @@ endif()
 
 add_library(ircx_interface
     ${IRCX_INTERFACE}/RCXInterface.cpp
+    ${CMAKE_SOURCE_DIR}/src/database/eccdb/adapters/ircx/RCXInterfaceEccdb.cpp
 )
 
 add_subdirectory(${IRCX_INTERFACE}/ics55)
@@ -18,6 +19,7 @@ target_link_libraries(ircx_interface
     ircx_aux
     ircx_source
     idm
+    eccdb_core
 )
 
 target_include_directories(ircx_interface

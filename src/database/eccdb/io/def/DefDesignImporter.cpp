@@ -1263,7 +1263,9 @@ int directComponentCallback(defrCallbackType_e type, defiComponent* source, defi
       if (source->hasHaloSoft()) instance.flags |= DesignInstanceFlag::kHaloSoft;
       source->haloEdges(&instance.halo.left, &instance.halo.bottom, &instance.halo.right, &instance.halo.top);
     }
-    if (source->hasRouteHalo()) {
+    // Si2's hasRouteHalo() returns the distance, so an explicit zero-distance
+    // halo is detected by its layer clause instead of losing that constraint.
+    if (const char* min_layer = source->minLayer(); min_layer != nullptr && *min_layer != '\0') {
       instance.flags |= DesignInstanceFlag::kHasRouteHalo;
       instance.route_halo.distance = source->haloDist();
       instance.route_halo.min_layer = directRoutingLayer(context, requiredText(source->minLayer(), "COMPONENT ROUTEHALO minimum layer"), "COMPONENT ROUTEHALO");

@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include <any>
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -39,6 +40,7 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "DataManager.hpp"
@@ -297,6 +299,26 @@ END NETS
 END DESIGN
 )DEF";
 
+std::string writebackDefWithDesignVia()
+{
+  auto text = std::string{kWritebackDef};
+  constexpr std::string_view components = "COMPONENTS 0 ;";
+  const auto position = text.find(components);
+  if (position == std::string::npos) {
+    throw std::runtime_error("missing COMPONENTS section in writeback DEF fixture");
+  }
+  text.insert(position, R"DEF(VIAS 1 ;
+- DESIGN12
+  + RECT M1 ( -80 -80 ) ( 80 80 )
+  + RECT V1 ( -40 -40 ) ( 40 40 )
+  + RECT M2 ( -80 -80 ) ( 80 80 )
+  ;
+END VIAS
+
+)DEF");
+  return text;
+}
+
 std::string readText(const std::filesystem::path& path)
 {
   std::ifstream input(path, std::ios::binary);
@@ -504,11 +526,11 @@ void injectWritebackResults(bool include_z_net = true)
 
 void runInjectedWriteback(const std::filesystem::path& temp_directory, eccdb::DesignStore* design = nullptr,
                           eccdb::TechStore* technology = nullptr, eccdb::LibraryStore* library = nullptr,
-                          eccdb::DatabaseContext* context = nullptr, bool include_z_net = true)
+                          eccdb::DatabaseContext* context = nullptr, bool include_z_net = true, bool commit = true)
 {
   Logger::initInst();
   if (context != nullptr) {
-    RTI.setDesignSource(*context);
+    RTI.setDesignSource(context);
   } else {
     RTI.setDesignSource(design, technology, library);
   }
@@ -519,8 +541,12 @@ void runInjectedWriteback(const std::filesystem::path& temp_directory, eccdb::De
                                          {"-enable_timing", 0}};
   RTI.initRT(config);
   injectWritebackResults(include_z_net);
-  RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  if (commit) {
+    RTI.destroyRT();
+  } else {
+    RTI.abortRT();
+  }
+  RTI.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
 }
 
 void expectWritebackSemanticsEqual(const eccdb::DesignStore& expected, const eccdb::DesignStore& actual,
@@ -1397,6 +1423,56 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
   EXPECT_EQ(entt_shapes, idb_shapes);
 }
 
+TEST(Writeback, NativeEnttResolvesRepeatedOutputViasAsDesignVias)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("design-via-writeback.lef");
+  const auto input_def = workspace.path("design-via-writeback.def");
+  writeText(lef, kGeneratedViaLef);
+  writeText(input_def, writebackDefWithDesignVia());
+
+  EnttDesignFixture actual(lef, input_def);
+  auto& routing = actual.design.routingStorage();
+  const auto design_via = routing.findVia("DESIGN12");
+  ASSERT_TRUE(design_via);
+
+  Logger::initInst();
+  RTI.setDesignSource(&actual.design, &actual.technology, &actual.library);
+  RTI.initRT(buildOnlyConfig(workspace.path("entt-run")));
+
+  const int32_t a_net = rtNetIndex("a_net");
+  const int32_t m1 = rtRoutingLayerIndex("M1");
+  const int32_t m2 = rtRoutingLayerIndex("M2");
+  auto& layer_vias = RTDM.getDatabase().get_layer_via_master_list();
+  ASSERT_GE(m1, 0);
+  ASSERT_LT(m1, static_cast<int32_t>(layer_vias.size()));
+  ASSERT_FALSE(layer_vias[static_cast<std::size_t>(m1)].empty());
+  layer_vias[static_cast<std::size_t>(m1)].front().set_via_name("DESIGN12");
+
+  injectWritebackResults(false);
+  RTDM.getDatabase().get_net_detailed_result_map()[a_net].emplace_back(LayerCoord{600, 200, m1},
+                                                                         LayerCoord{600, 200, m2});
+  RTI.destroyRT();
+  RTI.setDesignSource(nullptr, nullptr, nullptr);
+
+  const auto routed_net = actual.design.netlistStorage().findRegularNet("a_net");
+  ASSERT_TRUE(routed_net);
+  std::size_t via_count = 0u;
+  for (const auto wire : routing.wires(routed_net)) {
+    routing.forEachShape(wire, [&](eccdb::GeometryShapeId, const eccdb::DesignRouteShape& shape,
+                                   const eccdb::DesignRouteShapeAttributes*) {
+      const auto* route_via = std::get_if<eccdb::DesignRouteVia>(&shape.geometry);
+      if (route_via == nullptr) {
+        return;
+      }
+      ++via_count;
+      EXPECT_EQ(route_via->via.design_via, design_via);
+      EXPECT_FALSE(route_via->via.tech_via);
+    });
+  }
+  EXPECT_EQ(via_count, 2u);
+}
+
 TEST(Writeback, NativeEnttPreservesUnreportedRegularNetAndBorrowsContext)
 {
   TemporaryWorkspace workspace;
@@ -1418,6 +1494,31 @@ TEST(Writeback, NativeEnttPreservesUnreportedRegularNetAndBorrowsContext)
                        false);
 
   EXPECT_EQ(eccdb::test::structured::canonicalNet(actual.design, untouched), before);
+  EXPECT_GT(context.revision(), before_revision);
+}
+
+TEST(Writeback, NativeEnttAbortDoesNotPublishPartialResultsAndCanRestart)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("abort-writeback.lef");
+  const auto input_def = workspace.path("abort-writeback.def");
+  writeText(lef, kGeneratedViaLef);
+  writeText(input_def, kWritebackDef);
+
+  EnttDesignFixture actual(lef, input_def);
+  eccdb::DatabaseContext context(actual.technology, actual.library, actual.design);
+  const auto before_revision = context.revision();
+  const auto before_export = eccdb::DefDesignExporter(actual.design).exportText();
+
+  runInjectedWriteback(workspace.path("entt-abort"), &actual.design, &actual.technology, &actual.library, &context,
+                       true, false);
+
+  EXPECT_EQ(context.revision(), before_revision);
+  EXPECT_EQ(eccdb::DefDesignExporter(actual.design).exportText(), before_export);
+
+  // The native runner detaches after abort. Reattach the same borrowed context
+  // for a subsequent invocation and verify normal output is still possible.
+  runInjectedWriteback(workspace.path("entt-after-abort"), &actual.design, &actual.technology, &actual.library, &context);
   EXPECT_GT(context.revision(), before_revision);
 }
 
@@ -1546,6 +1647,71 @@ TEST(Wrap, GeneratedDefViaMaterializesAtSpecialNetPoint)
   expectWrappedEqual(idb_database, entt_database);
 }
 
+TEST(Wrap, GeneratedDefViaAppliesOriginAndOffset)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("generated-via-origin-offset.lef");
+  const auto def = workspace.path("generated-via-origin-offset.def");
+  writeText(lef, kGeneratedViaLef);
+  auto def_text = std::string{kGeneratedViaDef};
+  const auto row_col = def_text.find("  + ROWCOL 2 3\n");
+  ASSERT_NE(row_col, std::string::npos);
+  def_text.insert(row_col + std::string_view{"  + ROWCOL 2 3\n"}.size(), "  + ORIGIN 10 -20\n  + OFFSET 3 4 -5 -6\n");
+  writeText(def, def_text);
+
+  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
+  const auto has_routing_rect = [](Database& database, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
+    return std::any_of(database.get_routing_obstacle_list().begin(), database.get_routing_obstacle_list().end(),
+                       [=](const auto& obstacle) {
+                         return obstacle.get_real_ll_x() == ll_x && obstacle.get_real_ll_y() == ll_y
+                                && obstacle.get_real_ur_x() == ur_x && obstacle.get_real_ur_y() == ur_y;
+                       });
+  };
+
+  // The generated cut array receives ORIGIN.  OFFSET is applied independently
+  // to only the bottom and top routing metal enclosures.
+  EXPECT_TRUE(has_routing_rect(idb_database, 813, 809, 1213, 1159));
+  EXPECT_TRUE(has_routing_rect(idb_database, 785, 779, 1225, 1169));
+  EXPECT_TRUE(has_routing_rect(entt_database, 813, 809, 1213, 1159));
+  EXPECT_TRUE(has_routing_rect(entt_database, 785, 779, 1225, 1169));
+  expectWrappedEqual(idb_database, entt_database);
+}
+
+TEST(Wrap, OmittedRoutingAreaUsesLegacySentinel)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("generated-via-without-area.lef");
+  const auto def = workspace.path("generated-via-without-area.def");
+  auto lef_text = std::string{kGeneratedViaLef};
+  constexpr std::string_view kArea{"  AREA 0.01 ;\n"};
+  for (auto position = lef_text.find(kArea); position != std::string::npos; position = lef_text.find(kArea)) {
+    lef_text.erase(position, kArea.size());
+  }
+  writeText(lef, lef_text);
+  writeText(def, kGeneratedViaDef);
+
+  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
+  expectWrappedEqual(idb_database, entt_database);
+}
+
+TEST(Wrap, NativeEnttIncludesRoutingBlockage)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("routing-blockage.lef");
+  const auto def = workspace.path("routing-blockage.def");
+  writeText(lef, kGeneratedViaLef);
+  auto def_text = std::string{kGeneratedViaDef};
+  const auto end_design = def_text.rfind("END DESIGN\n");
+  ASSERT_NE(end_design, std::string::npos);
+  def_text.insert(end_design, "BLOCKAGES 1 ;\n- LAYER M1 RECT ( 1400 1400 ) ( 1600 1600 ) ;\nEND BLOCKAGES\n");
+  writeText(def, def_text);
+
+  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
+  EXPECT_EQ(idb_database.get_routing_obstacle_list().size(), 3u);
+  EXPECT_EQ(entt_database.get_routing_obstacle_list().size(), 3u);
+  expectWrappedEqual(idb_database, entt_database);
+}
+
 TEST(Writeback, IdbGeneratedViaPreservesOriginAndOffset)
 {
   TemporaryWorkspace workspace;
@@ -1565,6 +1731,54 @@ TEST(Writeback, IdbGeneratedViaPreservesOriginAndOffset)
   EXPECT_NE(output_text.find("+ ORIGIN 10 -20"), std::string::npos);
   EXPECT_NE(output_text.find("+ OFFSET 3 4 -5 -6"), std::string::npos);
   dmInst->reset();
+
+  auto [idb_roundtrip, entt_roundtrip] = wrapIdbAndEntt(lef, output);
+  const auto has_routing_rect = [](Database& database, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
+    return std::any_of(database.get_routing_obstacle_list().begin(), database.get_routing_obstacle_list().end(),
+                       [=](const auto& obstacle) {
+                         return obstacle.get_real_ll_x() == ll_x && obstacle.get_real_ll_y() == ll_y
+                                && obstacle.get_real_ur_x() == ur_x && obstacle.get_real_ur_y() == ur_y;
+                       });
+  };
+  EXPECT_TRUE(has_routing_rect(idb_roundtrip, 813, 809, 1213, 1159));
+  EXPECT_TRUE(has_routing_rect(idb_roundtrip, 785, 779, 1225, 1169));
+  expectWrappedEqual(idb_roundtrip, entt_roundtrip);
+}
+
+TEST(Writeback, IdbGeneratedViaExplicitZeroUsesEquivalentDefaults)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("generated-via-zero-origin-offset.lef");
+  const auto def = workspace.path("generated-via-zero-origin-offset.def");
+  const auto output = workspace.path("generated-via-zero-origin-offset-output.def");
+  writeText(lef, kGeneratedViaLef);
+  auto def_text = std::string{kGeneratedViaDef};
+  const auto row_col = def_text.find("  + ROWCOL 2 3\n");
+  ASSERT_NE(row_col, std::string::npos);
+  def_text.insert(row_col + std::string_view{"  + ROWCOL 2 3\n"}.size(), "  + ORIGIN 0 0\n  + OFFSET 0 0 0 0\n");
+  writeText(def, def_text);
+
+  loadIntoIdb(lef, def);
+  ASSERT_TRUE(dmInst->saveDef(output.string()));
+  const auto output_text = readText(output);
+  // DEF 5.8 defines zero as the default for both optional clauses. The
+  // bundled Si2 parser intentionally exposes their numeric value rather than
+  // lexical presence, so saveDef may normalize explicit zero clauses away.
+  EXPECT_EQ(output_text.find("+ ORIGIN 0 0"), std::string::npos);
+  EXPECT_EQ(output_text.find("+ OFFSET 0 0 0 0"), std::string::npos);
+  dmInst->reset();
+
+  auto [idb_roundtrip, entt_roundtrip] = wrapIdbAndEntt(lef, output);
+  const auto has_routing_rect = [](Database& database, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
+    return std::any_of(database.get_routing_obstacle_list().begin(), database.get_routing_obstacle_list().end(),
+                       [=](const auto& obstacle) {
+                         return obstacle.get_real_ll_x() == ll_x && obstacle.get_real_ll_y() == ll_y
+                                && obstacle.get_real_ur_x() == ur_x && obstacle.get_real_ur_y() == ur_y;
+                       });
+  };
+  EXPECT_TRUE(has_routing_rect(idb_roundtrip, 800, 825, 1200, 1175));
+  EXPECT_TRUE(has_routing_rect(idb_roundtrip, 780, 805, 1220, 1195));
+  expectWrappedEqual(idb_roundtrip, entt_roundtrip);
 }
 
 TEST(Wrap, ExternalLefDef)

@@ -201,7 +201,10 @@ void DieBuilder::buildTrackList()
     }
 
     int32_t offset = std::max(routing_layer.get_prefer_track_offset(), 0);
-    buildTrack(routing_layer.get_name(), offset, x_pitch, offset, y_pitch);
+    const auto& die = database.get_die();
+    const auto x_grid = boundedTrackGrid(die.get_ll_x(), die.get_ur_x(), offset, x_pitch);
+    const auto y_grid = boundedTrackGrid(die.get_ll_y(), die.get_ur_y(), offset, y_pitch);
+    buildTrack(routing_layer.get_name(), x_grid.start, x_pitch, y_grid.start, y_pitch);
   }
 }
 

@@ -45,6 +45,11 @@ EMIRInterface& EMIRInterface::getInst()
   return *_emir_interface_instance;
 }
 
+void EMIRInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
 void EMIRInterface::destroyInst()
 {
   if (_emir_interface_instance != nullptr) {
@@ -129,6 +134,19 @@ void EMIRInterface::destroyEMIR()
   Logger::destroyInst();
 }
 
+void EMIRInterface::abortEMIR() noexcept
+{
+  try {
+    EMIRReporter::destroyInst();
+    EMAnalyzer::destroyInst();
+    IRAnalyzer::destroyInst();
+    GraphBuilder::destroyInst();
+    DataManager::destroyInst();
+    Logger::destroyInst();
+  } catch (...) {
+  }
+}
+
 #endif
 
 #endif
@@ -157,6 +175,10 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void EMIRInterface::wrapDatabase()
 {
+  if (_database_context != nullptr) {
+    wrapDatabaseFromEccdb();
+    return;
+  }
   wrapDBInfo();
   wrapInstanceIdSet();
   wrapPowerNetList();
@@ -267,11 +289,25 @@ void EMIRInterface::wrapPowerVia(PowerNet& power_net, idb::IdbVia* idb_via)
   power_via.set_x(coordinate->get_x());
   power_via.set_y(coordinate->get_y());
   power_via.set_cut_num(static_cast<int32_t>(cut_layer_shape.get_rect_list().size()));
+  for (idb::IdbRect* rectangle : bottom_layer_shape.get_rect_list()) {
+    power_via.add_bottom_rect(
+        {.ll_x = rectangle->get_low_x(), .ll_y = rectangle->get_low_y(), .ur_x = rectangle->get_high_x(), .ur_y = rectangle->get_high_y()});
+  }
+  for (idb::IdbRect* rectangle : top_layer_shape.get_rect_list()) {
+    power_via.add_top_rect(
+        {.ll_x = rectangle->get_low_x(), .ll_y = rectangle->get_low_y(), .ur_x = rectangle->get_high_x(), .ur_y = rectangle->get_high_y()});
+  }
   if (idb_via_master->get_resistance() > 0.0) {
     power_via.set_resistance(idb_via_master->get_resistance());
-  } else if (idb_via_master->get_master_generate()->get_rule_generate() != nullptr
+  } else if (idb_via_master->get_master_generate() != nullptr
+             && idb_via_master->get_master_generate()->get_rule_generate() != nullptr
              && idb_via_master->get_master_generate()->get_rule_generate()->get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
     power_via.set_resistance(idb_via_master->get_master_generate()->get_rule_generate()->get_resistance_per_cut() / power_via.get_cut_num());
+  } else if (auto* cut_layer = dynamic_cast<idb::IdbLayerCut*>(cut_layer_shape.get_layer());
+             cut_layer != nullptr && cut_layer->get_resistance() > 0.0 && power_via.get_cut_num() > 0) {
+    // LEF CUT RESISTANCE is the default per-cut value when the VIA and
+    // VIARULE do not override it. Parallel cuts divide that resistance.
+    power_via.set_resistance(cut_layer->get_resistance() / power_via.get_cut_num());
   } else {
     power_via.set_resistance(getGeneratedViaResistance(idb_via_master, power_via.get_cut_num()));
   }
@@ -321,26 +357,44 @@ void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* id
 
 void EMIRInterface::wrapPowerPin(PowerNet& power_net, idb::IdbPin* idb_pin, bool is_source)
 {
-  for (idb::IdbLayerShape* idb_layer_shape : idb_pin->get_port_box_list()) {
-    wrapPowerPinShape(power_net, idb_pin, idb_layer_shape, is_source);
+  const auto& placed_shapes = idb_pin->get_port_box_list();
+  std::size_t shape_index = 0;
+  const auto& ports = idb_pin->get_term()->get_port_list();
+  for (std::size_t port_index = 0; port_index < ports.size(); ++port_index) {
+    // IdbPin::set_port_layer_shape retains PORT order followed by layer
+    // shape order. Use its already transformed rectangles, preserving the
+    // original PORT membership instead of collapsing a layer to its bbox.
+    for (std::size_t layer_index = 0; layer_index < ports[port_index]->get_layer_shape().size(); ++layer_index) {
+      if (shape_index >= placed_shapes.size()) {
+        return;  // An unplaced IO port has no transformed physical geometry.
+      }
+      const auto first = power_net.get_pin_list().size();
+      wrapPowerPinShape(power_net, idb_pin, placed_shapes[shape_index++], is_source);
+      for (std::size_t index = first; index < power_net.get_pin_list().size(); ++index) {
+        power_net.get_pin_list()[index].set_port_id(port_index);
+      }
+    }
   }
 }
 
 void EMIRInterface::wrapPowerPinShape(PowerNet& power_net, idb::IdbPin* idb_pin, idb::IdbLayerShape* idb_layer_shape, bool is_source)
 {
-  idb::IdbRect idb_bounding_box = idb_layer_shape->get_bounding_box();
-  PowerPin power_pin;
-  if (!idb_pin->is_io_pin()) {
-    power_pin.set_instance_id(idb_pin->get_instance()->get_id());
-    power_pin.set_pin_name(idb_pin->get_instance()->get_name() + ":" + idb_pin->get_pin_name());
-  } else {
-    power_pin.set_pin_name(idb_pin->get_pin_name());
+  if (!idb_layer_shape->get_layer()->is_routing()) {
+    return;
   }
-  power_pin.set_layer_idx(idb_layer_shape->get_layer()->get_id());
-  power_pin.set_x((idb_bounding_box.get_low_x() + idb_bounding_box.get_high_x()) / 2);
-  power_pin.set_y((idb_bounding_box.get_low_y() + idb_bounding_box.get_high_y()) / 2);
-  power_pin.set_is_source(is_source);
-  power_net.get_pin_list().push_back(power_pin);
+  for (auto* rectangle : idb_layer_shape->get_rect_list()) {
+    PowerPin power_pin;
+    if (!idb_pin->is_io_pin()) {
+      power_pin.set_instance_id(idb_pin->get_instance()->get_id());
+      power_pin.set_pin_name(idb_pin->get_instance()->get_name() + ":" + idb_pin->get_pin_name());
+    } else {
+      power_pin.set_pin_name(idb_pin->get_pin_name());
+    }
+    power_pin.set_layer_idx(idb_layer_shape->get_layer()->get_id());
+    power_pin.set_bounds(rectangle->get_low_x(), rectangle->get_low_y(), rectangle->get_high_x(), rectangle->get_high_y());
+    power_pin.set_is_source(is_source);
+    power_net.get_pin_list().push_back(std::move(power_pin));
+  }
 }
 
 #endif

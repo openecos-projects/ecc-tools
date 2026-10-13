@@ -41,12 +41,22 @@ struct LefDefInput
   std::filesystem::path def_file;
 };
 
+// LEF supplies the cell masters and terminal definitions; structural Verilog
+// supplies the logical instances and connectivity.  No DEF is required for
+// this input mode because placement and routing are intentionally left empty.
+struct LefVerilogInput
+{
+  std::vector<std::filesystem::path> lef_files;
+  std::filesystem::path verilog_file;
+  std::string top_module;
+};
+
 struct BinaryInput
 {
   BinaryFiles files;
 };
 
-using DatabaseInput = std::variant<LefDefInput, BinaryInput>;
+using DatabaseInput = std::variant<LefDefInput, LefVerilogInput, BinaryInput>;
 
 struct Config
 {

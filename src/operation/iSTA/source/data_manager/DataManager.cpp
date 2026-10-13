@@ -302,7 +302,7 @@ void DataManager::makeNet(const std::string& net_name, Net& net)
   }
 }
 
-void DataManager::readConstraint()
+bool DataManager::readConstraint()
 {
   Database& database = _database;
   std::string sdc_file_path = database.get_timing_constraint().get_sdc_file_path();
@@ -310,7 +310,7 @@ void DataManager::readConstraint()
   database.get_timing_constraint().get_port_constraint_map().clear();
   database.get_timing_constraint().get_case_analysis_map().clear();
   if (sdc_file_path.empty()) {
-    return;
+    return true;
   }
 
   auto& sdc_command{Singleton<SdcCommand>::getInst()};
@@ -318,7 +318,9 @@ void DataManager::readConstraint()
     for (const SdcError& error : sdc_command.getErrors()) {
       STALOG.warn(Loc::current(), "SDC command failed in '", sdc_file_path, "' at line ", error.line_number, ": ", error.message);
     }
+    return false;
   }
+  return true;
 }
 
 void DataManager::printConfig()

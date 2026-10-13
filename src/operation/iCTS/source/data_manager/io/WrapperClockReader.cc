@@ -42,6 +42,7 @@
 #include "LibParserCpp.hh"
 #include "Logger.hh"
 #include "Wrapper.hh"
+#include "CtsEccdbAdapter.hh"
 #include "adapter/sdc/SDCClockReader.hh"
 #include "builder.h"
 #include "def_service.h"
@@ -1112,11 +1113,22 @@ class Wrapper::CtsClockReader
 
 auto Wrapper::readClocks(Design& design, const std::vector<std::pair<std::string, std::string>>& clock_net_pairs) -> bool
 {
+  if (_native_adapter != nullptr) {
+    std::vector<ClockTraceClockTarget> targets;
+    targets.reserve(clock_net_pairs.size());
+    for (const auto& [clock_name, net_name] : clock_net_pairs) {
+      targets.push_back(ClockTraceClockTarget{.clock_name = clock_name, .clock_net_name = net_name});
+    }
+    return _native_adapter->readTraceClockTargets(design, targets);
+  }
   return CtsClockReader(*this, design).readClocks(clock_net_pairs);
 }
 
 auto Wrapper::readTraceClockTargets(Design& design, const std::vector<ClockTraceClockTarget>& clock_targets) -> bool
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->readTraceClockTargets(design, clock_targets);
+  }
   return CtsClockReader(*this, design).readTraceClockTargets(clock_targets);
 }
 

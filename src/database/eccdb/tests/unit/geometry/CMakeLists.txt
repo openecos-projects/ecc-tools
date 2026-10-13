@@ -26,6 +26,7 @@ eccdb_storage_target(eccdb_geometry_registry_test)
 target_link_libraries(eccdb_geometry_registry_test
   PRIVATE
     eccdb_geometry
+    eccdb_entt
     GTest::gtest_main
 )
 

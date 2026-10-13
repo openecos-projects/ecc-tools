@@ -40,6 +40,7 @@
 #include "Logger.hh"
 #include "Type.hh"
 #include "Wrapper.hh"
+#include "CtsEccdbAdapter.hh"
 #include "config/Config.hh"
 #include "design/Design.hh"
 #include "design/Inst.hh"
@@ -85,6 +86,13 @@ auto convertLibCapToPf(idb::LibCell* lib_cell, double cap_value) -> double
     return cap_value;
   }
   return idb::ConvertCapUnit(owner_lib->get_cap_unit(), idb::CapacitiveUnit::kPF, cap_value);
+}
+
+auto storedPortCapToPf(double cap_value) -> double
+{
+  // LibParserCpp normalizes scalar Liberty pin capacitance and cap-limit
+  // attributes to pF. LUT axes remain in the library-declared unit.
+  return cap_value;
 }
 
 auto convertLibTimeToNs(idb::LibCell* lib_cell, double time_value) -> double
@@ -136,7 +144,7 @@ auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -
   if (!cap_value.has_value()) {
     return std::nullopt;
   }
-  const double cap_pf = convertLibCapToPf(lib_cell, *cap_value);
+  const double cap_pf = storedPortCapToPf(*cap_value);
   return std::isfinite(cap_pf) && cap_pf > 0.0 ? std::optional<double>{cap_pf} : std::nullopt;
 }
 
@@ -272,7 +280,7 @@ auto queryLibOutputPinCapLimitPf(idb::LibCell* lib_cell, const Pin* pin) -> std:
   if (!cap_limit.has_value() || !std::isfinite(*cap_limit) || *cap_limit <= 0.0) {
     return std::nullopt;
   }
-  const double cap_limit_pf = convertLibCapToPf(lib_cell, *cap_limit);
+  const double cap_limit_pf = storedPortCapToPf(*cap_limit);
   return std::isfinite(cap_limit_pf) && cap_limit_pf > 0.0 ? std::optional<double>{cap_limit_pf} : std::nullopt;
 }
 
@@ -401,6 +409,11 @@ auto lookupLeakagePowerW(idb::LibCell* lib_cell) -> std::optional<double>
 
 auto Wrapper::loadLibertyIfNeeded() const -> void
 {
+  if (_native_adapter != nullptr) {
+    // Native callers inject a provider owned by their toolchain.  Falling
+    // through here would make the EccDB branch read dmInst again.
+    return;
+  }
   if (_liberty_loaded) {
     return;
   }
@@ -444,6 +457,9 @@ auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibC
   if (cell_master.empty()) {
     return nullptr;
   }
+  if (_native_adapter != nullptr) {
+    return _native_liberty_cell_lookup ? _native_liberty_cell_lookup(cell_master) : nullptr;
+  }
   loadLibertyIfNeeded();
   const auto iter = _lib_cell_by_master.find(cell_master);
   return iter == _lib_cell_by_master.end() ? nullptr : iter->second;
@@ -467,7 +483,7 @@ auto Wrapper::queryCellOutPinCapLimit(const std::string& cell_master) const -> s
   if (!cap_limit.has_value() || !std::isfinite(*cap_limit) || *cap_limit <= 0.0) {
     return std::nullopt;
   }
-  const double cap_limit_pf = convertLibCapToPf(lib_cell, *cap_limit);
+  const double cap_limit_pf = storedPortCapToPf(*cap_limit);
   return std::isfinite(cap_limit_pf) && cap_limit_pf > 0.0 ? std::optional<double>{cap_limit_pf} : std::nullopt;
 }
 
@@ -610,6 +626,9 @@ auto Wrapper::queryPinSlewLimit(const Config& config, const Pin* pin) const -> s
 
 auto Wrapper::queryCellHeightUm(const std::string& cell_master) const -> std::optional<double>
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->queryCellHeightUm(cell_master);
+  }
   if (_idb_layout == nullptr || _idb_layout->get_cell_master_list() == nullptr || _idb_layout->get_units() == nullptr) {
     return std::nullopt;
   }
@@ -630,6 +649,9 @@ auto Wrapper::queryCellHeightUm(const std::string& cell_master) const -> std::op
 
 auto Wrapper::queryCellAreaUm2(const std::string& cell_master) const -> std::optional<double>
 {
+  if (_native_adapter != nullptr) {
+    return _native_adapter->queryCellAreaUm2(cell_master);
+  }
   if (_idb_layout == nullptr || _idb_layout->get_cell_master_list() == nullptr || _idb_layout->get_units() == nullptr) {
     return std::nullopt;
   }

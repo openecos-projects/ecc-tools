@@ -25,10 +25,43 @@
 #include "VerilogReader.hh"
 
 #include <cstring>
+#include <utility>
 
 #include "utility/logger/Logger.hpp"
 
 namespace idb {
+
+VerilogReader::~VerilogReader()
+{
+  if (_verilog_file_ptr != nullptr) {
+    verilog_free_file(_verilog_file_ptr);
+  }
+}
+
+VerilogReader::VerilogReader(VerilogReader&& other) noexcept
+    : _verilog_file_ptr(std::exchange(other._verilog_file_ptr, nullptr)),
+      _top_module_name(std::move(other._top_module_name)),
+      _verilog_modules(std::move(other._verilog_modules)),
+      _top_module(other._top_module)
+{
+  other._top_module = nullptr;
+}
+
+VerilogReader& VerilogReader::operator=(VerilogReader&& rhs) noexcept
+{
+  if (this == &rhs) {
+    return *this;
+  }
+  if (_verilog_file_ptr != nullptr) {
+    verilog_free_file(_verilog_file_ptr);
+  }
+  _verilog_file_ptr = std::exchange(rhs._verilog_file_ptr, nullptr);
+  _top_module_name = std::move(rhs._top_module_name);
+  _verilog_modules = std::move(rhs._verilog_modules);
+  _top_module = rhs._top_module;
+  rhs._top_module = nullptr;
+  return *this;
+}
 
 /**
  * @brief Read the verilog file use Verilog parser.
@@ -40,6 +73,13 @@ unsigned VerilogReader::readVerilog(const char* verilog_file_path)
 {
   unsigned is_ok = 1;
   ECCLOG.info(ecc::Loc::current(), "load verilog file ", verilog_file_path);
+  if (_verilog_file_ptr != nullptr) {
+    verilog_free_file(_verilog_file_ptr);
+  }
+  _verilog_file_ptr = nullptr;
+  _top_module_name.clear();
+  _verilog_modules.clear();
+  _top_module = nullptr;
   _verilog_file_ptr = verilog_parse_file(verilog_file_path);
 
   if (_verilog_file_ptr) {

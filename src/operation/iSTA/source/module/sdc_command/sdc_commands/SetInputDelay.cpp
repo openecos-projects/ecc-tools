@@ -18,11 +18,31 @@
 #include "SdcCommandUtils.hpp"
 #include "SdcCommands.hpp"
 
+#include <cmath>
+
 namespace ista::sdc {
+
+namespace {
+
+bool conflictsWithAppendedDelay(TimingPortConstraint& constraint, const std::string& clock_name, const double delay_value,
+                                const bool set_min, const bool set_max)
+{
+  if (!clock_name.empty() && !constraint.get_clock_name().empty() && constraint.get_clock_name() != clock_name) {
+    return true;
+  }
+  constexpr double kTolerance = 1.0e-12;
+  return (set_min && constraint.get_has_input_delay_min()
+          && std::abs(constraint.get_input_delay_min() - delay_value) > kTolerance)
+         || (set_max && constraint.get_has_input_delay_max()
+             && std::abs(constraint.get_input_delay_max() - delay_value) > kTolerance);
+}
+
+}  // namespace
 
 TclSetInputDelay::TclSetInputDelay(const char* cmd_name, ClientData client_data) : SdcTclCmd(cmd_name, client_data)
 {
   addOption(new ecc::TclStringOption("-clock", 0));
+  addOption(new ecc::TclSwitchOption("-add_delay"));
   addOption(new ecc::TclSwitchOption("-min"));
   addOption(new ecc::TclSwitchOption("-max"));
   addOption(new ecc::TclDoubleOption("delay", 1));
@@ -42,11 +62,18 @@ unsigned TclSetInputDelay::exec()
 
   ecc::TclOption* clock_option = getOptionOrArg("-clock");
   const double delay_value = delay_option->getDoubleVal();
+  const bool add_delay = getOptionOrArg("-add_delay")->is_set_val();
   const bool set_min = getOptionOrArg("-min")->is_set_val();
   const bool set_max = getOptionOrArg("-max")->is_set_val();
   const std::string clock_name = clock_option->is_set_val() ? clock_option->getStringVal() : std::string{};
   for (const std::string& port_name : resolveObjectList(data_manager.getDatabase(), object_option->getStringList())) {
     TimingPortConstraint& port_constraint = getPortConstraint(data_manager.getDatabase(), port_name);
+    const bool apply_min = set_min || !set_max;
+    const bool apply_max = set_max || !set_min;
+    if (add_delay && conflictsWithAppendedDelay(port_constraint, clock_name, delay_value, apply_min, apply_max)) {
+      setTclError("set_input_delay -add_delay cannot represent multiple values for one port in the current timing model");
+      return 0;
+    }
     port_constraint.set_clock_name(clock_name);
     if (set_min && !set_max) {
       port_constraint.set_input_delay_min(delay_value);

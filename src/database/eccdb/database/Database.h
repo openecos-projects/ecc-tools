@@ -21,9 +21,11 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "database/DatabaseConfig.h"
+#include "import/verilog/VerilogNetlistImportService.h"
 
 namespace eccdb {
 
@@ -53,6 +55,11 @@ class Database
   Database& operator=(Database&&) noexcept;
 
   [[nodiscard]] const std::vector<ImportDiagnostic>& diagnostics() const noexcept;
+  // Import a structural (post-synthesis) Verilog netlist into the already
+  // loaded EccDB library/design.  LEF must be loaded first so cell masters
+  // and their terms can materialize instance terminals.
+  [[nodiscard]] VerilogNetlistImportResult importVerilog(const std::filesystem::path& file,
+                                                         std::string_view top_module = {});
   void writeDef(const std::filesystem::path& file) const;
   void writeBinary(const BinaryFiles& files) const;
   // Borrowed services follow the owned state through moves. Move assignment

@@ -13,6 +13,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -71,7 +72,52 @@ void testEscapedIdentifierWithBusCharactersStaysScalar()
   require(verilog_is_id(identifier), "escaped identifier with brackets must not become a bus index");
   require(std::string(verilog_convert_id(identifier)->id) == "\\hierarchy[0].wdata_i[0]", "escaped identifier text was not preserved");
 
-  verilog_free_file(reader.get_verilog_file_ptr());
+  std::filesystem::remove(verilog_path);
+}
+
+void testEscapedIdentifierKeepsLiteralInternalBackslash()
+{
+  const auto verilog_path = std::filesystem::temp_directory_path() / "verilog_escaped_backslash_identifier_test.v";
+  {
+    std::ofstream stream(verilog_path);
+    require(stream.good(), "failed to create test Verilog file");
+    stream << "module top;\n"
+           << R"(  wire \foo\bar ;)" << '\n'
+           << R"(  wire \foobar ;)" << '\n'
+           << R"(  wire \\leading ;)" << '\n'
+           << R"(  wire \leading ;)" << '\n'
+           << "endmodule\n";
+  }
+
+  idb::VerilogReader reader;
+  require(reader.readVerilog(verilog_path.c_str()) != 0, "failed to parse test Verilog file");
+
+  ParsedVerilogModule* top_module = nullptr;
+  for (auto* module : reader.get_verilog_modules()) {
+    if (module != nullptr && std::string(module->module_name) == "top") {
+      top_module = module;
+      break;
+    }
+  }
+  require(top_module != nullptr, "top module was not parsed");
+
+  std::vector<std::string> declarations;
+  void* statement = nullptr;
+  FOREACH_VERILOG_VEC_ELEM(&top_module->module_stmts, void, statement)
+  {
+    if (!verilog_is_dcls_stmt(statement)) {
+      continue;
+    }
+    auto declarations_statement = verilog_convert_dcls(statement)->verilog_dcls;
+    void* declaration = nullptr;
+    FOREACH_VERILOG_VEC_ELEM(&declarations_statement, void, declaration)
+    {
+      declarations.emplace_back(verilog_convert_dcl(declaration)->dcl_name);
+    }
+  }
+
+  require(declarations == std::vector<std::string>({R"(\foo\bar)", R"(\foobar)", R"(\\leading)", R"(\leading)"}),
+          "parser did not preserve distinct escaped identifier tokens");
   std::filesystem::remove(verilog_path);
 }
 
@@ -81,6 +127,7 @@ int main()
 {
   try {
     testEscapedIdentifierWithBusCharactersStaysScalar();
+    testEscapedIdentifierKeepsLiteralInternalBackslash();
   } catch (const std::exception& error) {
     std::cout << error.what() << '\n';
     return 1;

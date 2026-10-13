@@ -33,6 +33,7 @@ target_link_libraries(idrc_adapter_differential_test
     idm
     ecc_feature
     eccdb_design
+    eccdb_context
     eccdb_tech_database
     eccdb_library
     eccdb_lef_import

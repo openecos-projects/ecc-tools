@@ -117,6 +117,10 @@ class GeometryQueryService
 
   [[nodiscard]] GeometryShapeBatch query(Rect box) const;
   [[nodiscard]] GeometryShapeRefBatch queryRefs(Rect box, const GeometryQueryFilter& filter = {}) const;
+  // Boolean viewport query. This shares queryRefs' exact Via-layer semantics,
+  // but stops the R-tree traversal at the first qualifying shape instead of
+  // building a detached reference batch.
+  [[nodiscard]] bool hasShapes(Rect box, const GeometryQueryFilter& filter = {}) const;
   void warmupIndex() const;
   [[nodiscard]] bool indexReady() const;
   [[nodiscard]] std::size_t indexedShapeCount() const;

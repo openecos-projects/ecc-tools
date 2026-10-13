@@ -2102,7 +2102,6 @@ std::vector<Violation> DetailedRouter::getPatchViolationList(DRBox& dr_box, cons
     for (auto& [layer_idx, net_fixed_rect_map] : layer_net_fixed_rect_map) {
       for (auto& [net_idx, fixed_rect_set] : net_fixed_rect_map) {
         if (net_idx == -1) {
-          env_shape_list.reserve(env_shape_list.size() + fixed_rect_set.size());
           for (auto& fixed_rect : fixed_rect_set) {
             if (overlapCheckRegion(layer_idx, fixed_rect->get_real_rect(), check_region_list)) {
               env_shape_list.emplace_back(fixed_rect, is_routing);
@@ -2110,7 +2109,6 @@ std::vector<Violation> DetailedRouter::getPatchViolationList(DRBox& dr_box, cons
           }
         } else {
           std::vector<std::pair<EXTLayerRect*, bool>>& pin_shape_list = net_pin_shape_map[net_idx];
-          pin_shape_list.reserve(pin_shape_list.size() + fixed_rect_set.size());
           for (auto& fixed_rect : fixed_rect_set) {
             if (overlapCheckRegion(layer_idx, fixed_rect->get_real_rect(), check_region_list)) {
               pin_shape_list.emplace_back(fixed_rect, is_routing);
@@ -2135,7 +2133,6 @@ std::vector<Violation> DetailedRouter::getPatchViolationList(DRBox& dr_box, cons
   }
   for (auto& [net_idx, segment_list] : dr_box.get_net_task_detailed_result_map()) {
     std::vector<Segment<LayerCoord>*>& result_list = net_result_map[net_idx];
-    result_list.reserve(result_list.size() + segment_list.size());
     for (Segment<LayerCoord>& segment : segment_list) {
       for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
         if (overlapCheckRegion(net_shape.get_layer_idx(), net_shape.get_rect(), check_region_list)) {
@@ -2158,14 +2155,12 @@ std::vector<Violation> DetailedRouter::getPatchViolationList(DRBox& dr_box, cons
   for (auto& [net_idx, patch_list] : dr_box.get_net_task_detailed_patch_map()) {
     std::vector<EXTLayerRect*>& result_patch_list = net_patch_map[net_idx];
     if (net_idx == dr_box.get_curr_patch_task()->get_net_idx()) {
-      result_patch_list.reserve(result_patch_list.size() + dr_box.get_routing_patch_list().size());
       for (EXTLayerRect& patch : dr_box.get_routing_patch_list()) {
         if (overlapCheckRegion(patch.get_layer_idx(), patch.get_real_rect(), check_region_list)) {
           result_patch_list.emplace_back(&patch);
         }
       }
     } else {
-      result_patch_list.reserve(result_patch_list.size() + patch_list.size());
       for (EXTLayerRect& patch : patch_list) {
         if (overlapCheckRegion(patch.get_layer_idx(), patch.get_real_rect(), check_region_list)) {
           result_patch_list.emplace_back(&patch);

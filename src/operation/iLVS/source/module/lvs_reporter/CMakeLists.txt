@@ -16,6 +16,7 @@ target_link_libraries(ilvs_lvs_reporter
     ilvs_data_manager
     ilvs_module
     ilvs_toolkit
+    fort
 )
 
 target_include_directories(ilvs_lvs_reporter

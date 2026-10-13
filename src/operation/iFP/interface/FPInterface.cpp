@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "FPInterface.hpp"
 
+#include <stdexcept>
+
 #include "DataManager.hpp"
 #include "DieBuilder.hpp"
 #include "IOPlacer.hpp"
@@ -132,6 +134,12 @@ void FPInterface::destroyFP()
   Logger::destroyInst();
 }
 
+void FPInterface::abortFP()
+{
+  DataManager::destroyInst();
+  Logger::destroyInst();
+}
+
 #endif
 
 #if 1  // debug iFP
@@ -221,6 +229,16 @@ void FPInterface::debugInputMacro(std::map<std::string, std::any> config_map)
 #if 1  // TopData
 
 #if 1  // input
+
+void FPInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
+void FPInterface::setDesignSource(eccdb::DatabaseContext& context) noexcept
+{
+  setDesignSource(&context);
+}
 
 void FPInterface::input(std::map<std::string, std::any>& config_map)
 {
@@ -358,6 +376,16 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void FPInterface::wrapDatabase()
 {
+#if defined(IFP_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    wrapDatabaseFromEnTT();
+    return;
+  }
+#else
+  if (_database_context != nullptr) {
+    throw std::logic_error("iFP was built without native EccDB support");
+  }
+#endif
   wrapDBInfo();
   wrapMicronDBU();
   wrapManufactureGrid();
@@ -626,6 +654,16 @@ void FPInterface::wrapIOPinList()
 
 void FPInterface::output()
 {
+#if defined(IFP_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    outputToEnTT();
+    return;
+  }
+#else
+  if (_database_context != nullptr) {
+    throw std::logic_error("iFP was built without native EccDB support");
+  }
+#endif
   outputFloorplan();
   outputPGNetList();
   outputIOPinList();
@@ -732,24 +770,32 @@ idb::IdbOrient FPInterface::unwrapPlacementOrientation(PlacementOrientation orie
 void FPInterface::outputTrackList()
 {
   idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
+  // new_track_list is a complete reconstructed grid, not an append delta.
+  for (auto* layer : idb_layout->get_layers()->get_routing_layers()) {
+    static_cast<idb::IdbLayerRouting*>(layer)->get_track_grid_list().clear();
+  }
+  idb_layout->get_track_grid_list()->reset();
+  auto* die = idb_layout->get_die();
   for (Track& track : FPDM.getDatabase().get_new_track_list()) {
     idb::IdbLayerRouting* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(idb_layout->get_layers()->find_layer(track.get_layer_name()));
-
-    idb::IdbTrackGrid* x_track_grid = idb_layout->get_track_grid_list()->add_track_grid();
-    x_track_grid->add_layer_list(routing_layer);
-    routing_layer->add_track_grid(x_track_grid);
-    x_track_grid->get_track()->set_direction(idb::IdbTrackDirection::kDirectionX);
-    x_track_grid->get_track()->set_pitch(track.get_x_pitch());
-    x_track_grid->get_track()->set_start(track.get_x_offset());
-    x_track_grid->set_track_number((idb_layout->get_die()->get_width() - track.get_x_offset()) / track.get_x_pitch());
-
-    idb::IdbTrackGrid* y_track_grid = idb_layout->get_track_grid_list()->add_track_grid();
-    y_track_grid->add_layer_list(routing_layer);
-    routing_layer->add_track_grid(y_track_grid);
-    y_track_grid->get_track()->set_direction(idb::IdbTrackDirection::kDirectionY);
-    y_track_grid->get_track()->set_pitch(track.get_y_pitch());
-    y_track_grid->get_track()->set_start(track.get_y_offset());
-    y_track_grid->set_track_number((idb_layout->get_die()->get_height() - track.get_y_offset()) / track.get_y_pitch());
+    const auto append = [&](idb::IdbTrackDirection direction, int32_t lower, int32_t upper, int32_t phase, int32_t pitch) {
+      if (pitch <= 0) {
+        return;
+      }
+      const auto grid = boundedTrackGrid(lower, upper, phase, pitch);
+      if (grid.count == 0) {
+        return;
+      }
+      auto* stored = idb_layout->get_track_grid_list()->add_track_grid();
+      stored->add_layer_list(routing_layer);
+      routing_layer->add_track_grid(stored);
+      stored->get_track()->set_direction(direction);
+      stored->get_track()->set_pitch(pitch);
+      stored->get_track()->set_start(grid.start);
+      stored->set_track_number(grid.count);
+    };
+    append(idb::IdbTrackDirection::kDirectionX, die->get_llx(), die->get_urx(), track.get_x_offset(), track.get_x_pitch());
+    append(idb::IdbTrackDirection::kDirectionY, die->get_lly(), die->get_ury(), track.get_y_offset(), track.get_y_pitch());
   }
 }
 

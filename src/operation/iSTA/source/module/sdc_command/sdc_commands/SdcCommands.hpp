@@ -20,6 +20,14 @@
 
 namespace ista::sdc {
 
+class TclCurrentDesign : public SdcTclCmd
+{
+ public:
+  TclCurrentDesign(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclSetCaseAnalysis : public SdcTclCmd
 {
  public:

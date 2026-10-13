@@ -118,6 +118,7 @@ struct PyPlaceDB
   double total_space_area;  ///< total placeable space area excluding fixed cells.
                             ///< This is not the exact area, because we cannot exclude the overlapping fixed cells
                             ///< within a bin.
+  double total_fixed_node_area;  ///< sum of fixed body and synthetic obstacle rectangles.
 
   int num_movable_pins;
 

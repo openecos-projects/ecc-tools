@@ -104,11 +104,17 @@ auto collectSinkPinCapPfByPin(Wrapper& wrapper, const std::vector<SinkLoadRegion
 {
   SinkPinCapCollection collection;
   auto& sink_pin_cap_pf_by_pin = collection.cap_pf_by_pin;
+  std::size_t total_load_count = 0U;
+  for (const auto& group : groups) {
+    if (group.loads != nullptr) {
+      total_load_count += group.loads->size();
+    }
+  }
+  sink_pin_cap_pf_by_pin.reserve(total_load_count);
   for (const auto& group : groups) {
     if (group.loads == nullptr) {
       continue;
     }
-    sink_pin_cap_pf_by_pin.reserve(sink_pin_cap_pf_by_pin.size() + group.loads->size());
     for (const auto* pin : *group.loads) {
       if (pin == nullptr) {
         continue;

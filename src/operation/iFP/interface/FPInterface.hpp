@@ -34,6 +34,10 @@ enum class IdbConnectDirection : uint8_t;
 enum class IdbOrient : uint8_t;
 }  // namespace idb
 
+namespace eccdb {
+class DatabaseContext;
+}  // namespace eccdb
+
 #endif
 
 namespace ifp {
@@ -57,6 +61,9 @@ class FPInterface
   void initFP(std::map<std::string, std::any> config_map);
   void runFP();
   void destroyFP();
+  // Drops the private iFP work model after a failed stage.  Unlike destroyFP,
+  // this deliberately does not submit partially computed data to a database.
+  void abortFP();
 #endif
 
 #if 1  // debug iFP
@@ -70,9 +77,14 @@ class FPInterface
 #if 1  // TopData
 
 #if 1  // input
+  // A non-null native source selects the EccDB adapter path.  Clearing it
+  // restores the legacy iDB path for callers that still use it.
+  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
+  void setDesignSource(eccdb::DatabaseContext& context) noexcept;
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
+  void wrapDatabaseFromEnTT();
   void wrapDBInfo();
   void wrapMicronDBU();
   void wrapManufactureGrid();
@@ -91,6 +103,7 @@ class FPInterface
 
 #if 1  // output
   void output();
+  void outputToEnTT();
   void outputFloorplan();
   void outputDie();
   void outputCore();
@@ -127,6 +140,7 @@ class FPInterface
 
  private:
   static FPInterface* _fp_interface_instance;
+  eccdb::DatabaseContext* _database_context = nullptr;
 
   FPInterface() = default;
   FPInterface(const FPInterface& other) = delete;

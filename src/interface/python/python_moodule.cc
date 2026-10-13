@@ -30,6 +30,7 @@
 #include "py_register_izh.h"
 #include "py_register_report.h"
 #include "python_module.h"
+#include "py_register_native.h"
 
 namespace python_interface {
 
@@ -50,6 +51,7 @@ PYBIND11_MODULE(ecc_py, m)
   register_izh(m);
   register_report(m);
   register_feature(m);
+  register_native(m);
 }
 
 }  // namespace python_interface

@@ -90,6 +90,10 @@ class RTInterface
   void runERT(std::map<std::string, std::any> config_map);
   void runRT();
   void destroyRT();
+  // Releases a partially initialized run without publishing routing results.
+  // Callers use this after an algorithm failure before detaching a borrowed
+  // DatabaseContext.
+  void abortRT();
   void cleanDef();
 #endif
 
@@ -104,6 +108,9 @@ class RTInterface
                        eccdb::LibraryStore* library);
   // Borrow the caller's service context so native iRT output joins the same
   // revision and observer lifecycle as the surrounding Operation or GUI.
+  // Passing nullptr detaches the borrowed context and restores legacy iDB
+  // source selection until another source is attached.
+  void setDesignSource(eccdb::DatabaseContext* context);
   void setDesignSource(eccdb::DatabaseContext& context);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
@@ -187,6 +194,8 @@ class RTInterface
   RTInterface& operator=(const RTInterface& other) = delete;
   RTInterface& operator=(RTInterface&& other) = delete;
   [[nodiscard]] eccdb::DatabaseContext& databaseContext() const noexcept;
+  void finishRT(bool write_output);
+  void abortIDRC();
   // function
 
   // Legacy pointer callers do not provide a context. Keep the fallback here
@@ -194,6 +203,10 @@ class RTInterface
   // every writeback operation.
   std::unique_ptr<eccdb::DatabaseContext> _owned_database_context;
   eccdb::DatabaseContext* _database_context = nullptr;
+  bool _rt_initialized = false;
+  bool _topo_initialized = false;
+  bool _drc_engine_initialized = false;
+  bool _idrc_initialized = false;
 };
 
 }  // namespace irt

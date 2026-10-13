@@ -237,7 +237,6 @@ void RuleValidator::verifyCornerSpacing(RVCluster& rv_cluster)
 
       std::vector<GTLRectInt> gtl_rect_list;
       gtl::get_max_rectangles(gtl_rect_list, gtl_hole_poly);
-      merged_layer_data.max_rect_pool.reserve(merged_layer_data.max_rect_pool.size() + gtl_rect_list.size());
       for (GTLRectInt& gtl_rect : gtl_rect_list) {
         MaxRectData max_rect_data;
         max_rect_data.rect = gtl_rect;

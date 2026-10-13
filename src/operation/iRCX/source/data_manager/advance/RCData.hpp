@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <algorithm>
+
 #include "CornerNetPool.hpp"
 #include "CouplingCapEntry.hpp"
 #include "CouplingKey.hpp"
@@ -83,9 +85,27 @@ class RCData
   {
     _net_coupling_cap_entry_list[net_idx].emplace_back(first_edge_idx, second_edge_idx, corner_idx, coupling_capacitance);
   }
-  void merge_net_coupling_cap_entry_list()
+  void merge_net_coupling_cap_entry_list(TopoPool& topo_pool)
   {
-    for (std::vector<CouplingCapEntry>& coupling_cap_entry_list : _net_coupling_cap_entry_list) {
+    // CapExtractor records one independent contribution list per storage net.
+    // The two database adapters need not assign the same storage net indices,
+    // so merge by the semantic rank EnvBuilder assigned from the net name.
+    // Entries within one physical source net retain their extraction order.
+    std::vector<int32_t> net_idx_list;
+    net_idx_list.reserve(_net_coupling_cap_entry_list.size());
+    for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(_net_coupling_cap_entry_list.size()); ++net_idx) {
+      if (!_net_coupling_cap_entry_list[net_idx].empty()) {
+        net_idx_list.push_back(net_idx);
+      }
+    }
+    std::sort(net_idx_list.begin(), net_idx_list.end(), [&topo_pool](int32_t lhs, int32_t rhs) {
+      const std::span<TopoEdge> lhs_edges = topo_pool.get_net_edge_list(lhs);
+      const std::span<TopoEdge> rhs_edges = topo_pool.get_net_edge_list(rhs);
+      return lhs_edges.front().get_stable_net_rank() < rhs_edges.front().get_stable_net_rank();
+    });
+
+    for (int32_t net_idx : net_idx_list) {
+      std::vector<CouplingCapEntry>& coupling_cap_entry_list = _net_coupling_cap_entry_list[net_idx];
       for (CouplingCapEntry& coupling_capacitance_entry : coupling_cap_entry_list) {
         CouplingKey coupling_key(coupling_capacitance_entry.get_first_edge_idx(), coupling_capacitance_entry.get_second_edge_idx());
         if (_merged_coupling_capacitance_map.count(coupling_key) == 0) {

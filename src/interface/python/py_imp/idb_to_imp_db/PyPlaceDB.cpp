@@ -56,8 +56,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
 {
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
-  num_routing_grids_x = numRoutingGridsX;
-  num_routing_grids_y = numRoutingGridsY;
+  num_routing_grids_x = with_routability ? numRoutingGridsX : 0;
+  num_routing_grids_y = with_routability ? numRoutingGridsY : 0;
   _db = db;
   _design = db->get_idb_design();
   using namespace idb;
@@ -332,6 +332,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ps &= core_box;
   double total_fixed_geometry_area = gtl::area(ps);
   total_space_area = core_rect->get_area() - total_fixed_geometry_area;
+  this->total_fixed_node_area = total_fixed_node_area;
 
   PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
   body_core_ps &= core_box;
@@ -540,6 +541,14 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   yl = core->get_bounding_box()->get_low_y();
   xh = core->get_bounding_box()->get_high_x();
   yh = core->get_bounding_box()->get_high_y();
+  // A placement-only database has no routing capacities or demand maps.
+  // Keep its optional routing extent defined instead of exporting garbage.
+  routing_grid_xl = xl;
+  routing_grid_yl = yl;
+  routing_grid_xh = xh;
+  routing_grid_yh = yh;
+  routing_grids_size_x = 0;
+  routing_grids_size_y = 0;
 
   assert(yl >= 0 && xl >= 0 && xh > xl && yh > yl);
   row_height = db->get_idb_layout()->get_rows()->get_row_height();

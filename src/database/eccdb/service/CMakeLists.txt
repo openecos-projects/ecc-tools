@@ -48,3 +48,15 @@ target_include_directories(eccdb_service
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/eccdb/service>
 )
 target_link_libraries(eccdb_service PUBLIC eccdb_context eccdb_design eccdb_tech_database eccdb_library)
+
+# The structural Verilog importer is kept in a small optional target.  Making
+# it separate avoids exporting the legacy Flex/Bison parser as a transitive
+# dependency of the standalone EccDB service SDK.
+if(TARGET verilog)
+  add_library(eccdb_verilog_import STATIC
+    import/verilog/VerilogNetlistImportService.cpp
+  )
+  eccdb_storage_target(eccdb_verilog_import)
+  set_target_properties(eccdb_verilog_import PROPERTIES EXPORT_NAME verilog_import)
+  target_link_libraries(eccdb_verilog_import PRIVATE eccdb_service verilog)
+endif()

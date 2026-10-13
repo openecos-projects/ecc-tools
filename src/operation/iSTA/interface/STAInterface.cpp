@@ -20,6 +20,8 @@
 #include <malloc.h>
 #endif
 
+#include <stdexcept>
+
 #include "ClockPropagator.hpp"
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
@@ -54,6 +56,16 @@ STAInterface& STAInterface::getInst()
     _sta_interface_instance = new STAInterface();
   }
   return *_sta_interface_instance;
+}
+
+void STAInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
+void STAInterface::setTimingInputs(NativeTimingInputs inputs)
+{
+  _native_timing_inputs = std::move(inputs);
 }
 
 void STAInterface::destroyInst()
@@ -91,6 +103,7 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   STADM.input(config_map);
   DelayCalculator::initInst();
   SdcCommand::initInst({
+      {"current_design", sdc::executeTclCommand<sdc::TclCurrentDesign>},
       {"set_case_analysis", sdc::executeTclCommand<sdc::TclSetCaseAnalysis>},
       {"set_input_delay", sdc::executeTclCommand<sdc::TclSetInputDelay>},
       {"set_output_delay", sdc::executeTclCommand<sdc::TclSetOutputDelay>},
@@ -104,7 +117,9 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
       {"create_clock", sdc::executeTclCommand<sdc::TclCreateClock>},
       {"set_propagated_clock", sdc::executeTclCommand<sdc::TclSetPropagatedClock>},
   });
-  STADM.readConstraint();
+  if (!STADM.readConstraint() && _database_context != nullptr) {
+    throw std::runtime_error("Native EccDB STA rejected the SDC constraint file; see the iSTA log for command errors.");
+  }
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -223,6 +238,27 @@ void STAInterface::destroySTA()
 #endif
 }
 
+void STAInterface::abortSTA() noexcept
+{
+  try {
+    SDFWriter::destroyInst();
+    PowerReporter::destroyInst();
+    TimingReporter::destroyInst();
+    PowerAnalyzer::destroyInst();
+    TimingAnalyzer::destroyInst();
+    PowerPropagator::destroyInst();
+    TimingPropagator::destroyInst();
+    ClockPropagator::destroyInst();
+    GraphBuilder::destroyInst();
+    TimingCharacterizer::destroyInst();
+    DelayCalculator::destroyInst();
+    SdcCommand::destroyInst();
+    DataManager::destroyInst();
+    Logger::destroyInst();
+  } catch (...) {
+  }
+}
+
 #endif
 
 #endif
@@ -276,6 +312,10 @@ void STAInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void STAInterface::wrapDatabase()
 {
+  if (_database_context != nullptr) {
+    wrapDatabaseFromEccdb();
+    return;
+  }
   wrapDBInfo();
   wrapInstanceList();
   wrapPortList();
@@ -289,7 +329,7 @@ void STAInterface::wrapVcdActivity()
 {
   Database& database = STADM.getDatabase();
   database.get_vcd_activity_map().clear();
-  vcd::VcdReader* vcd_reader = dmInst->get_vcd_reader();
+  vcd::VcdReader* vcd_reader = _database_context != nullptr ? _native_timing_inputs.vcd_reader : dmInst->get_vcd_reader();
   if (vcd_reader == nullptr) {
     return;
   }
@@ -329,7 +369,8 @@ void STAInterface::wrapDBInfo()
 
 void STAInterface::wrapConstraintFilePath()
 {
-  STADM.getDatabase().get_timing_constraint().set_sdc_file_path(dmInst->get_config().get_sdc_path());
+  STADM.getDatabase().get_timing_constraint().set_sdc_file_path(_database_context != nullptr ? _native_timing_inputs.sdc_path
+                                                                                              : dmInst->get_config().get_sdc_path());
 }
 
 void STAInterface::wrapInstanceList()
@@ -513,13 +554,22 @@ void STAInterface::wrapTimingLibrary()
   STALOG.info(Loc::current(), "Starting...");
   bool old_silent_output = idb::Lib::isSilentOutput();
   idb::Lib::setSilentOutput(true);
-  std::vector<std::unique_ptr<idb::LibLibrary>> lib_list;
-  for (idb::LibertyReader& liberty_reader : dmInst->get_lib_readers()) {
-    liberty_reader.linkLib();
-    idb::LibBuilder* lib_builder = liberty_reader.get_library_builder();
-    lib_list.push_back(lib_builder->takeLib());
-    delete lib_builder;
-    liberty_reader.set_library_builder(nullptr);
+  std::vector<std::unique_ptr<idb::LibLibrary>> owned_lib_list;
+  std::vector<idb::LibLibrary*> lib_list;
+  if (_database_context != nullptr) {
+    lib_list = _native_timing_inputs.liberty_libraries;
+  } else {
+    for (idb::LibertyReader& liberty_reader : dmInst->get_lib_readers()) {
+      liberty_reader.linkLib();
+      idb::LibBuilder* lib_builder = liberty_reader.get_library_builder();
+      owned_lib_list.push_back(lib_builder->takeLib());
+      delete lib_builder;
+      liberty_reader.set_library_builder(nullptr);
+    }
+    lib_list.reserve(owned_lib_list.size());
+    for (const auto& library : owned_lib_list) {
+      lib_list.push_back(library.get());
+    }
   }
   wrapTimingCellMap(lib_list);
   wrapTimingLibraryInfo(lib_list);
@@ -527,23 +577,26 @@ void STAInterface::wrapTimingLibrary()
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void STAInterface::wrapTimingCellMap(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+void STAInterface::wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = STADM.getDatabase();
   database.get_timing_library().get_cell_map().clear();
-  for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+  for (idb::LibLibrary* lib : lib_list) {
+    if (lib == nullptr) {
+      continue;
+    }
     for (std::unique_ptr<idb::LibCell>& lib_cell : lib->get_cells()) {
       wrapTimingCell(lib_cell.get());
     }
   }
 }
 
-void STAInterface::wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+void STAInterface::wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = STADM.getDatabase();
   std::vector<std::string> library_name_list;
-  for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
-    if (!STAUTIL.exist(library_name_list, lib->get_lib_name())) {
+  for (idb::LibLibrary* lib : lib_list) {
+    if (lib != nullptr && !STAUTIL.exist(library_name_list, lib->get_lib_name())) {
       library_name_list.push_back(lib->get_lib_name());
     }
   }
@@ -582,20 +635,23 @@ void STAInterface::wrapTimingLibraryInfo(std::vector<std::unique_ptr<idb::LibLib
   timing_library.set_slew_derate_from_library(reference_lib->get_slew_derate_from_library());
 }
 
-idb::LibLibrary* STAInterface::wrapReferenceLib(std::vector<std::unique_ptr<idb::LibLibrary>>& lib_list)
+idb::LibLibrary* STAInterface::wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list)
 {
   Database& database = STADM.getDatabase();
   std::map<idb::LibLibrary*, std::pair<int32_t, int32_t>> lib_usage_map;
   for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
     Instance& instance = instance_pair.second;
-    for (std::unique_ptr<idb::LibLibrary>& lib : lib_list) {
+    for (idb::LibLibrary* lib : lib_list) {
+      if (lib == nullptr) {
+        continue;
+      }
       idb::LibCell* lib_cell = lib->findCell(instance.get_cell_name().c_str());
       if (lib_cell == nullptr) {
         continue;
       }
-      lib_usage_map[lib.get()].first++;
+      lib_usage_map[lib].first++;
       if (!lib_cell->isMacroCell()) {
-        lib_usage_map[lib.get()].second++;
+        lib_usage_map[lib].second++;
       }
     }
   }
@@ -615,7 +671,7 @@ idb::LibLibrary* STAInterface::wrapReferenceLib(std::vector<std::unique_ptr<idb:
     return reference_lib;
   }
   if (!lib_list.empty()) {
-    return lib_list.front().get();
+    return lib_list.front();
   }
   return nullptr;
 }
@@ -1140,9 +1196,10 @@ void STAInterface::wrapTimingCellInfo(TimingCell& timing_cell)
 void STAInterface::wrapParasiticLibrary()
 {
   Database& database = STADM.getDatabase();
-  database.get_parasitic_library().set_spef_file_path(dmInst->get_config().get_spef_path());
+  database.get_parasitic_library().set_spef_file_path(_database_context != nullptr ? _native_timing_inputs.spef_path
+                                                                                    : dmInst->get_config().get_spef_path());
   database.get_parasitic_library().get_net_map().clear();
-  spef::SpefReader* spef_reader = dmInst->get_spef_reader();
+  spef::SpefReader* spef_reader = _database_context != nullptr ? _native_timing_inputs.spef_reader : dmInst->get_spef_reader();
   if (spef_reader == nullptr || spef_reader->getSpefFile() == nullptr) {
     return;
   }

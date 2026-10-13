@@ -30,6 +30,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -63,6 +64,7 @@
 #include "library/master_port/model/MasterPortComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
 #include "service/floorplan/FloorplanService.h"
+#include "service/geometry/PhysicalDesignService.h"
 #include "service/routing/RoutingService.h"
 #include "tech/TechStore.h"
 
@@ -445,9 +447,8 @@ ViaShapes techViaShapes(const eccdb::TechStore& tech, eccdb::TechViaMasterId via
 
 ViaShapes generatedViaShapes(const eccdb::DesignVia& via, eccdb::Point origin)
 {
-  // Match IdbViaMasterGenerate / IdbViaMaster::set_layer_shape: center the cut
-  // array, then grow top/bottom enclosures from the cut bounding box. OFFSET is
-  // stored by iDB but not applied when building wrap shapes.
+  // Generated VIA cut rectangles share ORIGIN; OFFSET shifts only the
+  // corresponding bottom/top routing-layer enclosure.
   ViaShapes shapes;
   const auto& generated = via.generated;
   const int32_t rows = static_cast<int32_t>(std::max(generated.row_count, 1u));
@@ -456,6 +457,14 @@ ViaShapes generatedViaShapes(const eccdb::DesignVia& via, eccdb::Point origin)
       = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOrigin) != 0 ? generated.origin.x : 0;
   const int32_t origin_y
       = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOrigin) != 0 ? generated.origin.y : 0;
+  const int32_t bottom_offset_x
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.bottom_offset.x : 0;
+  const int32_t bottom_offset_y
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.bottom_offset.y : 0;
+  const int32_t top_offset_x
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.top_offset.x : 0;
+  const int32_t top_offset_y
+      = (generated.flags & eccdb::DesignGeneratedViaFlag::kHasOffset) != 0 ? generated.top_offset.y : 0;
   const int32_t cut_width_total = columns * generated.cut_size_x + (columns - 1) * generated.cut_spacing_x;
   const int32_t cut_height_total = rows * generated.cut_size_y + (rows - 1) * generated.cut_spacing_y;
   const int32_t ll_x_min = (-cut_width_total / 2) + origin_x;
@@ -485,16 +494,16 @@ ViaShapes generatedViaShapes(const eccdb::DesignVia& via, eccdb::Point origin)
                                     .ur_x = ll_x_min + cut_width_total,
                                     .ur_y = ll_y_min + cut_height_total};
   append(eccdb::TechLayerId{generated.bottom_layer.entity()},
-         eccdb::Rect{.ll_x = cut_box.ll_x - generated.bottom_enclosure_x,
-                             .ll_y = cut_box.ll_y - generated.bottom_enclosure_y,
-                             .ur_x = cut_box.ur_x + generated.bottom_enclosure_x,
-                             .ur_y = cut_box.ur_y + generated.bottom_enclosure_y},
+         eccdb::Rect{.ll_x = cut_box.ll_x - generated.bottom_enclosure_x + bottom_offset_x,
+                     .ll_y = cut_box.ll_y - generated.bottom_enclosure_y + bottom_offset_y,
+                     .ur_x = cut_box.ur_x + generated.bottom_enclosure_x + bottom_offset_x,
+                     .ur_y = cut_box.ur_y + generated.bottom_enclosure_y + bottom_offset_y},
          false);
   append(eccdb::TechLayerId{generated.top_layer.entity()},
-         eccdb::Rect{.ll_x = cut_box.ll_x - generated.top_enclosure_x,
-                             .ll_y = cut_box.ll_y - generated.top_enclosure_y,
-                             .ur_x = cut_box.ur_x + generated.top_enclosure_x,
-                             .ur_y = cut_box.ur_y + generated.top_enclosure_y},
+         eccdb::Rect{.ll_x = cut_box.ll_x - generated.top_enclosure_x + top_offset_x,
+                     .ll_y = cut_box.ll_y - generated.top_enclosure_y + top_offset_y,
+                     .ur_x = cut_box.ur_x + generated.top_enclosure_x + top_offset_x,
+                     .ur_y = cut_box.ur_y + generated.top_enclosure_y + top_offset_y},
          false);
   return shapes;
 }
@@ -590,7 +599,12 @@ void wrapRoutingDesignRuleFromEnTT(RoutingLayer& routing_layer, eccdb::TechRouti
   const auto& name = tech.layerInfo(eccdb::TechLayerId{layer_id.entity()}).name;
 
   routing_layer.set_min_width(effectiveMinWidth(tech_layer));
-  routing_layer.set_min_area(static_cast<int32_t>(tech_layer.area));
+  // iDB uses -1 to represent an omitted ROUTING AREA clause.  The EnTT
+  // component keeps the value at zero in that case, so consult the presence
+  // flag instead of translating the default as a real zero-area rule.
+  routing_layer.set_min_area((tech_layer.flags & eccdb::TechRoutingLayerFlag::kHasArea) != 0u
+                                 ? static_cast<int32_t>(tech_layer.area)
+                                 : -1);
 
   const auto notch_ids = storage.spacingNotchLengthRules(layer_id);
   const auto lef58_notch_ids = storage.lef58SpacingNotchLengthRules(layer_id);
@@ -1570,6 +1584,19 @@ void RTInterface::wrapDatabaseFromEnTT()
         }
       }
     });
+
+    const eccdb::PhysicalDesignService physical(tech, library, design);
+    physical.forEachRoutingBlockage([&](const auto blockage_id, const auto&) {
+      physical.forEachRoutingBlockageGeometry(
+          blockage_id,
+          eccdb::PhysicalGeometryVisitor{
+              .rectangle = [&](const eccdb::PhysicalLayerRect& shape) { appendObstacle(sink, shape.layer, shape.rectangle); },
+              .polygon = [&](const eccdb::PhysicalLayerPolygon& shape) {
+                for (const auto& rect : eccdb::decomposePolygonToRectangles(shape.points)) {
+                  appendObstacle(sink, shape.layer, rect);
+                }
+              }});
+    });
     routing_obstacle_list.reserve(instance_routing_count + trailing_routing_obstacles.size());
     cut_obstacle_list.reserve(instance_cut_count + trailing_cut_obstacles.size());
     routing_obstacle_list.resize(instance_routing_count);
@@ -2014,6 +2041,16 @@ void RTInterface::outputNetListToEnTT()
   const auto result_map = RTDM.getNetDetailedResultMap(die);
   const auto patch_map = RTDM.getNetDetailedPatchMap(die);
 
+  // Design VIA definitions stay unchanged throughout this writeback. Build
+  // their name index once instead of linearly scanning them for every routed
+  // VIA occurrence.
+  entt::dense_map<std::string_view, eccdb::DesignViaId> design_vias;
+  const auto via_ids = routing_storage.vias();
+  design_vias.reserve(via_ids.size());
+  for (const auto via_id : via_ids) {
+    design_vias.emplace(routing_storage.via(via_id).name, via_id);
+  }
+
   std::vector<int32_t> net_order(rt_nets.size());
   for (int32_t index = 0; index < static_cast<int32_t>(rt_nets.size()); ++index) {
     net_order[static_cast<std::size_t>(index)] = index;
@@ -2065,7 +2102,8 @@ void RTInterface::outputNetListToEnTT()
           }
           const std::string& via_name = layer_vias[static_cast<std::size_t>(below_layer)].front().get_via_name();
           const auto tech_via = _tech->viaMasterStorage().findViaMaster(via_name);
-          const auto design_via = routing_storage.findVia(via_name);
+          const auto found_via = design_vias.find(via_name);
+          const auto design_via = found_via != design_vias.end() ? found_via->second : eccdb::DesignViaId{};
           if (static_cast<bool>(tech_via) == static_cast<bool>(design_via)) {
             throw std::runtime_error("iRT output VIA must resolve exactly once in EnTTDB: " + via_name);
           }

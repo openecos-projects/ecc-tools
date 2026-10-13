@@ -78,10 +78,10 @@ void testMakeSingleModule(idb::NetlistReader* nr, string topModuleName) {
 #include <cassert>
 #include <cerrno>
 #include <charconv>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
-#include <regex>
 #include <string_view>
 #include <vector>
 #include <unistd.h>
@@ -211,19 +211,26 @@ std::string makeIndexedName(std::string_view name, int index)
   return std::string(name) + "[" + std::to_string(index) + "]";
 }
 
-std::string normalizeEscapedName(std::string name)
-{
-  while (!name.empty() && name.back() == '\n') {
-    name.pop_back();
-  }
-  std::erase(name, '\\');
-  std::erase(name, ' ');
-  return name;
-}
-
 bool isEscapedVerilogIdentifier(std::string_view name)
 {
   return !name.empty() && name.front() == '\\';
+}
+
+// An escaped Verilog identifier has one lexical leading '\\' and terminates
+// at whitespace.  The characters after that leading marker are its semantic
+// name, including a literal internal '\\'.  Do not globally remove slashes:
+// `\\foo\\bar` and `\\foobar` are two different legal identifiers.
+std::string normalizeVerilogIdentifier(std::string name)
+{
+  if (!isEscapedVerilogIdentifier(name)) {
+    return name;
+  }
+
+  name.erase(name.begin());
+  while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back())) != 0) {
+    name.pop_back();
+  }
+  return name;
 }
 
 class ScopedReadableVerilogFile
@@ -389,19 +396,10 @@ int32_t VerilogRead::build_pins()
     idb_io_pin_list = new IdbPins();
     idb_design->set_io_pin_list(idb_io_pin_list);
   }
-  auto replace_str = [](const string& str, const string& replace_str, const string& new_str) {
-    std::regex re(replace_str);
-    return std::regex_replace(str, re, new_str);
-  };
-  // create pin.
-  auto dcl_process = [idb_design, &replace_str, this](DclType dcl_type, const char* dcl_name) -> IdbPin* {
+  // The declaration parser owns the one-time lexical normalization.  This
+  // helper accepts an already semantic identifier; do not normalize it again.
+  auto create_io_pin = [idb_design, this](DclType dcl_type, const std::string& pin_name) -> IdbPin* {
     if (dcl_type == DclType::KInput || dcl_type == DclType::KOutput || dcl_type == DclType::KInout) {
-      std::string pin_name = dcl_name;
-      if (std::string::npos != pin_name.find('\\')) {
-        pin_name = replace_str(pin_name, R"(\\)", "");
-        pin_name = replace_str(pin_name, R"( )", "");
-      }
-
       IdbPin* idb_io_pin = idb_design->createOrFindIoPin(pin_name);
       if (idb_io_pin == nullptr) {
         return nullptr;
@@ -420,19 +418,19 @@ int32_t VerilogRead::build_pins()
   };
 
   // process declare statement.
-  auto process_dcl_stmt = [&dcl_process, idb_design](auto* verilog_dcl) {
+  auto process_dcl_stmt = [&create_io_pin, idb_design](auto* verilog_dcl) {
     auto dcl_type = verilog_dcl->dcl_type;
-    const auto* dcl_name = verilog_dcl->dcl_name;
+    const std::string dcl_name = normalizeVerilogIdentifier(verilog_dcl->dcl_name);
     auto dcl_range = verilog_dcl->range;
 
     if (!dcl_range.has_value) {
-      dcl_process(dcl_type, dcl_name);
+      create_io_pin(dcl_type, dcl_name);
     } else {
       auto bus_range = std::make_pair(dcl_range.start, dcl_range.end);
       for (int index = bus_range.second; index <= bus_range.first; index++) {
         // for port or wire bus, we split to one bye one port.
         std::string one_name = makeIndexedName(dcl_name, index);
-        auto io_pin = dcl_process(dcl_type, one_name.c_str());
+        auto io_pin = create_io_pin(dcl_type, one_name);
         if (io_pin) {
           if (index == bus_range.second) {
             IdbBus io_pin_bus(dcl_name, bus_range.first, bus_range.second);
@@ -490,17 +488,8 @@ int32_t VerilogRead::build_nets()
     idb_design->set_net_list(idb_net_list);
   }
 
-  auto replace_str = [](const string& str, const string& replace_str, const string& new_str) {
-    std::regex re(replace_str);
-    return std::regex_replace(str, re, new_str);
-  };
-
-  auto add_wire_net = [replace_str, idb_design](std::string net_name) -> IdbNet* {
-    if (std::string::npos != net_name.find('\\')) {
-      net_name = replace_str(net_name, R"(\\)", "");
-      net_name = replace_str(net_name, R"( )", "");
-    }
-
+  // Declarations normalize their raw lexer token once before this helper.
+  auto add_wire_net = [idb_design](const std::string& net_name) -> IdbNet* {
     IdbNet* idb_net = idb_design->createOrFindNet(net_name, IdbConnectType::kSignal);
     if (auto* io_pin = idb_design->get_io_pin_list()->find_pin(net_name); io_pin != nullptr) {
       idb_design->connectPinToNet(io_pin, idb_net);
@@ -509,17 +498,13 @@ int32_t VerilogRead::build_nets()
     return idb_net;
   };
 
-  auto process_dcl_stmt = [&add_wire_net, &replace_str, idb_design](auto* verilog_dcl) {
+  auto process_dcl_stmt = [&add_wire_net, idb_design](auto* verilog_dcl) {
     auto dcl_type = verilog_dcl->dcl_type;
     const auto* dcl_name = verilog_dcl->dcl_name;
     if (dcl_type == DclType::KWire) {
-      std::string net_name = dcl_name;
-      const bool is_escaped_name = isEscapedVerilogIdentifier(net_name);
-
-      if (std::string::npos != net_name.find('\\')) {
-        net_name = replace_str(net_name, R"(\\)", "");
-        net_name = replace_str(net_name, R"( )", "");
-      }
+      const std::string raw_net_name = dcl_name;
+      const bool is_escaped_name = isEscapedVerilogIdentifier(raw_net_name);
+      std::string net_name = normalizeVerilogIdentifier(raw_net_name);
 
       auto dcl_range = verilog_dcl->range;
 
@@ -607,8 +592,8 @@ int32_t VerilogRead::build_assign()
 
   auto process_one_to_one_net
       = [idb_design, idb_io_pin_list, idb_net_list, &remove_to_merge_nets](std::string left_net_name, std::string right_net_name) {
-          left_net_name = normalizeEscapedName(std::move(left_net_name));
-          right_net_name = normalizeEscapedName(std::move(right_net_name));
+          left_net_name = normalizeVerilogIdentifier(std::move(left_net_name));
+          right_net_name = normalizeVerilogIdentifier(std::move(right_net_name));
 
           // according to assign's lhs/rhs to connect port to net.
 
@@ -883,26 +868,32 @@ int32_t VerilogRead::build_components()
 
   auto* idb_net_list = idb_design->get_net_list();
 
-  auto replace_str = [](const string& str, const string& old_str, const string& new_str) {
-    std::regex re(old_str);
-    return std::regex_replace(str, re, new_str);
-  };
-
-  auto add_pin = [idb_net_list, replace_str, idb_io_pin_list, idb_design](const std::string& raw_name, auto* idb_pin) {
-    std::string net_name = raw_name;
-    const bool is_escaped_name = isEscapedVerilogIdentifier(raw_name);
-
-    // strip \\\ char.
-    if (std::string::npos != raw_name.find('\\')) {
-      net_name = replace_str(raw_name, R"(\\)", "");
-      net_name = replace_str(net_name, R"( )", "");
-    }
+  // Keep the raw-token boundary explicit.  A semantic name may itself begin
+  // with '\\', so it must never be passed back through the lexical decoder.
+  auto add_normalized_pin = [idb_net_list, idb_io_pin_list, idb_design](const std::string& net_name, bool is_escaped_name,
+                                                                          auto* idb_pin) {
 
     auto* idb_net = idb_net_list->find_net(net_name);
     if (!idb_net) {
-      // judge whether bus net name.
-      auto net_bus = idb_design->get_bus_list()->findBus(net_name);
-      if (!net_bus) {
+      if (!is_escaped_name) {
+        // An ordinary identifier can name a previously declared bus.
+        auto net_bus = idb_design->get_bus_list()->findBus(net_name);
+        if (net_bus) {
+          // existed bus net, get one net of bus.
+          std::string pin_name = idb_pin->get_pin_name();
+          auto [pin_bus_name, pin_bus_index] = splitBusName(pin_name.c_str());
+          if (!pin_bus_index) {
+            // if net bus only exist one net, get the bus index directly.
+            if ((*net_bus).get().get_left() == (*net_bus).get().get_right()) {
+              pin_bus_index = (*net_bus).get().get_left();
+            }
+          }
+          assert(pin_bus_index);
+          idb_net = (*net_bus).get().getNet(pin_bus_index.value());
+        }
+      }
+
+      if (!idb_net) {
         // not bus net name, create common idb net.
         idb_net = idb_design->createOrFindNet(net_name, IdbConnectType::kSignal);
 
@@ -926,18 +917,6 @@ int32_t VerilogRead::build_components()
             }
           }
         }
-      } else {
-        // existed bus net, get one net of bus.
-        std::string pin_name = idb_pin->get_pin_name();
-        auto [pin_bus_name, pin_bus_index] = splitBusName(pin_name.c_str());
-        if (!pin_bus_index) {
-          // if net bus only exist one net, get the bus index directly.
-          if ((*net_bus).get().get_left() == (*net_bus).get().get_right()) {
-            pin_bus_index = (*net_bus).get().get_left();
-          }
-        }
-        assert(pin_bus_index);
-        idb_net = (*net_bus).get().getNet(pin_bus_index.value());
       }
     }
 
@@ -954,6 +933,10 @@ int32_t VerilogRead::build_components()
     }
 
     idb_design->connectPinToNet(idb_pin, idb_net);
+  };
+
+  auto add_raw_pin = [&add_normalized_pin](std::string_view raw_name, auto* idb_pin) {
+    add_normalized_pin(normalizeVerilogIdentifier(std::string(raw_name)), isEscapedVerilogIdentifier(raw_name), idb_pin);
   };
 
   /*lambda function flatten concate net, which maybe nested.*/
@@ -992,14 +975,8 @@ int32_t VerilogRead::build_components()
   {
     if (verilog_is_module_inst_stmt(stmt)) {
       ParsedVerilogInst* verilog_inst = verilog_convert_inst(stmt);
-      std::string inst_name = verilog_inst->inst_name;
-
-      if (std::string::npos != inst_name.find('\\')) {
-        inst_name = replace_str(inst_name, R"(\\)", "");
-        inst_name = replace_str(inst_name, R"( )", "");
-      }
-
-      std::string cell_master_name = verilog_inst->cell_name;
+      std::string inst_name = normalizeVerilogIdentifier(verilog_inst->inst_name);
+      std::string cell_master_name = normalizeVerilogIdentifier(verilog_inst->cell_name);
 
       auto* cell_master = idb_master_list->find_cell_master(cell_master_name);
       if (cell_master == nullptr) {
@@ -1024,7 +1001,7 @@ int32_t VerilogRead::build_components()
         // *mut c_void
         void* net_expr = port_connection->net_expr;  // get net name
 
-        const char* cell_port_name;
+        std::string cell_port_name;
         if (verilog_is_id(cell_port_id)) {
           cell_port_name = verilog_convert_id(cell_port_id)->id;
         } else if (verilog_is_bus_index_id(cell_port_id)) {
@@ -1032,6 +1009,7 @@ int32_t VerilogRead::build_components()
         } else {
           cell_port_name = verilog_convert_slice_id(cell_port_id)->id;
         }
+        cell_port_name = normalizeVerilogIdentifier(std::move(cell_port_name));
         if (!net_expr) {
           continue;
         }
@@ -1044,7 +1022,7 @@ int32_t VerilogRead::build_components()
             int max_bus_bit = 1;
             std::vector<IdbPin*> bus_pins;
             for (int i = 0;; ++i) {
-              std::string bus_pin_name = std::string(cell_port_name) + "[" + std::to_string(i) + "]";
+              std::string bus_pin_name = cell_port_name + "[" + std::to_string(i) + "]";
               auto* idb_bus_pin = idb_instance->get_pin(bus_pin_name);
 
               // assert bus pin exist.
@@ -1080,7 +1058,7 @@ int32_t VerilogRead::build_components()
                 }
 
                 std::string bus_net_name = std::string(net_name) + "[" + std::to_string(i + net_bus_base_index.value_or(0)) + "]";
-                add_pin(bus_net_name, idb_bus_pin);
+                add_raw_pin(bus_net_name, idb_bus_pin);
                 bus_pins.emplace_back(idb_bus_pin);
               } else {
                 // found the max bus width, break loop.
@@ -1122,7 +1100,7 @@ int32_t VerilogRead::build_components()
                 generated_net_name = "ECC_CONST_" + std::to_string(index++);
                 net_name = generated_net_name.c_str();
               }
-              add_pin(net_name, idb_pin);
+              add_raw_pin(net_name, idb_pin);
             }
           }
 
@@ -1193,10 +1171,11 @@ int32_t VerilogRead::build_components()
               net_full_name = verilog_convert_slice_id(net_expr_verilog_id)->id;
               net_name = verilog_convert_slice_id(net_expr_verilog_id)->base_id;
             }
-            std::string bus_lookup_name = normalizeEscapedName(net_name);
+            const bool is_escaped_net_name = isEscapedVerilogIdentifier(net_name);
+            std::string bus_lookup_name = normalizeVerilogIdentifier(net_name);
             auto net_bus = idb_design->get_bus_list()->findBus(bus_lookup_name);
 
-            if (net_bus) {
+            if (!is_escaped_net_name && net_bus) {
               // for net bus, we need span the bus.
               int bus_left = (*net_bus).get().get_left();
               int bus_right = (*net_bus).get().get_right();
@@ -1213,7 +1192,7 @@ int32_t VerilogRead::build_components()
                 std::string bus_one_net_name = makeIndexedName(bus_lookup_name, j);
                 auto* idb_net = idb_net_list->find_net(bus_one_net_name);
                 assert(idb_net);
-                add_pin(bus_one_net_name, idb_pin);
+                add_normalized_pin(bus_one_net_name, false, idb_pin);
                 --i;
                 // the next pin add to pin bus.
                 if (i >= 0) {
@@ -1222,7 +1201,7 @@ int32_t VerilogRead::build_components()
                 }
               }
             } else {
-              add_pin(net_full_name, idb_pin);
+              add_raw_pin(net_full_name, idb_pin);
               --i;
               // the next pin add to pin bus.
               if (i >= 0) {

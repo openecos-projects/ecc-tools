@@ -38,11 +38,40 @@
 #include "SameLayerCutSpacingRule.hpp"
 #include "Utility.hpp"
 #include "design/DesignStore.h"
+#include "context/DatabaseContext.h"
 #include "feature_manager.h"
 #include "file_drc.h"
 #include "idm.h"
 #include "utility/logger/Logger.hpp"
 namespace idrc {
+namespace {
+
+// DEF routing points describe a centerline.  Unlike generic query expansion,
+// its physical wire envelope must remain outside the die when the centerline
+// is on a die edge; RuleValidator::verifyOutOfDie consumes that geometry.
+PlanarRect wireSegmentEnvelope(const PlanarCoord& first, const PlanarCoord& second, int32_t half_width)
+{
+  // Keep the legacy handling of an unsupported oblique segment.  DEF detailed
+  // routes reaching this projection are Manhattan, but changing the fallback
+  // here would silently broaden invalid input that the old implementation did
+  // not broaden.
+  if (first.get_x() != second.get_x() && first.get_y() != second.get_y()) {
+    PlanarCoord start = first;
+    PlanarCoord end = second;
+    if (!CmpPlanarCoordByXASC{}(start, end)) {
+      std::swap(start, end);
+    }
+    return PlanarRect(start, end);
+  }
+
+  return PlanarRect(std::min(first.get_x(), second.get_x()) - half_width,
+                    std::min(first.get_y(), second.get_y()) - half_width,
+                    std::max(first.get_x(), second.get_x()) + half_width,
+                    std::max(first.get_y(), second.get_y()) + half_width);
+}
+
+}  // namespace
+
 // public
 
 DRCInterface& DRCInterface::getInst()
@@ -67,6 +96,8 @@ void DRCInterface::destroyInst()
 
 void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enable_quiet)
 {
+  _last_violation_counts.clear();
+  refreshEccdbNetIndex();
   Logger::initInst();
   DRCLOG.setQuiet(enable_quiet);
   // clang-format off
@@ -90,6 +121,7 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
   GDSPlotter::initInst();
   DRCGP.init();
   RuleValidator::initInst();
+  _drc_initialized = true;
 
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
@@ -102,6 +134,7 @@ void DRCInterface::runDRC()
 
 void DRCInterface::checkDef()
 {
+  _last_violation_counts.clear();
   bool origin_quiet = DRCLOG.isQuiet();
   DRCLOG.disableQuiet();
 
@@ -110,6 +143,9 @@ void DRCInterface::checkDef()
   std::map<std::string, std::vector<ids::Violation>> type_violation_map;
   for (ids::Violation& ids_violation : getViolationList(env_shape_list, buildResultShapeList(), {}, {}, obs_shape_idx_set)) {
     type_violation_map[ids_violation.violation_type].push_back(ids_violation);
+  }
+  for (const auto& [type, violations] : type_violation_map) {
+    _last_violation_counts.emplace(type, violations.size());
   }
   printSummary(type_violation_map);
   outputViolationJson(type_violation_map);
@@ -121,16 +157,48 @@ void DRCInterface::checkDef()
   }
 }
 
+const std::map<std::string, std::size_t>& DRCInterface::lastViolationCounts() const noexcept
+{
+  return _last_violation_counts;
+}
+
 void DRCInterface::destroyDRC()
 {
+  finishDRC(true);
+}
+
+void DRCInterface::abortDRC()
+{
+  // An initDRC failure can happen before _drc_initialized is published.  The
+  // normal finish path intentionally stays guarded, while abort must release
+  // every singleton that may have been constructed by a partial init.
+  RuleValidator::destroyInst();
+  GDSPlotter::destroyInst();
+  DataManager::destroyInst();
+  _last_violation_counts.clear();
+  _drc_initialized = false;
+  clearEccdbNetIndex();
+  Logger::destroyInst();
+}
+
+void DRCInterface::finishDRC(bool write_output)
+{
+  if (!_drc_initialized) {
+    return;
+  }
+
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
 
   RuleValidator::destroyInst();
   DRCGP.destroy();
   GDSPlotter::destroyInst();
-  DRCDM.output();
+  if (write_output) {
+    DRCDM.output();
+  }
   DataManager::destroyInst();
+  _drc_initialized = false;
+  clearEccdbNetIndex();
 
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 
@@ -180,7 +248,7 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
   drc_result_shape_list.reserve(ids_result_shape_list.size());
   const int32_t regular_net_num
       = _design != nullptr
-            ? static_cast<int32_t>(_design->netlistStorage().regularNets().size())
+            ? _eccdb_regular_net_count
             : static_cast<int32_t>(dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list().size());
   for (const ids::Shape& ids_result_shape : ids_result_shape_list) {
     drc_result_shape_list.push_back(convertToDRCShape(ids_result_shape));
@@ -386,9 +454,57 @@ void DRCInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 void DRCInterface::setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
                                    eccdb::LibraryStore* library)
 {
+  clearEccdbNetIndex();
+  _database_context = nullptr;
   _design = design;
   _tech = tech;
   _library = library;
+}
+
+void DRCInterface::setDesignSource(eccdb::DatabaseContext& context)
+{
+  setDesignSource(&context);
+}
+
+void DRCInterface::setDesignSource(eccdb::DatabaseContext* context)
+{
+  clearEccdbNetIndex();
+  _database_context = context;
+  if (_database_context == nullptr) {
+    _design = nullptr;
+    _tech = nullptr;
+    _library = nullptr;
+    return;
+  }
+  _design = &_database_context->design();
+  _tech = _database_context->technology();
+  _library = _database_context->library();
+}
+
+void DRCInterface::clearEccdbNetIndex()
+{
+  _eccdb_regular_net_count = 0;
+  _eccdb_net_names.clear();
+}
+
+void DRCInterface::refreshEccdbNetIndex()
+{
+  clearEccdbNetIndex();
+  if (_design == nullptr) {
+    return;
+  }
+
+  const auto& netlist = _design->netlistStorage();
+  const auto regular_nets = netlist.regularNets();
+  const auto special_nets = netlist.specialNets();
+  _eccdb_regular_net_count = static_cast<int32_t>(regular_nets.size());
+  _eccdb_net_names.reserve(regular_nets.size() + special_nets.size());
+  for (const auto net : regular_nets) {
+    _eccdb_net_names.push_back(netlist.net(net).name);
+  }
+  for (const auto net : special_nets) {
+    _eccdb_net_names.push_back(netlist.net(net).name);
+  }
 }
 
 void DRCInterface::wrapDatabase()
@@ -954,7 +1070,7 @@ void DRCInterface::output()
 std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
 {
   if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    return buildEnvShapeListFromEnTT();
+    return buildEnvShapeListFromEnTT(nullptr);
   }
 
   std::set<size_t> obs_shape_idx_set;
@@ -965,7 +1081,7 @@ std::vector<ids::Shape> DRCInterface::buildEnvShapeList(std::set<size_t>& obs_sh
 {
   obs_shape_idx_set.clear();
   if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    return buildEnvShapeListFromEnTT();
+    return buildEnvShapeListFromEnTT(&obs_shape_idx_set);
   }
 
   std::vector<ids::Shape> env_shape_list;
@@ -1302,7 +1418,7 @@ std::vector<ids::Shape> DRCInterface::buildResultShapeList()
           PlanarCoord first_coord(idb_segment->get_point_start()->get_x(), idb_segment->get_point_start()->get_y());
           PlanarCoord second_coord(idb_segment->get_point_second()->get_x(), idb_segment->get_point_second()->get_y());
           int32_t half_width = dynamic_cast<IdbLayerRouting*>(idb_segment->get_layer())->get_width() / 2;
-          PlanarRect rect = DRCUTIL.getEnlargedRect(first_coord, second_coord, half_width);
+          PlanarRect rect = wireSegmentEnvelope(first_coord, second_coord, half_width);
           ids::Shape ids_shape;
           ids_shape.net_idx = static_cast<int32_t>(idb_net->get_id());
           ids_shape.ll_x = rect.get_ll_x();
@@ -1418,6 +1534,13 @@ std::string DRCInterface::getNetName(int32_t net_idx)
     return "obs";
   }
   if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+    if (_drc_initialized) {
+      if (net_idx >= 0 && static_cast<size_t>(net_idx) < _eccdb_net_names.size()) {
+        return _eccdb_net_names[static_cast<size_t>(net_idx)];
+      }
+      return DRCUTIL.getString("<invalid_entt_net:", net_idx, ">");
+    }
+    // Outside an initialized run, preserve live lookup for standalone API use.
     const auto regular_nets = _design->netlistStorage().regularNets();
     if (net_idx >= 0 && net_idx < static_cast<int32_t>(regular_nets.size())) {
       return _design->netlistStorage().net(regular_nets[static_cast<size_t>(net_idx)]).name;

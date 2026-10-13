@@ -30,6 +30,7 @@
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/pin_access/model/PinAccessComponents.h"
 #include "common/GeometryBounds.h"
+#include "common/VectorCapacity.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
 #include "geometry/DomainGeometryComponents.h"
@@ -701,7 +702,7 @@ DesignBlockPinId DesignNetlistStorage::createBlockPin(DesignBlockTermId term, De
   validateBlockPin(pin);
   validateBlockPinRelation(term, pin);
   auto& term_pins = _registry.get<DesignBlockTerm>(term.entity()).pins;
-  term_pins.reserve(term_pins.size() + 1u);
+  detail::reserveAppendSlot(term_pins);
 
   const auto entity = _registry.create();
   const DesignBlockPinId id{entity};
@@ -1458,7 +1459,7 @@ void DesignNetlistStorage::validateInstance(const DesignInstance& value,
 
   const bool has_route_halo = (value.flags & DesignInstanceFlag::kHasRouteHalo) != 0u;
   const bool has_route_layers = static_cast<bool>(value.route_halo.min_layer) && static_cast<bool>(value.route_halo.max_layer);
-  if (has_route_halo != has_route_layers || (has_route_halo ? value.route_halo.distance <= 0 : value.route_halo.distance != 0)) {
+  if (has_route_halo != has_route_layers || (has_route_halo ? value.route_halo.distance < 0 : value.route_halo.distance != 0)) {
     throw std::invalid_argument("design instance route halo and flags are inconsistent");
   }
   if (has_route_halo) {

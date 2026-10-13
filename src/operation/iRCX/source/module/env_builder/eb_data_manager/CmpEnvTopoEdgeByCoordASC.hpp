@@ -43,8 +43,8 @@ class CmpEnvTopoEdgeByCoordASC
     if (lhs->get_is_special_net() != rhs->get_is_special_net()) {
       return lhs->get_is_special_net() < rhs->get_is_special_net();
     }
-    if (lhs->get_net_idx() != rhs->get_net_idx()) {
-      return lhs->get_net_idx() < rhs->get_net_idx();
+    if (lhs->get_stable_net_rank() != rhs->get_stable_net_rank()) {
+      return lhs->get_stable_net_rank() < rhs->get_stable_net_rank();
     }
     return lhs->get_edge_idx() < rhs->get_edge_idx();
   }

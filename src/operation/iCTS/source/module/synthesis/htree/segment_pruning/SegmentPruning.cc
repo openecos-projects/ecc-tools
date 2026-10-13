@@ -96,7 +96,6 @@ auto AppendRetainedSegmentPatternIds(const SegmentCandidateFrontierSet& entry_se
     if (entries == nullptr) {
       continue;
     }
-    pattern_ids.reserve(pattern_ids.size() + entries->size());
     for (const auto& entry : *entries) {
       pattern_ids.push_back(entry.get_pattern_id());
     }

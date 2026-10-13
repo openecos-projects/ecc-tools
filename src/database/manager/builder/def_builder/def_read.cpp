@@ -991,11 +991,18 @@ int32_t DefRead::parse_component(defiComponent* def_component)
     halo->set_extend_top(extend_top);
   }
 
-  if (def_component->hasRouteHalo()) {
+  // Si2's hasRouteHalo() returns the distance itself, so it reports false
+  // for the valid `ROUTEHALO 0 <min-layer> <max-layer>` form.  The grammar
+  // requires both layer names when the clause is present; use those parser
+  // fields as the presence signal instead.
+  const char* route_halo_min_layer = def_component->minLayer();
+  const char* route_halo_max_layer = def_component->maxLayer();
+  if (route_halo_min_layer != nullptr && *route_halo_min_layer != '\0' && route_halo_max_layer != nullptr
+      && *route_halo_max_layer != '\0') {
     IdbRouteHalo* route_halo = instance->set_route_halo();
     route_halo->set_route_distance(def_component->haloDist());
-    route_halo->set_layer_bottom(layer_list->find_layer(def_component->minLayer()));
-    route_halo->set_layer_top(layer_list->find_layer(def_component->maxLayer()));
+    route_halo->set_layer_bottom(layer_list->find_layer(route_halo_min_layer));
+    route_halo->set_layer_top(layer_list->find_layer(route_halo_max_layer));
   }
 
   instance->set_coodinate(def_component->placementX(), def_component->placementY());

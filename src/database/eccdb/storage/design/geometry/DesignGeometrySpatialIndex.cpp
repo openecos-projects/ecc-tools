@@ -27,6 +27,62 @@
 
 namespace eccdb {
 
+class DesignGeometrySpatialIndex::CompiledFilter
+{
+ public:
+  explicit CompiledFilter(const GeometryQueryFilter& filter) : _filter(filter)
+  {
+    const auto design_via_bit = uint32_t{1} << static_cast<uint32_t>(GeometryOwnerDomain::kDesignVia);
+    for (const auto& clause : _filter.kind_owner_masks) {
+      if (clause.second == design_via_bit) _explicitly_requested_local_via_kinds |= clause.first;
+      for (uint32_t owner_bit = 0; owner_bit < _accepted_kinds_by_owner.size(); ++owner_bit) {
+        if ((clause.second & (uint32_t{1} << owner_bit)) != 0) {
+          _accepted_kinds_by_owner[owner_bit] |= clause.first;
+        }
+      }
+    }
+  }
+
+  [[nodiscard]] bool accepts(const Entry& entry) const noexcept
+  {
+    const auto kind_bit = uint32_t{1} << static_cast<uint32_t>(entry.kind);
+    // Via-definition coordinates are local templates, not placed layout.
+    // An exact DesignVia-only clause is an explicit request; broad aggregate
+    // GUI masks must not accidentally expose template geometry.
+    if (entry.owner.domain == GeometryOwnerDomain::kDesignVia && !_filter.include_local_vias
+        && _filter.owner_domain != GeometryOwnerDomain::kDesignVia
+        && (_explicitly_requested_local_via_kinds & kind_bit) == 0) {
+      return false;
+    }
+    // A VIA owns geometry on multiple layers. It is a spatial candidate for
+    // a layer-filtered payload query; expansion applies the exact layer test.
+    const bool via = entry.kind == GeometryShapeKind::kVia || entry.kind == GeometryShapeKind::kNetVia
+                     || entry.kind == GeometryShapeKind::kPinVia;
+    if (!_filter.acceptsLayer(entry.layer) && !via) return false;
+    if (!_filter.kind_owner_masks.empty()) {
+      const auto owner_bit = static_cast<uint32_t>(entry.owner.domain);
+      if (owner_bit >= _accepted_kinds_by_owner.size()
+          || (_accepted_kinds_by_owner[owner_bit] & kind_bit) == 0) {
+        return false;
+      }
+    }
+    if (_filter.kind_mask != UINT32_MAX) {
+      const auto bit = static_cast<uint32_t>(entry.kind);
+      if (bit >= 32u || (_filter.kind_mask & (uint32_t{1} << bit)) == 0) return false;
+    }
+    if (_filter.owner_domain != GeometryOwnerDomain::kNone && entry.owner.domain != _filter.owner_domain) return false;
+    if (_filter.owner != GeometryQueryFilter::kUnspecified && entry.owner.value != _filter.owner) return false;
+    if (_filter.net != GeometryQueryFilter::kUnspecified && static_cast<uint64_t>(entry.net.packed()) != _filter.net) return false;
+    if (_filter.wire != GeometryQueryFilter::kUnspecified && static_cast<uint64_t>(entry.wire.packed()) != _filter.wire) return false;
+    return true;
+  }
+
+ private:
+  const GeometryQueryFilter& _filter;
+  uint32_t _explicitly_requested_local_via_kinds = 0;
+  std::array<uint32_t, 32> _accepted_kinds_by_owner{};
+};
+
 void DesignGeometrySpatialIndex::invalidate() noexcept
 {
   _built = false;
@@ -174,55 +230,10 @@ std::vector<DesignGeometrySpatialIndex::ShapeId> DesignGeometrySpatialIndex::que
   // full RTreeValue vector before filtering; a whole-chip query could then
   // hold tens of millions of temporary candidates in addition to the tree.
   result.reserve(std::min<std::size_t>(_tree.size(), 4096u));
-  const auto design_via_bit = uint32_t{1} << static_cast<uint32_t>(GeometryOwnerDomain::kDesignVia);
-  // These values are query-wide constants.  Computing them once avoids
-  // rescanning the GUI's owner clauses for every candidate in a 500k-shape
-  // marquee.
-  uint32_t explicitly_requested_local_via_kinds = 0;
-  // Convert the small, declarative owner/kind clause list into a lookup table
-  // once per query.  The old hot path called std::none_of over all clauses
-  // for every R-tree candidate; a Test10 marquee can visit ~500k candidates,
-  // so that repeated vector walk was measurable despite the compact metadata.
-  std::array<uint32_t, 32> accepted_kinds_by_owner{};
-  for (const auto& clause : filter.kind_owner_masks) {
-    if (clause.second == design_via_bit) explicitly_requested_local_via_kinds |= clause.first;
-    for (uint32_t owner_bit = 0; owner_bit < accepted_kinds_by_owner.size(); ++owner_bit) {
-      if ((clause.second & (uint32_t{1} << owner_bit)) != 0)
-        accepted_kinds_by_owner[owner_bit] |= clause.first;
-    }
-  }
-  const auto explicitly_requested_local_via = [&](uint32_t kind_bit) {
-    return (explicitly_requested_local_via_kinds & kind_bit) != 0;
-  };
+  const CompiledFilter compiled_filter{filter};
   const auto accept = [&](const RTreeValue& candidate) {
     const auto& entry = _entries[candidate.second];
-    const auto kind_bit = uint32_t{1} << static_cast<uint32_t>(entry.kind);
-    // Via-definition coordinates are local templates, not placed layout.
-    // An exact DesignVia-only clause is an explicit request; broad aggregate
-    // GUI masks must not accidentally expose template geometry.
-    if (entry.owner.domain == GeometryOwnerDomain::kDesignVia && !filter.include_local_vias
-        && filter.owner_domain != GeometryOwnerDomain::kDesignVia && !explicitly_requested_local_via(kind_bit)) return;
-    // A VIA owns geometry on multiple layers. It is a spatial candidate for
-    // a layer-filtered payload query; expansion applies the exact layer test.
-    const bool via = entry.kind == GeometryShapeKind::kVia || entry.kind == GeometryShapeKind::kNetVia
-                     || entry.kind == GeometryShapeKind::kPinVia;
-    if (!filter.acceptsLayer(entry.layer) && !via) return;
-    if (!filter.kind_owner_masks.empty()) {
-      const auto owner_bit = static_cast<uint32_t>(entry.owner.domain);
-      if (owner_bit >= accepted_kinds_by_owner.size()
-          || (accepted_kinds_by_owner[owner_bit] & kind_bit) == 0) return;
-    }
-    if (filter.kind_mask != UINT32_MAX) {
-      const auto bit = static_cast<uint32_t>(entry.kind);
-      if (bit >= 32u || (filter.kind_mask & (uint32_t{1} << bit)) == 0) return;
-    }
-    if (filter.owner_domain != GeometryOwnerDomain::kNone && entry.owner.domain != filter.owner_domain) return;
-    if (filter.owner != GeometryQueryFilter::kUnspecified && entry.owner.value != filter.owner) return;
-    if (filter.net != GeometryQueryFilter::kUnspecified
-        && static_cast<uint64_t>(entry.net.packed()) != filter.net) return;
-    if (filter.wire != GeometryQueryFilter::kUnspecified
-        && static_cast<uint64_t>(entry.wire.packed()) != filter.wire) return;
-    result.push_back(entry.id);
+    if (compiled_filter.accepts(entry)) result.push_back(entry.id);
   };
   _tree.query(boost::geometry::index::intersects(indexBox(box)), boost::make_function_output_iterator(accept));
   return result;
@@ -231,6 +242,25 @@ std::vector<DesignGeometrySpatialIndex::ShapeId> DesignGeometrySpatialIndex::que
 std::vector<DesignGeometrySpatialIndex::ShapeId> DesignGeometrySpatialIndex::query(Rect box) const
 {
   return queryImpl(box, GeometryQueryFilter{});
+}
+
+std::optional<DesignGeometrySpatialIndex::ShapeId> DesignGeometrySpatialIndex::queryFirst(
+    Rect box, const GeometryQueryFilter& filter, const ShapePredicate& predicate) const
+{
+  ensureCurrent();
+  if (!box.isValid()) return std::nullopt;
+  const CompiledFilter compiled_filter{filter};
+  for (auto iterator = _tree.qbegin(boost::geometry::index::intersects(indexBox(box))); iterator != _tree.qend(); ++iterator) {
+    const auto& entry = _entries[iterator->second];
+    if (!compiled_filter.accepts(entry)) continue;
+    if (!predicate || predicate(entry.id)) return entry.id;
+  }
+  return std::nullopt;
+}
+
+bool DesignGeometrySpatialIndex::any(Rect box, const GeometryQueryFilter& filter, const ShapePredicate& predicate) const
+{
+  return queryFirst(box, filter, predicate).has_value();
 }
 
 std::vector<GeometrySpatialRecord> DesignGeometrySpatialIndex::queryRecords(Rect box) const

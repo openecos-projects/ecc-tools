@@ -53,6 +53,10 @@ file(GLOB PYTHON_INTERFACE_SRC CONFIGURE_DEPENDS *.cpp .h)
 # SET SOURCE FILES
 target_sources(ecc_py PUBLIC ${PYTHON_INTERFACE_SRC})
 
+target_sources(ecc_py PRIVATE py_native/py_native.cpp)
+target_include_directories(ecc_py PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/py_native)
+target_link_libraries(ecc_py PRIVATE ecc_native_toolchain)
+
 target_link_libraries(ecc_py
     PRIVATE
         py_idb

@@ -58,6 +58,15 @@ GeometryShapeId toShapeId(uint64_t value)
       || std::any_of(batch.polygons.begin(), batch.polygons.end(), matches);
 }
 
+[[nodiscard]] bool matchesQueryRef(const DesignGeometryStorage& geometry, DatabaseContext& context,
+                                    GeometryShapeId id, const GeometryQueryFilter& filter)
+{
+  if (!geometry.contains(id)) return false;
+  if (!hasLayerFilter(filter) || !isViaKind(geometry.shape(id).metadata->kind)) return true;
+  const std::array<uint64_t, 1> via_id{id.packed()};
+  return viaTouchesFilteredLayer(GeometryPayloadService{context}.fetchShapes(via_id), filter);
+}
+
 GeometryShapeRecord recordFor(const DesignStore& design, GeometryShapeId id)
 {
   const auto& geometry = design.geometryStorage();
@@ -145,16 +154,21 @@ GeometryShapeRefBatch GeometryQueryService::queryRefs(Rect box, const GeometryQu
   result.geometry_epoch = geometry.geometryEpoch();
   const auto ids = design.geometryIndex().query(box.normalized(), filter);
   result.records.reserve(ids.size());
-  const auto layer_filtered = hasLayerFilter(filter);
   for (const auto id : ids) {
-    if (!geometry.contains(id)) continue;
-    if (layer_filtered && isViaKind(geometry.shape(id).metadata->kind)) {
-      const std::array<uint64_t, 1> via_id{id.packed()};
-      if (!viaTouchesFilteredLayer(GeometryPayloadService{*_context}.fetchShapes(via_id), filter)) continue;
-    }
+    if (!matchesQueryRef(geometry, *_context, id, filter)) continue;
     result.records.push_back(refFor(recordFor(design, id)));
   }
   return result;
+}
+
+bool GeometryQueryService::hasShapes(Rect box, const GeometryQueryFilter& filter) const
+{
+  if (!_context) throw std::logic_error("GeometryQueryService has no database");
+  const auto& design = _context->design();
+  const auto& geometry = design.geometryStorage();
+  return design.geometryIndex().any(box.normalized(), filter, [&](GeometryShapeId id) {
+    return matchesQueryRef(geometry, *_context, id, filter);
+  });
 }
 
 std::optional<Rect> GeometryQueryService::designBounds() const

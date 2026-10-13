@@ -53,8 +53,6 @@ class TopoBuilder
   // function
   void buildRegularNetTopoList();
   TBTopo buildNetTopo(Net& net);
-  void appendNodeIfAbsent(Net& net, std::vector<TopoNode>& node_list, std::map<TBNodeKey, int32_t>& node_key_to_idx_map,
-                          std::set<std::string>& consumed_pin_name_set, int32_t layer_idx, const GTLPointInt& point);
   int32_t appendNode(std::vector<TopoNode>& node_list, TopoNode node);
   void mergeNodeShape(std::vector<TopoNode>& node_list, int32_t node_idx, const GTLRectInt& shape);
   GTLRectInt getSegmentEndpointShape(Segment& segment, const GTLPointInt& point);

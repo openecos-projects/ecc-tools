@@ -52,6 +52,16 @@ LVSInterface& LVSInterface::getInst()
   return *_lvs_interface_instance;
 }
 
+void LVSInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
+void LVSInterface::setReferenceNetlist(const NetlistData* reference) noexcept
+{
+  _reference_netlist = reference;
+}
+
 void LVSInterface::destroyInst()
 {
   if (_lvs_interface_instance != nullptr) {
@@ -135,6 +145,19 @@ void LVSInterface::destroyLVS()
   Logger::destroyInst();
 }
 
+void LVSInterface::abortLVS() noexcept
+{
+  try {
+    LVSReporter::destroyInst();
+    PDNChecker::destroyInst();
+    RoutingChecker::destroyInst();
+    EntityChecker::destroyInst();
+    DataManager::destroyInst();
+    Logger::destroyInst();
+  } catch (...) {
+  }
+}
+
 #endif
 
 #endif
@@ -160,6 +183,10 @@ void LVSInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void LVSInterface::wrapDatabase()
 {
+  if (_database_context != nullptr) {
+    wrapDatabaseFromEccdb();
+    return;
+  }
   if (dmInst->get_config().get_def_path().empty()) {
     LVSLOG.error(Loc::current(), "Direct iLVS database wrapping requires def_init before init_lvs.");
   }

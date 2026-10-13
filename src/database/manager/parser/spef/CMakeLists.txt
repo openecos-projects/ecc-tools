@@ -35,3 +35,11 @@ target_include_directories(spef
   PRIVATE
     ${SPEF_GENERATED_DIR}
 )
+
+if(BUILD_TESTING)
+  add_executable(spef_name_expansion_test
+    SpefNameExpansionTest.cpp
+  )
+  target_link_libraries(spef_name_expansion_test PRIVATE spef ecc_logger)
+  add_test(NAME spef_name_expansion_test COMMAND spef_name_expansion_test)
+endif()

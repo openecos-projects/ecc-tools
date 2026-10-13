@@ -406,11 +406,13 @@ class VerilogReader
 {
  public:
   explicit VerilogReader() = default;
-  ~VerilogReader() = default;
+  ~VerilogReader();
 
-  VerilogReader(VerilogReader&& other) noexcept = default;
-  VerilogReader& operator=(VerilogReader&& rhs) noexcept = default;
+  VerilogReader(VerilogReader&& other) noexcept;
+  VerilogReader& operator=(VerilogReader&& rhs) noexcept;
 
+  // Borrowed parser handle. VerilogReader releases it in its destructor;
+  // callers must not pass this pointer to verilog_free_file().
   void* get_verilog_file_ptr() { return _verilog_file_ptr; }
   auto* get_top_module() { return _top_module; }
   auto& get_verilog_modules() { return _verilog_modules; }

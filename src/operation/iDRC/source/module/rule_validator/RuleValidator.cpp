@@ -551,8 +551,6 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       routing_net.polygon_begin = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
       routing_net.max_rect_begin = static_cast<int32_t>(rv_layer_data.max_rect_pool.size());
       routing_net.boundary_begin = static_cast<int32_t>(rv_layer_data.boundary_pool.size());
-      rv_layer_data.polygon_pool.reserve(rv_layer_data.polygon_pool.size() + gtl_hole_poly_list.size());
-
       for (GTLHolePolyInt& gtl_hole_poly : gtl_hole_poly_list) {
         int32_t polygon_id = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
         rv_layer_data.polygon_pool.push_back(
@@ -562,7 +560,6 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
 
         std::vector<GTLRectInt> gtl_rect_list;
         gtl::get_max_rectangles(gtl_rect_list, gtl_hole_poly);
-        rv_layer_data.max_rect_pool.reserve(rv_layer_data.max_rect_pool.size() + gtl_rect_list.size());
         bool is_polygon_env = (env_polyset != nullptr) && !gtl_rect_list.empty();
         for (GTLRectInt& gtl_rect : gtl_rect_list) {
           MaxRectData max_rect_data;

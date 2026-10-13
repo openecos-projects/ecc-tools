@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "ZHInterface.hpp"
 
+#include <stdexcept>
+
 #include "AntennaChecker.hpp"
 #include "FillerInserter.hpp"
 #include "MetalInserter.hpp"
@@ -40,12 +42,32 @@ void ZHInterface::destroyInst()
   }
 }
 
+void ZHInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+{
+  _database_context = context;
+}
+
+void ZHInterface::setDesignSource(eccdb::DatabaseContext& context) noexcept
+{
+  setDesignSource(&context);
+}
+
 #if 1  // 外部调用ZH的API
 
 #if 1  // izh
 
 void ZHInterface::insertFiller(std::map<std::string, std::any> config_map)
 {
+#if defined(IZH_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    insertFillerFromEccdb(config_map);
+    return;
+  }
+#else
+  if (_database_context != nullptr) {
+    throw std::logic_error("iZH was built without native EccDB support");
+  }
+#endif
   FillerInserter::initInst();
   ZHFI.insert(config_map);
   FillerInserter::destroyInst();
@@ -53,6 +75,16 @@ void ZHInterface::insertFiller(std::map<std::string, std::any> config_map)
 
 void ZHInterface::insertMetal(std::map<std::string, std::any> config_map)
 {
+#if defined(IZH_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    insertMetalFromEccdb(config_map);
+    return;
+  }
+#else
+  if (_database_context != nullptr) {
+    throw std::logic_error("iZH was built without native EccDB support");
+  }
+#endif
   MetalInserter::initInst();
   ZHMI.insert(config_map);
   MetalInserter::destroyInst();
@@ -60,6 +92,16 @@ void ZHInterface::insertMetal(std::map<std::string, std::any> config_map)
 
 void ZHInterface::checkAntenna(std::map<std::string, std::any> config_map)
 {
+#if defined(IZH_HAS_ECCDB)
+  if (_database_context != nullptr) {
+    checkAntennaFromEccdb(config_map);
+    return;
+  }
+#else
+  if (_database_context != nullptr) {
+    throw std::logic_error("iZH was built without native EccDB support");
+  }
+#endif
   AntennaChecker::initInst();
   ZHAC.check(config_map);
   AntennaChecker::destroyInst();

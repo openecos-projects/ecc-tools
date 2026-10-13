@@ -33,6 +33,10 @@ class IdbViaMaster;
 enum class IdbConnectType : uint8_t;
 }  // namespace idb
 
+namespace eccdb {
+class DatabaseContext;
+}  // namespace eccdb
+
 namespace iemir {
 class PowerNet;
 enum class PowerNetType;
@@ -56,6 +60,8 @@ class EMIRInterface
   void initEMIR(std::map<std::string, std::any> config_map);
   void runEMIR();
   void destroyEMIR();
+  // Releases an incomplete read-only EMIR session without producing reports.
+  void abortEMIR() noexcept;
 #endif
 
 #endif
@@ -68,6 +74,10 @@ class EMIRInterface
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
+  // Borrowed native source. Passing nullptr restores the legacy iDB source.
+  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
+  void setDesignSource(eccdb::DatabaseContext& context) noexcept { setDesignSource(&context); }
+  void wrapDatabaseFromEccdb();
   void wrapDBInfo();
   void wrapInstanceIdSet();
   void wrapPowerNetList();
@@ -92,6 +102,7 @@ class EMIRInterface
 
  private:
   static EMIRInterface* _emir_interface_instance;
+  eccdb::DatabaseContext* _database_context = nullptr;
 
   EMIRInterface() = default;
   EMIRInterface(const EMIRInterface& other) = delete;

@@ -2,6 +2,7 @@ add_library(ista_sdc_command
     ${ISTA_MODULE}/sdc_command/SdcCommand.cpp
     ${ISTA_MODULE}/sdc_command/sdc_commands/SdcTclCmd.cpp
     ${ISTA_MODULE}/sdc_command/sdc_commands/SdcCommandUtils.cpp
+    ${ISTA_MODULE}/sdc_command/sdc_commands/CurrentDesign.cpp
     ${ISTA_MODULE}/sdc_command/sdc_commands/CreateClock.cpp
     ${ISTA_MODULE}/sdc_command/sdc_commands/GetClocks.cpp
     ${ISTA_MODULE}/sdc_command/sdc_commands/GetPorts.cpp

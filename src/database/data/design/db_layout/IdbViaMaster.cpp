@@ -220,10 +220,12 @@ IdbViaMasterGenerate::IdbViaMasterGenerate()
   _num_cut_cols = 1;
   _original_offset_x = 0;
   _original_offset_y = 0;
+  _has_origin = false;
   _offset_bottom_x = 0;
   _offset_bottom_y = 0;
   _offset_top_x = 0;
   _offset_top_y = 0;
+  _has_offset = false;
   _patttern = nullptr;
   _cut_bouding_rect = new IdbRect();
 }
@@ -273,10 +275,12 @@ IdbViaMasterGenerate* IdbViaMasterGenerate::clone()
   generate_new->_num_cut_cols = _num_cut_cols;
   generate_new->_original_offset_x = _original_offset_x;
   generate_new->_original_offset_y = _original_offset_y;
+  generate_new->_has_origin = _has_origin;
   generate_new->_offset_bottom_x = _offset_bottom_x;
   generate_new->_offset_bottom_y = _offset_bottom_y;
   generate_new->_offset_top_x = _offset_top_x;
   generate_new->_offset_top_y = _offset_top_y;
+  generate_new->_has_offset = _has_offset;
 
   for (IdbRect* rect : _cut_rect_list) {
     generate_new->add_cut_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
@@ -482,10 +486,10 @@ void IdbViaMaster::set_layer_shape(IdbViaLayerIndex layer_index)
       enclosure_y = master_generate->get_enclosure_bottom_y();
 
       IdbRect* cut_bouding_rect = master_generate->get_cut_bouding_rect();
-      int ll_x = cut_bouding_rect->get_low_x() - enclosure_x;
-      int ll_y = cut_bouding_rect->get_low_y() - enclosure_y;
-      int ur_x = cut_bouding_rect->get_high_x() + enclosure_x;
-      int ur_y = cut_bouding_rect->get_high_y() + enclosure_y;
+      int ll_x = cut_bouding_rect->get_low_x() - enclosure_x + master_generate->get_offset_bottom_x();
+      int ll_y = cut_bouding_rect->get_low_y() - enclosure_y + master_generate->get_offset_bottom_y();
+      int ur_x = cut_bouding_rect->get_high_x() + enclosure_x + master_generate->get_offset_bottom_x();
+      int ur_y = cut_bouding_rect->get_high_y() + enclosure_y + master_generate->get_offset_bottom_y();
       _layer_shape_bottom->add_rect(IdbRect(ll_x, ll_y, ur_x, ur_y));
 
     } else if (layer_index == IdbViaLayerIndex::kLayerTop) {
@@ -495,10 +499,10 @@ void IdbViaMaster::set_layer_shape(IdbViaLayerIndex layer_index)
       enclosure_y = master_generate->get_enclosure_top_y();
 
       IdbRect* cut_bouding_rect = master_generate->get_cut_bouding_rect();
-      int ll_x = cut_bouding_rect->get_low_x() - enclosure_x;
-      int ll_y = cut_bouding_rect->get_low_y() - enclosure_y;
-      int ur_x = cut_bouding_rect->get_high_x() + enclosure_x;
-      int ur_y = cut_bouding_rect->get_high_y() + enclosure_y;
+      int ll_x = cut_bouding_rect->get_low_x() - enclosure_x + master_generate->get_offset_top_x();
+      int ll_y = cut_bouding_rect->get_low_y() - enclosure_y + master_generate->get_offset_top_y();
+      int ur_x = cut_bouding_rect->get_high_x() + enclosure_x + master_generate->get_offset_top_x();
+      int ur_y = cut_bouding_rect->get_high_y() + enclosure_y + master_generate->get_offset_top_y();
       _layer_shape_top->add_rect(IdbRect(ll_x, ll_y, ur_x, ur_y));
     } else {
       _layer_shape_cut->set_layer(master_generate->get_layer_cut());

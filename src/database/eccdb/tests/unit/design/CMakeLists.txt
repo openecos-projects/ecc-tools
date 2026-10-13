@@ -41,6 +41,9 @@ set(_eccdb_design_test_sources
 if(TARGET eccdb_lef_import AND TARGET eccdb_def_import)
   list(APPEND _eccdb_design_test_sources DatabaseOpenTest.cpp)
 endif()
+if(TARGET eccdb_verilog_import AND TARGET eccdb_lef_import AND TARGET eccdb_def_import)
+  list(APPEND _eccdb_design_test_sources VerilogImportTest.cpp)
+endif()
 
 add_executable(eccdb_design_test ${_eccdb_design_test_sources})
 target_compile_features(eccdb_design_test PRIVATE cxx_std_20)
@@ -49,6 +52,9 @@ target_link_libraries(eccdb_design_test
     eccdb_database_owner
     eccdb_core
     GTest::gtest_main
+)
+target_compile_definitions(eccdb_design_test PRIVATE
+  ECCDB_TEST_DATA_ROOT="${ECCDB_TEST_DATA_ROOT}"
 )
 
 gtest_discover_tests(eccdb_design_test)

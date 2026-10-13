@@ -88,6 +88,38 @@ TEST_F(ConnectivityServiceTest, ReconnectScopeRejectsBeforeChangingEitherNet)
   EXPECT_TRUE(netlist.instanceTerms(target).empty());
 }
 
+TEST_F(ConnectivityServiceTest, HighDegreeNetsGrowWithoutRelocatingEveryEndpoint)
+{
+  auto& netlist = design.netlistStorage();
+  auto& registry = design.designRegistry().registry();
+  const auto net = service->createNet(DesignNet{.name = "VDD"}, true);
+  std::size_t instance_relocations = 0;
+  std::size_t block_relocations = 0;
+  std::size_t instance_capacity = 0;
+  std::size_t block_capacity = 0;
+  for (int index = 0; index < 128; ++index) {
+    const auto instance = netlist.createInstance(createInstance("u" + std::to_string(index)));
+    const auto term = netlist.findInstanceTerm(instance, "A");
+    const auto block = service->createBlockTerm(DesignBlockTerm{.name = "IO" + std::to_string(index)});
+    service->connect(term, net);
+    service->connect(block, net);
+    const auto next_instance_capacity = registry.get<DesignNetInstancePins>(net.entity()).values.capacity();
+    const auto next_block_capacity = registry.get<DesignNetIoPins>(net.entity()).values.capacity();
+    instance_relocations += next_instance_capacity != instance_capacity;
+    block_relocations += next_block_capacity != block_capacity;
+    instance_capacity = next_instance_capacity;
+    block_capacity = next_block_capacity;
+    EXPECT_EQ(netlist.instanceTerm(term).special_net, net);
+    EXPECT_EQ(netlist.blockTerm(block).special_net, net);
+  }
+  EXPECT_EQ(netlist.instanceTerms(net).size(), 128u);
+  EXPECT_EQ(netlist.blockTerms(net).size(), 128u);
+  // Detect the quadratic reserve(size + 1) regression without wall-clock
+  // thresholds, while leaving the growth factor an implementation choice.
+  EXPECT_LT(instance_relocations, 16u);
+  EXPECT_LT(block_relocations, 16u);
+}
+
 TEST_F(ConnectivityServiceTest, BatchReplacementMovesBothTermKindsAndRejectsDuplicates)
 {
   auto& netlist = design.netlistStorage();

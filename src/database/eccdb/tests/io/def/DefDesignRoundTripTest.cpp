@@ -513,6 +513,44 @@ TEST_F(DefDesignRoundTripTest, ImportsAndExportsComplexNewVirtualFlushAndViaPath
   EXPECT_EQ(second.netlistStorage().ioPin(second_io_pin).pins.size(), io_pin.pins.size());
 }
 
+TEST_F(DefDesignRoundTripTest, PreservesZeroDistanceRouteHaloAndClearsParserPresenceBetweenComponents)
+{
+  constexpr std::string_view input = R"DEF(VERSION 5.8 ;
+DESIGN route_halo ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 2000 2000 ) ;
+COMPONENTS 3 ;
+- zero INVX1 + ROUTEHALO 0 M1 M2 + PLACED ( 100 200 ) N ;
+- absent INVX1 + PLACED ( 200 200 ) N ;
+- positive INVX1 + ROUTEHALO 5 M1 M2 + PLACED ( 300 200 ) N ;
+END COMPONENTS
+END DESIGN
+)DEF";
+  DesignStore first{tech, library.libraryRegistry()};
+  DefDesignImporter(first).import(writeInput(input, "eccdb_zero_route_halo_input.def"));
+  const auto& zero = first.netlistStorage().instance(first.netlistStorage().findInstance("zero"));
+  EXPECT_NE(zero.flags & DesignInstanceFlag::kHasRouteHalo, 0u);
+  EXPECT_EQ(zero.route_halo.distance, 0);
+  EXPECT_NE(zero.route_halo.min_layer, zero.route_halo.max_layer);
+  EXPECT_EQ(first.netlistStorage().instance(first.netlistStorage().findInstance("absent")).flags
+                & DesignInstanceFlag::kHasRouteHalo,
+            0u);
+  EXPECT_EQ(first.netlistStorage().instance(first.netlistStorage().findInstance("positive")).route_halo.distance, 5);
+
+  const auto text = DefDesignExporter(first).exportText();
+  EXPECT_NE(text.find("+ ROUTEHALO 0 M1 M2"), std::string::npos);
+  DesignStore second{tech, library.libraryRegistry()};
+  DefDesignImporter(second).import(writeInput(text, "eccdb_zero_route_halo_roundtrip.def"));
+  const auto& reread = second.netlistStorage().instance(second.netlistStorage().findInstance("zero"));
+  EXPECT_NE(reread.flags & DesignInstanceFlag::kHasRouteHalo, 0u);
+  EXPECT_EQ(reread.route_halo.distance, 0);
+  EXPECT_EQ(reread.route_halo.min_layer, zero.route_halo.min_layer);
+  EXPECT_EQ(reread.route_halo.max_layer, zero.route_halo.max_layer);
+  EXPECT_EQ(second.netlistStorage().instance(second.netlistStorage().findInstance("absent")).flags
+                & DesignInstanceFlag::kHasRouteHalo,
+            0u);
+}
+
 TEST_F(DefDesignRoundTripTest, EditedDisconnectedShapesExportAsNewPathsWithoutAddingCopper)
 {
   const auto input = writeInput(singleRouteDef("M1 ( 0 0 ) ( 100 0 ) ( 100 100 )"), "shape_edit_input.def");

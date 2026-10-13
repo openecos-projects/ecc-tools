@@ -793,6 +793,14 @@ bool PhysicalDesignService::isPlaced(DesignInstanceId instance) const
   return isPlacedStatus(_design.netlistStorage().instance(instance).placement_status);
 }
 
+Point PhysicalDesignService::placeInstanceMasterPoint(DesignInstanceId instance_id, Point point) const
+{
+  const auto& instance = _design.netlistStorage().instance(instance_id);
+  requirePlaced(instance);
+  const auto& master = _library.cellMasterStorage().cellMaster(instance.master);
+  return placeMasterPoint(point, instance.origin, instance.orientation, master.width, master.height);
+}
+
 void PhysicalDesignService::forEachMasterPinGeometry(LibraryMasterPinId pin, const PhysicalGeometryVisitor& visitor) const
 {
   const auto identity = [](Point point) { return point; };

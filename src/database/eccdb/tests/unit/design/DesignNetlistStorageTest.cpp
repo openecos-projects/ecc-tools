@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "DesignTestFixture.h"
 #include "geometry/DomainGeometryComponents.h"
@@ -87,6 +88,42 @@ TEST_F(DesignStorageTest, BlockPinsHaveIndependentIdentityAndOwnedLifecycle)
   EXPECT_FALSE(netlist.contains(replacement));
   EXPECT_FALSE(design.geometryRegistry().contains(updated_second_shape));
   EXPECT_EQ(netlist.blockPinCount(), 0u);
+}
+
+TEST_F(DesignStorageTest, AppendingExplicitBlockPinsUsesGeometricOwnerCapacity)
+{
+  auto& netlist = design.netlistStorage();
+  auto& registry = design.designRegistry().registry();
+  const auto term = netlist.createBlockTerm(DesignBlockTerm{.name = "MULTI_PORT"});
+  std::vector<DesignBlockPinId> created;
+  created.reserve(17);
+
+  for (int32_t index = 0; index < 17; ++index) {
+    const auto& before = registry.get<const DesignBlockTerm>(term.entity()).pins;
+    const auto old_size = before.size();
+    const auto old_capacity = before.capacity();
+    const auto id = netlist.createBlockPin(
+        term,
+        DesignBlockPinInput{.flags = DesignIoPinPortFlag::kExplicit,
+                            .rectangles = {{.layer = layer, .rectangle = {index * 20, 0, index * 20 + 10, 10}}}});
+    created.push_back(id);
+
+    const auto& pins = registry.get<const DesignBlockTerm>(term.entity()).pins;
+    ASSERT_EQ(pins.size(), old_size + 1u);
+    EXPECT_EQ(pins.back(), id);
+    if (old_size == old_capacity) {
+      EXPECT_GE(pins.capacity(), old_capacity == 0u ? 1u : old_capacity * 2u);
+    } else {
+      EXPECT_EQ(pins.capacity(), old_capacity);
+    }
+  }
+
+  const std::vector<DesignBlockPinId> ports{netlist.blockPins(term).begin(), netlist.blockPins(term).end()};
+  EXPECT_EQ(ports, created);
+  for (const auto id : created) {
+    EXPECT_TRUE(netlist.contains(id));
+    EXPECT_EQ(netlist.blockPin(id).term, term);
+  }
 }
 
 TEST_F(DesignStorageTest, RollsBackBlockTermWhenALaterBlockPinIsInvalid)
@@ -608,6 +645,23 @@ TEST_F(DesignStorageTest, StoresComponentConstraintsAndNetNonDefaultRule)
   EXPECT_FALSE(design.geometryRegistry().contains(stored_bounds.front()));
   EXPECT_FALSE(design.geometryRegistry().contains(stored_bounds.back()));
   EXPECT_TRUE(constraints.destroyRegion(region));
+}
+
+TEST_F(DesignStorageTest, PreservesZeroDistanceRouteHaloAndRejectsNegativeDistance)
+{
+  auto instance = createInstance("zero_route_halo");
+  instance.flags = DesignInstanceFlag::kHasRouteHalo;
+  instance.route_halo = {.distance = 0, .min_layer = routing_layer, .max_layer = routing_layer};
+  const auto id = design.netlistStorage().createInstance(instance);
+  const auto& stored = design.netlistStorage().instance(id);
+  EXPECT_NE(stored.flags & DesignInstanceFlag::kHasRouteHalo, 0u);
+  EXPECT_EQ(stored.route_halo.distance, 0);
+  EXPECT_EQ(stored.route_halo.min_layer, routing_layer);
+  EXPECT_EQ(stored.route_halo.max_layer, routing_layer);
+
+  instance.name = "negative_route_halo";
+  instance.route_halo.distance = -1;
+  EXPECT_THROW((void) design.netlistStorage().createInstance(instance), std::invalid_argument);
 }
 
 TEST_F(DesignStorageTest, RejectsInconsistentComponentConstraintAndNetNdrFields)

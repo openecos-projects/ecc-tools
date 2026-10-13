@@ -101,6 +101,9 @@ test
 test/**
 !test/conftest.py
 !test/native_scenarios.py
+!test/native/
+!test/native/*.py
+!test/native/*.md
 !test/support.py
 !test/data/
 !test/data/test_python_io.py
@@ -129,3 +132,41 @@ test/**
 !test/fixtures/gcd/spef/gcd_TYPICAL_25C.spef
 test/**/__pycache__/
 !src/operation/iCTS/test/data_manager/adapter/sdc/ClockTraceTest.cc
+
+# Experiments: keep reproduction code and written conclusions, not generated
+# traces, snapshots, large JSON dumps, reports or extensionless probe binaries.
+# Reopen directories so the source/document exceptions below remain discoverable.
+/artifacts/**
+!/artifacts/**/
+!/artifacts/**/*.md
+!/artifacts/**/*.py
+!/artifacts/**/*.sh
+!/artifacts/**/*.tcl
+!/artifacts/**/*.awk
+!/artifacts/**/*.cpp
+!/artifacts/**/*.cc
+!/artifacts/**/*.h
+!/artifacts/**/*.hpp
+
+# Small hand-written smoke inputs; generated output/ remains ignored.
+!/artifacts/native-adapter-smoke-20261008/emir-synthetic/emir_manifest.json
+!/artifacts/native-adapter-smoke-20261008/emir-synthetic/emir_synthetic.sdc
+!/artifacts/native-adapter-smoke-20261008/emir-synthetic/emir_synthetic.def
+!/artifacts/native-adapter-smoke-20261008/emir-synthetic/synthetic_stdcell.lef
+!/artifacts/native-adapter-smoke-20261008/rcx-synthetic/rcx-sta-manifest.json
+!/artifacts/native-adapter-smoke-20261008/rcx-synthetic/rcx.json
+!/artifacts/native-adapter-smoke-20261008/rcx-synthetic/mapping.map
+!/artifacts/native-adapter-smoke-20261008/rcx-synthetic/synthetic.itf
+!/artifacts/native-adapter-smoke-20261008/rcx-synthetic/synthetic.captab
+
+# Hand-written configurations directly consumed by the reproduction scripts.
+!/artifacts/operation-coverage-20261010/ifp/floorplan-nangate45.json
+!/artifacts/operation-differential-20261010/izh/configs/filler.json
+!/artifacts/operation-differential-20261010/izh/configs/metal.json
+!/artifacts/tinyrocket-dreamplace/tinyrocket-idb.json
+
+# Operation emits a copy of its plotting script with each routing result.
+/artifacts/**/data_manager/plot.py
+
+# Independent upstream checkout: never add it as an embedded repository.
+/artifacts/rocket-chip/
