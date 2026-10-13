@@ -1,0 +1,8 @@
+add_executable(test_ista_sdc_compatibility EXCLUDE_FROM_ALL
+    sdc_compatibility_test.cpp
+)
+
+target_link_libraries(test_ista_sdc_compatibility PRIVATE ista_sdc_command ista_data_manager)
+
+add_test(NAME ista_sdc_compatibility COMMAND test_ista_sdc_compatibility)
+set_tests_properties(ista_sdc_compatibility PROPERTIES TIMEOUT 30)

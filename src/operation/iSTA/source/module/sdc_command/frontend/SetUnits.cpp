@@ -1,2 +1,83 @@
-// Placeholder for the SDC command `set_units`.
-// The command is intentionally not registered until its behavior is implemented.
+// SPDX-License-Identifier: MulanPSL-2.0
+#include "SetUnits.hpp"
+
+#include "DataManager.hpp"
+
+namespace ista::sdc {
+
+TclSetUnits::TclSetUnits(const char* cmd_name, ClientData client_data) : SdcTclCmd(cmd_name, client_data)
+{
+  for (const char* option : {"-time", "-capacitance", "-resistance", "-voltage", "-current", "-power", "-distance"}) {
+    addOption(new ecc::TclStringOption(option, 0));
+  }
+}
+
+unsigned TclSetUnits::exec()
+{
+  std::map<std::string, std::string> suffix_map = {{"-time", "s"},    {"-capacitance", "f"}, {"-resistance", "ohm"}, {"-voltage", "v"},
+                                                {"-current", "a"}, {"-power", "w"},       {"-distance", "m"}};
+  for (const auto& [option, value] : getOptionValueList()) {
+    double declared_scale = parseUnitScale(value, suffix_map[option]);
+    double active_scale = getUnitScale(option);
+    // Like OpenSTA, this is an assertion of units, not a change of units.
+    if (std::abs(declared_scale - active_scale) > 1e-6 * std::max(declared_scale, active_scale)) {
+      std::ostringstream message;
+      message << "set_units " << option << " " << value << " differs from the active iSTA unit scale " << active_scale
+              << " (SI); units are unchanged";
+      warn(message.str());
+    }
+  }
+  return 1;
+}
+
+double TclSetUnits::parseUnitScale(const std::string& value, const std::string& suffix)
+{
+  if (value.size() < suffix.size()) {
+    throw std::invalid_argument("invalid unit: " + value);
+  }
+  std::string actual_suffix = value.substr(value.size() - suffix.size());
+  for (char& character : actual_suffix) {
+    character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+  }
+  std::string prefix = value.substr(0, value.size() - suffix.size());
+  std::smatch match;
+  if (actual_suffix != suffix || !std::regex_match(prefix, match, std::regex("^(10*\\.?0*)?([Mkmunpf])?$"))) {
+    throw std::invalid_argument("invalid unit: " + value);
+  }
+  std::map<std::string, double> prefix_scale_map = {{"", 1.0}, {"M", 1e6}, {"k", 1e3}, {"m", 1e-3},
+                                                {"u", 1e-6}, {"n", 1e-9}, {"p", 1e-12}, {"f", 1e-15}};
+  double multiplier = match[1].matched ? std::stod(match[1].str()) : 1.0;
+  double scale = multiplier * prefix_scale_map[match[2].str()];
+  if (!std::isfinite(scale) || scale <= 0.0) {
+    throw std::invalid_argument("invalid unit scale: " + value);
+  }
+  return scale;
+}
+
+double TclSetUnits::getUnitScale(const std::string& option)
+{
+  // SDC time and capacitance values already use the normalized ns/pF domain,
+  // even when the source Liberty tables used ps or fF.
+  if (option == "-time") {
+    return 1e-9;
+  }
+  if (option == "-capacitance") {
+    return 1e-12;
+  }
+  TimingLibrary& library = STADM.getDatabase().get_timing_library();
+  if (option == "-resistance") {
+    return library.get_resistance_unit() == TimingResistanceUnit::kkOHM ? 1e3 : 1.0;
+  }
+  if (option == "-voltage") {
+    return parseUnitScale(library.get_voltage_unit_name().value_or("1V"), "v");
+  }
+  if (option == "-current") {
+    return parseUnitScale(library.get_current_unit_name().value_or("1A"), "a");
+  }
+  if (option == "-power") {
+    return 1.0;
+  }
+  return 1e-6;
+}
+
+}  // namespace ista::sdc
