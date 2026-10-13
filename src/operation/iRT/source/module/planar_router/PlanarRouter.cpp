@@ -76,7 +76,6 @@ void PlanarRouter::generate()
   // outputUsageCSV(pr_model);
   // outputCongestionCostCSV(pr_model);
 
-  RTDM.getDatabase().get_net_global_result_map() = std::move(pr_model.get_net_global_result_map());
   RTDM.rebuildGlobalResultRTree();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -88,7 +87,6 @@ PlanarRouter* PlanarRouter::_pr_instance = nullptr;
 PRModel PlanarRouter::initPRModel()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
-  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
 
   PRModel pr_model;
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
@@ -96,14 +94,6 @@ PRModel PlanarRouter::initPRModel()
   for (Net& net : net_list) {
     PRNet& pr_net = pr_net_list.emplace_back();
     pr_net.set_origin_net(&net);
-    pr_net.set_net_idx(net.get_net_idx());
-    pr_net.set_connect_type(net.get_connect_type());
-    if (region_route.isActiveNet(net.get_net_idx())) {
-      for (Pin& pin : net.get_pin_list()) {
-        pr_net.get_pr_pin_list().emplace_back(pin);
-      }
-    }
-    pr_net.set_bounding_box(net.get_bounding_box());
   }
   return pr_model;
 }
@@ -136,10 +126,9 @@ void PlanarRouter::initPRTaskList(PRModel& pr_model)
   std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
   std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  bool regional_stage = region_route.get_enable();
   pr_task_list.reserve(pr_net_list.size());
   for (PRNet& pr_net : pr_net_list) {
-    if (regional_stage && pr_net.get_pr_pin_list().size() < 2) {
+    if (!region_route.isActiveNet(pr_net.get_net_idx())) {
       continue;
     }
     pr_task_list.push_back(&pr_net);
@@ -400,7 +389,7 @@ void PlanarRouter::runRouteFlow(PRModel& pr_model)
     pr_com_param.set_overflow_unit(pr_com_param.get_overflow_unit() * 2);
   }
 
-  uploadNetList(pr_model, pr_task_list);
+  uploadNetList(pr_model);
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -614,8 +603,8 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getOverflowPlanarTopoList(
 {
   std::vector<Segment<PlanarCoord>> planar_topo_list;
   std::set<PlanarCoord, CmpPlanarCoordByXASC> pin_coord_set;
-  for (PRPin& pr_pin : pr_net.get_pr_pin_list()) {
-    pin_coord_set.insert(pr_pin.get_access_point().get_grid_coord());
+  for (Pin& pin : pr_net.get_pin_list()) {
+    pin_coord_set.insert(pin.get_access_point().get_grid_coord());
   }
   std::vector<bool> visited_list(unit_segment_list.size(), false);
   std::queue<int32_t> edge_queue;
@@ -844,8 +833,8 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(double overflo
 {
   std::vector<PlanarCoord> planar_coord_list;
   {
-    for (PRPin& pr_pin : pr_net.get_pr_pin_list()) {
-      planar_coord_list.push_back(pr_pin.get_access_point().get_grid_coord());
+    for (Pin& pin : pr_net.get_pin_list()) {
+      planar_coord_list.push_back(pin.get_access_point().get_grid_coord());
     }
     std::ranges::sort(planar_coord_list, CmpPlanarCoordByXASC());
     planar_coord_list.erase(std::ranges::unique(planar_coord_list).begin(), planar_coord_list.end());
@@ -1427,23 +1416,25 @@ MTree<PlanarCoord> PlanarRouter::getCoordTree(PRNet& pr_net, std::vector<Segment
 {
   std::vector<PlanarCoord> candidate_root_coord_list;
   std::map<PlanarCoord, std::set<int32_t>, CmpPlanarCoordByXASC> key_coord_pin_map;
-  std::vector<PRPin>& pr_pin_list = pr_net.get_pr_pin_list();
-  for (size_t i = 0; i < pr_pin_list.size(); i++) {
-    PlanarCoord coord = pr_pin_list[i].get_access_point().get_grid_coord();
+  std::vector<Pin>& pin_list = pr_net.get_pin_list();
+  for (size_t i = 0; i < pin_list.size(); i++) {
+    PlanarCoord coord = pin_list[i].get_access_point().get_grid_coord();
     candidate_root_coord_list.push_back(coord);
     key_coord_pin_map[coord].insert(static_cast<int32_t>(i));
   }
   return RTUTIL.getTreeByFullFlow(candidate_root_coord_list, routing_segment_list, key_coord_pin_map);
 }
 
-void PlanarRouter::uploadNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list)
+void PlanarRouter::uploadNetList(PRModel& pr_model)
 {
-  for (PRNet* pr_net : pr_net_list) {
-    for (Segment<PlanarCoord>& routing_segment : pr_net->get_routing_segment_list()) {
-      pr_model.get_net_global_result_map()[pr_net->get_net_idx()].emplace_back(LayerCoord(routing_segment.get_first(), 0),
-                                                                               LayerCoord(routing_segment.get_second(), 0));
+  std::map<int32_t, std::vector<Segment<LayerCoord>>> net_global_result_map;
+  for (PRNet& pr_net : pr_model.get_pr_net_list()) {
+    int32_t net_idx = pr_net.get_net_idx();
+    for (Segment<PlanarCoord>& routing_segment : pr_net.get_routing_segment_list()) {
+      net_global_result_map[net_idx].emplace_back(LayerCoord(routing_segment.get_first(), 0), LayerCoord(routing_segment.get_second(), 0));
     }
   }
+  RTDM.getDatabase().get_net_global_result_map() = std::move(net_global_result_map);
 }
 
 // exhibit
@@ -1471,22 +1462,11 @@ void PlanarRouter::updateSummary(PRModel& pr_model)
       }
     }
   }
-  for (auto& [net_idx, segment_set] : pr_model.get_net_global_result_map()) {
-    for (Segment<LayerCoord>& segment_value : segment_set) {
-      Segment<LayerCoord>* segment = &segment_value;
-      LayerCoord& first_coord = segment->get_first();
-      int32_t first_layer_idx = first_coord.get_layer_idx();
-      LayerCoord& second_coord = segment->get_second();
-      int32_t second_layer_idx = second_coord.get_layer_idx();
-
-      if (first_layer_idx == second_layer_idx) {
-        PlanarRect& first_gcell = gcell_map[first_coord.get_x()][first_coord.get_y()];
-        PlanarRect& second_gcell = gcell_map[second_coord.get_x()][second_coord.get_y()];
-        double wire_length = RTUTIL.getManhattanDistance(first_gcell.getMidPoint(), second_gcell.getMidPoint()) / 1.0 / micron_dbu;
-        total_wire_length += wire_length;
-      } else {
-        RTLOG.error(Loc::current(), "first_layer_idx != second_layer_idx!");
-      }
+  for (PRNet& pr_net : pr_model.get_pr_net_list()) {
+    for (Segment<PlanarCoord>& routing_segment : pr_net.get_routing_segment_list()) {
+      PlanarRect& first_gcell = gcell_map[routing_segment.get_first().get_x()][routing_segment.get_first().get_y()];
+      PlanarRect& second_gcell = gcell_map[routing_segment.get_second().get_x()][routing_segment.get_second().get_y()];
+      total_wire_length += RTUTIL.getManhattanDistance(first_gcell.getMidPoint(), second_gcell.getMidPoint()) / 1.0 / micron_dbu;
     }
   }
 }
@@ -1533,55 +1513,45 @@ void PlanarRouter::outputGuide(PRModel& pr_model)
   RTUTIL.pushStream(guide_file_stream, "wire grid1_x grid1_y grid2_x grid2_y real1_x real1_y real2_x real2_y layer\n");
   RTUTIL.pushStream(guide_file_stream, "via grid_x grid_y real_x real_y layer1 layer2\n");
 
-  for (auto& [net_idx, segment_set] : pr_model.get_net_global_result_map()) {
-    PRNet& pr_net = pr_net_list[net_idx];
-    RTUTIL.pushStream(guide_file_stream, "guide ", pr_net.get_origin_net()->get_net_name(), "\n");
+  for (PRNet& pr_net : pr_net_list) {
+    if (pr_net.get_routing_segment_list().empty()) {
+      continue;
+    }
+    RTUTIL.pushStream(guide_file_stream, "guide ", pr_net.get_net_name(), "\n");
 
-    for (PRPin& pr_pin : pr_net.get_pr_pin_list()) {
-      AccessPoint& access_point = pr_pin.get_access_point();
+    for (Pin& pin : pr_net.get_pin_list()) {
+      AccessPoint& access_point = pin.get_access_point();
       double grid_x = access_point.get_grid_x();
       double grid_y = access_point.get_grid_y();
       double real_x = access_point.get_real_x() / 1.0 / micron_dbu;
       double real_y = access_point.get_real_y() / 1.0 / micron_dbu;
       std::string layer = routing_layer_list[access_point.get_layer_idx()].get_layer_name();
       std::string connnect;
-      if (pr_pin.get_is_driven()) {
+      if (pin.get_is_driven()) {
         connnect = "driven";
       } else {
         connnect = "load";
       }
-      RTUTIL.pushStream(guide_file_stream, "pin ", grid_x, " ", grid_y, " ", real_x, " ", real_y, " ", layer, " ", connnect, " ", pr_pin.get_pin_name(), "\n");
+      RTUTIL.pushStream(guide_file_stream, "pin ", grid_x, " ", grid_y, " ", real_x, " ", real_y, " ", layer, " ", connnect, " ", pin.get_pin_name(), "\n");
     }
-    for (Segment<LayerCoord>& segment_value : segment_set) {
-      Segment<LayerCoord>* segment = &segment_value;
-      LayerCoord first_layer_coord = segment->get_first();
-      double grid1_x = first_layer_coord.get_x();
-      double grid1_y = first_layer_coord.get_y();
-      int32_t first_layer_idx = first_layer_coord.get_layer_idx();
-
-      PlanarCoord first_mid_coord = RTUTIL.getRealRectByGCell(first_layer_coord, gcell_axis).getMidPoint();
+    for (Segment<PlanarCoord>& routing_segment : pr_net.get_routing_segment_list()) {
+      PlanarCoord first_coord = routing_segment.get_first();
+      double grid1_x = first_coord.get_x();
+      double grid1_y = first_coord.get_y();
+      PlanarCoord first_mid_coord = RTUTIL.getRealRectByGCell(first_coord, gcell_axis).getMidPoint();
       double real1_x = first_mid_coord.get_x() / 1.0 / micron_dbu;
       double real1_y = first_mid_coord.get_y() / 1.0 / micron_dbu;
 
-      LayerCoord second_layer_coord = segment->get_second();
-      double grid2_x = second_layer_coord.get_x();
-      double grid2_y = second_layer_coord.get_y();
-      int32_t second_layer_idx = second_layer_coord.get_layer_idx();
-
-      PlanarCoord second_mid_coord = RTUTIL.getRealRectByGCell(second_layer_coord, gcell_axis).getMidPoint();
+      PlanarCoord second_coord = routing_segment.get_second();
+      double grid2_x = second_coord.get_x();
+      double grid2_y = second_coord.get_y();
+      PlanarCoord second_mid_coord = RTUTIL.getRealRectByGCell(second_coord, gcell_axis).getMidPoint();
       double real2_x = second_mid_coord.get_x() / 1.0 / micron_dbu;
       double real2_y = second_mid_coord.get_y() / 1.0 / micron_dbu;
 
-      if (first_layer_idx != second_layer_idx) {
-        RTUTIL.swapByASC(first_layer_idx, second_layer_idx);
-        std::string layer1 = routing_layer_list[first_layer_idx].get_layer_name();
-        std::string layer2 = routing_layer_list[second_layer_idx].get_layer_name();
-        RTUTIL.pushStream(guide_file_stream, "via ", grid1_x, " ", grid1_y, " ", real1_x, " ", real1_y, " ", layer1, " ", layer2, "\n");
-      } else {
-        std::string layer = routing_layer_list[first_layer_idx].get_layer_name();
-        RTUTIL.pushStream(guide_file_stream, "wire ", grid1_x, " ", grid1_y, " ", grid2_x, " ", grid2_y, " ", real1_x, " ", real1_y, " ", real2_x, " ", real2_y,
-                          " ", layer, "\n");
-      }
+      std::string layer = routing_layer_list[0].get_layer_name();
+      RTUTIL.pushStream(guide_file_stream, "wire ", grid1_x, " ", grid1_y, " ", grid2_x, " ", grid2_y, " ", real1_x, " ", real1_y, " ", real2_x, " ", real2_y, " ",
+                        layer, "\n");
     }
   }
   RTUTIL.closeFileStream(guide_file_stream);

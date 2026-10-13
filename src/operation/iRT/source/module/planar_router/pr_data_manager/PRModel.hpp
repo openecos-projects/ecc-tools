@@ -32,7 +32,6 @@ class PRModel
   std::vector<PRNet>& get_pr_net_list() { return _pr_net_list; }
   PRComParam& get_pr_com_param() { return _pr_com_param; }
   std::vector<PRNet*>& get_pr_task_list() { return _pr_task_list; }
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_global_result_map() { return _net_global_result_map; }
   // setter
   void set_pr_net_list(const std::vector<PRNet>& pr_net_list) { _pr_net_list = pr_net_list; }
   void set_pr_com_param(const PRComParam& pr_com_param) { _pr_com_param = pr_com_param; }
@@ -41,7 +40,6 @@ class PRModel
   std::vector<PRNet> _pr_net_list;
   PRComParam _pr_com_param;
   std::vector<PRNet*> _pr_task_list;
-  std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_global_result_map;
 };
 
 }  // namespace irt

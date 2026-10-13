@@ -197,7 +197,7 @@ class PlanarRouter
 
   // result
   MTree<PlanarCoord> getCoordTree(PRNet& pr_net, std::vector<Segment<PlanarCoord>>& routing_segment_list);
-  void uploadNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list);
+  void uploadNetList(PRModel& pr_model);
 
   // exhibit
   void updateSummary(PRModel& pr_model);
