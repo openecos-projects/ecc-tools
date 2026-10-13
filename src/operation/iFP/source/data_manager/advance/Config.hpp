@@ -24,8 +24,19 @@
 #include "PGRail.hpp"
 #include "PGStripe.hpp"
 #include "PlacementMode.hpp"
+#include "PlacementOrientation.hpp"
 
 namespace ifp {
+
+struct PGRingConfig
+{
+  std::vector<std::string> nets;
+  std::string horizontal_layer;
+  std::string vertical_layer;
+  double width_micron = 0.0;
+  double spacing_micron = 0.0;
+  double offset_micron = 0.0;
+};
 
 class Config
 {
@@ -61,6 +72,12 @@ class Config
   bool io_cell_filler_enabled;                             // optional
   bool io_cell_filler_require_exact;                       // optional
   std::vector<PGGlobalConnect> pg_connect_list;            // optional
+  std::string core_power_net;
+  std::string core_ground_net;
+  PGRingConfig pg_ring;
+  bool pg_connect_pads = false;
+  bool pg_require_connected_pins = true;
+  std::vector<std::string> pg_access_layer_list;
   std::vector<PGRail> pg_rail_list;                        // optional
   std::vector<PGStripe> pg_stripe_list;                    // optional
   std::vector<PGLayerPair> pg_layer_pair_list;             // optional
@@ -73,6 +90,8 @@ class Config
   std::vector<std::string> top_boundary_tap_name_list;     // optional
   std::vector<std::string> bottom_boundary_tap_name_list;  // optional
   double boundary_tap_rule_micron;                         // optional
+  std::map<std::string, std::map<PlacementOrientation, PlacementOrientation>> phy_orientations;
+  std::map<std::string, std::string> corner_cell_names;
   /////////////////////////////////////////////
   // **********        FP         ********** //
   std::string log_file_path;  // building

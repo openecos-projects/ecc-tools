@@ -50,6 +50,22 @@ bool hasMatchingNet(const Database& database, const std::vector<std::string>& pa
   return false;
 }
 
+std::string resolvePowerNet(const Database& database, const std::vector<std::string>& patterns)
+{
+  std::set<std::string> matches;
+  for (const auto& net : database.get_net_list()) {
+    for (const auto& pattern : patterns) {
+      if (matchPattern(net.get_name(), pattern)) {
+        matches.insert(net.get_name());
+      }
+    }
+  }
+  if (matches.size() != 1) {
+    FPLOG.error(Loc::current(), "IO power definition must match exactly one net; matched ", matches.size(), ".");
+  }
+  return *matches.begin();
+}
+
 }  // namespace
 
 bool IOCellPlacer::isPowerMaster(const IOCellDefinition& definition, const std::string& master)
@@ -372,13 +388,7 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
         for (const IOCellPowerMember& member : group.members) {
           if (member.master_name == instance->get_master_name()) {
             instance->set_io_cell_pin_name(member.pin_name);
-            for (const Net& net : database.get_net_list()) {
-              for (const std::string& pattern : member.net_patterns) {
-                if (matchPattern(net.get_name(), pattern)) {
-                  instance->set_io_cell_net_name(net.get_name());
-                }
-              }
-            }
+            instance->set_io_cell_net_name(resolvePowerNet(database, member.net_patterns));
           }
         }
       }
@@ -627,9 +637,9 @@ bool IOCellPlacer::placeCorners(const IOCellDefinition& definition)
     PlacementOrientation orient;
   };
   const Corner corners[] = {{"IO_CORNER_BL", x0, y0, PlacementOrientation::kN},
-                            {"IO_CORNER_BR", x1 - cw, y0, PlacementOrientation::kE},
+                            {"IO_CORNER_BR", x1 - cw, y0, PlacementOrientation::kW},
                             {"IO_CORNER_TR", x1 - cw, y1 - ch, PlacementOrientation::kS},
-                            {"IO_CORNER_TL", x0, y1 - ch, PlacementOrientation::kW}};
+                            {"IO_CORNER_TL", x0, y1 - ch, PlacementOrientation::kE}};
   for (const Corner& corner : corners) {
     Instance* instance = nullptr;
     auto index_iter = database.get_instance_name_to_idx_map().find(corner.name);
@@ -806,23 +816,16 @@ Instance* IOCellPlacer::findOrCreatePowerInstance(const IOCellPowerMember& membe
 {
   for (Instance* instance : _power_instances) {
     if (instance->get_master_name() == member.master_name && !instance->get_placed()) {
+      instance->set_io_cell_net_name(resolvePowerNet(FPDM.getDatabase(), member.net_patterns));
+      instance->set_io_cell_pin_name(member.pin_name);
       return instance;
     }
   }
   const std::string name = "IO_POWER_" + std::to_string(_used_instance_names.size());
   Instance* instance = createPhysicalInstance(name, member.master_name);
-  Database& database = FPDM.getDatabase();
-  for (const Net& net : database.get_net_list()) {
-    for (const std::string& pattern : member.net_patterns) {
-      if (matchPattern(net.get_name(), pattern)) {
-        instance->set_io_cell_net_name(net.get_name());
-        instance->set_io_cell_pin_name(member.pin_name);
-        return instance;
-      }
-    }
-  }
-  FPLOG.error(Loc::current(), "Power Cell '", member.master_name, "' requires a net matching definition patterns, but no net exists.");
-  return nullptr;
+  instance->set_io_cell_net_name(resolvePowerNet(FPDM.getDatabase(), member.net_patterns));
+  instance->set_io_cell_pin_name(member.pin_name);
+  return instance;
 }
 
 Instance* IOCellPlacer::createPhysicalInstance(const std::string& name, const std::string& master_name)
@@ -836,6 +839,7 @@ Instance* IOCellPlacer::createPhysicalInstance(const std::string& name, const st
   instance.set_height(master.get_height());
   instance.set_new_instance(true);
   instance.set_fixed(true);
+  database.get_instance_name_to_idx_map()[name] = static_cast<int32_t>(database.get_instance_list().size());
   database.get_instance_list().push_back(instance);
   _used_instance_names.insert(name);
   return &database.get_instance_list().back();
@@ -938,15 +942,16 @@ int32_t IOCellPlacer::micronToDbu(double micron) const
 
 PlacementOrientation IOCellPlacer::edgeOrientation(IOEdgeType edge) const
 {
+  // In N orientation the CORE side faces +Y. Rotate that side toward the die center.
   switch (edge) {
     case IOEdgeType::kBottom:
       return PlacementOrientation::kN;
     case IOEdgeType::kRight:
-      return PlacementOrientation::kE;
+      return PlacementOrientation::kW;
     case IOEdgeType::kTop:
       return PlacementOrientation::kS;
     case IOEdgeType::kLeft:
-      return PlacementOrientation::kW;
+      return PlacementOrientation::kE;
     default:
       return PlacementOrientation::kN;
   }

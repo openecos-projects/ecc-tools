@@ -29,6 +29,8 @@ class PGGlobalConnect
   std::string& get_net_name() { return _net_name; }
   std::string& get_pin_name() { return _pin_name; }
   PGNetType get_net_type() const { return _net_type; }
+  const std::string& get_instance_pattern() const { return _instance_pattern; }
+  const std::string& get_master_pattern() const { return _master_pattern; }
 
   // const getter
   const std::string& get_net_name() const { return _net_name; }
@@ -38,6 +40,8 @@ class PGGlobalConnect
   void set_net_name(std::string net_name) { _net_name = net_name; }
   void set_pin_name(std::string pin_name) { _pin_name = pin_name; }
   void set_net_type(PGNetType net_type) { _net_type = net_type; }
+  void set_instance_pattern(std::string pattern) { _instance_pattern = pattern; }
+  void set_master_pattern(std::string pattern) { _master_pattern = pattern; }
 
   // function
 
@@ -45,6 +49,8 @@ class PGGlobalConnect
   std::string _net_name;
   std::string _pin_name;
   PGNetType _net_type = PGNetType::kNone;
+  std::string _instance_pattern = "*";
+  std::string _master_pattern = "*";
 };
 
 }  // namespace ifp

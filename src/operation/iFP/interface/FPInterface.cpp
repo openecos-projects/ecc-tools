@@ -117,13 +117,13 @@ void FPInterface::runFP()
   FPMP.place();
   MacroPlacer::destroyInst();
 
-  PDNGenerator::initInst();
-  FPPG.generate();
-  PDNGenerator::destroyInst();
-
   PhyPlacer::initInst();
   FPPP.place();
   PhyPlacer::destroyInst();
+
+  PDNGenerator::initInst();
+  FPPG.generate();
+  PDNGenerator::destroyInst();
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -413,6 +413,12 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.io_cell_filler_enabled = true;
   config.io_cell_filler_require_exact = true;
   config.pg_connect_list.clear();
+  config.core_power_net.clear();
+  config.core_ground_net.clear();
+  config.pg_ring = {};
+  config.pg_connect_pads = false;
+  config.pg_require_connected_pins = true;
+  config.pg_access_layer_list.clear();
   config.pg_rail_list.clear();
   config.pg_stripe_list.clear();
   config.pg_layer_pair_list.clear();
@@ -425,6 +431,8 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.top_boundary_tap_name_list.clear();
   config.bottom_boundary_tap_name_list.clear();
   config.boundary_tap_rule_micron = -1.0;
+  config.phy_orientations.clear();
+  config.corner_cell_names.clear();
 
   std::filesystem::path config_file_path = std::filesystem::absolute(FPUTIL.getConfigValue<std::string>(config_map, "-config", ""));
   std::ifstream config_file_stream(config_file_path);
@@ -496,6 +504,18 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   }
 
   nlohmann::json& phy_placer_json = config_json["phy_placer"];
+  const auto orientations = phy_placer_json.value("orientations", nlohmann::json::object());
+  for (const auto& [role, mappings] : orientations.items()) {
+    for (const auto& [row, orient] : mappings.items()) {
+      const auto row_orient = GetPlacementOrientationByName()(row);
+      const auto cell_orient = GetPlacementOrientationByName()(orient.get<std::string>());
+      if (row_orient == PlacementOrientation::kNone || cell_orient == PlacementOrientation::kNone) {
+        FPLOG.error(Loc::current(), "Invalid physical-cell orientation for role '", role, "'.");
+      }
+      config.phy_orientations[role][row_orient] = cell_orient;
+    }
+  }
+  config.corner_cell_names = phy_placer_json.value("corner_cells", std::map<std::string, std::string>{});
   nlohmann::json& well_tap_json = phy_placer_json["well_tap"];
   config.tapcell_name = well_tap_json["cell_name"].get<std::string>();
   config.tap_distance_micron = well_tap_json["distance_micron"].get<double>();
@@ -519,11 +539,27 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.boundary_tap_rule_micron = boundary_tap_json["rule_micron"].get<double>();
 
   nlohmann::json& pdn_generator_json = config_json["pdn_generator"];
+  config.core_power_net = pdn_generator_json.value("core_power_net", "");
+  config.core_ground_net = pdn_generator_json.value("core_ground_net", "");
+  config.pg_connect_pads = pdn_generator_json.value("connect_pads", false);
+  config.pg_require_connected_pins = pdn_generator_json.value("require_connected_pins", true);
+  config.pg_access_layer_list = pdn_generator_json.value("access_layers", std::vector<std::string>{});
+  if (pdn_generator_json.contains("ring")) {
+    const auto& ring = pdn_generator_json["ring"];
+    config.pg_ring.nets = ring.at("nets").get<std::vector<std::string>>();
+    config.pg_ring.horizontal_layer = ring.at("horizontal_layer").get<std::string>();
+    config.pg_ring.vertical_layer = ring.at("vertical_layer").get<std::string>();
+    config.pg_ring.width_micron = ring.at("width_micron").get<double>();
+    config.pg_ring.spacing_micron = ring.at("spacing_micron").get<double>();
+    config.pg_ring.offset_micron = ring.at("offset_micron").get<double>();
+  }
   for (nlohmann::json& pg_connect_json : pdn_generator_json["global_connect"]) {
     PGGlobalConnect pg_connect;
     pg_connect.set_net_name(pg_connect_json["net_name"].get<std::string>());
     pg_connect.set_pin_name(pg_connect_json["instance_pin_name"].get<std::string>());
     pg_connect.set_net_type(pg_connect_json["is_power"].get<bool>() ? PGNetType::kPower : PGNetType::kGround);
+    pg_connect.set_instance_pattern(pg_connect_json.value("instance_pattern", "*"));
+    pg_connect.set_master_pattern(pg_connect_json.value("master_pattern", "*"));
     config.pg_connect_list.push_back(pg_connect);
   }
   for (nlohmann::json& pg_rail_json : pdn_generator_json["rail"]) {
@@ -615,11 +651,64 @@ void FPInterface::wrapCellMasterMap()
     cell_master.set_width(idb_cell_master->get_width());
     cell_master.set_height(idb_cell_master->get_height());
     cell_master.set_pad(idb_cell_master->is_pad());
+    cell_master.set_symmetry_x(idb_cell_master->is_symmetry_x());
+    cell_master.set_symmetry_y(idb_cell_master->is_symmetry_y());
     cell_master.set_pad_filler(idb_cell_master->is_pad_filler());
     cell_master.set_spacer(idb_cell_master->is_spacer());
     cell_master.set_corner(idb_cell_master->get_site() != nullptr && idb_cell_master->get_site()->is_corner_site());
+    for (idb::IdbTerm* term : idb_cell_master->get_term_list()) {
+      const bool pg = term->is_power() || term->is_ground();
+      if (pg) {
+        cell_master.get_pg_pin_types()[term->get_name()] = term->is_power() ? PGNetType::kPower : PGNetType::kGround;
+      }
+      int32_t port_idx = 0;
+      for (idb::IdbPort* port : term->get_port_list()) {
+        for (idb::IdbLayerShape* shape : port->get_layer_shape()) {
+          if (!shape->get_layer()->is_routing()) {
+            continue;
+          }
+          for (idb::IdbRect* rect : shape->get_rect_list()) {
+            InstancePinShape pin_shape;
+            pin_shape.set_pin_name(term->get_name());
+            pin_shape.set_layer_name(shape->get_layer()->get_name());
+            pin_shape.set_port_idx(port_idx);
+            pin_shape.set_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+            (pg ? cell_master.get_pg_pin_shapes() : cell_master.get_obstruction_shapes()).push_back(pin_shape);
+          }
+        }
+        ++port_idx;
+      }
+    }
+    for (auto* obs : idb_cell_master->get_obs_list()) {
+      for (auto* obs_layer : obs->get_obs_layer_list()) {
+        auto* shape = obs_layer->get_shape();
+        if (shape->get_layer() == nullptr || !shape->get_layer()->is_routing()) {
+          continue;
+        }
+        for (auto* rect : shape->get_rect_list()) {
+          InstancePinShape obstruction;
+          obstruction.set_layer_name(shape->get_layer()->get_name());
+          obstruction.set_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+          cell_master.get_obstruction_shapes().push_back(obstruction);
+        }
+      }
+    }
     cell_master_map[cell_master.get_name()] = cell_master;
   }
+}
+
+std::vector<InstancePinShape> FPInterface::getPlacedShapes(const Instance& instance, const std::vector<InstancePinShape>& shapes)
+{
+  auto placed = shapes;
+  idb::IdbCoordinate<int32_t> origin(instance.get_x(), instance.get_y());
+  idb::IdbOrientTransform transform(unwrapPlacementOrientation(instance.get_orient()), &origin, instance.get_width(), instance.get_height());
+  for (auto& shape : placed) {
+    idb::IdbRect rect(shape.get_ll_x() + instance.get_x(), shape.get_ll_y() + instance.get_y(),
+                      shape.get_ur_x() + instance.get_x(), shape.get_ur_y() + instance.get_y());
+    transform.transformRect(&rect);
+    shape.set_rect(rect.get_low_x(), rect.get_low_y(), rect.get_high_x(), rect.get_high_y());
+  }
+  return placed;
 }
 
 void FPInterface::wrapRoutingLayerList()
@@ -853,13 +942,13 @@ void FPInterface::wrapIOPinList()
 void FPInterface::output()
 {
   outputFloorplan();
-  outputPGNetList();
   outputIOPinList();
   outputIOInstancePlacement();
   outputMacroPlacement();
   outputMacroHalo();
   outputMacroRouteHalo();
   outputNewInstanceList();
+  outputPGNetList();
   outputPGSegmentList();
 }
 
@@ -995,11 +1084,33 @@ void FPInterface::outputPGNetList()
       connect_type = idb::IdbConnectType::kGround;
     }
     idb::IdbSpecialNet* idb_special_net = idb_design->createOrFindSpecialNet(pg_net.get_name(), connect_type);
+    if (idb_special_net == nullptr) {
+      FPLOG.error(Loc::current(), "Cannot create PG net '", pg_net.get_name(), "'.");
+    }
+    idb_design->setNetConnectType(pg_net.get_name(), connect_type);
+    // Only rules proven to apply to every instance may be exported as wildcards.
+    idb_special_net->get_pin_string_list().clear();
     for (std::string& instance_pin_name : pg_net.get_instance_pin_name_list()) {
       if (std::find(idb_special_net->get_pin_string_list().begin(), idb_special_net->get_pin_string_list().end(), instance_pin_name)
           == idb_special_net->get_pin_string_list().end()) {
         idb_special_net->add_pin_string(instance_pin_name);
       }
+    }
+    std::vector<idb::IdbPin*> instance_pins;
+    instance_pins.reserve(pg_net.get_instance_pins().size());
+    for (const auto& [instance_name, pin_name] : pg_net.get_instance_pins()) {
+      idb::IdbInstance* instance = idb_design->get_instance_list()->find_instance(instance_name);
+      idb::IdbPin* pin = instance == nullptr ? nullptr : instance->get_pin_by_term(pin_name);
+      if (pin == nullptr) {
+        FPLOG.error(Loc::current(), "Missing PG terminal '", instance_name, "/", pin_name, "' while exporting '", pg_net.get_name(), "'.");
+      }
+      if (pin->get_net() != nullptr && pin->get_net()->get_net_name() != pg_net.get_name()) {
+        FPLOG.error(Loc::current(), "PG terminal '", instance_name, "/", pin_name, "' already belongs to '", pin->get_net()->get_net_name(), "'.");
+      }
+      instance_pins.push_back(pin);
+    }
+    if (!idb_design->connectPinsToSpecialNet(instance_pins, idb_special_net)) {
+      FPLOG.error(Loc::current(), "Cannot bind instance pins to PG net '", pg_net.get_name(), "'.");
     }
     for (std::pair<const std::string, IOPinDirection>& pair : pg_net.get_io_pin_name_to_direction_map()) {
       idb::IdbPin* idb_pin = idb_design->get_io_pin_list()->find_pin(pair.first);
@@ -1241,7 +1352,10 @@ void FPInterface::outputNewInstanceList()
     }
     idb::IdbInstance* idb_instance = dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient,
                                                             idb::IdbInstanceType::kDist, idb::IdbPlacementStatus::kFixed);
-    if (idb_instance != nullptr && !instance.get_io_cell_net_name().empty() && !instance.get_io_cell_pin_name().empty()) {
+    if (idb_instance == nullptr) {
+      FPLOG.error(Loc::current(), "Cannot create floorplan instance '", instance.get_name(), "'.");
+    }
+    if (!instance.get_io_cell_net_name().empty() && !instance.get_io_cell_pin_name().empty()) {
       if (!dmInst->get_idb_design()->connectInstancePinToNet(instance.get_name(), instance.get_io_cell_pin_name(), instance.get_io_cell_net_name())) {
         FPLOG.error(Loc::current(), "Failed to connect generated IO power Cell '", instance.get_name(), "' pin '", instance.get_io_cell_pin_name(),
                     "' to net '", instance.get_io_cell_net_name(), "'.");
@@ -1264,7 +1378,7 @@ void FPInterface::outputPGSegmentList()
     }
     idb::IdbSpecialNet* idb_special_net = idb_design->get_special_net_list()->find_net(pg_segment.get_net_name());
     if (idb_special_net == nullptr) {
-      continue;
+      FPLOG.error(Loc::current(), "PG geometry references undeclared net '", pg_segment.get_net_name(), "'.");
     }
     idb::IdbSpecialWire* idb_special_wire = nullptr;
     std::map<std::string, idb::IdbSpecialWire*>::iterator wire_iter = pg_net_name_to_wire_map.find(pg_segment.get_net_name());
@@ -1275,7 +1389,10 @@ void FPInterface::outputPGSegmentList()
       idb_special_wire = wire_iter->second;
     }
     if (pg_segment.get_type() == PGSegmentType::kVia) {
-      outputPGVia(idb_special_wire, pg_segment);
+      if (!outputPGVia(idb_special_wire, pg_segment)) {
+        FPLOG.error(Loc::current(), "Incomplete PG via stack on '", pg_segment.get_net_name(), "' from '", pg_segment.get_bottom_layer_name(),
+                    "' to '", pg_segment.get_top_layer_name(), "' at (", pg_segment.get_start_x(), ",", pg_segment.get_start_y(), ").");
+      }
       pg_segment.set_generated(false);
       continue;
     }
@@ -1287,12 +1404,37 @@ void FPInterface::outputPGSegmentList()
     idb_segment->set_layer_as_new();
     idb_segment->set_layer(idb_layer);
     idb_segment->set_route_width(pg_segment.get_width());
-    idb_segment->set_shape_type(pg_segment.get_type() == PGSegmentType::kFollowPin ? idb::IdbWireShapeType::kFollowPin : idb::IdbWireShapeType::kStripe);
+    idb::IdbWireShapeType shape = idb::IdbWireShapeType::kStripe;
+    switch (pg_segment.get_type()) {
+      case PGSegmentType::kFollowPin: shape = idb::IdbWireShapeType::kFollowPin; break;
+      case PGSegmentType::kRing: shape = idb::IdbWireShapeType::kRing; break;
+      case PGSegmentType::kBlockWire: shape = idb::IdbWireShapeType::kBlockWire; break;
+      case PGSegmentType::kIoWire: shape = idb::IdbWireShapeType::kIoWire; break;
+      default: break;
+    }
+    idb_segment->set_shape_type(shape);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());
     idb_segment->add_point(pg_segment.get_end_x(), pg_segment.get_end_y());
     idb_segment->set_bounding_box();
     pg_segment.set_generated(false);
   }
+}
+
+std::vector<InstancePinShape> FPInterface::getPGViaShapes(PGSegment& pg_segment)
+{
+  std::vector<InstancePinShape> shapes;
+  for (auto* via : getPGViaStack(pg_segment)) {
+    for (auto layer_shape : {via->get_bottom_layer_shape(), via->get_top_layer_shape()}) {
+      for (auto* rect : layer_shape.get_rect_list()) {
+        InstancePinShape shape;
+        shape.set_layer_name(layer_shape.get_layer()->get_name());
+        shape.set_rect(pg_segment.get_start_x() + rect->get_low_x(), pg_segment.get_start_y() + rect->get_low_y(),
+                       pg_segment.get_start_x() + rect->get_high_x(), pg_segment.get_start_y() + rect->get_high_y());
+        shapes.push_back(shape);
+      }
+    }
+  }
+  return shapes;
 }
 
 void FPInterface::adjustPGLineSegmentListByViaEnclosure()
@@ -1301,7 +1443,7 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
   std::vector<PGSegment>& pg_segment_list = FPDM.getDatabase().get_pg_segment_list();
   std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>> pg_net_layer_coord_to_stripe_segment_list_map;
   for (PGSegment& pg_segment : pg_segment_list) {
-    if (pg_segment.get_type() != PGSegmentType::kStripe) {
+    if (!pg_segment.is_line() || pg_segment.get_type() == PGSegmentType::kFollowPin) {
       continue;
     }
     std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", pg_segment.get_layer_name());
@@ -1354,6 +1496,39 @@ idb::IdbVia* FPInterface::getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& 
     idb_via = buildIDBVia(via_name, idb_cut_layer, pg_segment);
   }
   return idb_via;
+}
+
+std::vector<idb::IdbVia*> FPInterface::getPGViaStack(PGSegment& pg_segment)
+{
+  auto* layers = dmInst->get_idb_layout()->get_layers();
+  auto* bottom = layers->find_layer(pg_segment.get_bottom_layer_name());
+  auto* top = layers->find_layer(pg_segment.get_top_layer_name());
+  if (bottom == nullptr || top == nullptr || !bottom->is_routing() || !top->is_routing() || bottom == top) {
+    return {};
+  }
+  if (bottom->get_order() > top->get_order()) {
+    std::swap(bottom, top);
+  }
+  auto cuts = layers->find_cut_layer_list(bottom->get_name(), top->get_name());
+  if (!pg_segment.get_cut_layer_name().empty()
+      && (cuts.size() != 1 || cuts.front()->get_name() != pg_segment.get_cut_layer_name())) {
+    return {};
+  }
+  std::vector<idb::IdbVia*> stack;
+  idb::IdbLayer* current = bottom;
+  for (auto* cut : cuts) {
+    auto* rule = cut->get_via_rule();
+    if (rule == nullptr || rule->get_layer_bottom() != current || rule->get_layer_top() == nullptr) {
+      return {};
+    }
+    auto* via = getIDBVia(cut, pg_segment);
+    if (via == nullptr) {
+      return {};
+    }
+    stack.push_back(via);
+    current = rule->get_layer_top();
+  }
+  return current == top ? stack : std::vector<idb::IdbVia*>{};
 }
 
 idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
@@ -1437,6 +1612,10 @@ std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_c
   int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
   int32_t cut_pitch_x = idb_via_rule->get_spacing_x();
   int32_t cut_pitch_y = idb_via_rule->get_spacing_y();
+  if (cut_size_x <= 0 || cut_size_y <= 0 || cut_pitch_x <= 0 || cut_pitch_y <= 0
+      || idb_via_rule->get_enclosure_bottom() == nullptr || idb_via_rule->get_enclosure_top() == nullptr) {
+    return {0, 0};
+  }
   std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
   if (!idb_cut_spacing_list.empty()) {
     int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
@@ -1562,24 +1741,13 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
   return covered;
 }
 
-void FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment)
+bool FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment)
 {
-  idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
-  std::vector<idb::IdbLayerCut*> idb_cut_layer_list;
-  if (!pg_segment.get_cut_layer_name().empty()) {
-    idb::IdbLayer* idb_layer = idb_layout->get_layers()->find_layer(pg_segment.get_cut_layer_name());
-    idb::IdbLayerCut* idb_cut_layer = dynamic_cast<idb::IdbLayerCut*>(idb_layer);
-    if (idb_cut_layer != nullptr) {
-      idb_cut_layer_list.push_back(idb_cut_layer);
-    }
-  } else {
-    idb_cut_layer_list = idb_layout->get_layers()->find_cut_layer_list(pg_segment.get_bottom_layer_name(), pg_segment.get_top_layer_name());
+  const auto stack = getPGViaStack(pg_segment);
+  if (stack.empty()) {
+    return false;
   }
-  for (idb::IdbLayerCut* idb_cut_layer : idb_cut_layer_list) {
-    idb::IdbVia* idb_via = getIDBVia(idb_cut_layer, pg_segment);
-    if (idb_via == nullptr) {
-      continue;
-    }
+  for (idb::IdbVia* idb_via : stack) {
     idb::IdbSpecialWireSegment* idb_segment = idb_special_wire->add_segment();
     idb_segment->set_is_via(true);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());
@@ -1591,6 +1759,7 @@ void FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& 
     idb_via_copy->set_coordinate(pg_segment.get_start_x(), pg_segment.get_start_y());
     idb_segment->set_bounding_box();
   }
+  return true;
 }
 
 #endif

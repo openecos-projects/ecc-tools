@@ -71,6 +71,7 @@ class PDNGenerator
   int32_t getMacroTopLayerOrder(Instance& instance);
 
   void buildStripe(PGModel& pg_model);
+  void buildRing(PGModel& pg_model);
   void alignStripeSegmentList();
   void alignStripeSegment(PGSegment& stripe_segment);
   int32_t getClosestRailEdgeCoord(PGSegment& stripe_segment, Instance& instance, bool high_side);
@@ -78,14 +79,15 @@ class PDNGenerator
 
   void buildLayerConnect(PGModel& pg_model);
   PlanarRect getOverlapRect(PlanarRect first_rect, PlanarRect second_rect);
-  void addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name, int32_t x,
+  bool addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name, int32_t x,
                      int32_t y, int32_t width, int32_t height);
 
   void buildMacroConnect(PGModel& pg_model);
-  void connectMacroPin(PGModel& pg_model, PGNet& pg_net, InstancePinShape& pin_shape);
+  void trimMacroStripeEnds();
 
   std::vector<Instance*> _placed_macro_list;
   std::unordered_map<const Instance*, int32_t> _macro_top_layer_order;
+  int32_t _rejected_via_count = 0;
 };
 
 }  // namespace ifp

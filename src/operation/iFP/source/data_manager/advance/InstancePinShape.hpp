@@ -32,16 +32,19 @@ class InstancePinShape : public PlanarRect
   // const getter
   const std::string& get_pin_name() const { return _pin_name; }
   const std::string& get_layer_name() const { return _layer_name; }
+  int32_t get_port_idx() const { return _port_idx; }
 
   // setter
   void set_pin_name(std::string pin_name) { _pin_name = pin_name; }
   void set_layer_name(std::string layer_name) { _layer_name = layer_name; }
+  void set_port_idx(int32_t port_idx) { _port_idx = port_idx; }
 
   // function
 
  private:
   std::string _pin_name;
   std::string _layer_name;
+  int32_t _port_idx = 0;
 };
 
 }  // namespace ifp

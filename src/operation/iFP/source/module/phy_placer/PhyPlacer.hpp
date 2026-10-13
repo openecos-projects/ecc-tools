@@ -57,19 +57,17 @@ class PhyPlacer
   void addPPRegion(PPModel& pp_model, Row& row, int32_t row_idx, int32_t start_coord, int32_t end_coord);
 
   void buildPPBoundaryRegionList(PPModel& pp_model);
-  void addCorePPBoundaryRegion(PPModel& pp_model);
   void addPPBoundaryRegion(PPModel& pp_model, PPRegion& pp_region, int32_t start_coord, int32_t end_coord, PPBoundaryType boundary_type);
-  void addMacroPPBoundaryRegion(PPModel& pp_model);
-  void addMacroPPBoundaryRegionInRow(PPModel& pp_model, Row& row, PlanarRect& placement_halo_rect, PPBoundaryType boundary_type);
 
   void insertSideEndcap(PPModel& pp_model, int32_t& endcap_idx);
+  void insertCornerEndcap(PPModel& pp_model, int32_t& endcap_idx);
   int32_t getCellMasterWidthByOrient(CellMaster& cell_master, PlacementOrientation orient);
-  void addPhyCell(PPModel& pp_model, PPRegion& pp_region, std::string instance_name, std::string cell_master_name, int32_t x_coord);
+  void addPhyCell(PPModel& pp_model, PPRegion& pp_region, std::string instance_name, std::string cell_master_name, int32_t x_coord,
+                  const std::string& role = "tap");
   bool isPhyCellOnSite(PPRegion& pp_region, CellMaster& cell_master, int32_t x_coord);
 
   void insertWellTap(PPModel& pp_model, int32_t tap_distance, int32_t& tapcell_idx);
   void insertWellTapInRegion(PPModel& pp_model, PPRegion& pp_region, int32_t tap_distance, int32_t tap_offset, int32_t& tapcell_idx);
-  void insertBoundaryWellTap(PPModel& pp_model, int32_t tap_distance, int32_t& tapcell_idx);
   int32_t getAvailableCellCoord(PPModel& pp_model, PPRegion& pp_region, int32_t start_coord, int32_t end_coord, CellMaster& cell_master);
   bool isCellAvailable(PPModel& pp_model, int32_t start_coord, int32_t end_coord, int32_t y_coord);
 
@@ -80,7 +78,6 @@ class PhyPlacer
   std::vector<std::string>& getEdgeEndcapNameList(PPBoundaryType boundary_type);
   std::vector<PPRegion> getEmptyPPRegionList(PPModel& pp_model, PPRegion& boundary_region);
   void fillEdgeEndcap(PPModel& pp_model, PPRegion& empty_region, std::vector<std::string>& endcap_name_list, int32_t& endcap_idx);
-  std::string getFittingCellMasterName(std::vector<std::string>& cell_master_name_list, int32_t max_width, PlacementOrientation orient);
 
   std::vector<Instance*> _placed_macro_list;
   std::unordered_map<int32_t, std::vector<size_t>> _occupied_region_indices;

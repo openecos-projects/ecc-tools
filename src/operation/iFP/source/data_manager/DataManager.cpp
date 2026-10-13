@@ -139,12 +139,19 @@ void DataManager::buildIOPinNameToIdxMap()
 
 void DataManager::buildIOPinSpecialNet()
 {
-  std::vector<IOPin>& io_pin_list = _database.get_io_pin_list();
-  std::map<std::string, int32_t>& io_pin_name_to_idx_map = _database.get_io_pin_name_to_idx_map();
-  for (PGGlobalConnect& pg_connect : _config.pg_connect_list) {
-    std::map<std::string, int32_t>::iterator io_pin_iter = io_pin_name_to_idx_map.find(pg_connect.get_pin_name());
-    if (io_pin_iter != io_pin_name_to_idx_map.end()) {
-      io_pin_list[io_pin_iter->second].set_special_net(true);
+  std::set<std::string> pg_names;
+  for (const PGGlobalConnect& rule : _config.pg_connect_list) {
+    pg_names.insert(rule.get_net_name());
+  }
+  for (Net& net : _database.get_net_list()) {
+    if (!pg_names.contains(net.get_name())) {
+      continue;
+    }
+    for (const NetPin& pin : net.get_net_pin_list()) {
+      auto iter = _database.get_io_pin_name_to_idx_map().find(pin.get_pin_name());
+      if (pin.get_io() && iter != _database.get_io_pin_name_to_idx_map().end()) {
+        _database.get_io_pin_list()[iter->second].set_special_net(true);
+      }
     }
   }
 }
