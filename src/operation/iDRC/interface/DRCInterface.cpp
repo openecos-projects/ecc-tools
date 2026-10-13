@@ -192,20 +192,22 @@ void DRCInterface::finishDRC(bool write_output)
     return;
   }
 
+  // Keep the lifecycle argument for callers that share the other operation
+  // interfaces.  The current iDRC DataManager has no output phase: violation
+  // artifacts are emitted by checkDef(), before teardown.
+  (void) write_output;
+
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
 
   RuleValidator::destroyInst();
   DRCGP.destroy();
   GDSPlotter::destroyInst();
-  if (write_output) {
-    DRCDM.output();
-  }
   DataManager::destroyInst();
   _drc_initialized = false;
   clearEccdbNetIndex();
 
-  DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 
   DRCLOG.printLogFilePath();
   // clang-format off
