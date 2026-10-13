@@ -245,6 +245,8 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(const PRGridGr
   tb_task.set_planar_coord_list(node_coord_list);
   tb_task.set_planar_search_region(PlanarRect(0, 0, _grid_graph.get_x_size() - 1, _grid_graph.get_y_size() - 1));
   tb_task.set_point_legal_query([this](const PlanarCoord& coord) { return _grid_graph.isCellLegal(coord); });
+  return RTTB.getPlanarTopoList(tb_task);
+  
   bool use_congestion_topology = pr_topo_mode == PRTopoMode::kCongestion && needCongestionAware(trial);
   tb_task.set_topo_mode(use_congestion_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
   if (!use_congestion_topology) {
@@ -422,15 +424,23 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByAStar(PRGridGr
     return {};
   }
 
+  // 33 = source + 32 sink
+  constexpr size_t max_direct_node_num = 33;
+  constexpr int64_t max_direct_node_rect_area = 500;
+  PlanarRect node_rect = RTUTIL.getBoundingBox(node_coord_list);
+  int64_t node_rect_area = static_cast<int64_t>(node_rect.get_ur_x() - node_rect.get_ll_x() + 1) * (node_rect.get_ur_y() - node_rect.get_ll_y() + 1);
+  if (node_coord_list.size() > max_direct_node_num && node_rect_area > max_direct_node_rect_area) {
+    // temp solution for ultra large net
+    return routeSegmentListByAStarPairwise(trial, pr_net);
+  }
+
   PRAStarTask astar_task;
   astar_task.source_coord_set.insert(getAStarSeedCoord(node_coord_list));
   astar_task.sink_coord_set.insert(node_coord_list.begin(), node_coord_list.end());
   astar_task.sink_coord_set.erase(*astar_task.source_coord_set.begin());
 
   PRAStarSearchArea search_area;
-  search_area.search_rect = getAStarBaseRect(node_coord_list);
-  search_area.x_size = search_area.search_rect.get_ur_x() - search_area.search_rect.get_ll_x() + 1;
-  search_area.y_size = search_area.search_rect.get_ur_y() - search_area.search_rect.get_ll_y() + 1;
+  search_area.set_search_rect(getAStarBaseRect(node_coord_list));
 
   std::vector<Segment<PlanarCoord>> routing_segment_list;
   while (!astar_task.sink_coord_set.empty()) {
@@ -450,6 +460,84 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByAStar(PRGridGr
   return routing_segment_list;
 }
 
+std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByAStarPairwise(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net)
+{
+  const std::vector<PlanarCoord>& node_coord_list = pr_net.get_node_coord_list();
+  std::vector<std::pair<int32_t, int32_t>> pair_list = buildTerminalMstPairList(node_coord_list);
+
+  std::set<PlanarCoord, CmpPlanarCoordByXASC> connected_coord_set{node_coord_list.front()};
+  std::vector<Segment<PlanarCoord>> routing_segment_list;
+  for (const std::pair<int32_t, int32_t>& pair : pair_list) {
+    const PlanarCoord& first_coord = node_coord_list[pair.first];
+    const PlanarCoord& second_coord = node_coord_list[pair.second];
+    PlanarRect pair_rect(std::min(first_coord.get_x(), second_coord.get_x()), std::min(first_coord.get_y(), second_coord.get_y()),
+                         std::max(first_coord.get_x(), second_coord.get_x()), std::max(first_coord.get_y(), second_coord.get_y()));
+    PRAStarSearchArea search_area;
+    search_area.set_search_rect(getAStarBaseRect(pair_rect));
+
+    PRAStarTask astar_task;
+    astar_task.sink_coord_set.insert(node_coord_list[pair.second]);
+    for (const PlanarCoord& connected_coord : connected_coord_set) {
+      if (RTUTIL.isInside(search_area.search_rect, connected_coord)) {
+        astar_task.source_coord_set.insert(connected_coord);
+      }
+    }
+
+    std::vector<PlanarCoord> path_coord_list = searchAStarPath(trial, astar_task, search_area);
+    if (path_coord_list.empty()) {
+      return {};
+    }
+    std::vector<Segment<PlanarCoord>> pair_segment_list = getRoutingSegmentListByCoordList(path_coord_list);
+    trial.append(pair_segment_list);
+    routing_segment_list.insert(routing_segment_list.end(), pair_segment_list.begin(), pair_segment_list.end());
+    for (const Segment<PlanarCoord>& pair_segment : pair_segment_list) {
+      connected_coord_set.insert(pair_segment.get_first());
+      connected_coord_set.insert(pair_segment.get_second());
+    }
+    connected_coord_set.insert(node_coord_list[pair.second]);
+  }
+  return routing_segment_list;
+}
+
+std::vector<std::pair<int32_t, int32_t>> PlanarRouter::buildTerminalMstPairList(const std::vector<PlanarCoord>& node_coord_list)
+{
+  int32_t node_num = static_cast<int32_t>(node_coord_list.size());
+  std::vector<bool> in_tree_list(node_num, false);
+  std::vector<int32_t> parent_list(node_num, -1);
+  std::vector<int32_t> known_distance_list(node_num, INT_MAX);
+  std::vector<std::pair<int32_t, int32_t>> pair_list;
+  pair_list.reserve(node_num - 1);
+
+  in_tree_list[0] = true;
+  for (int32_t node_idx = 1; node_idx < node_num; node_idx++) {
+    known_distance_list[node_idx] = RTUTIL.getManhattanDistance(node_coord_list[0], node_coord_list[node_idx]);
+    parent_list[node_idx] = 0;
+  }
+  for (int32_t tree_num = 1; tree_num < node_num; tree_num++) {
+    int32_t best_node_idx = -1;
+    int32_t best_distance = INT_MAX;
+    for (int32_t node_idx = 0; node_idx < node_num; node_idx++) {
+      if (!in_tree_list[node_idx] && known_distance_list[node_idx] < best_distance) {
+        best_distance = known_distance_list[node_idx];
+        best_node_idx = node_idx;
+      }
+    }
+    in_tree_list[best_node_idx] = true;
+    pair_list.emplace_back(parent_list[best_node_idx], best_node_idx);
+    for (int32_t node_idx = 0; node_idx < node_num; node_idx++) {
+      if (in_tree_list[node_idx]) {
+        continue;
+      }
+      int32_t distance = RTUTIL.getManhattanDistance(node_coord_list[best_node_idx], node_coord_list[node_idx]);
+      if (distance < known_distance_list[node_idx]) {
+        known_distance_list[node_idx] = distance;
+        parent_list[node_idx] = best_node_idx;
+      }
+    }
+  }
+  return pair_list;
+}
+
 PlanarCoord PlanarRouter::getAStarSeedCoord(const std::vector<PlanarCoord>& node_coord_list)
 {
   PlanarCoord center_coord = RTUTIL.getBoundingBox(node_coord_list).getMidPoint();
@@ -467,7 +555,12 @@ PlanarCoord PlanarRouter::getAStarSeedCoord(const std::vector<PlanarCoord>& node
 
 PlanarRect PlanarRouter::getAStarBaseRect(const std::vector<PlanarCoord>& node_coord_list)
 {
-  PlanarRect node_rect = RTUTIL.getBoundingBox(node_coord_list);
+  return getAStarBaseRect(RTUTIL.getBoundingBox(node_coord_list));
+}
+
+PlanarRect PlanarRouter::getAStarBaseRect(const PlanarRect& base_rect)
+{
+  PlanarRect node_rect = base_rect;
   PlanarRect search_rect = node_rect;
   for (const PlanarRect& macro_grid_rect : _grid_graph.get_macro_grid_rect_list()) {
     if (!RTUTIL.isClosedOverlap(node_rect, macro_grid_rect)) {

@@ -89,6 +89,13 @@ struct PRAStarSearchArea
   PlanarRect search_rect;
   int32_t x_size = 0;
   int32_t y_size = 0;
+
+  void set_search_rect(const PlanarRect& rect)
+  {
+    search_rect = rect;
+    x_size = rect.get_ur_x() - rect.get_ll_x() + 1;
+    y_size = rect.get_ur_y() - rect.get_ll_y() + 1;
+  }
 };
 
 class PlanarRouter
@@ -124,8 +131,11 @@ class PlanarRouter
 
   // A* route
   std::vector<Segment<PlanarCoord>> routeSegmentListByAStar(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net);
+  std::vector<Segment<PlanarCoord>> routeSegmentListByAStarPairwise(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net);
+  std::vector<std::pair<int32_t, int32_t>> buildTerminalMstPairList(const std::vector<PlanarCoord>& node_coord_list);
   PlanarCoord getAStarSeedCoord(const std::vector<PlanarCoord>& node_coord_list);
   PlanarRect getAStarBaseRect(const std::vector<PlanarCoord>& node_coord_list);
+  PlanarRect getAStarBaseRect(const PlanarRect& base_rect);
   std::vector<PlanarCoord> searchAStarPath(const PRGridGraph::NetRouteTrial& trial, const PRAStarTask& astar_task,
                                            const PRAStarSearchArea& search_area);
   int32_t getAStarStateIndex(const PRAStarSearchArea& search_area, const PlanarCoord& coord, bool is_horizontal);
