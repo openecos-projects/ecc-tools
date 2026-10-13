@@ -360,8 +360,11 @@ auto DataManager::readClockData() -> DataManagerStatus
     if (!sdc_clock_data.ok()) {
       auto status = failureStatus(DataManagerStatusCode::kExternalDataError, "sdc_constraints_rejected");
       status.diagnostics = std::move(sdc_clock_data.diagnostics);
-      if (!status.diagnostics.empty()) {
-        status.message += ": " + status.diagnostics.front();
+      bool first_diagnostic = true;
+      for (const auto& diagnostic : status.diagnostics) {
+        status.message += first_diagnostic ? ": " : "; ";
+        status.message += diagnostic;
+        first_diagnostic = false;
       }
       return status;
     }
@@ -387,6 +390,41 @@ auto DataManager::readClockData() -> DataManagerStatus
         .clock_data = &sdc_clock_data,
         .max_fanout = _config.get_max_fanout(),
     });
+    // A stage whose select is not pinned can be driven by more than one declared clock.
+    // Ownership stays with the primary clock, but the tree downstream of that stage must
+    // satisfy the tightest clock that can reach it, so its budget is taken from the
+    // candidates the trace recorded stopping there.
+    for (const auto& record : trace.summary.records) {
+      // The transition's own reason lands in `target_kind`; `reason` carries the reader's
+      // classification of the stop.
+      if (record.status != "trace_stop" || record.target_kind != "clock_mux_select_undecidable_generated_clock" || record.net_name.empty()) {
+        continue;
+      }
+      const auto candidate = period_by_clock.find(record.clock_name);
+      if (candidate == period_by_clock.end() || candidate->second <= 0.0) {
+        continue;
+      }
+      // The owner of a net is the clock that accepted it; a clock target's `clock_net_name`
+      // is the clock's own source net, which is a different net.
+      for (const auto& accepted : trace.summary.records) {
+        if (accepted.status != "accepted" || accepted.net_name != record.net_name || accepted.clock_name == record.clock_name) {
+          continue;
+        }
+        auto& owner_period = period_by_clock[accepted.clock_name];
+        if (owner_period > 0.0 && candidate->second < owner_period) {
+          // fast_sta reads the declaration's period, synthesis reads the Clock's: tighten
+          // both, or the two models disagree about the same clock.
+          for (auto& declaration : sdc_clock_data.clocks) {
+            if (declaration.clock_name == accepted.clock_name) {
+              declaration.period_ns = candidate->second;
+            }
+          }
+          CTSLOG.warn(Loc::current(), "CTS data input: clock \"", accepted.clock_name, "\" budget tightened to ", candidate->second, " ns by \"",
+                      record.clock_name, "\" reaching \"", record.net_name, "\".");
+          owner_period = candidate->second;
+        }
+      }
+    }
     logClockTraceSummary(sdc_clock_data, trace);
     if (!trace.ok()) {
       CTSLOG.warn(Loc::current(), "CTS data input rejected SDC clock ownership: ", trace.message);
@@ -399,9 +437,23 @@ auto DataManager::readClockData() -> DataManagerStatus
     }
     for (const auto& clock_name : traceable_clock_names) {
       if (!accepted_clock_names.contains(clock_name)) {
-        CTSLOG.warn(Loc::current(), "CTS data input found no target net for SDC clock \"", clock_name, "\".");
-        return failureStatus(DataManagerStatusCode::kExternalDataError, "clock_trace_no_targets");
+        // Name what the trace actually saw, so an unreachable clock is diagnosable from
+        // the log instead of only from its count.
+        for (const auto& record : trace.summary.records) {
+          if (record.clock_name == clock_name) {
+            CTSLOG.warn(Loc::current(), "  ", clock_name, " trace record: status=", record.status, " net=", record.net_name, " kind=", record.target_kind,
+                        " reason=", record.reason);
+          }
+        }
+        // A declared clock with no reachable clock sink needs no tree: it may be a
+        // reference or generated clock whose only load is a macro. Report what the trace
+        // saw and keep going, as long as some clock is still traceable.
+        CTSLOG.warn(Loc::current(), "CTS data input found no target net for SDC clock \"", clock_name, "\"; it will not be synthesized.");
       }
+    }
+    if (accepted_clock_names.empty()) {
+      CTSLOG.warn(Loc::current(), "CTS data input found no traceable SDC clock with a target net.");
+      return failureStatus(DataManagerStatusCode::kExternalDataError, "clock_trace_no_targets");
     }
   } else {
     logClockTraceSummary(sdc_clock_data, trace);
@@ -539,9 +591,13 @@ auto DataManager::buildTimingContexts(const Design& design, const ClockLayout& c
   }
   for (const auto& declaration : _timing_constraints.clocks) {
     if (!std::ranges::any_of(candidate.clocks, [&](const auto& entry) -> bool { return entry.first.first == declaration.clock_name; })) {
+      // A declaration with no materialized clock has no tree of its own: it is virtual,
+      // or it is a reference clock whose only load is a macro, which the trace reports and
+      // leaves untraced. Its constraints still apply, so it takes the same
+      // declaration-scoped context a virtual clock takes. A clock that should have been
+      // materialized and was not has already failed the materialization step.
       if (!declaration.is_virtual) {
-        releaseTimingContexts(candidate);
-        return failureStatus(DataManagerStatusCode::kCommitError, "fast_sta_clock_missing:" + declaration.clock_name);
+        CTSLOG.warn(Loc::current(), "FastSTA: clock \"", declaration.clock_name, "\" has no materialized tree; building a declaration-scoped context.");
       }
       auto status = build_one(nullptr, nullptr, declaration.clock_name);
       if (!status.ok()) {
@@ -596,8 +652,12 @@ auto DataManager::synchronizeTimingContexts(const Design& design, const ClockLay
         break;
       }
     }
+    // A declaration-scoped context has no owning clock in the design and no net name: it
+    // belongs to a virtual clock, or to a declared clock with no materialized tree (a
+    // reference clock whose only load is a macro). Both are declaration-scoped by
+    // construction, so the empty net name is the property to test, not virtuality.
     if (owner == nullptr && !std::ranges::any_of(_timing_constraints.clocks, [&](const auto& declaration) -> bool {
-          return declaration.is_virtual && declaration.clock_name == identity.first && identity.second.empty();
+          return declaration.clock_name == identity.first && identity.second.empty();
         })) {
       releaseTimingContexts(candidate);
       return failureStatus(DataManagerStatusCode::kCommitError, "fast_sta_synthesis_clock_missing:" + identity.first);
@@ -662,8 +722,11 @@ auto DataManager::timingContextsMatchDesign(const TimingContextSet& contexts, co
         break;
       }
     }
+    // Same property as the synthesis commit check: a declaration-scoped context has no
+    // owning clock and no net name, whether the declaration is virtual or is a declared
+    // clock with no materialized tree.
     if (owner == nullptr && !std::ranges::any_of(_timing_constraints.clocks, [&](const auto& declaration) -> bool {
-          return declaration.is_virtual && identity.first == declaration.clock_name && identity.second.empty();
+          return declaration.clock_name == identity.first && identity.second.empty();
         })) {
       return false;
     }

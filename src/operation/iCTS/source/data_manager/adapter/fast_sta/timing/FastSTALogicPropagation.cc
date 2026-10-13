@@ -41,11 +41,36 @@
 #include "FastSTALibertyModel.hh"
 #include "FastSTALogicAnalysis.hh"
 #include "FastSTATimingLookup.hh"
+#include "Logger.hh"
 #include "timing/FastSTAClockTiming.hh"
 
 namespace icts::fast_sta {
 
 namespace {
+
+// One definition per arc relation, shared by the selection helpers and by the driver
+// lookup, so the two cannot drift apart.
+auto LogicArcMatches(const FastStaLibertyArc& candidate, const FastStaTimingArc& arc) -> bool
+{
+  return candidate.from_port == arc.from_port && candidate.to_port == arc.to_port && !candidate.edge_triggered;
+}
+
+auto LaunchArcMatches(const FastStaLibertyArc& candidate, const FastStaTimingLaunch& launch) -> bool
+{
+  return candidate.from_port == launch.clock_port && candidate.to_port == launch.output_port && candidate.edge_triggered
+         && candidate.trigger_transition == launch.clock_transition;
+}
+
+// Why a launch's arc selection is empty decides how the caller may react: a model that
+// has no such arc is a defect, while an arc switched off by the instance's case values
+// means this launch cannot fire under the given constraints.
+struct LaunchArcSelection
+{
+  ArcIndexSelection selection;
+  bool cell_model_available = false;
+  std::size_t structural_matches = 0U;
+  std::size_t transition_matches = 0U;
+};
 
 auto findLogicArcIndexes(const FastStaContext& context, const FastStaTimingArc& arc) -> ArcIndexSelection
 {
@@ -60,18 +85,29 @@ auto findLogicArcIndexes(const FastStaContext& context, const FastStaTimingArc& 
   });
 }
 
-auto findLaunchArcIndexes(const FastStaContext& context, const FastStaTimingLaunch& launch) -> ArcIndexSelection
+auto findLaunchArcIndexes(const FastStaContext& context, const FastStaTimingLaunch& launch) -> LaunchArcSelection
 {
+  LaunchArcSelection result;
   const auto cell = context.liberty_cell_by_master.find(launch.cell_master);
   if (cell == context.liberty_cell_by_master.end()) {
-    return {};
+    return result;
   }
-  return SelectArcIndexes(cell->second, [&](const auto& candidate) -> bool {
-    return candidate.from_port == launch.clock_port && candidate.to_port == launch.output_port && candidate.edge_triggered
-           && candidate.trigger_transition == launch.clock_transition
+  result.cell_model_available = true;
+  for (const auto& candidate : cell->second.timing_arcs) {
+    if (candidate.from_port != launch.clock_port || candidate.to_port != launch.output_port || !candidate.edge_triggered) {
+      continue;
+    }
+    ++result.structural_matches;
+    if (candidate.trigger_transition == launch.clock_transition) {
+      ++result.transition_matches;
+    }
+  }
+  result.selection = SelectArcIndexes(cell->second, [&](const auto& candidate) -> bool {
+    return LaunchArcMatches(candidate, launch)
            && FastStaCondition::evaluate(candidate.when, FastStaConstraints::caseLookup(context, context.nodes.at(launch.output_node_id).inst_name))
                   != FastStaLogicValue::kZero;
   });
+  return result;
 }
 
 }  // namespace
@@ -136,8 +172,7 @@ auto logicDriverTiming(const FastStaContext& context, const FastStaTimingPoint& 
     cell = cell_iter == context.liberty_cell_by_master.end() ? nullptr : &cell_iter->second;
     if (cell != nullptr && driver_arc_variant_index < cell->timing_arcs.size()) {
       const auto& candidate = cell->timing_arcs.at(driver_arc_variant_index);
-      if (candidate.from_port == launch.clock_port && candidate.to_port == launch.output_port && candidate.edge_triggered
-          && candidate.trigger_transition == launch.clock_transition) {
+      if (LaunchArcMatches(candidate, launch)) {
         model = &candidate;
       }
     }
@@ -150,7 +185,7 @@ auto logicDriverTiming(const FastStaContext& context, const FastStaTimingPoint& 
     cell = cell_iter == context.liberty_cell_by_master.end() ? nullptr : &cell_iter->second;
     if (cell != nullptr && driver_arc_variant_index < cell->timing_arcs.size()) {
       const auto& candidate = cell->timing_arcs.at(driver_arc_variant_index);
-      if (candidate.from_port == arc.from_port && candidate.to_port == arc.to_port && !candidate.edge_triggered) {
+      if (LogicArcMatches(candidate, arc)) {
         model = &candidate;
       }
     }
@@ -276,6 +311,7 @@ auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<Fas
       }
     }
   }
+  std::vector<std::string> skipped_launch_examples;
   for (std::size_t launch_index = 0U; launch_index < context.timing_launches.size(); ++launch_index) {
     const auto& launch = context.timing_launches.at(launch_index);
     if (launch.output_node_id < context.nodes.size() && !result.includes(launch.output_node_id)) {
@@ -293,20 +329,34 @@ auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<Fas
       return false;
     }
     const auto arc_selection = findLaunchArcIndexes(context, launch);
-    result.conditional_fallback_arc_count += arc_selection.fallback_count;
-    result.conditional_extrema_bundle_count += arc_selection.extrema_bundle_count;
-    if (arc_selection.indexes.empty()) {
-      result.diagnostic = "launch_arc_model_unavailable:" + launch.cell_master + ":" + launch.clock_port + ":" + launch.output_port;
-      return false;
-    }
-    const auto cell_iter = context.liberty_cell_by_master.find(launch.cell_master);
-    if (cell_iter == context.liberty_cell_by_master.end()) {
+    if (!arc_selection.cell_model_available) {
       result.diagnostic = "launch_cell_model_unavailable:" + launch.cell_master;
       return false;
     }
+    result.conditional_fallback_arc_count += arc_selection.selection.fallback_count;
+    result.conditional_extrema_bundle_count += arc_selection.selection.extrema_bundle_count;
+    if (arc_selection.selection.indexes.empty()) {
+      if (arc_selection.structural_matches == 0U) {
+        result.diagnostic = "launch_arc_model_unavailable:" + launch.cell_master + ":" + launch.clock_port + ":" + launch.output_port;
+        return false;
+      }
+      if (arc_selection.transition_matches == 0U) {
+        result.diagnostic = "launch_arc_transition_unavailable:" + launch.cell_master + ":" + launch.clock_port + ":" + launch.output_port;
+        return false;
+      }
+      // The cell has the arc and it matches the clock edge, but its condition is off for
+      // this instance: under the given case values this launch cannot fire. Skipping it is
+      // the model's own conclusion, not a missing model.
+      ++result.skipped_launch_arc_count;
+      if (skipped_launch_examples.size() < 3U) {
+        skipped_launch_examples.push_back(launch.cell_master + ":" + launch.clock_port + ":" + launch.output_port);
+      }
+      continue;
+    }
+    const auto cell_iter = context.liberty_cell_by_master.find(launch.cell_master);
     for (const auto transition : {FastStaTransition::kRise, FastStaTransition::kFall}) {
       bool transition_valid = false;
-      for (const auto arc_index : arc_selection.indexes) {
+      for (const auto arc_index : arc_selection.selection.indexes) {
         for (const auto early : {true, false}) {
           const auto& clock_node = context.nodes.at(launch.clock_node_id);
           const auto& clock_timing = early ? clock_node.early_timing.at(TransitionIndex(launch.clock_transition))
@@ -355,6 +405,14 @@ auto SeedLogicTiming(const FastStaContext& context, const std::unordered_map<Fas
         return false;
       }
     }
+  }
+  if (result.skipped_launch_arc_count > 0U) {
+    std::string examples;
+    for (const auto& example : skipped_launch_examples) {
+      examples += examples.empty() ? example : ", " + example;
+    }
+    CTSLOG.warn(Loc::current(), "FastSTA: skipped ", result.skipped_launch_arc_count,
+                " launch(es) whose liberty arc is switched off by case values; examples: ", examples, ".");
   }
   return true;
 }

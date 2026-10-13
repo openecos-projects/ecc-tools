@@ -45,6 +45,8 @@ enum class ClockTracePropagationKind
   kBuffer,
   kInverter,
   kClockGate,
+  kIoPad,
+  kClockMux,
 };
 
 struct ClockTracePropagationStep

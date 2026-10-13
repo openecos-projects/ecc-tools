@@ -190,7 +190,7 @@ class ClockSynthesisRun
   auto ensureClockSource() -> std::pair<Pin*, Net*>;
   auto prepareSinkDomain(SinkDomainKind sink_domain, const std::vector<Pin*>& sinks, std::size_t valid_sinks) -> bool;
   auto formClockTopology(std::size_t valid_sinks) -> bool;
-  auto synthesizeGateRegions() -> bool;
+  auto synthesizeBoundaryRegions() -> bool;
 
   const Config* _config = nullptr;
   Design* _design = nullptr;
@@ -269,7 +269,7 @@ auto ClockSynthesisRun::run() -> ClockSynthesisSummary
 {
   auto result = runClockTree();
   if (result.success) {
-    result.success = synthesizeGateRegions();
+    result.success = synthesizeBoundaryRegions();
   }
   return result;
 }
@@ -278,7 +278,7 @@ auto ClockSynthesisRun::runClockTree() -> ClockSynthesisSummary
 {
   _per_clock_layout.ensureClock(_clock->get_clock_name(), _clock->get_clock_net_name(), _clock_index);
 
-  const auto synthesis_frontier = ClockTreeRealization::deriveSynthesisFrontier(*_clock);
+  const auto synthesis_frontier = ClockTreeRealization::deriveSynthesisFrontier(*_clock, _config->get_max_fanout());
   if (synthesis_frontier.hasTracedTopology() && !_design->rebuildClockDAG()) {
     _status_recorder.appendNoDomain(*_clock, DomainStatus::kFailed, _clock->get_loads().size(), _clock->get_loads().size(),
                                     _design->get_clock_dag().get_status());
@@ -335,7 +335,9 @@ auto ClockSynthesisRun::runClockTree() -> ClockSynthesisSummary
     return ClockSynthesisSummary{.success = true, .skipped = false};
   }
 
-  const auto frontier_partition = ClockDistribution::partitionSinkDomains(synthesis_frontier.pins);
+  // Only uncovered terminal loads are synthesis sinks; top-level traced inputs are
+  // boundary pins of the region's first stages and must not enter a sink domain.
+  const auto frontier_partition = ClockDistribution::partitionSinkDomains(synthesis_frontier.uncovered_terminal_loads);
   if (frontier_partition.valid_sink_count == 0U) {
     _status_recorder.appendNoDomain(*_clock, DomainStatus::kFailed, valid_sinks, 0U, "synthesis frontier has no valid loads");
     return ClockSynthesisSummary{.success = false, .skipped = false};
@@ -351,29 +353,63 @@ auto ClockSynthesisRun::runClockTree() -> ClockSynthesisSummary
   return ClockSynthesisSummary{.success = formClockTopology(valid_sinks), .skipped = false};
 }
 
-auto ClockSynthesisRun::synthesizeGateRegions() -> bool
+namespace {
+
+// The naming an inserted distribution region carries. Gates keep the historical `_icg_N`
+// form so existing benchmark outputs stay byte-identical; the other boundary stages name
+// themselves.
+// A stage that belongs to a clock tree itself. Everything else -- a clock gate, an IO pad,
+// a clock mux -- is a boundary that starts its own distribution region.
+auto IsTreeStage(ClockPropagationKind kind) -> bool
 {
-  std::vector<ClockPropagationArc> gate_arcs;
+  return kind == ClockPropagationKind::kBuffer || kind == ClockPropagationKind::kInverter;
+}
+
+auto RegionSuffix(ClockPropagationKind kind, std::size_t index) -> std::string
+{
+  switch (kind) {
+    case ClockPropagationKind::kClockMux:
+      return "_mux_" + std::to_string(index);
+    case ClockPropagationKind::kIoPad:
+      return "_pad_" + std::to_string(index);
+    case ClockPropagationKind::kClockGate:
+    case ClockPropagationKind::kBuffer:
+    case ClockPropagationKind::kInverter:
+      break;
+  }
+  return "_icg_" + std::to_string(index);
+}
+
+}  // namespace
+
+auto ClockSynthesisRun::synthesizeBoundaryRegions() -> bool
+{
+  // Every traced stage that is not itself a clock-tree element starts a distribution
+  // region downstream of it: a clock gate, an IO pad, or a clock mux. The sinks behind
+  // such a stage need their own tree rooted at the stage's output, because that output is
+  // a new root of the clock, not an existing tree that already drives them.
+  std::vector<ClockPropagationArc> region_arcs;
   for (const auto& arc : _clock->get_propagation_arcs()) {
-    if (arc.kind == ClockPropagationKind::kClockGate) {
-      gate_arcs.push_back(arc);
+    if (arc.kind == ClockPropagationKind::kClockGate || arc.kind == ClockPropagationKind::kIoPad || arc.kind == ClockPropagationKind::kClockMux) {
+      region_arcs.push_back(arc);
     }
   }
-  std::ranges::sort(gate_arcs, {}, [](const ClockPropagationArc& arc) -> std::string { return arc.inst->get_name(); });
+  std::ranges::sort(region_arcs, {}, [](const ClockPropagationArc& arc) -> std::string { return arc.inst->get_name(); });
 
-  for (std::size_t gate_index = 0U; gate_index < gate_arcs.size(); ++gate_index) {
-    const auto& gate = gate_arcs.at(gate_index);
-    auto* source_net = gate.output_pin == nullptr ? nullptr : gate.output_pin->get_net();
+  std::unordered_map<int, std::size_t> region_index_by_kind;
+  for (const auto& stage : region_arcs) {
+    const auto stage_index = region_index_by_kind[static_cast<int>(stage.kind)]++;
+    auto* source_net = stage.output_pin == nullptr ? nullptr : stage.output_pin->get_net();
     if (source_net == nullptr) {
-      CTSLOG.warn(Loc::current(), "Synthesis: clock gate \"", gate.inst->get_name(), "\" has no output clock net.");
+      CTSLOG.warn(Loc::current(), "Synthesis: clock stage \"", stage.inst->get_name(), "\" has no output clock net.");
       return false;
     }
 
     Clock region(_clock->get_clock_name(), _clock->get_clock_net_name());
-    region.set_synthesis_region_suffix("_icg_" + std::to_string(gate_index));
+    region.set_synthesis_region_suffix(RegionSuffix(stage.kind, stage_index));
     region.set_clock_period_ns(_clock->get_clock_period_ns());
     region.set_clock_period_source(_clock->get_clock_period_source());
-    region.set_clock_source(gate.output_pin);
+    region.set_clock_source(stage.output_pin);
     region.set_clock_source_net(source_net);
 
     std::unordered_map<const Pin*, ClockPropagationArc> propagation_by_input;
@@ -395,18 +431,26 @@ auto ClockSynthesisRun::synthesizeGateRegions() -> bool
       }
       for (auto* load : net->get_loads()) {
         const auto next = propagation_by_input.find(load);
-        if (next == propagation_by_input.end() || next->second.kind == ClockPropagationKind::kClockGate) {
+        const bool crosses_traced_tree_stage
+            = next != propagation_by_input.end() && IsTreeStage(next->second.kind) && next->second.origin == ClockPropagationOrigin::kTracedInput;
+        if (!crosses_traced_tree_stage) {
+          // A region distributes up to the next boundary stage; that stage's own region
+          // continues from there. Walking through it would re-drive its input net and
+          // detach the stage's own propagation arc from the clock's nets. A synthesized
+          // stage is not crossed either: a previous build already distributed the sinks
+          // behind it, so the region keeps its loads and defers to the built topology.
           region.add_load(load);
           continue;
         }
         if (const auto status = region.addPropagationArc(next->second); !status.ok()) {
-          CTSLOG.warn(Loc::current(), "Synthesis: gate-region topology is invalid for \"", gate.inst->get_name(), "\": ", status.message, ".");
+          CTSLOG.warn(Loc::current(), "Synthesis: region topology is invalid for \"", stage.inst->get_name(), "\": ", status.message, ".");
           return false;
         }
         pending_nets.push_back(next->second.output_pin->get_net());
       }
     }
-    if (region.get_loads().empty()) {
+    if (region.get_loads().empty() || ClockDistribution::partitionSinkDomains(region).valid_sink_count == 0U) {
+      // A stage whose output only feeds further stages distributes to no sink of its own.
       continue;
     }
 
@@ -425,14 +469,18 @@ auto ClockSynthesisRun::synthesizeGateRegions() -> bool
         .counters = &region_counters,
         .characterization_library = _characterization_library,
     });
-    if (!region_run.runClockTree().success) {
-      CTSLOG.warn(Loc::current(), "Synthesis: downstream region of clock gate \"", gate.inst->get_name(), "\" failed.");
+    const auto region_result = region_run.runClockTree();
+    if (!region_result.success && !region_result.skipped) {
+      CTSLOG.warn(Loc::current(), "Synthesis: downstream region of clock stage \"", stage.inst->get_name(), "\" failed.");
       return false;
+    }
+    if (region_result.skipped) {
+      continue;
     }
     for (const auto& arc : region.get_propagation_arcs()) {
       if (arc.origin == ClockPropagationOrigin::kSynthesized) {
         if (const auto status = _clock->addPropagationArc(arc); !status.ok()) {
-          CTSLOG.warn(Loc::current(), "Synthesis: cannot merge gate-region propagation for \"", gate.inst->get_name(), "\": ", status.message, ".");
+          CTSLOG.warn(Loc::current(), "Synthesis: cannot merge region propagation for \"", stage.inst->get_name(), "\": ", status.message, ".");
           return false;
         }
       }
@@ -441,7 +489,7 @@ auto ClockSynthesisRun::synthesizeGateRegions() -> bool
       _clock->add_net(net);
     }
     if (!_design->rebuildClockDAG()) {
-      CTSLOG.warn(Loc::current(), "Synthesis: gate-region clock graph is invalid for \"", gate.inst->get_name(), "\": ", _design->get_clock_dag().get_status());
+      CTSLOG.warn(Loc::current(), "Synthesis: region clock graph is invalid for \"", stage.inst->get_name(), "\": ", _design->get_clock_dag().get_status());
       return false;
     }
     for (const auto& layout_clock : region_layout.get_clocks()) {

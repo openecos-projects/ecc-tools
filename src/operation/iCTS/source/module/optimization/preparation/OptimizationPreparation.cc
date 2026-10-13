@@ -260,10 +260,22 @@ auto CollectClockSizingBuffers(const Design& design, const FastSTA& fast_sta, Fa
     return buffers;
   }
   const auto fast_sta_buffers = fast_sta.collectClockSizingBuffers(context_id);
+  std::size_t missing_inst_count = 0U;
+  std::size_t not_buffer_count = 0U;
+  std::size_t master_mismatch_count = 0U;
   buffers.reserve(fast_sta_buffers.size());
   for (const auto& fast_sta_buffer : fast_sta_buffers) {
     auto* inst = design.findInst(fast_sta_buffer.inst_name);
-    if (inst == nullptr || !inst->is_buffer() || FindMasterInfo(master_infos, fast_sta_buffer.cell_master) == nullptr) {
+    if (inst == nullptr) {
+      ++missing_inst_count;
+      continue;
+    }
+    if (!inst->is_buffer()) {
+      ++not_buffer_count;
+      continue;
+    }
+    if (FindMasterInfo(master_infos, fast_sta_buffer.cell_master) == nullptr) {
+      ++master_mismatch_count;
       continue;
     }
     buffers.push_back(ClockSizingBuffer{.node_id = fast_sta_buffer.node_id,
@@ -271,6 +283,10 @@ auto CollectClockSizingBuffers(const Design& design, const FastSTA& fast_sta, Fa
                                         .inst_name = fast_sta_buffer.inst_name,
                                         .current_master = fast_sta_buffer.cell_master,
                                         .candidates = master_infos});
+  }
+  if (buffers.empty() && !fast_sta_buffers.empty()) {
+    CTSLOG.warn(Loc::current(), "Optimization: rejected all ", fast_sta_buffers.size(), " FastSTA clock sizing candidates: missing_inst=", missing_inst_count,
+                ", not_buffer=", not_buffer_count, ", master_mismatch=", master_mismatch_count, ".");
   }
   return buffers;
 }

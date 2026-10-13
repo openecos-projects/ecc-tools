@@ -192,6 +192,48 @@ auto NetHasDirectClockSinks(const SdcLibertyCellLookup& liberty_cell_lookup, idb
   return net != nullptr && (IsClockTarget(CountDirectClockSinks(liberty_cell_lookup, net)) || HasDirectClockGateSink(liberty_cell_lookup, net));
 }
 
+auto NetLeadsToClockSinks(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net) -> bool
+{
+  // A stage's output net may still be buffered before the sink fanout (an existing
+  // buffer tree between a mux and the flops). The trace walk crosses BUF/INV stages
+  // unconditionally, so mirror that here: follow buffer/inverter fanout and report
+  // whether any reachable net carries clock targets.
+  std::vector<idb::IdbNet*> frontier;
+  std::unordered_set<idb::IdbNet*> visited;
+  if (net != nullptr) {
+    frontier.push_back(net);
+  }
+  while (!frontier.empty()) {
+    auto* current = frontier.back();
+    frontier.pop_back();
+    if (current == nullptr || !visited.insert(current).second) {
+      continue;
+    }
+    if (NetHasDirectClockSinks(liberty_cell_lookup, current)) {
+      return true;
+    }
+    for (auto* load_pin : CollectNetPins(current).loads) {
+      auto* inst = load_pin == nullptr ? nullptr : load_pin->get_instance();
+      auto* lib_cell = FindLibCell(liberty_cell_lookup, inst);
+      if (lib_cell == nullptr || !(lib_cell->isBuffer() || lib_cell->isInverter())) {
+        continue;
+      }
+      idb::LibPort* input_port = nullptr;
+      idb::LibPort* output_port = nullptr;
+      lib_cell->bufferPorts(input_port, output_port);
+      if (input_port == nullptr || output_port == nullptr) {
+        continue;
+      }
+      auto* input_pin = ResolveInstPinByLibPort(inst, input_port);
+      auto* output_pin = ResolveInstPinByLibPort(inst, output_port);
+      if (input_pin == load_pin && output_pin != nullptr && output_pin->get_net() != nullptr) {
+        frontier.push_back(output_pin->get_net());
+      }
+    }
+  }
+  return false;
+}
+
 auto CountInputPinsOnNet(idb::IdbInstance* inst, idb::IdbNet* net) -> std::size_t
 {
   if (inst == nullptr || net == nullptr) {
@@ -211,7 +253,7 @@ auto CountClockTargetOutputs(const SdcLibertyCellLookup& liberty_cell_lookup, co
   std::size_t clock_target_output_count = 0U;
   for (auto* output_pin : output_pins) {
     auto* output_net = output_pin == nullptr ? nullptr : output_pin->get_net();
-    if (NetHasDirectClockSinks(liberty_cell_lookup, output_net)) {
+    if (NetHasDirectClockSinks(liberty_cell_lookup, output_net) || NetLeadsToClockSinks(liberty_cell_lookup, output_net)) {
       ++clock_target_output_count;
     }
   }
@@ -289,6 +331,22 @@ auto OtherInputsAreControlCandidates(idb::IdbInstance* inst, idb::IdbPin* clock_
   return has_other_input;
 }
 
+auto PropagationOwnershipReason(ClockTracePropagationKind kind) -> const char*
+{
+  switch (kind) {
+    case ClockTracePropagationKind::kClockGate:
+      return "liberty_clock_gate_transition";
+    case ClockTracePropagationKind::kIoPad:
+      return "liberty_io_pad_transition";
+    case ClockTracePropagationKind::kClockMux:
+      return "sdc_primary_clock_mux_transition";
+    case ClockTracePropagationKind::kBuffer:
+    case ClockTracePropagationKind::kInverter:
+      break;
+  }
+  return "liberty_buffer_transition";
+}
+
 auto AddOutputTransition(std::vector<TraceTransition>& transitions, idb::IdbPin* input_pin, idb::IdbPin* output_pin, const std::string& reason,
                          std::optional<ClockTracePropagationKind> propagation_kind = std::nullopt) -> void
 {
@@ -311,7 +369,7 @@ auto AddOutputTransition(std::vector<TraceTransition>& transitions, idb::IdbPin*
         .input_net_name = input_pin->get_net()->get_net_name(),
         .output_net_name = output_pin->get_net()->get_net_name(),
         .kind = *propagation_kind,
-        .ownership_reason = *propagation_kind == ClockTracePropagationKind::kClockGate ? "liberty_clock_gate_transition" : "liberty_buffer_transition",
+        .ownership_reason = PropagationOwnershipReason(*propagation_kind),
     };
   }
   transitions.push_back(std::move(transition));
@@ -337,13 +395,29 @@ auto MakeTraceRecord(const std::string& clock_name, const std::string& net_name,
   };
 }
 
-auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net, const CaseConstraintSet& case_constraints)
-    -> std::vector<TraceTransition>
+auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* net, const CaseConstraintSet& case_constraints,
+                            SdcClockDecl::Kind clock_kind) -> std::vector<TraceTransition>
 {
   std::vector<TraceTransition> transitions;
   const auto net_pins = CollectNetPins(net);
+  bool io_boundary_recorded = false;
   for (auto* load_pin : net_pins.loads) {
-    if (load_pin == nullptr || load_pin->is_io_pin() || !IsInputLike(load_pin)) {
+    if (load_pin == nullptr || !IsInputLike(load_pin)) {
+      continue;
+    }
+    if (load_pin->is_io_pin()) {
+      // A clock reaching an IO pin is a boundary this reader does not cross. Report it
+      // as a stop rather than dropping it: a boundary the reader cannot classify must
+      // stay visible, never disappear into a zero-record trace.
+      if (!io_boundary_recorded) {
+        transitions.push_back(TraceTransition{
+            .net = net,
+            .path_step = PinDisplayName(load_pin),
+            .reason = "io_pin_clock_boundary",
+            .propagation_step = std::nullopt,
+        });
+        io_boundary_recorded = true;
+      }
       continue;
     }
     auto* inst = load_pin->get_instance();
@@ -383,6 +457,27 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
       continue;
     }
 
+    auto* cell_master = inst->get_cell_master();
+    if (cell_master != nullptr && cell_master->is_pad()) {
+      // An IO pad is its own propagation stage: the receiver output follows the PAD
+      // input through the pad's enable logic. LEF marks the cell CLASS PAD, so the
+      // boundary is recognized instead of silently dropped when the clock enters the
+      // die. Cross it only while exactly one input pin carries this net.
+      if (CountInputPinsOnNet(inst, net) != 1U) {
+        continue;
+      }
+      for (auto* output_pin : CollectOutputPins(inst)) {
+        if (output_pin == nullptr || output_pin->get_net() == nullptr) {
+          continue;
+        }
+        if (!OutputFunctionUsesInput(lib_cell, output_pin, load_pin)) {
+          continue;
+        }
+        AddOutputTransition(transitions, load_pin, output_pin, "io_pad_receiver", ClockTracePropagationKind::kIoPad);
+      }
+      continue;
+    }
+
     const auto input_pins = CollectInputPins(inst);
     const auto output_pins = CollectOutputPins(inst);
     const bool single_input_output_trace = input_pins.size() == 1U && input_pins.front() == load_pin && output_pins.size() == 1U;
@@ -402,17 +497,38 @@ auto CollectSafeTransitions(const SdcLibertyCellLookup& liberty_cell_lookup, idb
         continue;
       }
       const auto output_stats = CountDirectClockSinks(liberty_cell_lookup, output_net);
-      if (!OutputFunctionUsesInput(lib_cell, output_pin, load_pin) && !(control_candidate_gate && IsClockTarget(output_stats))) {
+      const bool output_reaches_clock = IsClockTarget(output_stats) || NetLeadsToClockSinks(liberty_cell_lookup, output_net);
+      if (!OutputFunctionUsesInput(lib_cell, output_pin, load_pin) && !(control_candidate_gate && output_reaches_clock)) {
         continue;
       }
       if (IsClockTarget(output_stats)) {
+        if (control_candidate_gate) {
+          // The stage's control inputs are not pinned by SDC, so which clock reaches the
+          // output is undecidable. Only a primary clock claims through it; a generated
+          // clock stops here so ownership stays with the declared primary clock.
+          if (clock_kind == SdcClockDecl::Kind::kPrimary) {
+            AddOutputTransition(transitions, load_pin, output_pin, "clock_mux_select_undecidable", ClockTracePropagationKind::kClockMux);
+          } else {
+            AddOutputTransition(transitions, load_pin, output_pin, "clock_mux_select_undecidable_generated_clock");
+          }
+          continue;
+        }
         std::string reason = "single_input_clock_buffer_like";
         if (constrained_gate) {
           reason = "case_constrained_comb_clock_gate";
-        } else if (control_candidate_gate) {
-          reason = "comb_output_direct_clock_sinks";
         }
         AddOutputTransition(transitions, load_pin, output_pin, reason);
+      } else if (control_candidate_gate && output_reaches_clock) {
+        // The stage's output net drives no sink directly, but the clock still reaches
+        // clock targets through buffer-like stages (an existing buffer tree between
+        // the stage and the sink fanout). Same undecidable-select rule as the direct
+        // case: only a primary clock claims through it; a generated clock stops.
+        if (clock_kind == SdcClockDecl::Kind::kPrimary) {
+          AddOutputTransition(transitions, load_pin, output_pin, "clock_mux_select_undecidable", ClockTracePropagationKind::kClockMux);
+        } else {
+          AddOutputTransition(transitions, load_pin, output_pin, "clock_mux_select_undecidable_generated_clock");
+        }
+        continue;
       } else if (output_net->is_clock() && constrained_gate) {
         AddOutputTransition(transitions, load_pin, output_pin, "case_constrained_clock_net");
       }
@@ -633,7 +749,7 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
       continue;
     }
 
-    for (const auto& transition : CollectSafeTransitions(liberty_cell_lookup, node.net, case_constraints)) {
+    for (const auto& transition : CollectSafeTransitions(liberty_cell_lookup, node.net, case_constraints, clock.kind)) {
       if (transition.net == nullptr || visited.contains(transition.net)) {
         continue;
       }

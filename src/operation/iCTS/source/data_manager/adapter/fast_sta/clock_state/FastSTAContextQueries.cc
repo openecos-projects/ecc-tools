@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "FastSTA.hh"
+#include "Logger.hh"
 #include "branch_timing/FastSTABranch.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "timing/FastSTAConstraints.hh"
@@ -139,6 +140,45 @@ auto hasCompleteBufferPairIndexes(const FastStaContext& context) -> bool
     }
   }
   return true;
+}
+
+auto logIncompleteBufferPairs(const FastStaContext& context) -> void
+{
+  const auto kind_name = [](FastStaNodeKind kind) -> const char* {
+    switch (kind) {
+      case FastStaNodeKind::kSource:
+        return "source";
+      case FastStaNodeKind::kBufferInput:
+        return "buffer_input";
+      case FastStaNodeKind::kBufferOutput:
+        return "buffer_output";
+      case FastStaNodeKind::kSink:
+        return "sink";
+    }
+    return "unknown";
+  };
+  std::size_t reported = 0U;
+  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size() && reported < 8U; ++node_id) {
+    const auto& node = context.nodes.at(node_id);
+    if (node.kind != FastStaNodeKind::kBufferInput && node.kind != FastStaNodeKind::kBufferOutput) {
+      continue;
+    }
+    const auto& index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_input_node_id_by_inst : context.buffer_output_node_id_by_inst;
+    const auto& peer_index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_output_node_id_by_inst : context.buffer_input_node_id_by_inst;
+    const auto indexed = index.find(node.inst_name);
+    const auto peer = peer_index.find(node.inst_name);
+    const bool self_indexed = !node.inst_name.empty() && indexed != index.end() && indexed->second == node_id;
+    const bool peer_indexed = peer != peer_index.end() && peer->second < context.nodes.size()
+                              && context.nodes.at(peer->second).kind
+                                     == (node.kind == FastStaNodeKind::kBufferInput ? FastStaNodeKind::kBufferOutput : FastStaNodeKind::kBufferInput);
+    if (self_indexed && peer_indexed) {
+      continue;
+    }
+    ++reported;
+    CTSLOG.warn(Loc::current(), "FastSTA: incomplete buffer pair on clock \"", context.clock_name, "\": pin=\"", node.name, "\", kind=", kind_name(node.kind),
+                ", inst=\"", node.inst_name, "\", self_indexed=", self_indexed, ", peer_indexed=", peer_indexed,
+                ", peer_kind=", peer != peer_index.end() && peer->second < context.nodes.size() ? kind_name(context.nodes.at(peer->second).kind) : "missing");
+  }
 }
 
 auto makeClockTreeTopology(const FastStaContext& context) -> std::optional<FastStaClockTreeTopology>
@@ -278,6 +318,7 @@ auto FastSTA::collectClockSizingBuffers(FastStaContextId context_id) const -> st
     return buffers;
   }
   if (!hasCompleteBufferPairIndexes(*context)) {
+    logIncompleteBufferPairs(*context);
     return buffers;
   }
   buffers.reserve(context->nodes.size());
