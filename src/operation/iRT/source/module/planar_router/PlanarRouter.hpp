@@ -58,7 +58,6 @@ struct PRAStarTask
 
 struct PRAStarState
 {
-  uint64_t search_stamp = 0;
   bool closed = false;
   int32_t parent_state_idx = -1;
   double known_cost = DBL_MAX;
@@ -90,13 +89,6 @@ struct PRAStarSearchArea
   PlanarRect search_rect;
   int32_t x_size = 0;
   int32_t y_size = 0;
-};
-
-struct PRAStarScratch
-{
-  uint64_t search_stamp = 0;
-  std::vector<PRAStarState> state_list;
-  std::vector<PRAStarQueueNode> open_heap;
 };
 
 class PlanarRouter
@@ -134,12 +126,10 @@ class PlanarRouter
   std::vector<Segment<PlanarCoord>> routeSegmentListByAStar(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net);
   PlanarCoord getAStarSeedCoord(const std::vector<PlanarCoord>& node_coord_list);
   PlanarRect getAStarBaseRect(const std::vector<PlanarCoord>& node_coord_list);
-  void prepareAStarScratch(PRAStarSearchArea& search_area);
   std::vector<PlanarCoord> searchAStarPath(const PRGridGraph::NetRouteTrial& trial, const PRAStarTask& astar_task,
                                            const PRAStarSearchArea& search_area);
   int32_t getAStarStateIndex(const PRAStarSearchArea& search_area, const PlanarCoord& coord, bool is_horizontal);
   PlanarCoord getAStarStateCoord(const PRAStarSearchArea& search_area, int32_t state_idx);
-  inline PRAStarState& getAStarState(int32_t state_idx);
   inline int32_t getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord);
   std::vector<Segment<PlanarCoord>> getRoutingSegmentListByCoordList(const std::vector<PlanarCoord>& coord_list);
 
@@ -180,7 +170,6 @@ class PlanarRouter
 #endif
 
   // data
-  PRAStarScratch _astar_scratch;
   std::vector<PRNet> _pr_net_list;
   std::vector<PRNet*> _pr_task_list;
   PRGridGraph _grid_graph;

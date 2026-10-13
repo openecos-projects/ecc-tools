@@ -490,7 +490,8 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByAStar(PRGridGr
 
   PRAStarSearchArea search_area;
   search_area.search_rect = getAStarBaseRect(node_coord_list);
-  prepareAStarScratch(search_area);
+  search_area.x_size = search_area.search_rect.get_ur_x() - search_area.search_rect.get_ll_x() + 1;
+  search_area.y_size = search_area.search_rect.get_ur_y() - search_area.search_rect.get_ll_y() + 1;
 
   std::vector<Segment<PlanarCoord>> routing_segment_list;
   while (!astar_task.sink_coord_set.empty()) {
@@ -547,16 +548,6 @@ PlanarRect PlanarRouter::getAStarBaseRect(const std::vector<PlanarCoord>& node_c
   return search_rect;
 }
 
-void PlanarRouter::prepareAStarScratch(PRAStarSearchArea& search_area)
-{
-  search_area.x_size = search_area.search_rect.get_ur_x() - search_area.search_rect.get_ll_x() + 1;
-  search_area.y_size = search_area.search_rect.get_ur_y() - search_area.search_rect.get_ll_y() + 1;
-  auto state_num = static_cast<size_t>(search_area.x_size) * search_area.y_size * 2;
-  if (_astar_scratch.state_list.size() < state_num) {
-    _astar_scratch.state_list.resize(state_num);
-  }
-}
-
 std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRouteTrial& trial, const PRAStarTask& astar_task,
                                                       const PRAStarSearchArea& search_area)
 {
@@ -565,14 +556,8 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
     sink_cell_idx_set.insert(getAStarStateIndex(search_area, sink_coord, false) / 2);
   }
 
-  _astar_scratch.search_stamp++;
-  if (_astar_scratch.search_stamp == 0) {
-    for (PRAStarState& state : _astar_scratch.state_list) {
-      state.search_stamp = 0;
-    }
-    _astar_scratch.search_stamp = 1;
-  }
-  _astar_scratch.open_heap.clear();
+  std::vector<PRAStarState> state_list(static_cast<size_t>(search_area.x_size) * search_area.y_size * 2);
+  std::vector<PRAStarQueueNode> open_heap;
 
   CmpPRAStarQueueNode cmp_queue_node;
   for (const PlanarCoord& source_coord : astar_task.source_coord_set) {
@@ -580,11 +565,11 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
     double estimated_cost = getAStarEstimatedCost(astar_task, source_coord);
     for (int32_t direction_idx = 0; direction_idx < 2; direction_idx++) {
       int32_t source_state_idx = (source_cell_idx * 2) + direction_idx;
-      getAStarState(source_state_idx).known_cost = 0;
-      _astar_scratch.open_heap.push_back({source_state_idx, 0, estimated_cost});
+      state_list[source_state_idx].known_cost = 0;
+      open_heap.push_back({source_state_idx, 0, estimated_cost});
     }
   }
-  std::ranges::make_heap(_astar_scratch.open_heap, cmp_queue_node);
+  std::ranges::make_heap(open_heap, cmp_queue_node);
   int32_t curr_net_idx = trial.get_net_idx();
   double overflow_unit = _pr_com_param.get_overflow_unit();
   double corner_weight = _pr_com_param.get_corner_weight();
@@ -592,18 +577,18 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
   int32_t search_ll_y = search_area.search_rect.get_ll_y();
   constexpr std::array<std::pair<int32_t, int32_t>, 4> step_list = {{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
   int32_t end_state_idx = -1;
-  while (!_astar_scratch.open_heap.empty()) {
-    std::ranges::pop_heap(_astar_scratch.open_heap, cmp_queue_node);
-    PRAStarQueueNode queue_node = _astar_scratch.open_heap.back();
-    _astar_scratch.open_heap.pop_back();
+  while (!open_heap.empty()) {
+    std::ranges::pop_heap(open_heap, cmp_queue_node);
+    PRAStarQueueNode queue_node = open_heap.back();
+    open_heap.pop_back();
 
-    PRAStarState& curr_state = getAStarState(queue_node.state_idx);
+    PRAStarState& curr_state = state_list[queue_node.state_idx];
     if (curr_state.closed || queue_node.known_cost != curr_state.known_cost) {
       continue;
     }
     int32_t curr_cell_idx = queue_node.state_idx / 2;
     int32_t other_state_idx = queue_node.state_idx ^ 1;
-    PRAStarState& other_state = getAStarState(other_state_idx);
+    PRAStarState& other_state = state_list[other_state_idx];
     double dominated_cost = other_state.known_cost + corner_weight;
     if (curr_state.known_cost > dominated_cost || (curr_state.known_cost == dominated_cost && (corner_weight > 0 || queue_node.state_idx > other_state_idx))) {
       curr_state.closed = true;
@@ -634,7 +619,7 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
 
       int32_t neighbor_cell_idx = curr_cell_idx + (step_x * search_area.y_size) + step_y;
       int32_t neighbor_state_idx = (neighbor_cell_idx * 2) + (is_horizontal ? 1 : 0);
-      PRAStarState& neighbor_state = getAStarState(neighbor_state_idx);
+      PRAStarState& neighbor_state = state_list[neighbor_state_idx];
       if (neighbor_state.closed) {
         continue;
       }
@@ -658,7 +643,7 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
       double next_known_cost = curr_state.known_cost + step_cost;
       if (next_known_cost < neighbor_state.known_cost) {
         int32_t other_neighbor_state_idx = neighbor_state_idx ^ 1;
-        PRAStarState& other_neighbor_state = getAStarState(other_neighbor_state_idx);
+        PRAStarState& other_neighbor_state = state_list[other_neighbor_state_idx];
         double dominated_cost = other_neighbor_state.known_cost + corner_weight;
         if (next_known_cost > dominated_cost || (next_known_cost == dominated_cost && (corner_weight > 0 || neighbor_state_idx > other_neighbor_state_idx))) {
           continue;
@@ -667,8 +652,8 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
         neighbor_state.known_cost = next_known_cost;
         PlanarCoord neighbor_coord(neighbor_x, neighbor_y);
         double next_estimated_cost = getAStarEstimatedCost(astar_task, neighbor_coord);
-        _astar_scratch.open_heap.push_back({.state_idx = neighbor_state_idx, .known_cost = next_known_cost, .total_cost = next_known_cost + next_estimated_cost});
-        std::ranges::push_heap(_astar_scratch.open_heap, cmp_queue_node);
+        open_heap.push_back({.state_idx = neighbor_state_idx, .known_cost = next_known_cost, .total_cost = next_known_cost + next_estimated_cost});
+        std::ranges::push_heap(open_heap, cmp_queue_node);
       }
     }
   }
@@ -677,7 +662,7 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
   int32_t curr_state_idx = end_state_idx;
   while (curr_state_idx != -1) {
     coord_list.push_back(getAStarStateCoord(search_area, curr_state_idx));
-    curr_state_idx = getAStarState(curr_state_idx).parent_state_idx;
+    curr_state_idx = state_list[curr_state_idx].parent_state_idx;
   }
   std::ranges::reverse(coord_list);
   return coord_list;
@@ -701,18 +686,6 @@ PlanarCoord PlanarRouter::getAStarStateCoord(const PRAStarSearchArea& search_are
   }
   int32_t cell_idx = state_idx / 2;
   return {search_area.search_rect.get_ll_x() + (cell_idx / search_area.y_size), search_area.search_rect.get_ll_y() + (cell_idx % search_area.y_size)};
-}
-
-inline PRAStarState& PlanarRouter::getAStarState(int32_t state_idx)
-{
-  PRAStarState& state = _astar_scratch.state_list[state_idx];
-  if (state.search_stamp != _astar_scratch.search_stamp) {
-    state.search_stamp = _astar_scratch.search_stamp;
-    state.closed = false;
-    state.parent_state_idx = -1;
-    state.known_cost = DBL_MAX;
-  }
-  return state;
 }
 
 inline int32_t PlanarRouter::getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord)
