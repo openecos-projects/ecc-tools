@@ -139,7 +139,14 @@ void registerLvsNetName(std::unordered_map<std::string, std::string>& physical_n
   return result;
 }
 
-void appendVia(NetRoutingData& routing, const eccdb::PhysicalDesignService& physical, const eccdb::PhysicalViaPlacement& placement)
+int32_t appendRoutingShape(NetRoutingGraph& routing, RoutingShape shape)
+{
+  auto& shapes = routing.get_routing_shape_list();
+  shapes.push_back(std::move(shape));
+  return static_cast<int32_t>(shapes.size()) - 1;
+}
+
+void appendVia(NetRoutingGraph& routing, const eccdb::PhysicalDesignService& physical, const eccdb::PhysicalViaPlacement& placement)
 {
   const auto layers = physical.routingViaLayers(placement.tech_via, placement.design_via);
   std::optional<eccdb::Rect> bottom;
@@ -171,13 +178,13 @@ void appendVia(NetRoutingData& routing, const eccdb::PhysicalDesignService& phys
   if (!bottom || !top) {
     return;
   }
-  RoutingVia via;
-  via.set_bottom_routing_shape(toRoutingShape(physical, eccdb::TechLayerId{layers.bottom.entity()}, *bottom));
-  via.set_top_routing_shape(toRoutingShape(physical, eccdb::TechLayerId{layers.top.entity()}, *top));
-  routing.get_routing_via_list().push_back(std::move(via));
+  const int32_t bottom_shape_idx = appendRoutingShape(
+      routing, toRoutingShape(physical, eccdb::TechLayerId{layers.bottom.entity()}, *bottom));
+  const int32_t top_shape_idx = appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{layers.top.entity()}, *top));
+  routing.get_via_shape_idx_pair_list().emplace_back(bottom_shape_idx, top_shape_idx);
 }
 
-void appendRouteShape(NetRoutingData& routing, const eccdb::PhysicalDesignService& physical, const eccdb::DesignRouteShape& shape,
+void appendRouteShape(NetRoutingGraph& routing, const eccdb::PhysicalDesignService& physical, const eccdb::DesignRouteShape& shape,
                       const eccdb::DesignRouteShapeAttributes* attributes)
 {
   std::visit(
@@ -187,11 +194,10 @@ void appendRouteShape(NetRoutingData& routing, const eccdb::PhysicalDesignServic
           const int32_t width = attributes != nullptr && (shape.flags & eccdb::DesignWirePathFlag::kHasWidth) != 0u
                                     ? attributes->width
                                     : physical.routingLayer(shape.layer).width;
-          routing.get_wire_routing_shape_list().push_back(toRoutingShape(physical, eccdb::TechLayerId{shape.layer.entity()},
-                                                                           segmentBounds(geometry.begin.position, geometry.end.position, width)));
+          appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{shape.layer.entity()},
+                                                     segmentBounds(geometry.begin.position, geometry.end.position, width)));
         } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
-          routing.get_wire_routing_shape_list().push_back(
-              toRoutingShape(physical, eccdb::TechLayerId{shape.layer.entity()}, geometry.rectangle));
+          appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{shape.layer.entity()}, geometry.rectangle));
         } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
           appendVia(routing, physical,
                     {.tech_via = geometry.via.tech_via, .design_via = geometry.via.design_via, .origin = geometry.origin.position,
@@ -219,7 +225,8 @@ void appendPinGeometry(std::vector<RoutingShape>& target, const eccdb::PhysicalD
 void appendNetPins(DefData& def_data, const eccdb::PhysicalDesignService& physical, const eccdb::DesignNetId net_id,
                    const std::string& net_name, const bool power, const bool ground)
 {
-  auto& routing = def_data.get_def_routing_data().get_net_routing_data_map()[net_name];
+  auto& routing = def_data.get_physical_graph().getOrCreateNetRoutingGraph(net_name);
+  auto& physical_graph = def_data.get_physical_graph();
   std::optional<std::string> input_io_driver;
   physical.forEachNetPin(
       net_id,
@@ -228,9 +235,9 @@ void appendNetPins(DefData& def_data, const eccdb::PhysicalDesignService& physic
          const ConnectType type = power ? ConnectType::kPower : (ground ? ConnectType::kGround : ConnectType::kNone);
          def_data.get_terminal_connect_type_map()[terminal_name] = type;
          if (power) {
-           def_data.get_def_routing_data().get_power_instance_pin_net_map()[terminal_name] = net_name;
+           physical_graph.get_power_instance_pin_net_map()[terminal_name] = net_name;
          } else if (ground) {
-           def_data.get_def_routing_data().get_ground_instance_pin_net_map()[terminal_name] = net_name;
+           physical_graph.get_ground_instance_pin_net_map()[terminal_name] = net_name;
          }
          if (isDriver(term.direction) && routing.get_driver_terminal_name().empty()) {
            routing.set_driver_terminal_name(terminal_name);
@@ -243,7 +250,11 @@ void appendNetPins(DefData& def_data, const eccdb::PhysicalDesignService& physic
            physical.forEachPlacedInstancePinGeometry(pin_id, visitor);
          });
          if (!shapes.empty()) {
-           routing.get_terminal_routing_shape_map()[terminal_name] = std::move(shapes);
+           auto& shape_indices = routing.get_terminal_shape_idx_map()[terminal_name];
+           shape_indices.reserve(shape_indices.size() + shapes.size());
+           for (auto& shape : shapes) {
+             shape_indices.push_back(appendRoutingShape(routing, std::move(shape)));
+           }
          }
        },
        .io_pin = [&](const auto pin_id, const auto& pin) {
@@ -258,29 +269,33 @@ void appendNetPins(DefData& def_data, const eccdb::PhysicalDesignService& physic
          std::vector<RoutingShape> shapes;
          appendPinGeometry(shapes, physical, [&](const eccdb::PhysicalGeometryVisitor& visitor) { physical.forEachIoPinGeometry(pin_id, visitor); });
          if (!shapes.empty()) {
-           routing.get_terminal_routing_shape_map()[terminal_name] = std::move(shapes);
+           auto& shape_indices = routing.get_terminal_shape_idx_map()[terminal_name];
+           shape_indices.reserve(shape_indices.size() + shapes.size());
+           for (auto& shape : shapes) {
+             shape_indices.push_back(appendRoutingShape(routing, std::move(shape)));
+           }
          }
        }});
   if (routing.get_driver_terminal_name().empty() && input_io_driver.has_value()) {
     routing.set_driver_terminal_name(*input_io_driver);
   }
+  routing.set_terminal_routing_shape_num(static_cast<int32_t>(routing.get_routing_shape_list().size()));
 }
 
 void appendNetRouting(DefData& def_data, const eccdb::PhysicalDesignService& physical, const eccdb::DesignNetId net_id,
                       const std::string& net_name)
 {
-  auto& routing = def_data.get_def_routing_data().get_net_routing_data_map()[net_name];
+  auto& routing = def_data.get_physical_graph().getOrCreateNetRoutingGraph(net_name);
   physical.forEachNetWireShape(net_id, [&](const auto, const auto&, const auto, const auto& shape, const auto* attributes) {
     appendRouteShape(routing, physical, shape, attributes);
   });
   physical.forEachNetGeometry(
       net_id,
       {.rectangle = [&](const eccdb::DesignGeometryRectangle& rectangle) {
-         routing.get_wire_routing_shape_list().push_back(toRoutingShape(physical, eccdb::TechLayerId{rectangle.layer.entity()}, rectangle.rectangle));
+         appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{rectangle.layer.entity()}, rectangle.rectangle));
        },
        .polygon = [&](const eccdb::DesignGeometryPolygon& polygon) {
-         routing.get_wire_routing_shape_list().push_back(
-             toRoutingShape(physical, eccdb::TechLayerId{polygon.layer.entity()}, polygonBounds(polygon.points)));
+         appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{polygon.layer.entity()}, polygonBounds(polygon.points)));
        },
        .via = [&](const eccdb::DesignGeometryNetVia& via) {
          for (const auto origin : via.origins) {
@@ -344,9 +359,9 @@ void LVSInterface::wrapDatabaseFromEccdb()
     const bool power = isPower(net.use);
     const bool ground = isGround(net.use);
     if (power) {
-      def_data.get_def_routing_data().get_power_net_name_set().insert(net.name);
+      def_data.get_physical_graph().get_power_net_name_set().insert(net.name);
     } else if (ground) {
-      def_data.get_def_routing_data().get_ground_net_name_set().insert(net.name);
+      def_data.get_physical_graph().get_ground_net_name_set().insert(net.name);
     }
     appendNetPins(def_data, physical, net_id, net.name, power, ground);
     appendNetRouting(def_data, physical, net_id, net.name);
@@ -362,7 +377,7 @@ void LVSInterface::wrapDatabaseFromEccdb()
   database.set_netlist_data(std::move(reference));
   database.set_def_data(std::move(def_data));
   LVSLOG.info(Loc::current(), "Wrapped native EccDB physical design: def_nets=", database.get_def_data().get_net_map().size(),
-              " routing_nets=", database.get_def_data().get_def_routing_data().get_net_routing_data_map().size(), ".");
+              " routing_nets=", database.get_def_data().get_physical_graph().get_net_routing_graph_list().size(), ".");
 }
 
 }  // namespace ilvs
