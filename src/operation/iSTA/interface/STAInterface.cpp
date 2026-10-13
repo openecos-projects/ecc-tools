@@ -508,11 +508,14 @@ void STAInterface::wrapTimingLibrary()
   const auto conversion_start = std::chrono::steady_clock::now();
   bool old_silent_output = idb::Lib::isSilentOutput();
   idb::Lib::setSilentOutput(true);
-  std::vector<std::unique_ptr<idb::LibLibrary>> owned_lib_list;
   std::vector<idb::LibLibrary*> lib_list;
+  // Keep the central generation alive while the wrapped timing model borrows
+  // its LibLibrary objects.  DataManager no longer exposes the old reader
+  // collection; initLib publishes this generation for the regular iSTA path.
+  std::shared_ptr<const idm::RawLibertyGeneration> liberty_generation;
   if (_database_context != nullptr) {
     lib_list = _native_timing_inputs.liberty_libraries;
-  } else if (auto* liberty_generation = dmInst->get_liberty_generation(); liberty_generation != nullptr) {
+  } else if ((liberty_generation = dmInst->get_liberty_generation()) != nullptr) {
     lib_list.reserve(liberty_generation->get_libraries().size());
     for (const auto& library : liberty_generation->get_libraries()) {
       if (library != nullptr) {
@@ -520,17 +523,7 @@ void STAInterface::wrapTimingLibrary()
       }
     }
   } else {
-    for (idb::LibertyReader& liberty_reader : dmInst->get_lib_readers()) {
-      liberty_reader.linkLib();
-      idb::LibBuilder* lib_builder = liberty_reader.get_library_builder();
-      owned_lib_list.push_back(lib_builder->takeLib());
-      delete lib_builder;
-      liberty_reader.set_library_builder(nullptr);
-    }
-    lib_list.reserve(owned_lib_list.size());
-    for (const auto& library : owned_lib_list) {
-      lib_list.push_back(library.get());
-    }
+    STALOG.warn(Loc::current(), "No central Liberty generation is available for iSTA.");
   }
   wrapTimingCellMap(lib_list);
   wrapTimingLibraryInfo(lib_list);
