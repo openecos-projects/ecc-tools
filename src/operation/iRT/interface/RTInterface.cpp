@@ -130,9 +130,6 @@ void RTInterface::runRT()
   RTPR.generate();
   PlanarRouter::destroyInst();
 
-  RTDM.getDatabase().get_planar_routing_h_edge_map().free();
-  RTDM.getDatabase().get_planar_routing_v_edge_map().free();
-
   LayerAssigner::initInst();
   RTLA.assign();
   LayerAssigner::destroyInst();

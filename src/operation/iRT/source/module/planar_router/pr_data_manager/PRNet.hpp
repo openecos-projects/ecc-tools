@@ -18,7 +18,7 @@
 
 #include "Net.hpp"
 #include "PlanarCoord.hpp"
-#include "RoutingEdge.hpp"
+#include "PRGridGraph.hpp"
 #include "Segment.hpp"
 
 namespace irt {
@@ -34,19 +34,23 @@ class PRNet
   std::string& get_net_name() { return _origin_net->get_net_name(); }
   std::vector<Pin>& get_pin_list() { return _origin_net->get_pin_list(); }
   std::vector<Segment<PlanarCoord>>& get_routing_segment_list() { return _routing_segment_list; }
-  std::unordered_set<RoutingEdge*>& get_routing_edge_set() { return _routing_edge_set; }
+  PREdgeSet& get_routing_edge_set() { return _routing_edge_set; }
   // const getter
-  const std::unordered_set<RoutingEdge*>& get_routing_edge_set() const { return _routing_edge_set; }
+  const std::vector<PlanarCoord>& get_node_coord_list() const { return _node_coord_list; }
+  const PREdgeSet& get_routing_edge_set() const { return _routing_edge_set; }
   // setter
   void set_origin_net(Net* origin_net) { _origin_net = origin_net; }
+  void set_node_coord_list(std::vector<PlanarCoord>&& node_coord_list) { _node_coord_list = std::move(node_coord_list); }
   void set_routing_segment_list(const std::vector<Segment<PlanarCoord>>& routing_segment_list) { _routing_segment_list = routing_segment_list; }
   void set_routing_segment_list(std::vector<Segment<PlanarCoord>>&& routing_segment_list) { _routing_segment_list = std::move(routing_segment_list); }
+  void set_routing_edge_set(PREdgeSet&& routing_edge_set) { _routing_edge_set = std::move(routing_edge_set); }
   // function
 
  private:
   Net* _origin_net = nullptr;
+  std::vector<PlanarCoord> _node_coord_list;
   std::vector<Segment<PlanarCoord>> _routing_segment_list;
-  std::unordered_set<RoutingEdge*> _routing_edge_set;
+  PREdgeSet _routing_edge_set;
 };
 
 struct CmpPRNet

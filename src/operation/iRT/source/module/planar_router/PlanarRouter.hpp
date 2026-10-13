@@ -21,26 +21,19 @@
 #include "Database.hpp"
 #include "Monitor.hpp"
 #include "PRCandidate.hpp"
-#include "PRModel.hpp"
+#include "PRComParam.hpp"
+#include "PRGridGraph.hpp"
+#include "PRNet.hpp"
 #include "RTHeader.hpp"
 
 namespace irt {
 
 #define RTPR (irt::PlanarRouter::getInst())
 
-struct PREdgeCost
-{
-  double unit_cost = 0.0;
-  bool is_saturated = false;
-  bool is_hotspot = false;
-  bool is_overflow = false;
-
-  double getTotalCost(double overflow_unit, double congestion_cost) const { return overflow_unit * unit_cost + congestion_cost; }
-};
-
 enum class PRRouteMode
 {
-  kLZPattern,
+  kInitialLZPattern,
+  kCongestionLZPattern,
   kAllPattern,
   kAStar
 };
@@ -55,15 +48,12 @@ struct PRRouteParam
 {
   const char* route_name;
   PRRouteMode pr_route_mode;
-  PRTopoMode pr_topo_mode;
 };
 
 struct PRAStarTask
 {
-  PlanarCoord start_coord;
-  PlanarCoord end_coord;
-  PlanarRect owned_rect;
-  bool has_owned_rect = false;
+  std::set<PlanarCoord, CmpPlanarCoordByXASC> source_coord_set;
+  std::set<PlanarCoord, CmpPlanarCoordByXASC> sink_coord_set;
 };
 
 struct PRAStarState
@@ -95,11 +85,15 @@ struct CmpPRAStarQueueNode
   }
 };
 
-struct PRAStarWorkspace
+struct PRAStarSearchArea
 {
-  PlanarRect workspace_rect;
+  PlanarRect search_rect;
   int32_t x_size = 0;
   int32_t y_size = 0;
+};
+
+struct PRAStarScratch
+{
   uint64_t search_stamp = 0;
   std::vector<PRAStarState> state_list;
   std::vector<PRAStarQueueNode> open_heap;
@@ -125,50 +119,37 @@ class PlanarRouter
   PlanarRouter& operator=(PlanarRouter&& other) = delete;
 
   // initialization
-  PRModel initPRModel();
-  void setPRComParam(PRModel& pr_model);
-  void initPRTaskList(PRModel& pr_model);
-  void buildPlanarRoutingEdgeMap();
-  void initMacroGridRectList();
-
-  // routing edge
-  inline PREdgeCost getRoutingEdgeCost(int32_t supply, int32_t demand);
-  inline PREdgeCost getRoutingEdgeCost(const RoutingEdge& routing_edge);
-  double getTopologyEdgeCost(RoutingEdge& routing_edge, int32_t net_idx, double overflow_unit, const std::unordered_set<RoutingEdge*>& routing_edge_set);
-  double getTopologySegmentCost(double overflow_unit, const PRNet& pr_net, const PlanarCoord& first_coord, const PlanarCoord& second_coord);
-  void updateRoutingEdgeToGraph(RoutingEdge& routing_edge, int32_t curr_net_idx, ChangeType change_type,
-                                std::unordered_set<RoutingEdge*>& routing_edge_set);
-  void updateRoutingSegmentListToGraph(PRNet& pr_net, std::span<const Segment<PlanarCoord>> routing_segment_list, ChangeType change_type);
+  void initPRNetList();
+  void initPRGridGraph();
+  void setPRComParam();
+  void initPRTaskList();
 
   // routing flow
-  void runRouteFlow(PRModel& pr_model);
-  void routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list, const PRRouteParam& pr_route_param);
-  void routePRNet(PRModel& pr_model, PRNet& pr_net, const PRRouteParam& pr_route_param);
-  void splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list);
-  bool routePlanarTopoList(PRModel& pr_model, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
-                           std::vector<Segment<PlanarCoord>>& routing_segment_list);
-  void updateCongestion(PRModel& pr_model);
-  std::vector<PRNet*> getOverflowPRNetList(PRModel& pr_model);
-  bool shouldRefineTopology(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num);
-  std::vector<Segment<PlanarCoord>> getPlanarTopoList(double overflow_unit, PRNet& pr_net, PRTopoMode pr_topo_mode);
+  void runRouteFlow();
+  void routePRNetList(const std::vector<PRNet*>& pr_net_list, const PRRouteParam& pr_route_param);
+  void routePRNet(PRNet& pr_net, const PRRouteParam& pr_route_param);
+  std::vector<PRNet*> getOverflowPRNetList();
 
   // A* route
-  std::vector<Segment<PlanarCoord>> getRoutingSegmentListByAStar(const PRComParam& pr_com_param, const PRNet& pr_net, const Segment<PlanarCoord>& planar_topo,
-                                                                 const std::vector<Segment<PlanarCoord>>& routed_segment_list);
-  PRAStarTask initPRAStarTask(const Segment<PlanarCoord>& planar_topo, const std::vector<Segment<PlanarCoord>>& routed_segment_list);
-  bool prepareAStarWorkspace(const PlanarRect& workspace_rect, PRAStarWorkspace& workspace);
-  int32_t getAStarStateIndex(const PRAStarWorkspace& workspace, const PlanarCoord& coord, bool is_horizontal);
-  PlanarCoord getAStarStateCoord(const PRAStarWorkspace& workspace, int32_t state_idx);
-  inline PRAStarState& getAStarState(PRAStarWorkspace& workspace, int32_t state_idx);
-  inline int32_t getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord, bool has_owned_edge);
-  bool searchRoutingSegmentByAStar(const PRComParam& pr_com_param, const PRNet& pr_net, const PRAStarTask& astar_task, PRAStarWorkspace& workspace,
-                                   std::vector<Segment<PlanarCoord>>& routing_segment_list);
-  PlanarRect getAStarBaseRect(const Segment<PlanarCoord>& planar_topo);
+  std::vector<Segment<PlanarCoord>> routeSegmentListByAStar(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net);
+  PlanarCoord getAStarSeedCoord(const std::vector<PlanarCoord>& node_coord_list);
+  PlanarRect getAStarBaseRect(const std::vector<PlanarCoord>& node_coord_list);
+  void prepareAStarScratch(PRAStarSearchArea& search_area);
+  std::vector<PlanarCoord> searchAStarPath(const PRGridGraph::NetRouteTrial& trial, const PRAStarTask& astar_task,
+                                           const PRAStarSearchArea& search_area);
+  int32_t getAStarStateIndex(const PRAStarSearchArea& search_area, const PlanarCoord& coord, bool is_horizontal);
+  PlanarCoord getAStarStateCoord(const PRAStarSearchArea& search_area, int32_t state_idx);
+  inline PRAStarState& getAStarState(int32_t state_idx);
+  inline int32_t getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord);
   std::vector<Segment<PlanarCoord>> getRoutingSegmentListByCoordList(const std::vector<PlanarCoord>& coord_list);
 
   // pattern route
-  void getRoutingSegmentListByPattern(const PRComParam& pr_com_param, const PRNet& pr_net, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode,
-                                      std::vector<Segment<PlanarCoord>>& routing_segment_list);
+  std::vector<Segment<PlanarCoord>> routeSegmentListByPattern(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net, PRRouteMode pr_route_mode);
+  void splitLongPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, std::vector<Segment<PlanarCoord>>& planar_topo_list);
+  bool needCongestionAware(const PRGridGraph::NetRouteTrial& trial);
+  std::vector<Segment<PlanarCoord>> getPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, PRNet& pr_net, PRTopoMode pr_topo_mode);
+  std::vector<Segment<PlanarCoord>> getRoutingSegmentListByPattern(const PRGridGraph::NetRouteTrial& trial, Segment<PlanarCoord>& planar_topo,
+                                                                  PRRouteMode pr_route_mode);
   bool isBetterCandidate(double corner_weight, const PRCandidate& candidate, const PRCandidate& best_candidate);
   std::vector<PRCandidate> getPRCandidateListByTopo(int32_t expand_step_num, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode);
   void addPRCandidate(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo, std::initializer_list<PlanarCoord> inflection_list);
@@ -178,27 +159,32 @@ class PlanarRouter
   void addPRCandidateListByUPattern(std::vector<PRCandidate>& pr_candidate_list, int32_t expand_step_num, Segment<PlanarCoord>& planar_topo);
   void addPRCandidateListByInner3Bends(std::vector<PRCandidate>& pr_candidate_list, Segment<PlanarCoord>& planar_topo);
   void addPRCandidateListByOuter3Bends(std::vector<PRCandidate>& pr_candidate_list, int32_t expand_step_num, Segment<PlanarCoord>& planar_topo);
-  void updatePRCandidate(double overflow_unit, const PRNet& pr_net, PRCandidate& pr_candidate);
+  void updatePRCandidate(const PRGridGraph::NetRouteTrial& trial, PRCandidate& pr_candidate);
 
   // result
   MTree<PlanarCoord> getCoordTree(PRNet& pr_net, std::vector<Segment<PlanarCoord>>& routing_segment_list);
-  void uploadNetList(PRModel& pr_model);
+  void uploadNetList();
 
-  // exhibit
-  void updateSummary(PRModel& pr_model);
-  void printSummary(PRModel& pr_model);
-  void outputGuide(PRModel& pr_model);
-  void outputNetCSV(PRModel& pr_model);
-  void outputOverflowCSV(PRModel& pr_model);
-  void outputUsageCSV(PRModel& pr_model);
-  void outputCongestionCostCSV(PRModel& pr_model);
+#if 1  // exhibit
+  void updateSummary();
+  void printSummary();
+  void outputGuide();
+  void outputNetCSV();
+  void outputOverflowCSV();
+  void outputUsageCSV();
+  void outputCongestionCostCSV();
+#endif
 
-  // debug
-  void debugPlotPRModel(std::string flag);
+#if 1  // debug
+  void debugPlotPRGraph(std::string flag);
+#endif
 
   // data
-  PRAStarWorkspace _astar_workspace;
-  std::vector<PlanarRect> _macro_grid_rect_list;
+  PRAStarScratch _astar_scratch;
+  std::vector<PRNet> _pr_net_list;
+  std::vector<PRNet*> _pr_task_list;
+  PRGridGraph _grid_graph;
+  PRComParam _pr_com_param;
 };
 
 }  // namespace irt

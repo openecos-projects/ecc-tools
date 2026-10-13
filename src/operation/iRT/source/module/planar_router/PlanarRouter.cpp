@@ -59,22 +59,21 @@ void PlanarRouter::generate()
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  PRModel pr_model = initPRModel();
-  setPRComParam(pr_model);
-  initPRTaskList(pr_model);
-  buildPlanarRoutingEdgeMap();
-  initMacroGridRectList();
+  initPRNetList();
+  initPRGridGraph();
+  setPRComParam();
+  initPRTaskList();
 
-  runRouteFlow(pr_model);
-  // debugPlotPRModel("after");
+  runRouteFlow();
+  // debugPlotPRGraph("after");
 
-  updateSummary(pr_model);
-  printSummary(pr_model);
-  outputGuide(pr_model);
-  outputNetCSV(pr_model);
-  outputOverflowCSV(pr_model);
-  // outputUsageCSV(pr_model);
-  // outputCongestionCostCSV(pr_model);
+  updateSummary();
+  printSummary();
+  outputGuide();
+  outputNetCSV();
+  outputOverflowCSV();
+  // outputUsageCSV();
+  // outputCongestionCostCSV();
 
   RTDM.rebuildGlobalResultRTree();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -84,29 +83,41 @@ void PlanarRouter::generate()
 
 PlanarRouter* PlanarRouter::_pr_instance = nullptr;
 
-PRModel PlanarRouter::initPRModel()
+void PlanarRouter::initPRNetList()
 {
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
 
-  PRModel pr_model;
-  std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
-  pr_net_list.reserve(net_list.size());
+  _pr_net_list.clear();
+  _pr_task_list.clear();
+  _pr_net_list.reserve(net_list.size());
   for (Net& net : net_list) {
-    PRNet& pr_net = pr_net_list.emplace_back();
+    PRNet& pr_net = _pr_net_list.emplace_back();
     pr_net.set_origin_net(&net);
+
+    std::vector<PlanarCoord> node_coord_list;
+    for (Pin& pin : net.get_pin_list()) {
+      node_coord_list.push_back(pin.get_access_point().get_grid_coord());
+    }
+    std::ranges::sort(node_coord_list, CmpPlanarCoordByXASC());
+    node_coord_list.erase(std::ranges::unique(node_coord_list).begin(), node_coord_list.end());
+    pr_net.set_node_coord_list(std::move(node_coord_list));
   }
-  return pr_model;
 }
 
-void PlanarRouter::setPRComParam(PRModel& pr_model)
+void PlanarRouter::initPRGridGraph()
+{
+  _grid_graph.build(RTDM.getDatabase());
+}
+
+void PlanarRouter::setPRComParam()
 {
   int32_t topo_spilt_length = 100;
   int32_t expand_step_num = 30;
   int32_t astar_search_margin = 30;
+  double overflow_unit = 20;
   double corner_weight = 2.5;
-  double overflow_unit = 8 * corner_weight;
   /**
-   * topo_spilt_length, expand_step_num, astar_search_margin, overflow_unit
+   * topo_spilt_length, expand_step_num, astar_search_margin, overflow_unit, corner_weight
    */
 
   PRComParam pr_com_param(topo_spilt_length, expand_step_num, astar_search_margin, overflow_unit, corner_weight);
@@ -115,357 +126,63 @@ void PlanarRouter::setPRComParam(PRModel& pr_model)
   RTLOG.info(Loc::current(), "astar_search_margin: ", pr_com_param.get_astar_search_margin());
   RTLOG.info(Loc::current(), "overflow_unit: ", pr_com_param.get_overflow_unit());
   RTLOG.info(Loc::current(), "corner_weight: ", pr_com_param.get_corner_weight());
-  RTLOG.info(Loc::current(), "cost_mode: routing_edge");
-  pr_model.set_pr_com_param(pr_com_param);
+  _pr_com_param = pr_com_param;
 }
 
-void PlanarRouter::initPRTaskList(PRModel& pr_model)
+void PlanarRouter::initPRTaskList()
 {
-  std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
-  std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  pr_task_list.reserve(pr_net_list.size());
-  for (PRNet& pr_net : pr_net_list) {
+  _pr_task_list.reserve(_pr_net_list.size());
+  for (PRNet& pr_net : _pr_net_list) {
     if (!region_route.isActiveNet(pr_net.get_net_idx())) {
       continue;
     }
-    pr_task_list.push_back(&pr_net);
+    _pr_task_list.push_back(&pr_net);
   }
-  std::ranges::sort(pr_task_list, CmpPRNet());
+  std::ranges::sort(_pr_task_list, CmpPRNet());
 }
 
-void PlanarRouter::buildPlanarRoutingEdgeMap()
+void PlanarRouter::runRouteFlow()
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  GridMap<RoutingEdge>& planar_routing_h_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
-  GridMap<RoutingEdge>& planar_routing_v_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
-  std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
-  std::vector<GridMap<RoutingEdge>>& routing_v_edge_map = RTDM.getDatabase().get_routing_v_edge_map();
+  constexpr int32_t max_astar_iters = 5;
 
-  planar_routing_h_edge_map.init(std::max(0, gcell_map.get_x_size() - 1), gcell_map.get_y_size());
-  planar_routing_v_edge_map.init(gcell_map.get_x_size(), std::max(0, gcell_map.get_y_size() - 1));
-  for (GridMap<RoutingEdge>* planar_routing_edge_map : {&planar_routing_h_edge_map, &planar_routing_v_edge_map}) {
-    for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(routing_h_edge_map.size()); layer_idx++) {
-      GridMap<RoutingEdge>& routing_edge_map
-          = planar_routing_edge_map == &planar_routing_h_edge_map ? routing_h_edge_map[layer_idx] : routing_v_edge_map[layer_idx];
-#pragma omp parallel for
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        for (int32_t y = 0; y < routing_edge_map.get_y_size(); y++) {
-          RoutingEdge& planar_routing_edge = (*planar_routing_edge_map)[x][y];
-          RoutingEdge& routing_edge = routing_edge_map[x][y];
-          planar_routing_edge.set_supply(planar_routing_edge.get_supply() + routing_edge.get_supply());
-          planar_routing_edge.set_congestion_cost(planar_routing_edge.get_congestion_cost() + routing_edge.get_congestion_cost());
-          planar_routing_edge.get_ignore_net_set().insert(routing_edge.get_ignore_net_set().begin(), routing_edge.get_ignore_net_set().end());
-        }
-      }
-    }
-  }
+  routePRNetList(_pr_task_list, {"initial LZ pattern", PRRouteMode::kInitialLZPattern});
+  _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
+  routePRNetList(_pr_task_list, {"congestion LZ pattern", PRRouteMode::kCongestionLZPattern});
+  _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
+  routePRNetList(getOverflowPRNetList(), {"overflow All pattern", PRRouteMode::kAllPattern});
+  _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
 
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void PlanarRouter::initMacroGridRectList()
-{
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  std::vector<Macro>& macro_list = RTDM.getDatabase().get_macro_list();
-  _macro_grid_rect_list.clear();
-  _macro_grid_rect_list.reserve(macro_list.size());
-  for (Macro& macro : macro_list) {
-    _macro_grid_rect_list.push_back(RTUTIL.getClosedGCellGridRect(macro.get_body_rect(), gcell_axis));
-  }
-}
-
-inline PREdgeCost PlanarRouter::getRoutingEdgeCost(int32_t supply, int32_t demand)
-{
-  constexpr double saturation_start_ratio = 0.8;
-  constexpr double hotspot_start_ratio = 0.9;
-
-  PREdgeCost edge_cost;
-  if (supply <= 0 || demand > supply) {
-    double overflow_ratio = demand - std::max(supply, 0) + 1;
-    double overflow_ratio_square = overflow_ratio * overflow_ratio;
-    edge_cost.is_overflow = true;
-    edge_cost.unit_cost = overflow_ratio_square * overflow_ratio_square;
-    return edge_cost;
-  }
-
-  double usage_ratio = demand / 1.0 / supply;
-  double usage_ratio_square = usage_ratio * usage_ratio;
-  edge_cost.unit_cost = usage_ratio_square * usage_ratio_square;
-  if (usage_ratio < saturation_start_ratio) {
-    return edge_cost;
-  }
-
-  // Add progressively stronger penalties near capacity while preserving the base usage cost.
-  double saturation_ratio = (usage_ratio - saturation_start_ratio) / (1.0 - saturation_start_ratio);
-  edge_cost.is_saturated = true;
-  edge_cost.unit_cost += saturation_ratio * saturation_ratio;
-  if (usage_ratio < hotspot_start_ratio) {
-    return edge_cost;
-  }
-
-  double hotspot_ratio = (usage_ratio - hotspot_start_ratio) / (1.0 - hotspot_start_ratio);
-  edge_cost.is_hotspot = true;
-  edge_cost.unit_cost += 2.0 * hotspot_ratio * hotspot_ratio;
-  return edge_cost;
-}
-
-inline PREdgeCost PlanarRouter::getRoutingEdgeCost(const RoutingEdge& routing_edge)
-{
-  return getRoutingEdgeCost(routing_edge.get_supply(), routing_edge.get_demand() + 1);
-}
-
-double PlanarRouter::getTopologyEdgeCost(RoutingEdge& routing_edge, int32_t net_idx, double overflow_unit,
-                                         const std::unordered_set<RoutingEdge*>& routing_edge_set)
-{
-  constexpr double wire_cost = 1;
-  if (routing_edge.get_ignore_net_set().contains(net_idx)) {
-    return wire_cost;
-  }
-  if (routing_edge.get_supply() <= 0) {
-    return std::numeric_limits<double>::infinity();
-  }
-
-  int32_t effective_demand = routing_edge.get_demand() - routing_edge_set.contains(&routing_edge);
-  effective_demand = std::max(0, effective_demand);
-  PREdgeCost edge_cost = getRoutingEdgeCost(routing_edge.get_supply(), effective_demand + 1);
-  return wire_cost + edge_cost.getTotalCost(overflow_unit, routing_edge.get_congestion_cost());
-}
-
-double PlanarRouter::getTopologySegmentCost(double overflow_unit, const PRNet& pr_net, const PlanarCoord& first_coord, const PlanarCoord& second_coord)
-{
-  if (first_coord == second_coord) {
-    return 0;
-  }
-  if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
-    return std::numeric_limits<double>::infinity();
-  }
-
-  int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
-  int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
-  int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
-  int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
-  int32_t net_idx = pr_net.get_net_idx();
-  const std::unordered_set<RoutingEdge*>& routing_edge_set = pr_net.get_routing_edge_set();
-  double segment_cost = 0;
-  if (RTUTIL.isHorizontal(first_coord, second_coord)) {
-    GridMap<RoutingEdge>& routing_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
-    if (first_x < 0 || second_x > routing_edge_map.get_x_size() || first_y < 0 || first_y >= routing_edge_map.get_y_size()) {
-      return std::numeric_limits<double>::infinity();
-    }
-    for (int32_t x = first_x; x < second_x; x++) {
-      double edge_cost = getTopologyEdgeCost(routing_edge_map[x][first_y], net_idx, overflow_unit, routing_edge_set);
-      if (!std::isfinite(edge_cost)) {
-        return edge_cost;
-      }
-      segment_cost += edge_cost;
-    }
-  } else {
-    GridMap<RoutingEdge>& routing_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
-    if (first_x < 0 || first_x >= routing_edge_map.get_x_size() || first_y < 0 || second_y > routing_edge_map.get_y_size()) {
-      return std::numeric_limits<double>::infinity();
-    }
-    for (int32_t y = first_y; y < second_y; y++) {
-      double edge_cost = getTopologyEdgeCost(routing_edge_map[first_x][y], net_idx, overflow_unit, routing_edge_set);
-      if (!std::isfinite(edge_cost)) {
-        return edge_cost;
-      }
-      segment_cost += edge_cost;
-    }
-  }
-  return segment_cost;
-}
-
-void PlanarRouter::updateRoutingEdgeToGraph(RoutingEdge& routing_edge, int32_t curr_net_idx, ChangeType change_type,
-                                            std::unordered_set<RoutingEdge*>& routing_edge_set)
-{
-  int32_t delta = 0;
-  if (change_type == ChangeType::kAdd) {
-    delta = 1;
-  } else if (change_type == ChangeType::kDel) {
-    delta = -1;
-  } else {
-    RTLOG.error(Loc::current(), "The change type is error!");
-  }
-  bool is_changed = delta > 0 ? routing_edge_set.insert(&routing_edge).second : routing_edge_set.erase(&routing_edge) > 0;
-  if (!is_changed) {
-    return;
-  }
-  if (routing_edge.get_ignore_net_set().contains(curr_net_idx)) {
-    return;
-  }
-  if (delta < 0 && routing_edge.get_demand() <= 0) {
-    RTLOG.error(Loc::current(), "The planar routing edge demand is error!");
-  }
-  std::vector<int32_t>& demand_net_idx_list = routing_edge.get_demand_net_idx_list();
-  if (delta > 0) {
-    demand_net_idx_list.push_back(curr_net_idx);
-  } else {
-    auto iter = std::find(demand_net_idx_list.begin(), demand_net_idx_list.end(), curr_net_idx);
-    if (iter == demand_net_idx_list.end()) {
-      RTLOG.error(Loc::current(), "The planar routing edge demand net is error!");
-    }
-    demand_net_idx_list.erase(iter);
-  }
-  routing_edge.set_demand(routing_edge.get_demand() + delta);
-}
-
-void PlanarRouter::updateRoutingSegmentListToGraph(PRNet& pr_net, std::span<const Segment<PlanarCoord>> routing_segment_list, ChangeType change_type)
-{
-  int32_t curr_net_idx = pr_net.get_net_idx();
-  std::unordered_set<RoutingEdge*>& routing_edge_set = pr_net.get_routing_edge_set();
-  GridMap<RoutingEdge>& routing_h_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
-  GridMap<RoutingEdge>& routing_v_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
-  for (const Segment<PlanarCoord>& routing_segment : routing_segment_list) {
-    PlanarCoord first_coord = routing_segment.get_first();
-    PlanarCoord second_coord = routing_segment.get_second();
-    if (first_coord == second_coord) {
-      continue;
-    }
-    if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
-      RTLOG.error(Loc::current(), "The routing segment is oblique!");
-    }
-    int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
-    int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
-    int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
-    int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
-    if (RTUTIL.isHorizontal(first_coord, second_coord)) {
-      for (int32_t x = first_x; x < second_x; x++) {
-        updateRoutingEdgeToGraph(routing_h_edge_map[x][first_y], curr_net_idx, change_type, routing_edge_set);
-      }
-    } else {
-      for (int32_t y = first_y; y < second_y; y++) {
-        updateRoutingEdgeToGraph(routing_v_edge_map[first_x][y], curr_net_idx, change_type, routing_edge_set);
-      }
-    }
-  }
-}
-
-void PlanarRouter::runRouteFlow(PRModel& pr_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  constexpr int32_t max_iter = 5;
-  std::vector<PRNet*>& pr_task_list = pr_model.get_pr_task_list();
-  PRComParam& pr_com_param = pr_model.get_pr_com_param();
-
-  routePRNetList(pr_model, pr_task_list, {"initial LZ pattern", PRRouteMode::kLZPattern, PRTopoMode::kNormal});
-  updateCongestion(pr_model);
-  routePRNetList(pr_model, pr_task_list, {"congestion LZ pattern", PRRouteMode::kLZPattern, PRTopoMode::kCongestion});
-  updateCongestion(pr_model);
-  routePRNetList(pr_model, getOverflowPRNetList(pr_model), {"overflow All pattern", PRRouteMode::kAllPattern, PRTopoMode::kCongestion});
-  updateCongestion(pr_model);
-
-  for (int32_t iter = 0; iter < max_iter; iter++) {
-    std::vector<PRNet*> reroute_net_list = getOverflowPRNetList(pr_model);
+  for (int32_t iter = 0; iter < max_astar_iters; iter++) {
+    std::vector<PRNet*> reroute_net_list = getOverflowPRNetList();
     if (reroute_net_list.empty()) {
       break;
     }
 
-    routePRNetList(pr_model, reroute_net_list, {"overflow A*", PRRouteMode::kAStar, PRTopoMode::kCongestion});
-    updateCongestion(pr_model);
-    pr_com_param.set_astar_search_margin(pr_com_param.get_astar_search_margin() * 2);
-    pr_com_param.set_overflow_unit(pr_com_param.get_overflow_unit() * 2);
+    routePRNetList(reroute_net_list, {"overflow A*", PRRouteMode::kAStar});
+    _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
+    _pr_com_param.set_astar_search_margin(_pr_com_param.get_astar_search_margin() * 2);
+    _pr_com_param.set_overflow_unit(_pr_com_param.get_overflow_unit() * 2);
   }
 
-  uploadNetList(pr_model);
+  uploadNetList();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PlanarRouter::routePRNetList(PRModel& pr_model, const std::vector<PRNet*>& pr_net_list, const PRRouteParam& pr_route_param)
-{
-  RTLOG.info(Loc::current(), "Mode: ", pr_route_param.route_name, ", net_num: ", pr_net_list.size());
-  size_t next_percent = 10;
-  for (size_t i = 0; i < pr_net_list.size(); i++) {
-    PRNet* pr_net = pr_net_list[i];
-    routePRNet(pr_model, *pr_net, pr_route_param);
-    size_t percent = ((i + 1) * 100) / pr_net_list.size();
-    if (percent >= next_percent || (i + 1) == pr_net_list.size()) {
-      RTLOG.info(Loc::current(), "Mode: ", pr_route_param.route_name, ", progress: ", percent, "% (", (i + 1), "/", pr_net_list.size(), ")");
-      next_percent += 10;
-    }
-  }
-}
-
-void PlanarRouter::routePRNet(PRModel& pr_model, PRNet& pr_net, const PRRouteParam& pr_route_param)
-{
-  const std::vector<Segment<PlanarCoord>>& old_routing_segment_list = pr_net.get_routing_segment_list();
-  std::vector<Segment<PlanarCoord>> planar_topo_list =
-      getPlanarTopoList(pr_model.get_pr_com_param().get_overflow_unit(), pr_net, pr_route_param.pr_topo_mode);
-  updateRoutingSegmentListToGraph(pr_net, old_routing_segment_list, ChangeType::kDel);
-
-  std::vector<Segment<PlanarCoord>> routing_segment_list;
-  bool is_routed = routePlanarTopoList(pr_model, pr_net, planar_topo_list, pr_route_param.pr_route_mode, routing_segment_list);
-  std::vector<Segment<PlanarCoord>> final_routing_segment_list;
-  if (is_routed) {
-    MTree<PlanarCoord> routing_tree = getCoordTree(pr_net, routing_segment_list);
-    for (Segment<TNode<PlanarCoord>*>& segment : RTUTIL.getSegListByTree(routing_tree)) {
-      final_routing_segment_list.emplace_back(segment.get_first()->value(), segment.get_second()->value());
-    }
-  }
-
-  updateRoutingSegmentListToGraph(pr_net, routing_segment_list, ChangeType::kDel);
-  if (is_routed) {
-    pr_net.set_routing_segment_list(std::move(final_routing_segment_list));
-  }
-  updateRoutingSegmentListToGraph(pr_net, pr_net.get_routing_segment_list(), ChangeType::kAdd);
-}
-
-void PlanarRouter::updateCongestion(PRModel& pr_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  constexpr int32_t congestion_radius = 1;
-  constexpr double congestion_decay = 0.5;
-  double congestion_unit = pr_model.get_pr_com_param().get_overflow_unit();
-  for (GridMap<RoutingEdge>* routing_edge_map : {&RTDM.getDatabase().get_planar_routing_h_edge_map(), &RTDM.getDatabase().get_planar_routing_v_edge_map()}) {
-    int32_t x_size = routing_edge_map->get_x_size();
-    int32_t y_size = routing_edge_map->get_y_size();
-    int64_t edge_count = static_cast<int64_t>(x_size) * y_size;
-#pragma omp parallel for
-    for (int64_t edge_idx = 0; edge_idx < edge_count; edge_idx++) {
-      int32_t x = static_cast<int32_t>(edge_idx / y_size);
-      int32_t y = static_cast<int32_t>(edge_idx % y_size);
-      double total_usage_ratio = 0;
-      int32_t neighbor_num = 0;
-      for (int32_t neighbor_x = std::max(0, x - congestion_radius); neighbor_x <= std::min(x_size - 1, x + congestion_radius); neighbor_x++) {
-        for (int32_t neighbor_y = std::max(0, y - congestion_radius); neighbor_y <= std::min(y_size - 1, y + congestion_radius); neighbor_y++) {
-          RoutingEdge& neighbor_edge = (*routing_edge_map)[neighbor_x][neighbor_y];
-          if (neighbor_edge.get_supply() == 0) {
-            continue;
-          }
-          total_usage_ratio += neighbor_edge.get_demand() / 1.0 / neighbor_edge.get_supply();
-          neighbor_num++;
-        }
-      }
-      RoutingEdge& routing_edge = (*routing_edge_map)[x][y];
-      double usage_ratio = routing_edge.get_supply() == 0 ? 0 : routing_edge.get_demand() / 1.0 / routing_edge.get_supply();
-      usage_ratio = std::max(0.0, usage_ratio - 0.8);
-      double average_usage_ratio = neighbor_num == 0 ? 0 : total_usage_ratio / neighbor_num;
-      double congestion_ratio = average_usage_ratio + usage_ratio;
-      double new_congestion_cost = congestion_unit * congestion_ratio * congestion_ratio;
-      routing_edge.set_congestion_cost((routing_edge.get_congestion_cost() * congestion_decay) + new_congestion_cost);
-    }
-  }
-
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-std::vector<PRNet*> PlanarRouter::getOverflowPRNetList(PRModel& pr_model)
+std::vector<PRNet*> PlanarRouter::getOverflowPRNetList()
 {
   std::vector<PRNet*> pr_net_list;
-  for (PRNet& pr_net : pr_model.get_pr_net_list()) {
-    for (RoutingEdge* routing_edge : pr_net.get_routing_edge_set()) {
-      if (routing_edge->get_ignore_net_set().contains(pr_net.get_net_idx())) {
+  for (PRNet& pr_net : _pr_net_list) {
+    for (PREdgeId edge_id : pr_net.get_routing_edge_set()) {
+      const PRGridEdge& edge = _grid_graph.get_edge(edge_id);
+      if (edge.ignore_net_set.contains(pr_net.get_net_idx())) {
         continue;
       }
-      if (routing_edge->get_overflow() > 0) {
+      if (edge.get_overflow() > 0) {
         pr_net_list.push_back(&pr_net);
         break;
       }
@@ -474,10 +191,107 @@ std::vector<PRNet*> PlanarRouter::getOverflowPRNetList(PRModel& pr_model)
   return pr_net_list;
 }
 
-void PlanarRouter::splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list)
+void PlanarRouter::routePRNetList(const std::vector<PRNet*>& pr_net_list, const PRRouteParam& pr_route_param)
+{
+  RTLOG.info(Loc::current(), "Mode: ", pr_route_param.route_name, ", net_num: ", pr_net_list.size());
+  size_t next_percent = 10;
+  for (size_t i = 0; i < pr_net_list.size(); i++) {
+    PRNet* pr_net = pr_net_list[i];
+    routePRNet(*pr_net, pr_route_param);
+    size_t percent = ((i + 1) * 100) / pr_net_list.size();
+    if (percent >= next_percent || (i + 1) == pr_net_list.size()) {
+      RTLOG.info(Loc::current(), "Mode: ", pr_route_param.route_name, ", progress: ", percent, "% (", (i + 1), "/", pr_net_list.size(), ")");
+      next_percent += 10;
+    }
+  }
+}
+
+void PlanarRouter::routePRNet(PRNet& pr_net, const PRRouteParam& pr_route_param)
+{
+  PRGridGraph::NetRouteTrial trial = _grid_graph.begin_route(pr_net);
+
+  std::vector<Segment<PlanarCoord>> routing_segment_list = pr_route_param.pr_route_mode == PRRouteMode::kAStar
+                                                               ? routeSegmentListByAStar(trial, pr_net)
+                                                               : routeSegmentListByPattern(trial, pr_net, pr_route_param.pr_route_mode);
+  if (routing_segment_list.empty()) {
+    trial.rollback();
+    return;
+  }
+
+  MTree<PlanarCoord> routing_tree = getCoordTree(pr_net, routing_segment_list);
+  std::vector<Segment<PlanarCoord>> final_routing_segment_list;
+  for (Segment<TNode<PlanarCoord>*>& segment : RTUTIL.getSegListByTree(routing_tree)) {
+    final_routing_segment_list.emplace_back(segment.get_first()->value(), segment.get_second()->value());
+  }
+  trial.commit(std::move(final_routing_segment_list));
+}
+
+std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByPattern(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net, PRRouteMode pr_route_mode)
+{
+  PRTopoMode pr_topo_mode = pr_route_mode == PRRouteMode::kInitialLZPattern ? PRTopoMode::kNormal : PRTopoMode::kCongestion;
+  std::vector<Segment<PlanarCoord>> planar_topo_list = getPlanarTopoList(trial, pr_net, pr_topo_mode);
+  if (pr_route_mode == PRRouteMode::kAllPattern) {
+    splitLongPlanarTopoList(trial, planar_topo_list);
+  }
+
+  std::vector<Segment<PlanarCoord>> routing_segment_list;
+  for (Segment<PlanarCoord>& planar_topo : planar_topo_list) {
+    std::vector<Segment<PlanarCoord>> topo_segment_list = getRoutingSegmentListByPattern(trial, planar_topo, pr_route_mode);
+    trial.append(topo_segment_list);
+    routing_segment_list.insert(routing_segment_list.end(), topo_segment_list.begin(), topo_segment_list.end());
+  }
+  return routing_segment_list;
+}
+
+std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, PRNet& pr_net, PRTopoMode pr_topo_mode)
+{
+  const std::vector<PlanarCoord>& node_coord_list = pr_net.get_node_coord_list();
+  TBTask tb_task;
+  tb_task.set_planar_coord_list(node_coord_list);
+  tb_task.set_planar_search_region(PlanarRect(0, 0, _grid_graph.get_x_size() - 1, _grid_graph.get_y_size() - 1));
+  tb_task.set_point_legal_query([this](const PlanarCoord& coord) { return _grid_graph.isCellLegal(coord); });
+  bool use_congestion_topology = pr_topo_mode == PRTopoMode::kCongestion && needCongestionAware(trial);
+  tb_task.set_topo_mode(use_congestion_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
+  if (!use_congestion_topology) {
+    return RTTB.getPlanarTopoList(tb_task);
+  }
+
+  double overflow_unit = _pr_com_param.get_overflow_unit();
+  TBSegmentCostQuery segment_cost_query = [this, &trial, overflow_unit](const PlanarCoord& first, const PlanarCoord& second) {
+    return _grid_graph.get_segment_cost(trial, first, second, overflow_unit);
+  };
+  PRTopologyCostCache topology_cost_cache(std::move(segment_cost_query));
+  tb_task.set_segment_cost_query(
+      [&topology_cost_cache](const PlanarCoord& first, const PlanarCoord& second) { return topology_cost_cache.getCost(first, second); });
+  return RTTB.getPlanarTopoList(tb_task);
+}
+
+bool PlanarRouter::needCongestionAware(const PRGridGraph::NetRouteTrial& trial)
+{
+  if (trial.get_pr_net()->get_node_coord_list().size() < 3) {
+    return false;
+  }
+  if (trial.get_old_edge_set().empty()) {
+    return true;
+  }
+  double history_threshold = 0.64 * _pr_com_param.get_overflow_unit();
+  for (PREdgeId edge_id : trial.get_old_edge_set()) {
+    const PRGridEdge& routing_edge = _grid_graph.get_edge(edge_id);
+    if (routing_edge.ignore_net_set.contains(trial.get_net_idx())) {
+      continue;
+    }
+    int32_t supply = routing_edge.supply;
+    if (supply <= 0 || routing_edge.demand / static_cast<double>(supply) >= 0.8 || routing_edge.congestion_cost >= history_threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void PlanarRouter::splitLongPlanarTopoList(const PRGridGraph::NetRouteTrial& trial, std::vector<Segment<PlanarCoord>>& planar_topo_list)
 {
   constexpr int32_t min_subsegment_length = 30;
-  int32_t split_length = pr_com_param.get_topo_spilt_length();
+  int32_t split_length = _pr_com_param.get_topo_spilt_length();
   std::vector<Segment<PlanarCoord>> split_topo_list;
   split_topo_list.reserve(planar_topo_list.size() * 3);
   for (Segment<PlanarCoord>& planar_topo : planar_topo_list) {
@@ -501,7 +315,7 @@ void PlanarRouter::splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet
       for (const PlanarCoord& neighbor :
            {PlanarCoord(ideal_coord.get_x() - 1, ideal_coord.get_y()), PlanarCoord(ideal_coord.get_x() + 1, ideal_coord.get_y()),
             PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() - 1), PlanarCoord(ideal_coord.get_x(), ideal_coord.get_y() + 1)}) {
-        if (std::isfinite(getTopologySegmentCost(pr_com_param.get_overflow_unit(), pr_net, ideal_coord, neighbor))) {
+        if (std::isfinite(_grid_graph.get_segment_cost(trial, ideal_coord, neighbor, _pr_com_param.get_overflow_unit()))) {
           has_escape = true;
           break;
         }
@@ -530,39 +344,13 @@ void PlanarRouter::splitLongPlanarTopoList(const PRComParam& pr_com_param, PRNet
   planar_topo_list = std::move(split_topo_list);
 }
 
-bool PlanarRouter::routePlanarTopoList(PRModel& pr_model, PRNet& pr_net, std::vector<Segment<PlanarCoord>>& planar_topo_list, PRRouteMode pr_route_mode,
-                                       std::vector<Segment<PlanarCoord>>& routing_segment_list)
-{
-  const PRComParam& pr_com_param = pr_model.get_pr_com_param();
-  if (pr_route_mode == PRRouteMode::kAllPattern) {
-    splitLongPlanarTopoList(pr_com_param, pr_net, planar_topo_list);
-  }
-
-  for (Segment<PlanarCoord>& planar_topo : planar_topo_list) {
-    size_t routed_segment_num = routing_segment_list.size();
-
-    if (pr_route_mode == PRRouteMode::kAStar) {
-      std::vector<Segment<PlanarCoord>> topo_routing_segment_list = getRoutingSegmentListByAStar(pr_com_param, pr_net, planar_topo, routing_segment_list);
-      if (topo_routing_segment_list.empty()) {
-        return false;
-      }
-      routing_segment_list.insert(routing_segment_list.end(), topo_routing_segment_list.begin(), topo_routing_segment_list.end());
-    } else {
-      getRoutingSegmentListByPattern(pr_com_param, pr_net, planar_topo, pr_route_mode, routing_segment_list);
-    }
-
-    updateRoutingSegmentListToGraph(pr_net, std::span<const Segment<PlanarCoord>>(routing_segment_list).subspan(routed_segment_num), ChangeType::kAdd);
-  }
-  return true;
-}
-
-void PlanarRouter::getRoutingSegmentListByPattern(const PRComParam& pr_com_param, const PRNet& pr_net, Segment<PlanarCoord>& planar_topo,
-                                                  PRRouteMode pr_route_mode, std::vector<Segment<PlanarCoord>>& routing_segment_list)
+std::vector<Segment<PlanarCoord>> PlanarRouter::getRoutingSegmentListByPattern(const PRGridGraph::NetRouteTrial& trial, Segment<PlanarCoord>& planar_topo,
+                                                                              PRRouteMode pr_route_mode)
 {
   constexpr int64_t edge_visit_num_per_thread = 8192;
   int32_t max_thread_num = std::max(1, std::min(RTDM.getConfig().thread_number, 16));
 
-  std::vector<PRCandidate> candidate_list = getPRCandidateListByTopo(pr_com_param.get_expand_step_num(), planar_topo, pr_route_mode);
+  std::vector<PRCandidate> candidate_list = getPRCandidateListByTopo(_pr_com_param.get_expand_step_num(), planar_topo, pr_route_mode);
   auto candidate_num = static_cast<int32_t>(candidate_list.size());
   int64_t edge_visit_num = 0;
   for (PRCandidate& candidate : candidate_list) {
@@ -574,42 +362,17 @@ void PlanarRouter::getRoutingSegmentListByPattern(const PRComParam& pr_com_param
 
 #pragma omp parallel for if (thread_num > 1) num_threads(thread_num) schedule(guided, 8)
   for (int32_t candidate_idx = 0; candidate_idx < candidate_num; candidate_idx++) {
-    updatePRCandidate(pr_com_param.get_overflow_unit(), pr_net, candidate_list[candidate_idx]);
+    updatePRCandidate(trial, candidate_list[candidate_idx]);
   }
 
   auto best_candidate_it = candidate_list.begin();
   for (auto candidate_it = best_candidate_it + 1; candidate_it != candidate_list.end(); candidate_it++) {
-    if (isBetterCandidate(pr_com_param.get_corner_weight(), *candidate_it, *best_candidate_it)) {
+    if (isBetterCandidate(_pr_com_param.get_corner_weight(), *candidate_it, *best_candidate_it)) {
       best_candidate_it = candidate_it;
     }
   }
-  const auto& best_segment_list = best_candidate_it->get_routing_segment_list();
-  routing_segment_list.insert(routing_segment_list.end(), best_segment_list.begin(), best_segment_list.end());
-}
-
-bool PlanarRouter::isBetterCandidate(double corner_weight, const PRCandidate& candidate, const PRCandidate& best_candidate)
-{
-  constexpr double score_epsilon = 1e-9;
-
-  if (candidate.get_is_path_blocked() != best_candidate.get_is_path_blocked()) {
-    return !candidate.get_is_path_blocked();
-  }
-  if (candidate.get_is_overflow() != best_candidate.get_is_overflow()) {
-    return !candidate.get_is_overflow();
-  }
-
-  double candidate_score = candidate.get_total_wire_length() + candidate.get_total_cost() + (corner_weight * candidate.get_total_corner_num());
-  double best_score = best_candidate.get_total_wire_length() + best_candidate.get_total_cost() + (corner_weight * best_candidate.get_total_corner_num());
-  if (!(std::abs(candidate_score - best_score) < score_epsilon)) {
-    return candidate_score < best_score;
-  }
-  if (candidate.get_saturation_edge_num() != best_candidate.get_saturation_edge_num()) {
-    return candidate.get_saturation_edge_num() < best_candidate.get_saturation_edge_num();
-  }
-  if (candidate.get_hotspot_edge_num() != best_candidate.get_hotspot_edge_num()) {
-    return candidate.get_hotspot_edge_num() < best_candidate.get_hotspot_edge_num();
-  }
-  return candidate.get_total_wire_length() < best_candidate.get_total_wire_length();
+  const PRCandidate::RoutingSegmentList& best_segment_list = best_candidate_it->get_routing_segment_list();
+  return std::vector<Segment<PlanarCoord>>(best_segment_list.begin(), best_segment_list.end());
 }
 
 std::vector<PRCandidate> PlanarRouter::getPRCandidateListByTopo(int32_t expand_step_num, Segment<PlanarCoord>& planar_topo, PRRouteMode pr_route_mode)
@@ -637,253 +400,225 @@ std::vector<PRCandidate> PlanarRouter::getPRCandidateListByTopo(int32_t expand_s
   return pr_candidate_list;
 }
 
-bool PlanarRouter::shouldRefineTopology(double overflow_unit, const PRNet& pr_net, size_t unique_pin_num)
+void PlanarRouter::updatePRCandidate(const PRGridGraph::NetRouteTrial& trial, PRCandidate& pr_candidate)
 {
-  if (unique_pin_num < 3) {
-    return false;
-  }
-  if (pr_net.get_routing_edge_set().empty()) {
-    return true;
-  }
-  double history_threshold = 0.64 * overflow_unit;
-  for (RoutingEdge* routing_edge : pr_net.get_routing_edge_set()) {
-    if (routing_edge->get_ignore_net_set().contains(pr_net.get_net_idx())) {
-      continue;
+  double overflow_unit = _pr_com_param.get_overflow_unit();
+  int32_t curr_net_idx = trial.get_net_idx();
+
+  PRCandidateCost candidate_cost;
+  Direction pre_direction = Direction::kNone;
+  for (Segment<PlanarCoord>& coord_segment : pr_candidate.get_routing_segment_list()) {
+    PlanarCoord& first_coord = coord_segment.get_first();
+    PlanarCoord& second_coord = coord_segment.get_second();
+    if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
+      RTLOG.error(Loc::current(), "The direction is error!");
     }
-    int32_t supply = routing_edge->get_supply();
-    if (supply <= 0 || routing_edge->get_demand() / static_cast<double>(supply) >= 0.8 || routing_edge->get_congestion_cost() >= history_threshold) {
-      return true;
+    Direction direction = RTUTIL.getDirection(first_coord, second_coord);
+    if (pre_direction != Direction::kNone && pre_direction != direction) {
+      candidate_cost.total_corner_num++;
+    }
+    pre_direction = direction;
+  }
+  for (Segment<PlanarCoord>& routing_segment : pr_candidate.get_routing_segment_list()) {
+    PlanarCoord first_coord = routing_segment.get_first();
+    PlanarCoord second_coord = routing_segment.get_second();
+    int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
+    int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
+    int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
+    int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
+    bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
+    int32_t first_idx = is_horizontal ? first_x : first_y;
+    int32_t second_idx = is_horizontal ? second_x : second_y;
+    for (int32_t idx = first_idx; idx < second_idx; idx++) {
+      PlanarCoord edge_first = is_horizontal ? PlanarCoord(idx, first_y) : PlanarCoord(first_x, idx);
+      PlanarCoord edge_second = is_horizontal ? PlanarCoord(idx + 1, first_y) : PlanarCoord(first_x, idx + 1);
+      PREdgeId edge_id = _grid_graph.get_edge_id(edge_first, edge_second);
+      const PRGridEdge& routing_edge = _grid_graph.get_edge(edge_id);
+      bool is_owned = trial.get_new_edge_set().contains(edge_id);
+      candidate_cost.total_wire_length += !is_owned;
+      if (is_owned || routing_edge.ignore_net_set.contains(curr_net_idx)) {
+        continue;
+      }
+      const PREdgeCost edge_cost = _grid_graph.get_edge_cost(trial, edge_id);
+      candidate_cost.is_path_blocked |= routing_edge.supply == 0;
+      candidate_cost.is_overflow |= edge_cost.is_overflow;
+      candidate_cost.total_cost += edge_cost.getTotalCost(overflow_unit, routing_edge.congestion_cost);
+      candidate_cost.saturation_edge_num += edge_cost.is_saturated;
+      candidate_cost.hotspot_edge_num += edge_cost.is_hotspot;
     }
   }
-  return false;
+
+  pr_candidate.set_candidate_cost(candidate_cost);
 }
 
-std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(double overflow_unit, PRNet& pr_net, PRTopoMode pr_topo_mode)
+bool PlanarRouter::isBetterCandidate(double corner_weight, const PRCandidate& candidate, const PRCandidate& best_candidate)
 {
-  std::vector<PlanarCoord> planar_coord_list;
-  {
-    for (Pin& pin : pr_net.get_pin_list()) {
-      planar_coord_list.push_back(pin.get_access_point().get_grid_coord());
-    }
-    std::ranges::sort(planar_coord_list, CmpPlanarCoordByXASC());
-    planar_coord_list.erase(std::ranges::unique(planar_coord_list).begin(), planar_coord_list.end());
+  constexpr double score_epsilon = 1e-9;
+
+  if (candidate.get_is_path_blocked() != best_candidate.get_is_path_blocked()) {
+    return !candidate.get_is_path_blocked();
   }
-  TBTask tb_task;
-  tb_task.set_planar_coord_list(planar_coord_list);
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  tb_task.set_planar_search_region(PlanarRect(0, 0, gcell_map.get_x_size() - 1, gcell_map.get_y_size() - 1));
-  tb_task.set_point_legal_query([this](const PlanarCoord& coord) {
-    return std::ranges::none_of(_macro_grid_rect_list, [&](const PlanarRect& macro_rect) {
-      return macro_rect.get_ll_x() <= coord.get_x() && coord.get_x() <= macro_rect.get_ur_x() && macro_rect.get_ll_y() <= coord.get_y()
-             && coord.get_y() <= macro_rect.get_ur_y();
-    });
-  });
-  bool refine_topology = pr_topo_mode == PRTopoMode::kCongestion && shouldRefineTopology(overflow_unit, pr_net, planar_coord_list.size());
-  tb_task.set_topo_mode(refine_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
-  if (!refine_topology) {
-    return RTTB.getPlanarTopoList(tb_task);
+  if (candidate.get_is_overflow() != best_candidate.get_is_overflow()) {
+    return !candidate.get_is_overflow();
   }
 
-  TBSegmentCostQuery segment_cost_query = [this, overflow_unit, &pr_net](const PlanarCoord& first, const PlanarCoord& second) {
-    return getTopologySegmentCost(overflow_unit, pr_net, first, second);
-  };
-  PRTopologyCostCache topology_cost_cache(std::move(segment_cost_query));
-  tb_task.set_segment_cost_query(
-      [&topology_cost_cache](const PlanarCoord& first, const PlanarCoord& second) { return topology_cost_cache.getCost(first, second); });
-  return RTTB.getPlanarTopoList(tb_task);
+  double candidate_score = candidate.get_total_wire_length() + candidate.get_total_cost() + (corner_weight * candidate.get_total_corner_num());
+  double best_score = best_candidate.get_total_wire_length() + best_candidate.get_total_cost() + (corner_weight * best_candidate.get_total_corner_num());
+  if (!(std::abs(candidate_score - best_score) < score_epsilon)) {
+    return candidate_score < best_score;
+  }
+  if (candidate.get_saturation_edge_num() != best_candidate.get_saturation_edge_num()) {
+    return candidate.get_saturation_edge_num() < best_candidate.get_saturation_edge_num();
+  }
+  if (candidate.get_hotspot_edge_num() != best_candidate.get_hotspot_edge_num()) {
+    return candidate.get_hotspot_edge_num() < best_candidate.get_hotspot_edge_num();
+  }
+  return candidate.get_total_wire_length() < best_candidate.get_total_wire_length();
 }
 
-std::vector<Segment<PlanarCoord>> PlanarRouter::getRoutingSegmentListByAStar(const PRComParam& pr_com_param, const PRNet& pr_net,
-                                                                             const Segment<PlanarCoord>& planar_topo,
-                                                                             const std::vector<Segment<PlanarCoord>>& routed_segment_list)
+std::vector<Segment<PlanarCoord>> PlanarRouter::routeSegmentListByAStar(PRGridGraph::NetRouteTrial& trial, PRNet& pr_net)
 {
-  PlanarCoord start_coord = planar_topo.get_first();
-  PlanarCoord end_coord = planar_topo.get_second();
-  if (start_coord == end_coord) {
+  const std::vector<PlanarCoord>& node_coord_list = pr_net.get_node_coord_list();
+  if (node_coord_list.size() <= 1) {
     return {};
   }
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
-  int32_t max_search_margin = std::max(gcell_map.get_x_size(), gcell_map.get_y_size());
-  int32_t search_margin_step = std::max(1, pr_com_param.get_astar_search_margin());
-  int32_t search_margin = std::min(max_search_margin, search_margin_step);
-  PlanarRect base_rect = getAStarBaseRect(planar_topo);
 
-  const PRAStarTask astar_task = initPRAStarTask(planar_topo, routed_segment_list);
-  while (true) {
-    PlanarRect search_rect(std::max(0, base_rect.get_ll_x() - search_margin), std::max(0, base_rect.get_ll_y() - search_margin),
-                           std::min(gcell_map.get_x_size() - 1, base_rect.get_ur_x() + search_margin),
-                           std::min(gcell_map.get_y_size() - 1, base_rect.get_ur_y() + search_margin));
-    if (!prepareAStarWorkspace(search_rect, _astar_workspace)) {
-      return {};
-    }
-    std::vector<Segment<PlanarCoord>> routing_segment_list;
-    if (searchRoutingSegmentByAStar(pr_com_param, pr_net, astar_task, _astar_workspace, routing_segment_list)) {
-      return routing_segment_list;
-    }
-    if (search_rect.get_ll_x() == 0 && search_rect.get_ll_y() == 0 && search_rect.get_ur_x() == gcell_map.get_x_size() - 1
-        && search_rect.get_ur_y() == gcell_map.get_y_size() - 1) {
-      return {};
-    }
-    search_margin = std::min(max_search_margin, search_margin + search_margin_step);
-  }
-}
-
-PRAStarTask PlanarRouter::initPRAStarTask(const Segment<PlanarCoord>& planar_topo, const std::vector<Segment<PlanarCoord>>& routed_segment_list)
-{
   PRAStarTask astar_task;
-  astar_task.start_coord = planar_topo.get_first();
-  astar_task.end_coord = planar_topo.get_second();
-  astar_task.has_owned_rect = !routed_segment_list.empty();
-  if (astar_task.has_owned_rect) {
-    PlanarCoord first_coord = routed_segment_list.front().get_first();
-    astar_task.owned_rect = PlanarRect(first_coord.get_x(), first_coord.get_y(), first_coord.get_x(), first_coord.get_y());
-    for (const Segment<PlanarCoord>& segment : routed_segment_list) {
-      for (PlanarCoord coord : {segment.get_first(), segment.get_second()}) {
-        astar_task.owned_rect.set_ll_x(std::min(astar_task.owned_rect.get_ll_x(), coord.get_x()));
-        astar_task.owned_rect.set_ll_y(std::min(astar_task.owned_rect.get_ll_y(), coord.get_y()));
-        astar_task.owned_rect.set_ur_x(std::max(astar_task.owned_rect.get_ur_x(), coord.get_x()));
-        astar_task.owned_rect.set_ur_y(std::max(astar_task.owned_rect.get_ur_y(), coord.get_y()));
-      }
+  astar_task.source_coord_set.insert(getAStarSeedCoord(node_coord_list));
+  astar_task.sink_coord_set.insert(node_coord_list.begin(), node_coord_list.end());
+  astar_task.sink_coord_set.erase(*astar_task.source_coord_set.begin());
+
+  PRAStarSearchArea search_area;
+  search_area.search_rect = getAStarBaseRect(node_coord_list);
+  prepareAStarScratch(search_area);
+
+  std::vector<Segment<PlanarCoord>> routing_segment_list;
+  while (!astar_task.sink_coord_set.empty()) {
+    std::vector<PlanarCoord> path_coord_list = searchAStarPath(trial, astar_task, search_area);
+    if (path_coord_list.empty()) {
+      return {};
+    }
+    std::vector<Segment<PlanarCoord>> connect_segment_list = getRoutingSegmentListByCoordList(path_coord_list);
+    trial.append(connect_segment_list);
+    routing_segment_list.insert(routing_segment_list.end(), connect_segment_list.begin(), connect_segment_list.end());
+    for (const Segment<PlanarCoord>& connect_segment : connect_segment_list) {
+      astar_task.source_coord_set.insert(connect_segment.get_first());
+      astar_task.source_coord_set.insert(connect_segment.get_second());
+    }
+    astar_task.sink_coord_set.erase(path_coord_list.back());
+  }
+  return routing_segment_list;
+}
+
+PlanarCoord PlanarRouter::getAStarSeedCoord(const std::vector<PlanarCoord>& node_coord_list)
+{
+  PlanarCoord center_coord = RTUTIL.getBoundingBox(node_coord_list).getMidPoint();
+  PlanarCoord seed_coord = node_coord_list.front();
+  int32_t min_distance = RTUTIL.getManhattanDistance(center_coord, seed_coord);
+  for (const PlanarCoord& node_coord : node_coord_list) {
+    int32_t distance = RTUTIL.getManhattanDistance(center_coord, node_coord);
+    if (distance < min_distance) {
+      min_distance = distance;
+      seed_coord = node_coord;
     }
   }
-  return astar_task;
+  return seed_coord;
 }
 
-bool PlanarRouter::prepareAStarWorkspace(const PlanarRect& workspace_rect, PRAStarWorkspace& workspace)
+PlanarRect PlanarRouter::getAStarBaseRect(const std::vector<PlanarCoord>& node_coord_list)
 {
-  workspace.workspace_rect = workspace_rect;
-  workspace.x_size = (workspace_rect.get_ur_x() - workspace_rect.get_ll_x()) + 1;
-  workspace.y_size = (workspace_rect.get_ur_y() - workspace_rect.get_ll_y()) + 1;
-  if (workspace.x_size <= 0 || workspace.y_size <= 0) {
-    RTLOG.error(Loc::current(), "The A* workspace is empty!");
-    return false;
+  PlanarRect node_rect = RTUTIL.getBoundingBox(node_coord_list);
+  PlanarRect search_rect = node_rect;
+  for (const PlanarRect& macro_grid_rect : _grid_graph.get_macro_grid_rect_list()) {
+    if (!RTUTIL.isClosedOverlap(node_rect, macro_grid_rect)) {
+      continue;
+    }
+    search_rect.set_ll_x(std::min(search_rect.get_ll_x(), macro_grid_rect.get_ll_x()));
+    search_rect.set_ll_y(std::min(search_rect.get_ll_y(), macro_grid_rect.get_ll_y()));
+    search_rect.set_ur_x(std::max(search_rect.get_ur_x(), macro_grid_rect.get_ur_x()));
+    search_rect.set_ur_y(std::max(search_rect.get_ur_y(), macro_grid_rect.get_ur_y()));
   }
-  int64_t cell_num = static_cast<int64_t>(workspace.x_size) * workspace.y_size;
-  if (cell_num > INT_MAX / 2) {
-    RTLOG.error(Loc::current(), "The A* workspace is too large!");
-    return false;
-  }
-  auto state_num = static_cast<size_t>(cell_num * 2);
-  if (workspace.state_list.size() < state_num) {
-    workspace.state_list.resize(state_num);
-  }
-  return true;
+
+  int32_t search_margin = _pr_com_param.get_astar_search_margin();
+  search_rect.set_ll_x(std::max(0, search_rect.get_ll_x() - search_margin));
+  search_rect.set_ll_y(std::max(0, search_rect.get_ll_y() - search_margin));
+  search_rect.set_ur_x(std::min(_grid_graph.get_x_size() - 1, search_rect.get_ur_x() + search_margin));
+  search_rect.set_ur_y(std::min(_grid_graph.get_y_size() - 1, search_rect.get_ur_y() + search_margin));
+  return search_rect;
 }
 
-int32_t PlanarRouter::getAStarStateIndex(const PRAStarWorkspace& workspace, const PlanarCoord& coord, bool is_horizontal)
+void PlanarRouter::prepareAStarScratch(PRAStarSearchArea& search_area)
 {
-  int32_t local_x = coord.get_x() - workspace.workspace_rect.get_ll_x();
-  int32_t local_y = coord.get_y() - workspace.workspace_rect.get_ll_y();
-  if (local_x < 0 || workspace.x_size <= local_x || local_y < 0 || workspace.y_size <= local_y) {
-    RTLOG.error(Loc::current(), "The A* node is outside the workspace!");
+  search_area.x_size = search_area.search_rect.get_ur_x() - search_area.search_rect.get_ll_x() + 1;
+  search_area.y_size = search_area.search_rect.get_ur_y() - search_area.search_rect.get_ll_y() + 1;
+  auto state_num = static_cast<size_t>(search_area.x_size) * search_area.y_size * 2;
+  if (_astar_scratch.state_list.size() < state_num) {
+    _astar_scratch.state_list.resize(state_num);
   }
-  return (((local_x * workspace.y_size) + local_y) * 2) + (is_horizontal ? 1 : 0);
 }
 
-PlanarCoord PlanarRouter::getAStarStateCoord(const PRAStarWorkspace& workspace, int32_t state_idx)
+std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRouteTrial& trial, const PRAStarTask& astar_task,
+                                                      const PRAStarSearchArea& search_area)
 {
-  int64_t state_num = static_cast<int64_t>(workspace.x_size) * workspace.y_size * 2;
-  if (state_idx < 0 || state_num <= state_idx) {
-    RTLOG.error(Loc::current(), "The A* state index is outside the workspace!");
+  std::set<int32_t> sink_cell_idx_set;
+  for (const PlanarCoord& sink_coord : astar_task.sink_coord_set) {
+    sink_cell_idx_set.insert(getAStarStateIndex(search_area, sink_coord, false) / 2);
   }
-  int32_t cell_idx = state_idx / 2;
-  return {workspace.workspace_rect.get_ll_x() + (cell_idx / workspace.y_size), workspace.workspace_rect.get_ll_y() + (cell_idx % workspace.y_size)};
-}
 
-inline PRAStarState& PlanarRouter::getAStarState(PRAStarWorkspace& workspace, int32_t state_idx)
-{
-  PRAStarState& state = workspace.state_list[state_idx];
-  if (state.search_stamp != workspace.search_stamp) {
-    state.search_stamp = workspace.search_stamp;
-    state.closed = false;
-    state.parent_state_idx = -1;
-    state.known_cost = DBL_MAX;
-  }
-  return state;
-}
-
-inline int32_t PlanarRouter::getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord, bool has_owned_edge)
-{
-  const PlanarCoord& end_coord = astar_task.end_coord;
-  int32_t direct_distance = RTUTIL.getManhattanDistance(coord, end_coord);
-  if (!has_owned_edge) {
-    return direct_distance;
-  }
-  if (!astar_task.has_owned_rect) {
-    return 0;
-  }
-  int32_t coord_dx = std::max({astar_task.owned_rect.get_ll_x() - coord.get_x(), 0, coord.get_x() - astar_task.owned_rect.get_ur_x()});
-  int32_t coord_dy = std::max({astar_task.owned_rect.get_ll_y() - coord.get_y(), 0, coord.get_y() - astar_task.owned_rect.get_ur_y()});
-  int32_t end_dx = std::max({astar_task.owned_rect.get_ll_x() - end_coord.get_x(), 0, end_coord.get_x() - astar_task.owned_rect.get_ur_x()});
-  int32_t end_dy = std::max({astar_task.owned_rect.get_ll_y() - end_coord.get_y(), 0, end_coord.get_y() - astar_task.owned_rect.get_ur_y()});
-  return std::min(direct_distance, coord_dx + coord_dy + end_dx + end_dy);
-}
-
-bool PlanarRouter::searchRoutingSegmentByAStar(const PRComParam& pr_com_param, const PRNet& pr_net, const PRAStarTask& astar_task, PRAStarWorkspace& workspace,
-                                               std::vector<Segment<PlanarCoord>>& routing_segment_list)
-{
-  const PlanarCoord& start_coord = astar_task.start_coord;
-  const PlanarCoord& end_coord = astar_task.end_coord;
-  if (start_coord == end_coord || !RTUTIL.isInside(workspace.workspace_rect, start_coord) || !RTUTIL.isInside(workspace.workspace_rect, end_coord)) {
-    return false;
-  }
-  workspace.search_stamp++;
-  if (workspace.search_stamp == 0) {
-    for (PRAStarState& state : workspace.state_list) {
+  _astar_scratch.search_stamp++;
+  if (_astar_scratch.search_stamp == 0) {
+    for (PRAStarState& state : _astar_scratch.state_list) {
       state.search_stamp = 0;
     }
-    workspace.search_stamp = 1;
+    _astar_scratch.search_stamp = 1;
   }
-  workspace.open_heap.clear();
+  _astar_scratch.open_heap.clear();
 
   CmpPRAStarQueueNode cmp_queue_node;
-  int32_t start_cell_idx = getAStarStateIndex(workspace, start_coord, false) / 2;
-  int32_t end_cell_idx = getAStarStateIndex(workspace, end_coord, false) / 2;
-  const std::unordered_set<RoutingEdge*>& routing_edge_set = pr_net.get_routing_edge_set();
-  bool has_owned_edge = !routing_edge_set.empty();
-  double estimated_cost = getAStarEstimatedCost(astar_task, start_coord, has_owned_edge);
-  for (int32_t direction_idx = 0; direction_idx < 2; direction_idx++) {
-    int32_t start_state_idx = (start_cell_idx * 2) + direction_idx;
-    getAStarState(workspace, start_state_idx).known_cost = 0;
-    workspace.open_heap.push_back({start_state_idx, 0, estimated_cost});
+  for (const PlanarCoord& source_coord : astar_task.source_coord_set) {
+    int32_t source_cell_idx = getAStarStateIndex(search_area, source_coord, false) / 2;
+    double estimated_cost = getAStarEstimatedCost(astar_task, source_coord);
+    for (int32_t direction_idx = 0; direction_idx < 2; direction_idx++) {
+      int32_t source_state_idx = (source_cell_idx * 2) + direction_idx;
+      getAStarState(source_state_idx).known_cost = 0;
+      _astar_scratch.open_heap.push_back({source_state_idx, 0, estimated_cost});
+    }
   }
-  std::ranges::make_heap(workspace.open_heap, cmp_queue_node);
-  GridMap<RoutingEdge>& routing_h_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
-  GridMap<RoutingEdge>& routing_v_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
-  int32_t curr_net_idx = pr_net.get_net_idx();
-  double overflow_unit = pr_com_param.get_overflow_unit();
-  double corner_weight = pr_com_param.get_corner_weight();
-  int32_t workspace_ll_x = workspace.workspace_rect.get_ll_x();
-  int32_t workspace_ll_y = workspace.workspace_rect.get_ll_y();
+  std::ranges::make_heap(_astar_scratch.open_heap, cmp_queue_node);
+  int32_t curr_net_idx = trial.get_net_idx();
+  double overflow_unit = _pr_com_param.get_overflow_unit();
+  double corner_weight = _pr_com_param.get_corner_weight();
+  int32_t search_ll_x = search_area.search_rect.get_ll_x();
+  int32_t search_ll_y = search_area.search_rect.get_ll_y();
   constexpr std::array<std::pair<int32_t, int32_t>, 4> step_list = {{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}};
   int32_t end_state_idx = -1;
-  while (!workspace.open_heap.empty()) {
-    std::ranges::pop_heap(workspace.open_heap, cmp_queue_node);
-    PRAStarQueueNode queue_node = workspace.open_heap.back();
-    workspace.open_heap.pop_back();
+  while (!_astar_scratch.open_heap.empty()) {
+    std::ranges::pop_heap(_astar_scratch.open_heap, cmp_queue_node);
+    PRAStarQueueNode queue_node = _astar_scratch.open_heap.back();
+    _astar_scratch.open_heap.pop_back();
 
-    PRAStarState& curr_state = getAStarState(workspace, queue_node.state_idx);
+    PRAStarState& curr_state = getAStarState(queue_node.state_idx);
     if (curr_state.closed || queue_node.known_cost != curr_state.known_cost) {
       continue;
     }
     int32_t curr_cell_idx = queue_node.state_idx / 2;
     int32_t other_state_idx = queue_node.state_idx ^ 1;
-    PRAStarState& other_state = getAStarState(workspace, other_state_idx);
+    PRAStarState& other_state = getAStarState(other_state_idx);
     double dominated_cost = other_state.known_cost + corner_weight;
     if (curr_state.known_cost > dominated_cost || (curr_state.known_cost == dominated_cost && (corner_weight > 0 || queue_node.state_idx > other_state_idx))) {
       curr_state.closed = true;
       continue;
     }
     curr_state.closed = true;
-    if (curr_cell_idx == end_cell_idx) {
+    if (sink_cell_idx_set.contains(curr_cell_idx)) {
       end_state_idx = queue_node.state_idx;
       break;
     }
 
-    int32_t curr_local_x = curr_cell_idx / workspace.y_size;
-    int32_t curr_local_y = curr_cell_idx % workspace.y_size;
-    int32_t curr_x = workspace_ll_x + curr_local_x;
-    int32_t curr_y = workspace_ll_y + curr_local_y;
+    int32_t curr_local_x = curr_cell_idx / search_area.y_size;
+    int32_t curr_local_y = curr_cell_idx % search_area.y_size;
+    int32_t curr_x = search_ll_x + curr_local_x;
+    int32_t curr_y = search_ll_y + curr_local_y;
     bool curr_is_horizontal = queue_node.state_idx % 2 == 1;
     double turn_known_cost = curr_state.known_cost + corner_weight;
     for (auto [step_x, step_y] : step_list) {
@@ -893,29 +628,29 @@ bool PlanarRouter::searchRoutingSegmentByAStar(const PRComParam& pr_com_param, c
       }
       int32_t neighbor_local_x = curr_local_x + step_x;
       int32_t neighbor_local_y = curr_local_y + step_y;
-      if (neighbor_local_x < 0 || workspace.x_size <= neighbor_local_x || neighbor_local_y < 0 || workspace.y_size <= neighbor_local_y) {
+      if (neighbor_local_x < 0 || search_area.x_size <= neighbor_local_x || neighbor_local_y < 0 || search_area.y_size <= neighbor_local_y) {
         continue;
       }
 
-      int32_t neighbor_cell_idx = curr_cell_idx + (step_x * workspace.y_size) + step_y;
+      int32_t neighbor_cell_idx = curr_cell_idx + (step_x * search_area.y_size) + step_y;
       int32_t neighbor_state_idx = (neighbor_cell_idx * 2) + (is_horizontal ? 1 : 0);
-      PRAStarState& neighbor_state = getAStarState(workspace, neighbor_state_idx);
+      PRAStarState& neighbor_state = getAStarState(neighbor_state_idx);
       if (neighbor_state.closed) {
         continue;
       }
 
       int32_t neighbor_x = curr_x + step_x;
       int32_t neighbor_y = curr_y + step_y;
-      RoutingEdge& routing_edge
-          = is_horizontal ? routing_h_edge_map[std::min(curr_x, neighbor_x)][curr_y] : routing_v_edge_map[curr_x][std::min(curr_y, neighbor_y)];
-      bool is_owned = routing_edge_set.contains(&routing_edge);
-      bool is_ignored = routing_edge.get_ignore_net_set().contains(curr_net_idx);
-      if (!is_owned && routing_edge.get_supply() == 0 && !is_ignored) {
+      PREdgeId edge_id = _grid_graph.get_edge_id({curr_x, curr_y}, {neighbor_x, neighbor_y});
+      const PRGridEdge& routing_edge = _grid_graph.get_edge(edge_id);
+      bool is_owned = trial.get_new_edge_set().contains(edge_id);
+      bool is_ignored = routing_edge.ignore_net_set.contains(curr_net_idx);
+      if (!is_owned && routing_edge.supply == 0 && !is_ignored) {
         continue;
       }
       double step_cost = is_owned ? 0 : 1.0;
       if (!is_owned && !is_ignored) {
-        step_cost += getRoutingEdgeCost(routing_edge).getTotalCost(overflow_unit, routing_edge.get_congestion_cost());
+        step_cost += _grid_graph.get_edge_cost(trial, edge_id, overflow_unit) - 1.0;
       }
       if (curr_is_horizontal != is_horizontal) {
         step_cost += corner_weight;
@@ -923,7 +658,7 @@ bool PlanarRouter::searchRoutingSegmentByAStar(const PRComParam& pr_com_param, c
       double next_known_cost = curr_state.known_cost + step_cost;
       if (next_known_cost < neighbor_state.known_cost) {
         int32_t other_neighbor_state_idx = neighbor_state_idx ^ 1;
-        PRAStarState& other_neighbor_state = getAStarState(workspace, other_neighbor_state_idx);
+        PRAStarState& other_neighbor_state = getAStarState(other_neighbor_state_idx);
         double dominated_cost = other_neighbor_state.known_cost + corner_weight;
         if (next_known_cost > dominated_cost || (next_known_cost == dominated_cost && (corner_weight > 0 || neighbor_state_idx > other_neighbor_state_idx))) {
           continue;
@@ -931,52 +666,62 @@ bool PlanarRouter::searchRoutingSegmentByAStar(const PRComParam& pr_com_param, c
         neighbor_state.parent_state_idx = queue_node.state_idx;
         neighbor_state.known_cost = next_known_cost;
         PlanarCoord neighbor_coord(neighbor_x, neighbor_y);
-        double next_estimated_cost = getAStarEstimatedCost(astar_task, neighbor_coord, has_owned_edge);
-        workspace.open_heap.push_back({.state_idx = neighbor_state_idx, .known_cost = next_known_cost, .total_cost = next_known_cost + next_estimated_cost});
-        std::ranges::push_heap(workspace.open_heap, cmp_queue_node);
+        double next_estimated_cost = getAStarEstimatedCost(astar_task, neighbor_coord);
+        _astar_scratch.open_heap.push_back({.state_idx = neighbor_state_idx, .known_cost = next_known_cost, .total_cost = next_known_cost + next_estimated_cost});
+        std::ranges::push_heap(_astar_scratch.open_heap, cmp_queue_node);
       }
     }
   }
 
-  if (end_state_idx == -1) {
-    return false;
-  }
-
   std::vector<PlanarCoord> coord_list;
   int32_t curr_state_idx = end_state_idx;
-  while (true) {
-    coord_list.push_back(getAStarStateCoord(workspace, curr_state_idx));
-    if (curr_state_idx / 2 == start_cell_idx) {
-      break;
-    }
-    curr_state_idx = getAStarState(workspace, curr_state_idx).parent_state_idx;
-    if (curr_state_idx == -1) {
-      return false;
-    }
+  while (curr_state_idx != -1) {
+    coord_list.push_back(getAStarStateCoord(search_area, curr_state_idx));
+    curr_state_idx = getAStarState(curr_state_idx).parent_state_idx;
   }
   std::ranges::reverse(coord_list);
-  routing_segment_list = getRoutingSegmentListByCoordList(coord_list);
-  return !routing_segment_list.empty();
+  return coord_list;
 }
 
-PlanarRect PlanarRouter::getAStarBaseRect(const Segment<PlanarCoord>& planar_topo)
+int32_t PlanarRouter::getAStarStateIndex(const PRAStarSearchArea& search_area, const PlanarCoord& coord, bool is_horizontal)
 {
-  PlanarCoord first_coord = planar_topo.get_first();
-  PlanarCoord second_coord = planar_topo.get_second();
-
-  PlanarRect topo_rect(std::min(first_coord.get_x(), second_coord.get_x()), std::min(first_coord.get_y(), second_coord.get_y()),
-                       std::max(first_coord.get_x(), second_coord.get_x()), std::max(first_coord.get_y(), second_coord.get_y()));
-  PlanarRect search_rect = topo_rect;
-  for (const PlanarRect& body_grid_rect : _macro_grid_rect_list) {
-    if (!RTUTIL.isClosedOverlap(topo_rect, body_grid_rect) && !RTUTIL.isInside(body_grid_rect, first_coord) && !RTUTIL.isInside(body_grid_rect, second_coord)) {
-      continue;
-    }
-    search_rect.set_ll_x(std::min(search_rect.get_ll_x(), body_grid_rect.get_ll_x()));
-    search_rect.set_ll_y(std::min(search_rect.get_ll_y(), body_grid_rect.get_ll_y()));
-    search_rect.set_ur_x(std::max(search_rect.get_ur_x(), body_grid_rect.get_ur_x()));
-    search_rect.set_ur_y(std::max(search_rect.get_ur_y(), body_grid_rect.get_ur_y()));
+  int32_t local_x = coord.get_x() - search_area.search_rect.get_ll_x();
+  int32_t local_y = coord.get_y() - search_area.search_rect.get_ll_y();
+  if (local_x < 0 || search_area.x_size <= local_x || local_y < 0 || search_area.y_size <= local_y) {
+    RTLOG.error(Loc::current(), "The A* node is outside the search area!");
   }
-  return search_rect;
+  return (((local_x * search_area.y_size) + local_y) * 2) + (is_horizontal ? 1 : 0);
+}
+
+PlanarCoord PlanarRouter::getAStarStateCoord(const PRAStarSearchArea& search_area, int32_t state_idx)
+{
+  int64_t state_num = static_cast<int64_t>(search_area.x_size) * search_area.y_size * 2;
+  if (state_idx < 0 || state_num <= state_idx) {
+    RTLOG.error(Loc::current(), "The A* state index is outside the workspace!");
+  }
+  int32_t cell_idx = state_idx / 2;
+  return {search_area.search_rect.get_ll_x() + (cell_idx / search_area.y_size), search_area.search_rect.get_ll_y() + (cell_idx % search_area.y_size)};
+}
+
+inline PRAStarState& PlanarRouter::getAStarState(int32_t state_idx)
+{
+  PRAStarState& state = _astar_scratch.state_list[state_idx];
+  if (state.search_stamp != _astar_scratch.search_stamp) {
+    state.search_stamp = _astar_scratch.search_stamp;
+    state.closed = false;
+    state.parent_state_idx = -1;
+    state.known_cost = DBL_MAX;
+  }
+  return state;
+}
+
+inline int32_t PlanarRouter::getAStarEstimatedCost(const PRAStarTask& astar_task, const PlanarCoord& coord)
+{
+  int32_t min_distance = INT_MAX;
+  for (const PlanarCoord& sink_coord : astar_task.sink_coord_set) {
+    min_distance = std::min(min_distance, RTUTIL.getManhattanDistance(coord, sink_coord));
+  }
+  return min_distance;
 }
 
 std::vector<Segment<PlanarCoord>> PlanarRouter::getRoutingSegmentListByCoordList(const std::vector<PlanarCoord>& coord_list)
@@ -1186,57 +931,6 @@ void PlanarRouter::addPRCandidateListByOuter3Bends(std::vector<PRCandidate>& pr_
   }
 }
 
-void PlanarRouter::updatePRCandidate(double overflow_unit, const PRNet& pr_net, PRCandidate& pr_candidate)
-{
-  int32_t curr_net_idx = pr_net.get_net_idx();
-
-  const std::unordered_set<RoutingEdge*>& routing_edge_set = pr_net.get_routing_edge_set();
-
-  PRCandidateCost candidate_cost;
-  Direction pre_direction = Direction::kNone;
-  for (Segment<PlanarCoord>& coord_segment : pr_candidate.get_routing_segment_list()) {
-    PlanarCoord& first_coord = coord_segment.get_first();
-    PlanarCoord& second_coord = coord_segment.get_second();
-    if (!RTUTIL.isRightAngled(first_coord, second_coord)) {
-      RTLOG.error(Loc::current(), "The direction is error!");
-    }
-    Direction direction = RTUTIL.getDirection(first_coord, second_coord);
-    if (pre_direction != Direction::kNone && pre_direction != direction) {
-      candidate_cost.total_corner_num++;
-    }
-    pre_direction = direction;
-  }
-  GridMap<RoutingEdge>& routing_h_edge_map = RTDM.getDatabase().get_planar_routing_h_edge_map();
-  GridMap<RoutingEdge>& routing_v_edge_map = RTDM.getDatabase().get_planar_routing_v_edge_map();
-  for (Segment<PlanarCoord>& routing_segment : pr_candidate.get_routing_segment_list()) {
-    PlanarCoord first_coord = routing_segment.get_first();
-    PlanarCoord second_coord = routing_segment.get_second();
-    int32_t first_x = std::min(first_coord.get_x(), second_coord.get_x());
-    int32_t second_x = std::max(first_coord.get_x(), second_coord.get_x());
-    int32_t first_y = std::min(first_coord.get_y(), second_coord.get_y());
-    int32_t second_y = std::max(first_coord.get_y(), second_coord.get_y());
-    bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
-    int32_t first_idx = is_horizontal ? first_x : first_y;
-    int32_t second_idx = is_horizontal ? second_x : second_y;
-    for (int32_t idx = first_idx; idx < second_idx; idx++) {
-      RoutingEdge& routing_edge = is_horizontal ? routing_h_edge_map[idx][first_y] : routing_v_edge_map[first_x][idx];
-      bool is_owned = routing_edge_set.contains(&routing_edge);
-      candidate_cost.total_wire_length += !is_owned;
-      if (is_owned || routing_edge.get_ignore_net_set().contains(curr_net_idx)) {
-        continue;
-      }
-      const PREdgeCost edge_cost = getRoutingEdgeCost(routing_edge);
-      candidate_cost.is_path_blocked |= routing_edge.get_supply() == 0;
-      candidate_cost.is_overflow |= edge_cost.is_overflow;
-      candidate_cost.total_cost += edge_cost.getTotalCost(overflow_unit, routing_edge.get_congestion_cost());
-      candidate_cost.saturation_edge_num += edge_cost.is_saturated;
-      candidate_cost.hotspot_edge_num += edge_cost.is_hotspot;
-    }
-  }
-
-  pr_candidate.set_candidate_cost(candidate_cost);
-}
-
 MTree<PlanarCoord> PlanarRouter::getCoordTree(PRNet& pr_net, std::vector<Segment<PlanarCoord>>& routing_segment_list)
 {
   std::vector<PlanarCoord> candidate_root_coord_list;
@@ -1250,10 +944,10 @@ MTree<PlanarCoord> PlanarRouter::getCoordTree(PRNet& pr_net, std::vector<Segment
   return RTUTIL.getTreeByFullFlow(candidate_root_coord_list, routing_segment_list, key_coord_pin_map);
 }
 
-void PlanarRouter::uploadNetList(PRModel& pr_model)
+void PlanarRouter::uploadNetList()
 {
   std::map<int32_t, std::vector<Segment<LayerCoord>>> net_global_result_map;
-  for (PRNet& pr_net : pr_model.get_pr_net_list()) {
+  for (PRNet& pr_net : _pr_net_list) {
     int32_t net_idx = pr_net.get_net_idx();
     for (Segment<PlanarCoord>& routing_segment : pr_net.get_routing_segment_list()) {
       net_global_result_map[net_idx].emplace_back(LayerCoord(routing_segment.get_first(), 0), LayerCoord(routing_segment.get_second(), 0));
@@ -1262,12 +956,12 @@ void PlanarRouter::uploadNetList(PRModel& pr_model)
   RTDM.getDatabase().get_net_global_result_map() = std::move(net_global_result_map);
 }
 
-// exhibit
+#if 1  // exhibit
 
-void PlanarRouter::updateSummary(PRModel& pr_model)
+void PlanarRouter::updateSummary()
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
-  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  const PRGridGraph& grid_graph = _grid_graph;
   Summary& summary = RTDM.getDatabase().get_summary();
 
   double& total_demand = summary.pr_summary.total_demand;
@@ -1278,25 +972,24 @@ void PlanarRouter::updateSummary(PRModel& pr_model)
   total_overflow = 0;
   total_wire_length = 0;
 
-  for (GridMap<RoutingEdge>* routing_edge_map : {&RTDM.getDatabase().get_planar_routing_h_edge_map(), &RTDM.getDatabase().get_planar_routing_v_edge_map()}) {
-    for (int32_t x = 0; x < routing_edge_map->get_x_size(); x++) {
-      for (int32_t y = 0; y < routing_edge_map->get_y_size(); y++) {
-        RoutingEdge& routing_edge = (*routing_edge_map)[x][y];
-        total_demand += routing_edge.get_demand();
-        total_overflow += routing_edge.get_overflow();
-      }
-    }
+  for (const PRGridEdge& edge : grid_graph.get_horizontal_edge_list()) {
+    total_demand += edge.demand;
+    total_overflow += edge.get_overflow();
   }
-  for (PRNet& pr_net : pr_model.get_pr_net_list()) {
+  for (const PRGridEdge& edge : grid_graph.get_vertical_edge_list()) {
+    total_demand += edge.demand;
+    total_overflow += edge.get_overflow();
+  }
+  for (PRNet& pr_net : _pr_net_list) {
     for (Segment<PlanarCoord>& routing_segment : pr_net.get_routing_segment_list()) {
-      PlanarRect& first_gcell = gcell_map[routing_segment.get_first().get_x()][routing_segment.get_first().get_y()];
-      PlanarRect& second_gcell = gcell_map[routing_segment.get_second().get_x()][routing_segment.get_second().get_y()];
+      const PlanarRect& first_gcell = grid_graph.get_gcell_rect(routing_segment.get_first());
+      const PlanarRect& second_gcell = grid_graph.get_gcell_rect(routing_segment.get_second());
       total_wire_length += RTUTIL.getManhattanDistance(first_gcell.getMidPoint(), second_gcell.getMidPoint()) / 1.0 / micron_dbu;
     }
   }
 }
 
-void PlanarRouter::printSummary(PRModel& pr_model)
+void PlanarRouter::printSummary()
 {
   Summary& summary = RTDM.getDatabase().get_summary();
 
@@ -1314,7 +1007,7 @@ void PlanarRouter::printSummary(PRModel& pr_model)
   RTUTIL.printTableList({summary_table});
 }
 
-void PlanarRouter::outputGuide(PRModel& pr_model)
+void PlanarRouter::outputGuide()
 {
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
@@ -1327,8 +1020,6 @@ void PlanarRouter::outputGuide(PRModel& pr_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  std::vector<PRNet>& pr_net_list = pr_model.get_pr_net_list();
-
   std::ofstream* guide_file_stream = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, "route.guide"));
   if (guide_file_stream == nullptr) {
     return;
@@ -1338,7 +1029,7 @@ void PlanarRouter::outputGuide(PRModel& pr_model)
   RTUTIL.pushStream(guide_file_stream, "wire grid1_x grid1_y grid2_x grid2_y real1_x real1_y real2_x real2_y layer\n");
   RTUTIL.pushStream(guide_file_stream, "via grid_x grid_y real_x real_y layer1 layer2\n");
 
-  for (PRNet& pr_net : pr_net_list) {
+  for (PRNet& pr_net : _pr_net_list) {
     if (pr_net.get_routing_segment_list().empty()) {
       continue;
     }
@@ -1383,7 +1074,7 @@ void PlanarRouter::outputGuide(PRModel& pr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PlanarRouter::outputNetCSV(PRModel& pr_model)
+void PlanarRouter::outputNetCSV()
 {
   std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
   int32_t output_inter_result = RTDM.getConfig().output_inter_result;
@@ -1393,13 +1084,16 @@ void PlanarRouter::outputNetCSV(PRModel& pr_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  for (std::pair<std::string, GridMap<RoutingEdge>*> edge_map_pair : {std::make_pair("h_net_map.csv", &RTDM.getDatabase().get_planar_routing_h_edge_map()),
-                                                                      std::make_pair("v_net_map.csv", &RTDM.getDatabase().get_planar_routing_v_edge_map())}) {
-    std::ofstream* net_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, edge_map_pair.first));
-    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.second;
-    for (int32_t y = routing_edge_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        RTUTIL.pushStream(net_csv_file, routing_edge_map[x][y].get_demand(), ",");
+  const PRGridGraph& grid_graph = _grid_graph;
+  for (bool is_horizontal : {true, false}) {
+    std::string file_name = is_horizontal ? "h_net_map.csv" : "v_net_map.csv";
+    std::ofstream* net_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, file_name));
+    int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+    int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+    for (int32_t y = y_size - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < x_size; x++) {
+        const PRGridEdge& edge = is_horizontal ? grid_graph.get_horizontal_edge(x, y) : grid_graph.get_vertical_edge(x, y);
+        RTUTIL.pushStream(net_csv_file, edge.demand, ",");
       }
       RTUTIL.pushStream(net_csv_file, "\n");
     }
@@ -1408,7 +1102,7 @@ void PlanarRouter::outputNetCSV(PRModel& pr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PlanarRouter::outputOverflowCSV(PRModel& pr_model)
+void PlanarRouter::outputOverflowCSV()
 {
   std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
   int32_t output_inter_result = RTDM.getConfig().output_inter_result;
@@ -1418,14 +1112,16 @@ void PlanarRouter::outputOverflowCSV(PRModel& pr_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  for (std::pair<std::string, GridMap<RoutingEdge>*> edge_map_pair :
-       {std::make_pair("h_overflow_map.csv", &RTDM.getDatabase().get_planar_routing_h_edge_map()),
-        std::make_pair("v_overflow_map.csv", &RTDM.getDatabase().get_planar_routing_v_edge_map())}) {
-    std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, edge_map_pair.first));
-    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.second;
-    for (int32_t y = routing_edge_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        RTUTIL.pushStream(overflow_csv_file, routing_edge_map[x][y].get_overflow(), ",");
+  const PRGridGraph& grid_graph = _grid_graph;
+  for (bool is_horizontal : {true, false}) {
+    std::string file_name = is_horizontal ? "h_overflow_map.csv" : "v_overflow_map.csv";
+    std::ofstream* overflow_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(pr_temp_directory_path, file_name));
+    int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+    int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+    for (int32_t y = y_size - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < x_size; x++) {
+        const PRGridEdge& edge = is_horizontal ? grid_graph.get_horizontal_edge(x, y) : grid_graph.get_vertical_edge(x, y);
+        RTUTIL.pushStream(overflow_csv_file, edge.get_overflow(), ",");
       }
       RTUTIL.pushStream(overflow_csv_file, "\n");
     }
@@ -1434,23 +1130,26 @@ void PlanarRouter::outputOverflowCSV(PRModel& pr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PlanarRouter::outputUsageCSV(PRModel& pr_model)
+void PlanarRouter::outputUsageCSV()
 {
   std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  for (std::pair<std::string, GridMap<RoutingEdge>*> edge_map_pair : {std::make_pair("h_usage_map.csv", &RTDM.getDatabase().get_planar_routing_h_edge_map()),
-                                                                      std::make_pair("v_usage_map.csv", &RTDM.getDatabase().get_planar_routing_v_edge_map())}) {
-    std::ofstream csv_file(pr_temp_directory_path + edge_map_pair.first);
+  const PRGridGraph& grid_graph = _grid_graph;
+  for (bool is_horizontal : {true, false}) {
+    std::string file_name = is_horizontal ? "h_usage_map.csv" : "v_usage_map.csv";
+    std::ofstream csv_file(pr_temp_directory_path + file_name);
     if (!csv_file.is_open()) {
-      RTLOG.error(Loc::current(), "Failed to open file '", pr_temp_directory_path + edge_map_pair.first, "'!");
+      RTLOG.error(Loc::current(), "Failed to open file '", pr_temp_directory_path + file_name, "'!");
       continue;
     }
-    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.second;
-    for (int32_t y = routing_edge_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        csv_file << routing_edge_map[x][y].get_demand() << ",";
+    int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+    int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+    for (int32_t y = y_size - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < x_size; x++) {
+        const PRGridEdge& edge = is_horizontal ? grid_graph.get_horizontal_edge(x, y) : grid_graph.get_vertical_edge(x, y);
+        csv_file << edge.demand << ",";
       }
       csv_file << "\n";
     }
@@ -1459,24 +1158,26 @@ void PlanarRouter::outputUsageCSV(PRModel& pr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PlanarRouter::outputCongestionCostCSV(PRModel& pr_model)
+void PlanarRouter::outputCongestionCostCSV()
 {
   std::string& pr_temp_directory_path = RTDM.getConfig().pr_temp_directory_path;
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  for (std::pair<std::string, GridMap<RoutingEdge>*> edge_map_pair :
-       {std::make_pair("h_congestion_cost_map.csv", &RTDM.getDatabase().get_planar_routing_h_edge_map()),
-        std::make_pair("v_congestion_cost_map.csv", &RTDM.getDatabase().get_planar_routing_v_edge_map())}) {
-    std::ofstream csv_file(pr_temp_directory_path + edge_map_pair.first);
+  const PRGridGraph& grid_graph = _grid_graph;
+  for (bool is_horizontal : {true, false}) {
+    std::string file_name = is_horizontal ? "h_congestion_cost_map.csv" : "v_congestion_cost_map.csv";
+    std::ofstream csv_file(pr_temp_directory_path + file_name);
     if (!csv_file.is_open()) {
-      RTLOG.error(Loc::current(), "Failed to open file '", pr_temp_directory_path + edge_map_pair.first, "'!");
+      RTLOG.error(Loc::current(), "Failed to open file '", pr_temp_directory_path + file_name, "'!");
       continue;
     }
-    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.second;
-    for (int32_t y = routing_edge_map.get_y_size() - 1; y >= 0; y--) {
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        csv_file << routing_edge_map[x][y].get_congestion_cost() << ",";
+    int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+    int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+    for (int32_t y = y_size - 1; y >= 0; y--) {
+      for (int32_t x = 0; x < x_size; x++) {
+        const PRGridEdge& edge = is_horizontal ? grid_graph.get_horizontal_edge(x, y) : grid_graph.get_vertical_edge(x, y);
+        csv_file << edge.congestion_cost << ",";
       }
       csv_file << "\n";
     }
@@ -1485,10 +1186,13 @@ void PlanarRouter::outputCongestionCostCSV(PRModel& pr_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-// debug
+#endif
 
-void PlanarRouter::debugPlotPRModel(std::string flag)
+#if 1  // debug
+
+void PlanarRouter::debugPlotPRGraph(std::string flag)
 {
+  const PRGridGraph& grid_graph = _grid_graph;
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
@@ -1511,25 +1215,25 @@ void PlanarRouter::debugPlotPRModel(std::string flag)
 
   // edge_axis
   {
-    for (std::pair<GridMap<RoutingEdge>*, bool> edge_map_pair : {std::make_pair(&RTDM.getDatabase().get_planar_routing_h_edge_map(), true),
-                                                                 std::make_pair(&RTDM.getDatabase().get_planar_routing_v_edge_map(), false)}) {
-      GPStruct edge_axis_struct(edge_map_pair.second ? "h_edge_axis" : "v_edge_axis");
-      GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.first;
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        for (int32_t y = 0; y < routing_edge_map.get_y_size(); y++) {
+    for (bool is_horizontal : {true, false}) {
+      GPStruct edge_axis_struct(is_horizontal ? "h_edge_axis" : "v_edge_axis");
+      int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+      int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+      for (int32_t x = 0; x < x_size; x++) {
+        for (int32_t y = 0; y < y_size; y++) {
           PlanarCoord first_grid_coord(x, y);
-          PlanarCoord second_grid_coord = edge_map_pair.second ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
+          PlanarCoord second_grid_coord = is_horizontal ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
           PlanarRect first_real_rect = RTUTIL.getRealRectByGCell(first_grid_coord, gcell_axis);
           PlanarRect second_real_rect = RTUTIL.getRealRectByGCell(second_grid_coord, gcell_axis);
           PlanarCoord first_coord = first_real_rect.getMidPoint();
           PlanarCoord second_coord = second_real_rect.getMidPoint();
-          PlanarRect edge_rect = edge_map_pair.second
+          PlanarRect edge_rect = is_horizontal
                                      ? PlanarRect(first_coord.get_x(), first_real_rect.get_ll_y(), second_coord.get_x(), first_real_rect.get_ur_y())
                                      : PlanarRect(first_real_rect.get_ll_x(), first_coord.get_y(), first_real_rect.get_ur_x(), second_coord.get_y());
 
           GPBoundary gp_boundary;
           gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(0));
-          gp_boundary.set_data_type(static_cast<int32_t>(edge_map_pair.second ? GPDataType::kHEdgeAxis : GPDataType::kVEdgeAxis));
+          gp_boundary.set_data_type(static_cast<int32_t>(is_horizontal ? GPDataType::kHEdgeAxis : GPDataType::kVEdgeAxis));
           gp_boundary.set_rect(edge_rect);
           edge_axis_struct.push(gp_boundary);
         }
@@ -1600,24 +1304,24 @@ void PlanarRouter::debugPlotPRModel(std::string flag)
 
   // routing_edge
   {
-    for (std::pair<GridMap<RoutingEdge>*, bool> edge_map_pair : {std::make_pair(&RTDM.getDatabase().get_planar_routing_h_edge_map(), true),
-                                                                 std::make_pair(&RTDM.getDatabase().get_planar_routing_v_edge_map(), false)}) {
-      GPStruct routing_edge_struct(edge_map_pair.second ? "h_edge_info" : "v_edge_info");
-      GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.first;
-      for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-        for (int32_t y = 0; y < routing_edge_map.get_y_size(); y++) {
-          RoutingEdge& routing_edge = routing_edge_map[x][y];
+    for (bool is_horizontal : {true, false}) {
+      GPStruct routing_edge_struct(is_horizontal ? "h_edge_info" : "v_edge_info");
+      int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+      int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+      for (int32_t x = 0; x < x_size; x++) {
+        for (int32_t y = 0; y < y_size; y++) {
+          const PRGridEdge& routing_edge = is_horizontal ? grid_graph.get_horizontal_edge(x, y) : grid_graph.get_vertical_edge(x, y);
           PlanarCoord first_grid_coord(x, y);
-          PlanarCoord second_grid_coord = edge_map_pair.second ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
+          PlanarCoord second_grid_coord = is_horizontal ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
           PlanarRect first_real_rect = RTUTIL.getRealRectByGCell(first_grid_coord, gcell_axis);
           PlanarRect second_real_rect = RTUTIL.getRealRectByGCell(second_grid_coord, gcell_axis);
           PlanarCoord first_coord = first_real_rect.getMidPoint();
           PlanarCoord second_coord = second_real_rect.getMidPoint();
-          PlanarRect edge_rect = edge_map_pair.second
+          PlanarRect edge_rect = is_horizontal
                                      ? PlanarRect(first_coord.get_x(), first_real_rect.get_ll_y(), second_coord.get_x(), first_real_rect.get_ur_y())
                                      : PlanarRect(first_real_rect.get_ll_x(), first_coord.get_y(), first_real_rect.get_ur_x(), second_coord.get_y());
 
-          int32_t info_data_type = static_cast<int32_t>(edge_map_pair.second ? GPDataType::kHEdgeInfo : GPDataType::kVEdgeInfo);
+          int32_t info_data_type = static_cast<int32_t>(is_horizontal ? GPDataType::kHEdgeInfo : GPDataType::kVEdgeInfo);
           GPBoundary gp_boundary;
           gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(0));
           gp_boundary.set_data_type(info_data_type);
@@ -1625,21 +1329,21 @@ void PlanarRouter::debugPlotPRModel(std::string flag)
           routing_edge_struct.push(gp_boundary);
 
           std::string ignore_net_message;
-          for (int32_t net_idx : routing_edge.get_ignore_net_set()) {
+          for (int32_t net_idx : routing_edge.ignore_net_set) {
             ignore_net_message += RTUTIL.getString(ignore_net_message.empty() ? "" : ",", net_idx);
           }
           std::string demand_net_message;
-          for (int32_t net_idx : routing_edge.get_demand_net_idx_list()) {
+          for (int32_t net_idx : routing_edge.demand_net_idx_list) {
             demand_net_message += RTUTIL.getString(demand_net_message.empty() ? "" : ",", net_idx);
           }
           std::vector<std::string> message_list;
-          message_list.push_back(RTUTIL.getString(edge_map_pair.second ? "H" : "V", " (", first_grid_coord.get_x(), ",", first_grid_coord.get_y(), ")-(",
+          message_list.push_back(RTUTIL.getString(is_horizontal ? "H" : "V", " (", first_grid_coord.get_x(), ",", first_grid_coord.get_y(), ")-(",
                                                   second_grid_coord.get_x(), ",", second_grid_coord.get_y(), ")"));
-          message_list.push_back(RTUTIL.getString("demand: ", routing_edge.get_demand()));
+          message_list.push_back(RTUTIL.getString("demand: ", routing_edge.demand));
           message_list.push_back(RTUTIL.getString("demand_net: [", demand_net_message, "]"));
-          message_list.push_back(RTUTIL.getString("supply: ", routing_edge.get_supply()));
+          message_list.push_back(RTUTIL.getString("supply: ", routing_edge.supply));
           message_list.push_back(RTUTIL.getString("ignore_net: [", ignore_net_message, "]"));
-          message_list.push_back(RTUTIL.getString("congestion_cost: ", routing_edge.get_congestion_cost()));
+          message_list.push_back(RTUTIL.getString("congestion_cost: ", routing_edge.congestion_cost));
 
           int32_t text_y = edge_rect.get_ur_y();
           int32_t y_reduced_span = std::max(1, edge_rect.getYSpan() / 7);
@@ -1692,17 +1396,17 @@ void PlanarRouter::debugPlotPRModel(std::string flag)
   }
 
   GPStruct overflow_struct("overflow");
-  for (std::pair<GridMap<RoutingEdge>*, bool> edge_map_pair : {std::make_pair(&RTDM.getDatabase().get_planar_routing_h_edge_map(), true),
-                                                               std::make_pair(&RTDM.getDatabase().get_planar_routing_v_edge_map(), false)}) {
-    GridMap<RoutingEdge>& routing_edge_map = *edge_map_pair.first;
-    for (int32_t x = 0; x < routing_edge_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < routing_edge_map.get_y_size(); y++) {
-        RoutingEdge& routing_edge = routing_edge_map[x][y];
-        if (routing_edge.get_overflow() <= 0) {
+  for (bool is_horizontal : {true, false}) {
+    int32_t x_size = is_horizontal ? grid_graph.get_horizontal_x_size() : grid_graph.get_x_size();
+    int32_t y_size = is_horizontal ? grid_graph.get_y_size() : grid_graph.get_vertical_y_size();
+    for (int32_t x = 0; x < x_size; x++) {
+      for (int32_t y = 0; y < y_size; y++) {
+        const PRGridEdge& edge = is_horizontal ? grid_graph.get_horizontal_edge(x, y) : grid_graph.get_vertical_edge(x, y);
+        if (edge.get_overflow() <= 0) {
           continue;
         }
         PlanarCoord first_coord(x, y);
-        PlanarCoord second_coord = edge_map_pair.second ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
+        PlanarCoord second_coord = is_horizontal ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
         PlanarRect edge_rect = RTUTIL.getBoundingBox({RTUTIL.getRealRectByGCell(first_coord, gcell_axis), RTUTIL.getRealRectByGCell(second_coord, gcell_axis)});
 
         GPBoundary gp_boundary;
@@ -1715,8 +1419,10 @@ void PlanarRouter::debugPlotPRModel(std::string flag)
   }
   gp_gds.addStruct(overflow_struct);
 
-  std::string gds_file_path = RTUTIL.getString(pr_temp_directory_path, flag, "_pr_model.gds");
+  std::string gds_file_path = RTUTIL.getString(pr_temp_directory_path, flag, "_pr_graph.gds");
   RTGP.plot(gp_gds, gds_file_path);
 }
+
+#endif
 
 }  // namespace irt
