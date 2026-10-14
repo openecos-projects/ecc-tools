@@ -164,6 +164,15 @@ auto Design::clone() const -> std::unique_ptr<Design>
       }
     }
     cloned_net->set_loads(cloned_loads);
+    std::vector<Pin*> cloned_ignore_loads;
+    cloned_ignore_loads.reserve(net->get_ignore_loads().size());
+    for (const auto* ignore_load : net->get_ignore_loads()) {
+      if (const auto load_iter = pin_map.find(ignore_load); load_iter != pin_map.end()) {
+        cloned_ignore_loads.push_back(load_iter->second);
+        load_iter->second->set_net(cloned_net);
+      }
+    }
+    cloned_net->set_ignore_loads(cloned_ignore_loads);
     net_map.emplace(net, cloned_net);
   }
 

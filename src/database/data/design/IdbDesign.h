@@ -220,6 +220,9 @@ class IdbDesign
   std::size_t disconnectAllPinsFromNet(IdbNet* net);
   bool removeNetSafe(const std::string& net_name);
   bool renameNet(IdbNet* net, const std::string& new_name);
+  // Run after importing or completing a topology edit, before building timing/parasitic views.
+  // Keep DEF and Verilog in one namespace without changing ports or connectivity.
+  std::size_t canonicalizeNetNames();
   bool mergeNetInto(const std::string& target_net_name, const std::string& source_net_name, bool move_wires = true);
   IdbSpecialNet* createOrFindSpecialNet(const std::string& net_name, IdbConnectType type = IdbConnectType::kNone,
                                         IdbCreatePolicy policy = IdbCreatePolicy::kReturnExisting);

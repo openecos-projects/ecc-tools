@@ -257,7 +257,7 @@ double EMAnalyzer::calcViaEMLimit(PowerEdge& power_edge, EMViaRule& via_rule)
   if (via_rule.get_em_limit_ma() <= 0.0) {
     return 0.0;
   }
-  // A scalar RedHawk VIA EM value is a per-cut limit. Geometry area is not an
+  // A scalar technology VIA EM value is a per-cut limit. Geometry area is not an
   // interchangeable multiplier unless an area-dependent rule table is present.
   double scale = power_edge.get_cut_num() > 0 ? static_cast<double>(power_edge.get_cut_num()) : 1.0;
   return via_rule.get_em_limit_ma() * scale / 1000.0;

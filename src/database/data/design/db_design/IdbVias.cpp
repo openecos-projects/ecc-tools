@@ -191,15 +191,16 @@ IdbRect IdbVia::get_top_bounding_box()
 
 IdbLayerShape IdbVia::get_cut_layer_shape()
 {
+  IdbLayerShape via_shape(IdbLayerShapeType::kVia);
   if (_master_instance == nullptr || _coordinate == nullptr) {
-    return IdbLayerShape();
-  }
-  IdbLayerShape* layer_shape = _master_instance->get_cut_layer_shape();
-  if (layer_shape == nullptr) {
-    return IdbLayerShape();
+    return via_shape;
   }
 
-  IdbLayerShape via_shape;
+  IdbLayerShape* layer_shape = _master_instance->get_cut_layer_shape();
+  if (layer_shape == nullptr) {
+    return via_shape;
+  }
+
   layer_shape->clone(via_shape);
   via_shape.moveToLocation(_coordinate);
 

@@ -218,8 +218,9 @@ auto ParsedClockGraph(const std::string& commands) -> icts::FastStaContext
   context.nodes.at(3U).incoming_net_id = 0U;
   context.nodes.at(2U).output_net_ids = {1U};
   context.nodes.at(4U).incoming_net_id = 1U;
-  context.nets = {{.name = "root", .driver_node_id = 1U, .load_node_ids = {2U, 3U}, .load_rc_node_ids = {}, .driver_timing_by_state = {}},
-                  {.name = "child", .driver_node_id = 2U, .load_node_ids = {4U}, .load_rc_node_ids = {}, .driver_timing_by_state = {}}};
+  context.nets
+      = {{.name = "root", .driver_node_id = 1U, .load_node_ids = {2U, 3U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+         {.name = "child", .driver_node_id = 2U, .load_node_ids = {4U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}}};
   return context;
 }
 

@@ -39,6 +39,8 @@ class TimingCellPort
   bool get_is_clock() const { return _is_clock; }
   double get_fanout_load() const { return _fanout_load; }
   std::optional<double>& get_max_fanout() { return _max_fanout; }
+  std::optional<double>& get_max_capacitance() { return _max_capacitance; }
+  std::optional<double>& get_max_transition() { return _max_transition; }
   // setter
   void set_port_name(const std::string& port_name) { _port_name = port_name; }
   void set_capacitance(const double capacitance) { _capacitance = capacitance; }
@@ -53,6 +55,8 @@ class TimingCellPort
   void set_is_clock(const bool is_clock) { _is_clock = is_clock; }
   void set_fanout_load(double fanout_load) { _fanout_load = fanout_load; }
   void set_max_fanout(const std::optional<double>& max_fanout) { _max_fanout = max_fanout; }
+  void set_max_capacitance(const std::optional<double>& value) { _max_capacitance = value; }
+  void set_max_transition(const std::optional<double>& value) { _max_transition = value; }
   // function
 
  private:
@@ -66,6 +70,8 @@ class TimingCellPort
   bool _is_clock = false;
   double _fanout_load = 0.0;
   std::optional<double> _max_fanout;
+  std::optional<double> _max_capacitance;
+  std::optional<double> _max_transition;
 };
 
 }  // namespace ista

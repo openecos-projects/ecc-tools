@@ -18,8 +18,10 @@
 
 #include <any>
 #include <cstdint>
+#include <cstddef>
 #include <map>
 #include <string>
+#include <vector>
 
 #if 1  // 前向声明
 
