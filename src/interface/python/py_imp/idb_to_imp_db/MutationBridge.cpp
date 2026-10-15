@@ -517,7 +517,7 @@ py::dict PyPlaceDB::applyBufferActions(const py::list& actions, const std::strin
   struct Applied
   {
     std::string instance_name;
-    std::string downstream_net_name;
+    idb::IdbNet* downstream_net;
     idb::IdbNet* source_net;
     std::vector<idb::IdbPin*> loads;
   };
@@ -526,14 +526,15 @@ py::dict PyPlaceDB::applyBufferActions(const py::list& actions, const std::strin
   auto rollback = [&]() {
     bool rollback_ok = true;
     for (auto it = applied.rbegin(); it != applied.rend(); ++it) {
-      auto* downstream = _design->get_net_list()->find_net(it->downstream_net_name);
+      auto* downstream = it->downstream_net;
       if (downstream != nullptr) {
         for (auto* load : it->loads) {
           _design->disconnectPinFromNet(load);
           rollback_ok = _design->connectPinToNet(load, it->source_net) && rollback_ok;
         }
         _design->disconnectAllPinsFromNet(downstream);
-        rollback_ok = _design->removeNetSafe(it->downstream_net_name) && rollback_ok;
+        const std::string downstream_name = downstream->get_net_name();
+        rollback_ok = _design->removeNetSafe(downstream_name) && rollback_ok;
       }
       rollback_ok = _design->removeInstanceSafe(it->instance_name) && rollback_ok;
     }
@@ -587,7 +588,7 @@ py::dict PyPlaceDB::applyBufferActions(const py::list& actions, const std::strin
                                         : "buffer topology setup failed and journal rollback failed";
       return summary;
     }
-    applied.push_back({instance_name, downstream_name, upstream, candidate.loads});
+    applied.push_back({instance_name, downstream, upstream, candidate.loads});
     for (auto* load : candidate.loads) {
       if (!_design->disconnectPinFromNet(load) || !_design->connectPinToNet(load, downstream)) {
         const bool rollback_ok = rollback();
@@ -608,12 +609,16 @@ py::dict PyPlaceDB::applyBufferActions(const py::list& actions, const std::strin
     return summary;
   }
 
+  // Moving an output port can leave its former net in the port namespace.
+  // Resolve names before rebuilding timing so all exported views agree.
+  _design->canonicalizeNetNames();
+
   py::list buffer_names;
   py::list downstream_names;
   py::list moved_load_names;
   for (const auto& item : applied) {
     buffer_names.append(item.instance_name);
-    downstream_names.append(item.downstream_net_name);
+    downstream_names.append(item.downstream_net->get_net_name());
     for (auto* load : item.loads) {
       moved_load_names.append(pin_display_name(load));
     }
