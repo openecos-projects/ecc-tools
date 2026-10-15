@@ -416,6 +416,8 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.core_power_net.clear();
   config.core_ground_net.clear();
   config.pg_ring = {};
+  config.pg_io_core_connect = {};
+  config.pg_required_net_list.clear();
   config.pg_connect_pads = false;
   config.pg_require_connected_pins = true;
   config.pg_access_layer_list.clear();
@@ -541,6 +543,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   nlohmann::json& pdn_generator_json = config_json["pdn_generator"];
   config.core_power_net = pdn_generator_json.value("core_power_net", "");
   config.core_ground_net = pdn_generator_json.value("core_ground_net", "");
+  config.pg_required_net_list = pdn_generator_json.value("required_nets", std::vector<std::string>{});
   config.pg_connect_pads = pdn_generator_json.value("connect_pads", false);
   config.pg_require_connected_pins = pdn_generator_json.value("require_connected_pins", true);
   config.pg_access_layer_list = pdn_generator_json.value("access_layers", std::vector<std::string>{});
@@ -552,6 +555,64 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.pg_ring.width_micron = ring.at("width_micron").get<double>();
     config.pg_ring.spacing_micron = ring.at("spacing_micron").get<double>();
     config.pg_ring.offset_micron = ring.at("offset_micron").get<double>();
+  }
+  if (pdn_generator_json.contains("io_core_connect")) {
+    const auto& io_core = pdn_generator_json["io_core_connect"];
+    config.pg_io_core_connect.enabled = io_core.value("enable", true);
+    config.pg_io_core_connect.nets = io_core.value("nets", std::vector<std::string>{});
+    config.pg_io_core_connect.pin_layers = io_core.value("pin_layers", std::vector<std::string>{});
+    config.pg_io_core_connect.same_layer_only = io_core.value("same_layer_only", true);
+    config.pg_io_core_connect.select_outermost_pin = io_core.value("select_outermost_pin", true);
+    config.pg_io_core_connect.connect_all_legal_stripes = io_core.value("connect_all_legal_stripes", true);
+    config.pg_io_core_connect.allow_core_detour = io_core.value("allow_core_detour", false);
+    config.pg_io_core_connect.max_bridge_bends = io_core.value("max_bridge_bends", 0);
+    config.pg_io_core_connect.fail_on_unresolved = io_core.value("fail_on_unresolved", false);
+    config.pg_io_core_connect.require_each_pin_layer = io_core.value("require_each_pin_layer", true);
+    config.pg_io_core_connect.min_contacts_per_port = io_core.value("min_contacts_per_port", 1);
+    config.pg_io_core_connect.max_contacts_per_port = io_core.value("max_contacts_per_port", 0);
+    config.pg_io_core_connect.max_routes_per_stripe = io_core.value("max_routes_per_stripe", 0);
+    config.pg_io_core_connect.allow_direct_extension = io_core.value("allow_direct_extension", true);
+    config.pg_io_core_connect.allow_bridge = io_core.value("allow_bridge", true);
+    config.pg_io_core_connect.direct_extension_only = io_core.value("direct_extension_only", true);
+    config.pg_io_core_connect.bridge_straight_only = io_core.value("bridge_straight_only", true);
+    config.pg_io_core_connect.bridge_min_spacing_micron = io_core.value("bridge_min_spacing_micron", 0.0);
+  }
+  if (config.pg_io_core_connect.enabled) {
+    if (config.pg_io_core_connect.nets.empty()) {
+      FPLOG.error(Loc::current(), "io_core_connect.enable requires a non-empty nets list.");
+    }
+    if (config.pg_io_core_connect.min_contacts_per_port < 1 || config.pg_io_core_connect.max_contacts_per_port < 0
+        || config.pg_io_core_connect.max_routes_per_stripe < 0
+        || config.pg_io_core_connect.max_bridge_bends < 0 || config.pg_io_core_connect.max_bridge_bends > 2
+        || (config.pg_io_core_connect.max_contacts_per_port > 0
+            && config.pg_io_core_connect.max_contacts_per_port < config.pg_io_core_connect.min_contacts_per_port)) {
+      FPLOG.error(Loc::current(), "Invalid io_core_connect contact limits.");
+    }
+    if (!std::isfinite(config.pg_io_core_connect.bridge_min_spacing_micron)
+        || config.pg_io_core_connect.bridge_min_spacing_micron < 0.0) {
+      FPLOG.error(Loc::current(), "io_core_connect.bridge_min_spacing_micron must be finite and non-negative.");
+    }
+    if (!config.pg_io_core_connect.direct_extension_only || !config.pg_io_core_connect.bridge_straight_only) {
+      FPLOG.warn(Loc::current(), "IO-core direct extensions and bridges only support single straight segments; overriding the configuration.");
+      config.pg_io_core_connect.direct_extension_only = true;
+      config.pg_io_core_connect.bridge_straight_only = true;
+    }
+    if (config.pg_io_core_connect.bridge_straight_only && config.pg_io_core_connect.max_bridge_bends != 0) {
+      FPLOG.warn(Loc::current(),
+                 "io_core_connect.max_bridge_bends is ignored because bent IO-core routes are disabled; using max_bridge_bends=0.");
+      config.pg_io_core_connect.max_bridge_bends = 0;
+    }
+    if (config.pg_io_core_connect.allow_core_detour) {
+      FPLOG.warn(Loc::current(), "io_core_connect.allow_core_detour is ignored because bent IO-core routes are disabled.");
+      config.pg_io_core_connect.allow_core_detour = false;
+    }
+    std::set<std::string> unique_nets(config.pg_io_core_connect.nets.begin(), config.pg_io_core_connect.nets.end());
+    if (unique_nets.size() != config.pg_io_core_connect.nets.size()) {
+      FPLOG.error(Loc::current(), "io_core_connect.nets contains duplicate networks.");
+    }
+    if (config.pg_required_net_list.empty()) {
+      config.pg_required_net_list = config.pg_io_core_connect.nets;
+    }
   }
   for (nlohmann::json& pg_connect_json : pdn_generator_json["global_connect"]) {
     PGGlobalConnect pg_connect;
@@ -672,6 +733,7 @@ void FPInterface::wrapCellMasterMap()
             pin_shape.set_pin_name(term->get_name());
             pin_shape.set_layer_name(shape->get_layer()->get_name());
             pin_shape.set_port_idx(port_idx);
+            pin_shape.set_core_port(port->get_port_class() == idb::IdbPortClass::kCore);
             pin_shape.set_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
             (pg ? cell_master.get_pg_pin_shapes() : cell_master.get_obstruction_shapes()).push_back(pin_shape);
           }
@@ -728,6 +790,28 @@ void FPInterface::wrapRoutingLayerList()
     routing_layer.set_min_area(std::max(idb_routing_layer->get_area(), 0));
     routing_layer.set_prefer_track_offset(idb_routing_layer->get_offset_prefer());
     routing_layer.set_spacing(idb_routing_layer->get_spacing(0));
+    int32_t io_spacing = std::max(0, routing_layer.get_spacing());
+    for (const auto* rule : idb_routing_layer->get_spacing_list()->get_spacing_list()) {
+      io_spacing = std::max(io_spacing, rule->get_min_spacing());
+      if (rule->get_has_parallel_edge()) io_spacing = std::max(io_spacing, rule->get_par_space());
+    }
+    const auto table = idb_routing_layer->get_spacing_table();
+    if (table && table->is_parallel()) {
+      for (const auto& row : table->get_parallel()->get_spacing_table()) {
+        for (const int32_t value : row) io_spacing = std::max(io_spacing, value);
+      }
+    }
+    for (const auto& rule : idb_routing_layer->get_lef58_spacing_eol_list()) {
+      io_spacing = std::max(io_spacing, rule->get_eol_space());
+      if (const auto edge = rule->get_parallel_edge()) io_spacing = std::max(io_spacing, edge->get_par_space());
+      if (const auto ends = rule->get_end_to_end()) io_spacing = std::max(io_spacing, ends->get_end_to_end_space());
+    }
+    routing_layer.set_io_spacing(io_spacing);
+    int32_t enclosed_area = 0;
+    for (const auto& rule : idb_routing_layer->get_min_enclose_area_list()->get_min_area_list()) {
+      enclosed_area = std::max(enclosed_area, rule._area);
+    }
+    routing_layer.set_min_enclosed_area(enclosed_area);
     routing_layer.set_prefer_direction(idb_routing_layer->is_horizontal() ? Direction::kHorizontal : Direction::kVertical);
 
     idb::IdbTrackGrid* prefer_track_grid = idb_routing_layer->get_prefer_track_grid();

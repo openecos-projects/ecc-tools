@@ -14,6 +14,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PDNGenerator.hpp"
+#include <cmath>
 #include <fnmatch.h>
 #include <queue>
 
@@ -62,7 +63,8 @@ class PGGeometryIndex
     return result;
   }
 
-  bool clear(const std::string& layer, const PlanarRect& rect, int32_t net, int32_t spacing) const
+  bool clear(const std::string& layer, const PlanarRect& rect, int32_t net, int32_t spacing,
+             const PlanarRect* shared_contact = nullptr) const
   {
     auto layer_it = _layers.find(layer);
     if (layer_it == _layers.end()) {
@@ -82,6 +84,31 @@ class PGGeometryIndex
         const auto& box = obstacle.rect;
         if (obstacle.net != net && query.get_ll_x() < box.get_ur_x() && box.get_ll_x() < query.get_ur_x()
             && query.get_ll_y() < box.get_ur_y() && box.get_ll_y() < query.get_ur_y()) {
+          // Independent IO paths may meet inside their destination stripe.
+          // An overlapping trunk outside that stripe is still rejected.
+          if (shared_contact) {
+            auto outside_contact = [&](const PlanarRect& r) {
+              const int32_t lx = std::max(r.get_ll_x(), shared_contact->get_ll_x());
+              const int32_t ly = std::max(r.get_ll_y(), shared_contact->get_ll_y());
+              const int32_t ux = std::min(r.get_ur_x(), shared_contact->get_ur_x());
+              const int32_t uy = std::min(r.get_ur_y(), shared_contact->get_ur_y());
+              if (lx >= ux || ly >= uy) return std::vector<PlanarRect>{r};
+              std::vector<PlanarRect> pieces;
+              if (r.get_ll_x() < lx) pieces.emplace_back(r.get_ll_x(), r.get_ll_y(), lx, r.get_ur_y());
+              if (ux < r.get_ur_x()) pieces.emplace_back(ux, r.get_ll_y(), r.get_ur_x(), r.get_ur_y());
+              if (r.get_ll_y() < ly) pieces.emplace_back(lx, r.get_ll_y(), ux, ly);
+              if (uy < r.get_ur_y()) pieces.emplace_back(lx, uy, ux, r.get_ur_y());
+              return pieces;
+            };
+            bool separated = true;
+            for (const auto& a : outside_contact(rect)) {
+              for (const auto& b : outside_contact(box)) {
+                if (a.get_ll_x() - spacing < b.get_ur_x() && b.get_ll_x() < a.get_ur_x() + spacing
+                    && a.get_ll_y() - spacing < b.get_ur_y() && b.get_ll_y() < a.get_ur_y() + spacing) separated = false;
+              }
+            }
+            if (separated) continue;
+          }
           clear = false;
           break;
         }
@@ -171,11 +198,12 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   alignStripeSegmentList();
   buildRing(pg_model);
   buildLayerConnect(pg_model);
+  buildIOCoreConnect(pg_model);
   buildMacroConnect(pg_model);
-  trimMacroStripeEnds();
+  trimStripeEnds();
 }
 
-void PDNGenerator::trimMacroStripeEnds()
+void PDNGenerator::trimStripeEnds()
 {
   auto& database = FPDM.getDatabase();
   auto& segments = database.get_pg_segment_list();
@@ -198,6 +226,10 @@ void PDNGenerator::trimMacroStripeEnds()
     const bool horizontal = stripe.is_horizontal();
     const int32_t half = stripe.get_width() / 2;
     Candidate candidate{i};
+    const auto& core = database.get_core();
+    // Ring-connected stripes extend outside the core and are not selected here.
+    candidate.start = horizontal ? stripe.get_start_x() == core.get_ll_x() : stripe.get_start_y() == core.get_ll_y();
+    candidate.end = horizontal ? stripe.get_end_x() == core.get_ur_x() : stripe.get_end_y() == core.get_ur_y();
     for (auto* instance : _placed_macro_list) {
       if (findRoutingLayer(stripe.get_layer_name())->get_order() > getMacroTopLayerOrder(*instance)) {
         continue;
@@ -221,7 +253,7 @@ void PDNGenerator::trimMacroStripeEnds()
     return;
   }
 
-  // Index only the clipped stripes; scan contacts once, before changing any geometry.
+  // Freeze contacts before editing geometry, preserving same-net joins on both axes.
   auto contact = [&](const std::string& net, const std::string& layer, const PlanarRect& rect, size_t source, const PGSegment* via) {
     for (bool horizontal : {true, false}) {
       auto found = by_coord.find({net, layer, horizontal});
@@ -270,6 +302,15 @@ void PDNGenerator::trimMacroStripeEnds()
         continue;
       }
       const auto& master = database.get_cell_master_map().at(instance.get_master_name());
+      // IO power pins are handled by buildIOCoreConnect.  Do not let an
+      // unselected package-facing PORT keep a stripe endpoint alive after the
+      // dedicated same-layer connector has decided that it is inaccessible.
+      if (FPDM.getConfig().pg_io_core_connect.enabled && instance.get_io_cell_net_name() == net.get_name()
+          && instance.get_io_cell_pin_name() == pin_name
+          && std::find(FPDM.getConfig().pg_io_core_connect.nets.begin(), FPDM.getConfig().pg_io_core_connect.nets.end(), net.get_name())
+                 != FPDM.getConfig().pg_io_core_connect.nets.end()) {
+        continue;
+      }
       std::vector<InstancePinShape> shapes;
       for (const auto& shape : master.get_pg_pin_shapes()) {
         if (shape.get_pin_name() == pin_name
@@ -282,11 +323,43 @@ void PDNGenerator::trimMacroStripeEnds()
       }
     }
   }
+  for (const auto& net : database.get_pg_net_list()) {
+    for (const auto& [name, direction] : net.get_io_pin_name_to_direction_map()) {
+      auto found = database.get_io_pin_name_to_idx_map().find(name);
+      if (found == database.get_io_pin_name_to_idx_map().end()) {
+        continue;
+      }
+      const auto& pin = database.get_io_pin_list()[found->second];
+      if (!pin.get_placed()) {
+        continue;
+      }
+      if (pin.is_updated()) {
+        // Both IO placers emit N-oriented, relative new ports. Imported port_list
+        // rectangles are already absolute (including the original orientation).
+        for (const auto& port : pin.get_new_port_list()) {
+          const int32_t x = port.get_placed() ? port.get_x() : pin.get_x();
+          const int32_t y = port.get_placed() ? port.get_y() : pin.get_y();
+          contact(net.get_name(), port.get_layer_name(),
+                  PlanarRect(port.get_ll_x() + x, port.get_ll_y() + y, port.get_ur_x() + x, port.get_ur_y() + y),
+                  segments.size(), nullptr);
+        }
+      } else {
+        for (const auto& port : pin.get_port_list()) {
+          contact(net.get_name(), port.get_layer_name(), port, segments.size(), nullptr);
+        }
+      }
+    }
+  }
   int32_t trimmed = 0;
+  std::ofstream report;
+  if (!FPDM.getConfig().pg_temp_directory_path.empty()) {
+    report.open(FPDM.getConfig().pg_temp_directory_path + "/stripe_trim.rpt");
+    report << "net layer direction fixed_coord old_begin old_end new_begin new_end (DBU)\n";
+  }
   const int32_t grid = std::max(1, database.get_manufacture_grid());
   for (const auto& candidate : candidates) {
     if (candidate.first_contact == INT32_MAX) {
-      FPLOG.warn(Loc::current(), "Clipped PG stripe has no physical contact on '", segments[candidate.index].get_net_name(), "'.");
+      FPLOG.warn(Loc::current(), "PG stripe has no physical contact; retained on '", segments[candidate.index].get_net_name(), "'.");
       continue;
     }
     auto& stripe = segments[candidate.index];
@@ -298,7 +371,19 @@ void PDNGenerator::trimMacroStripeEnds()
     if (new_begin >= new_end) {
       continue;
     }
+    // A legal wire may need more metal than its contacts alone. Keep it intact
+    // if the proposed rectangle would violate the layer's minimum area.
+    const int64_t area = int64_t(new_end - new_begin + stripe.get_width()) * stripe.get_width();
+    if (area < findRoutingLayer(stripe.get_layer_name())->get_min_area()) {
+      FPLOG.warn(Loc::current(), "Retained PG stripe on '", stripe.get_net_name(), "' to preserve minimum area.");
+      continue;
+    }
     trimmed += (new_begin != begin) + (new_end != end);
+    if (report && (new_begin != begin || new_end != end)) {
+      report << stripe.get_net_name() << ' ' << stripe.get_layer_name() << ' ' << (horizontal ? "H" : "V") << ' '
+             << (horizontal ? stripe.get_start_y() : stripe.get_start_x()) << ' '
+             << begin << ' ' << end << ' ' << new_begin << ' ' << new_end << '\n';
+    }
     if (horizontal) {
       stripe.set_start_x(new_begin);
       stripe.set_end_x(new_end);
@@ -307,7 +392,7 @@ void PDNGenerator::trimMacroStripeEnds()
       stripe.set_end_y(new_end);
     }
   }
-  FPLOG.info(Loc::current(), "Trimmed ", trimmed, " macro stripe ends while preserving physical PG contacts.");
+  FPLOG.info(Loc::current(), "Trimmed ", trimmed, " stripe ends while preserving physical PG contacts.");
 }
 
 void PDNGenerator::buildPGNet(PGModel& pg_model)
@@ -432,6 +517,27 @@ void PDNGenerator::buildPGNet(PGModel& pg_model)
   if ((!config.pg_rail_list.empty() || !config.pg_stripe_list.empty())
       && (pg_model.get_default_power_net_name().empty() || pg_model.get_default_ground_net_name().empty())) {
     FPLOG.error(Loc::current(), "Rails and stripes require both core POWER and GROUND nets.");
+  }
+  if (config.pg_io_core_connect.enabled) {
+    for (const auto& net_name : config.pg_io_core_connect.nets) {
+      auto net_it = database.get_pg_net_name_to_idx_map().find(net_name);
+      if (net_it == database.get_pg_net_name_to_idx_map().end()) {
+        FPLOG.error(Loc::current(), "io_core_connect refers to undeclared PG net '", net_name, "'.");
+      }
+      if (net_name != pg_model.get_default_power_net_name() && net_name != pg_model.get_default_ground_net_name()) {
+        FPLOG.error(Loc::current(), "io_core_connect net '", net_name, "' is not the resolved core POWER/GROUND net.");
+      }
+    }
+    for (const auto& layer_name : config.pg_io_core_connect.pin_layers) {
+      if (findRoutingLayer(layer_name) == nullptr) {
+        FPLOG.error(Loc::current(), "io_core_connect refers to unknown pin layer '", layer_name, "'.");
+      }
+    }
+  }
+  for (const auto& net_name : config.pg_required_net_list) {
+    if (!database.get_pg_net_name_to_idx_map().contains(net_name)) {
+      FPLOG.error(Loc::current(), "required_nets refers to undeclared PG net '", net_name, "'.");
+    }
   }
   FPLOG.info(Loc::current(), "Resolved ", bindings.size(), " instance PG terminals on ", database.get_pg_net_list().size(), " nets.");
 
@@ -1160,6 +1266,573 @@ bool PDNGenerator::addViaSegment(PGModel& pg_model, std::string net_name, std::s
   return true;
 }
 
+void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
+{
+  Monitor monitor;
+  auto& database = FPDM.getDatabase();
+  auto& config = FPDM.getConfig();
+  if (!config.pg_io_core_connect.enabled || database.get_pg_segment_list().empty()) {
+    return;
+  }
+
+  FPLOG.info(Loc::current(), "Starting dedicated IO core PG connection...");
+  FPI.adjustPGLineSegmentListByViaEnclosure();
+  const int32_t grid = std::max(1, database.get_manufacture_grid());
+  const int32_t configured_bridge_spacing = config.pg_io_core_connect.bridge_min_spacing_micron > 0.0
+                                                ? static_cast<int32_t>(std::ceil(
+                                                      config.pg_io_core_connect.bridge_min_spacing_micron
+                                                      * static_cast<double>(database.get_micron_dbu())))
+                                                : 0;
+  const int32_t bin_size = 64 * database.get_micron_dbu();
+  PGGeometryIndex geometry(bin_size);
+  std::map<std::pair<std::string, std::string>, int32_t> bindings;
+  for (size_t net_idx = 0; net_idx < database.get_pg_net_list().size(); ++net_idx) {
+    for (const auto& terminal : database.get_pg_net_list()[net_idx].get_instance_pins()) {
+      bindings[terminal] = static_cast<int32_t>(net_idx);
+    }
+  }
+
+  auto is_io_core_net = [&](const std::string& net_name) {
+    return std::find(config.pg_io_core_connect.nets.begin(), config.pg_io_core_connect.nets.end(), net_name)
+           != config.pg_io_core_connect.nets.end();
+  };
+  auto snap = [&](int32_t value) { return FPUTIL.alignDown(value, grid); };
+  auto add_segment_geometry = [&](PGSegment& segment) {
+    const auto net_it = database.get_pg_net_name_to_idx_map().find(segment.get_net_name());
+    if (net_it == database.get_pg_net_name_to_idx_map().end()) {
+      return;
+    }
+    if (segment.is_line()) {
+      geometry.add(segment.get_layer_name(), segmentRect(segment), net_it->second);
+    } else if (segment.get_type() == PGSegmentType::kVia) {
+      for (const auto& shape : FPI.getPGViaShapes(segment)) {
+        geometry.add(shape.get_layer_name(), shape, net_it->second);
+      }
+    }
+  };
+  for (auto& segment : database.get_pg_segment_list()) {
+    add_segment_geometry(segment);
+  }
+
+  struct StripeTarget {
+    PGSegment segment;
+    size_t database_index = 0;
+  };
+  using StripeMap = std::map<std::string, std::vector<StripeTarget>>;
+  std::map<int32_t, StripeMap> stripe_targets;
+  for (size_t index = 0; index < database.get_pg_segment_list().size(); ++index) {
+    const auto& segment = database.get_pg_segment_list()[index];
+    if (segment.get_type() != PGSegmentType::kStripe || !is_io_core_net(segment.get_net_name())) {
+      continue;
+    }
+    const auto net_it = database.get_pg_net_name_to_idx_map().find(segment.get_net_name());
+    if (net_it == database.get_pg_net_name_to_idx_map().end()) {
+      continue;
+    }
+    stripe_targets[net_it->second][segment.get_layer_name()].push_back({segment, index});
+  }
+
+  std::map<std::string, std::vector<InstancePinShape>> placed_shapes;
+  for (auto& instance : database.get_instance_list()) {
+    if (!instance.get_placed() || instance.is_delete_instance()) {
+      continue;
+    }
+    const auto master_it = database.get_cell_master_map().find(instance.get_master_name());
+    if (master_it == database.get_cell_master_map().end()) {
+      continue;
+    }
+    const auto& master = master_it->second;
+    if (!instance.get_macro() && !master.get_pad() && !master.get_pad_filler() && !master.get_corner()) {
+      continue;
+    }
+    auto& shapes = placed_shapes[instance.get_name()];
+    shapes = FPI.getPlacedShapes(instance, master.get_pg_pin_shapes());
+    for (const auto& shape : shapes) {
+      const auto binding = bindings.find({instance.get_name(), shape.get_pin_name()});
+      geometry.add(shape.get_layer_name(), shape, binding == bindings.end() ? -1 : binding->second);
+    }
+    for (const auto& shape : FPI.getPlacedShapes(instance, master.get_obstruction_shapes())) {
+      geometry.add(shape.get_layer_name(), shape, -1);
+    }
+  }
+
+  struct Side {
+    enum Value { kLeft, kRight, kBottom, kTop } value = kBottom;
+  };
+  auto get_side = [&](const Instance& instance) {
+    const auto& box = instance.get_bounding_rect();
+    const auto& die = database.get_die();
+    const int32_t left = std::abs(box.get_ll_x() - die.get_ll_x());
+    const int32_t right = std::abs(die.get_ur_x() - box.get_ur_x());
+    const int32_t bottom = std::abs(box.get_ll_y() - die.get_ll_y());
+    const int32_t top = std::abs(die.get_ur_y() - box.get_ur_y());
+    const int32_t min_distance = std::min({left, right, bottom, top});
+    if (min_distance == left) return Side{Side::kLeft};
+    if (min_distance == right) return Side{Side::kRight};
+    if (min_distance == bottom) return Side{Side::kBottom};
+    return Side{Side::kTop};
+  };
+  // For an IO-to-core connection, "outermost" means the rail at the
+  // core-facing edge of the IO cell.  The package-facing rail can be wide,
+  // but it is commonly separated from the core rail by another PG pin and is
+  // therefore not an access point for the core mesh.
+  auto core_facing_coordinate = [&](const InstancePinShape& shape, Side side) {
+    switch (side.value) {
+      case Side::kLeft: return shape.get_ur_x();
+      case Side::kRight: return -shape.get_ll_x();
+      case Side::kBottom: return shape.get_ur_y();
+      case Side::kTop: return -shape.get_ll_y();
+    }
+    return 0;
+  };
+  auto snap_inside = [&](int32_t value, int32_t low, int32_t high, int32_t width) {
+    const int32_t min_center = low + width / 2;
+    const int32_t max_center = high - width / 2;
+    if (min_center > max_center) {
+      return INT32_MIN;
+    }
+    int32_t result = snap(value);
+    if (result < min_center) result = FPUTIL.alignUp(min_center, grid);
+    if (result > max_center) result = FPUTIL.alignDown(max_center, grid);
+    return result >= min_center && result <= max_center ? result : INT32_MIN;
+  };
+  auto pin_width = [&](const InstancePinShape& pin, const RoutingLayer* layer, int32_t target_width) {
+    const int32_t span = std::min(pin.get_width(), pin.get_height());
+    // Preserve the stripe width; a narrower pin aperture is not a legal
+    // access for this stripe and must not silently shrink the connector.
+    if (target_width > span) {
+      return 0;
+    }
+    // The target Stripe width is already generated on the technology grid;
+    // preserve it exactly so the exported IOWIRE has the same cross-section.
+    const int32_t width = target_width;
+    return width >= layer->get_min_width() ? width : 0;
+  };
+  auto make_line = [&](const std::string& net, const std::string& layer, int32_t width, const PlanarCoord& start,
+                       const PlanarCoord& end) {
+    PGSegment line;
+    line.set_net_name(net);
+    line.set_layer_name(layer);
+    line.set_type(PGSegmentType::kIoWire);
+    line.set_width(width);
+    line.set_start_coord(start.get_x(), start.get_y());
+    line.set_end_coord(end.get_x(), end.get_y());
+    line.set_generated(true);
+    return line;
+  };
+
+  struct Failure {
+    std::string terminal;
+    std::string reason;
+  };
+  std::vector<Failure> failures;
+  std::vector<std::string> contact_details;
+  int32_t connected_ports = 0;
+  int32_t direct_connections = 0;
+  int32_t bridge_connections = 0;
+
+  struct LayerContacts {
+    int32_t direct = 0;
+    int32_t bridge = 0;
+    int32_t candidates = 0;
+    std::set<size_t> stripes;
+    std::map<std::string, int32_t> rejected;
+    int32_t count() const { return direct + bridge; }
+  };
+  struct AccessPoint { int32_t tangent; int32_t width; int32_t separation; };
+  struct PortTask {
+    Instance* instance;
+    int32_t port;
+    int32_t net_idx;
+    Side side;
+    StripeMap* targets;
+    std::map<std::string, std::vector<InstancePinShape>> rails;
+    std::map<std::string, LayerContacts> layers;
+    std::map<size_t, int32_t> routes_per_stripe;
+    int32_t contacts = 0;
+    std::map<std::string, std::vector<AccessPoint>> access_points;
+  };
+  std::vector<PortTask> tasks;
+  // Separate IO paths must remain distinct outside the source pin/stripe.
+  // Treat accepted paths as obstacles even for the same net: this prevents
+  // overlapping trunks from inflating the redundant-contact count.
+  PGGeometryIndex io_paths(bin_size);
+
+  for (auto& instance : database.get_instance_list()) {
+    const std::string& net_name = instance.get_io_cell_net_name();
+    if (!instance.get_placed() || instance.is_delete_instance() || net_name.empty() || !is_io_core_net(net_name)) {
+      continue;
+    }
+    const auto net_it = database.get_pg_net_name_to_idx_map().find(net_name);
+    if (net_it == database.get_pg_net_name_to_idx_map().end()) {
+      continue;
+    }
+    const int32_t net_idx = net_it->second;
+    const auto target_it = stripe_targets.find(net_idx);
+    const auto shape_it = placed_shapes.find(instance.get_name());
+    const std::string terminal = instance.get_name() + "/" + instance.get_io_cell_pin_name();
+    if (target_it == stripe_targets.end() || target_it->second.empty()) {
+      failures.push_back({terminal, "NO_SAME_NET_STRIPE"});
+      continue;
+    }
+    if (shape_it == placed_shapes.end()) {
+      failures.push_back({terminal, "NO_ROUTING_SHAPE"});
+      continue;
+    }
+    const auto binding = bindings.find({instance.get_name(), instance.get_io_cell_pin_name()});
+    if (binding == bindings.end() || binding->second != net_idx) {
+      failures.push_back({terminal, "NET_BINDING_MISMATCH"});
+      continue;
+    }
+
+    std::map<int32_t, std::vector<const InstancePinShape*>> ports;
+    for (const auto& shape : shape_it->second) {
+      if (shape.get_pin_name() == instance.get_io_cell_pin_name()) {
+        ports[shape.get_port_idx()].push_back(&shape);
+      }
+    }
+    bool has_core_port = false;
+    for (const auto& [port, port_shapes] : ports) {
+      if (std::any_of(port_shapes.begin(), port_shapes.end(), [](const auto* shape) { return shape->is_core_port(); })) {
+        has_core_port = true;
+        break;
+      }
+    }
+    if (has_core_port) {
+      for (auto port_it = ports.begin(); port_it != ports.end();) {
+        const bool core_port = std::any_of(port_it->second.begin(), port_it->second.end(),
+                                           [](const auto* shape) { return shape->is_core_port(); });
+        if (!core_port) {
+          port_it = ports.erase(port_it);
+        } else {
+          ++port_it;
+        }
+      }
+    }
+    if (ports.empty()) {
+      failures.push_back({terminal, "NO_ROUTING_SHAPE"});
+      continue;
+    }
+
+    const Side side = get_side(instance);
+    const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+    for (const auto& [port, shapes] : ports) {
+      std::map<std::string, std::vector<const InstancePinShape*>> layer_shapes;
+      for (const auto* shape : shapes) {
+        if (findRoutingLayer(shape->get_layer_name()) == nullptr) continue;
+        if (!config.pg_io_core_connect.pin_layers.empty()
+            && std::find(config.pg_io_core_connect.pin_layers.begin(), config.pg_io_core_connect.pin_layers.end(), shape->get_layer_name())
+                   == config.pg_io_core_connect.pin_layers.end()) {
+          continue;
+        }
+        layer_shapes[shape->get_layer_name()].push_back(shape);
+      }
+      if (layer_shapes.empty()) {
+        failures.push_back({terminal + " PORT " + std::to_string(port), "PIN_LAYER_UNAVAILABLE"});
+        continue;
+      }
+      // LEF can fracture one rail into several abutting RECTs. Keep every
+      // rectangle on the core-facing edge and merge only exact rectangular
+      // unions along the tangent; never bridge a hole with a bounding box.
+      std::map<std::string, std::vector<InstancePinShape>> rails;
+      for (auto& [layer, candidates] : layer_shapes) {
+        int32_t outer_edge = INT32_MIN;
+        for (const auto* shape : candidates) outer_edge = std::max(outer_edge, core_facing_coordinate(*shape, side));
+        auto normal_interval = [&](const InstancePinShape& shape) {
+          return normal_x ? std::pair{shape.get_ll_x(), shape.get_ur_x()} : std::pair{shape.get_ll_y(), shape.get_ur_y()};
+        };
+        auto tangent_low = [&](const InstancePinShape& shape) { return normal_x ? shape.get_ll_y() : shape.get_ll_x(); };
+        auto tangent_high = [&](const InstancePinShape& shape) { return normal_x ? shape.get_ur_y() : shape.get_ur_x(); };
+        std::sort(candidates.begin(), candidates.end(), [&](const auto* a, const auto* b) {
+          return std::pair{normal_interval(*a), tangent_low(*a)} < std::pair{normal_interval(*b), tangent_low(*b)};
+        });
+        for (const auto* shape : candidates) {
+          if (config.pg_io_core_connect.select_outermost_pin && core_facing_coordinate(*shape, side) != outer_edge) continue;
+          auto& merged = rails[layer];
+          if (!merged.empty() && normal_interval(merged.back()) == normal_interval(*shape)
+              && tangent_low(*shape) <= tangent_high(merged.back())) {
+            if (normal_x) merged.back().set_ur_y(std::max(merged.back().get_ur_y(), shape->get_ur_y()));
+            else merged.back().set_ur_x(std::max(merged.back().get_ur_x(), shape->get_ur_x()));
+          } else {
+            merged.push_back(*shape);
+          }
+        }
+        candidates.clear();
+        for (const auto& rail : rails[layer]) candidates.push_back(&rail);
+      }
+      std::set<std::string> required_layers;
+      for (const auto& [layer, candidates] : layer_shapes) {
+        if (!candidates.empty()) required_layers.insert(layer);
+      }
+      if (required_layers.empty()) {
+        failures.push_back({terminal + " PORT " + std::to_string(port), "PIN_LAYER_UNAVAILABLE"});
+        continue;
+      }
+      if (config.pg_io_core_connect.max_contacts_per_port > 0
+          && config.pg_io_core_connect.max_contacts_per_port
+                 < (config.pg_io_core_connect.require_each_pin_layer ? static_cast<int32_t>(required_layers.size()) : 1)) {
+        failures.push_back({terminal + " PORT " + std::to_string(port), "CONTACT_LIMIT"});
+        continue;
+      }
+
+      tasks.push_back({&instance, port, net_idx, side, &target_it->second, std::move(rails), {}, {}, 0});
+    }
+  }
+
+  // All terminals get their direct paths before any bridge can occupy the
+  // corridor.  Both route classes are deliberately restricted to one
+  // Manhattan segment; there is no bend or core detour fallback.
+  for (int phase = 0; phase < 2; ++phase) {
+    for (auto& task : tasks) {
+      auto& instance = *task.instance;
+      const auto& net_name = instance.get_io_cell_net_name();
+      const int32_t net_idx = task.net_idx;
+      const int32_t port = task.port;
+      const Side side = task.side;
+      const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+      auto can_add = [&](const std::string& layer, size_t stripe_id) {
+        const auto& options = config.pg_io_core_connect;
+        if (options.max_routes_per_stripe > 0 && task.routes_per_stripe[stripe_id] >= options.max_routes_per_stripe) return false;
+        int32_t missing_other_layers = 0;
+        for (const auto& [name, shapes] : task.rails) {
+          if (name != layer && task.layers[name].count() == 0) ++missing_other_layers;
+        }
+        if (!options.require_each_pin_layer) missing_other_layers = 0;
+        if (options.max_contacts_per_port > 0 && task.contacts + missing_other_layers >= options.max_contacts_per_port) return false;
+        return options.connect_all_legal_stripes || task.contacts < options.min_contacts_per_port
+               || (options.require_each_pin_layer && task.layers[layer].count() == 0);
+      };
+      auto start_at = [&](const InstancePinShape& pin, int32_t width, int32_t tangent) {
+        PlanarCoord start;
+        if (side.value == Side::kLeft) {
+          start.set_coord(pin.get_ur_x() - width / 2, tangent);
+        } else if (side.value == Side::kRight) {
+          start.set_coord(pin.get_ll_x() + width / 2, tangent);
+        } else if (side.value == Side::kBottom) {
+          start.set_coord(tangent, pin.get_ur_y() - width / 2);
+        } else {
+          start.set_coord(tangent, pin.get_ll_y() + width / 2);
+        }
+        start.set_x(snap_inside(start.get_x(), pin.get_ll_x(), pin.get_ur_x(), width));
+        start.set_y(snap_inside(start.get_y(), pin.get_ll_y(), pin.get_ur_y(), width));
+        return start;
+      };
+      auto bridge_target_point = [&](const PGSegment& target, const PlanarCoord& start) {
+        // A straight bridge must touch the existing stripe span.  Do not
+        // clamp a tangent to a stripe endpoint: that would turn a bridge
+        // candidate into an implicit extension.
+        if (target.is_horizontal()) {
+          const int32_t x_low = target.get_ll_x() + target.get_width() / 2;
+          const int32_t x_high = target.get_ur_x() - target.get_width() / 2;
+          if (start.get_x() < x_low || start.get_x() > x_high) return PlanarCoord(INT32_MIN, INT32_MIN);
+          return PlanarCoord(start.get_x(), target.get_start_y());
+        }
+        if (target.is_vertical()) {
+          const int32_t y_low = target.get_ll_y() + target.get_width() / 2;
+          const int32_t y_high = target.get_ur_y() - target.get_width() / 2;
+          if (start.get_y() < y_low || start.get_y() > y_high) return PlanarCoord(INT32_MIN, INT32_MIN);
+          return PlanarCoord(target.get_start_x(), start.get_y());
+        }
+        return PlanarCoord(INT32_MIN, INT32_MIN);
+      };
+      auto direct_extension_target_point = [&](const PGSegment& target, const PlanarCoord& start) {
+        // A direct extension continues the stripe from its end nearest the
+        // IO edge.  The pin tangent only needs to be within the stripe's
+        // cross-section; its coordinate along the stripe may be outside the
+        // original core segment because that is exactly the portion extended.
+        if (target.is_horizontal() && normal_x) {
+          return PlanarCoord(side.value == Side::kLeft ? target.get_start_x() : target.get_end_x(), start.get_y());
+        }
+        if (target.is_vertical() && !normal_x) {
+          return PlanarCoord(start.get_x(), side.value == Side::kBottom ? target.get_start_y() : target.get_end_y());
+        }
+        return PlanarCoord(INT32_MIN, INT32_MIN);
+      };
+      auto access_separation = [&](const RoutingLayer& layer, int32_t width, const PlanarCoord& start, const PlanarCoord& end) {
+        int32_t separation = std::max(grid, layer.get_io_spacing());
+        const int32_t gap = (std::abs(end.get_x() - start.get_x()) + std::abs(end.get_y() - start.get_y())) - width;
+        if (gap > 0 && layer.get_min_enclosed_area() > 0) {
+          separation = std::max(separation, static_cast<int32_t>((int64_t(layer.get_min_enclosed_area()) + gap - 1) / gap));
+        }
+        return std::max(separation, configured_bridge_spacing);
+      };
+      auto try_path = [&](const InstancePinShape& pin, const StripeTarget& target, int32_t width,
+                          std::vector<PlanarCoord> points, const std::string& mode) {
+        const auto& layer_name = target.segment.get_layer_name();
+        auto& stats = task.layers[layer_name];
+        if (!can_add(layer_name, target.database_index)) return false;
+        ++stats.candidates;
+        auto reject = [&](const std::string& reason) { ++stats.rejected[reason]; return false; };
+        auto* layer = findRoutingLayer(layer_name);
+        if (pin.get_layer_name() != layer_name) return reject("SAME_LAYER_REQUIRED");
+        if (width != target.segment.get_width() || width < layer->get_min_width()
+            || (layer->get_max_width() > 0 && width > layer->get_max_width())) return reject("ILLEGAL_WIDTH");
+        // An odd/off-grid width cannot be repaired by silently narrowing it.
+        if (width % (2 * grid) != 0) return reject("OFF_GRID_WIDTH");
+        points.erase(std::unique(points.begin(), points.end()), points.end());
+        if (points.size() < 2) return reject("ALREADY_TOUCHING");
+        if (points.size() != 2) return reject("NON_STRAIGHT_PATH");
+        if (points.front().get_x() != points.back().get_x() && points.front().get_y() != points.back().get_y()) {
+          return reject("NON_STRAIGHT_PATH");
+        }
+        const int32_t tangent = normal_x ? points.front().get_y() : points.front().get_x();
+        const int32_t separation = access_separation(*layer, width, points.front(), points.back());
+        for (const auto& access : task.access_points[layer_name]) {
+          if (std::abs(tangent - access.tangent) < (width + access.width) / 2 + std::max(separation, access.separation)) {
+            return reject("ACCESS_SPACING_OR_HOLE_AREA");
+          }
+        }
+        const auto& die = database.get_die();
+        std::vector<PGSegment> path;
+        for (size_t i = 1; i < points.size(); ++i) {
+          const auto& a = points[i - 1];
+          const auto& b = points[i];
+          if ((a.get_x() != b.get_x() && a.get_y() != b.get_y())
+              || a.get_x() % grid || a.get_y() % grid || b.get_x() % grid || b.get_y() % grid) return reject("OFF_GRID_PATH");
+          auto line = make_line(net_name, layer_name, width, a, b);
+          const auto box = segmentRect(line);
+          if (box.get_ll_x() < die.get_ll_x() || box.get_ll_y() < die.get_ll_y()
+              || box.get_ur_x() > die.get_ur_x() || box.get_ur_y() > die.get_ur_y()) return reject("OUTSIDE_DIE");
+          const int64_t area = int64_t(width) * (std::abs(b.get_x() - a.get_x()) + std::abs(b.get_y() - a.get_y()) + width);
+          if (area < layer->get_min_area()) return reject("MIN_AREA");
+          if (!geometry.clear(layer_name, box, net_idx, separation)) return reject("FOREIGN_METAL_OR_OBS");
+          const auto target_box = segmentRect(target.segment);
+          if (!io_paths.clear(layer_name, box, -2, separation, &target_box)) return reject("BRIDGE_BLOCKED_SPACING");
+          path.push_back(line);
+        }
+        auto positive_overlap = [](const PlanarRect& a, const PlanarRect& b) {
+          return a.get_ll_x() < b.get_ur_x() && b.get_ll_x() < a.get_ur_x()
+                 && a.get_ll_y() < b.get_ur_y() && b.get_ll_y() < a.get_ur_y();
+        };
+        if (!positive_overlap(segmentRect(path.front()), pin)
+            || !positive_overlap(segmentRect(path.back()), segmentRect(target.segment))) return reject("NO_ENDPOINT_OVERLAP");
+        for (auto& segment : path) {
+          database.get_pg_segment_list().push_back(segment);
+          add_segment_geometry(segment);
+          io_paths.add(layer_name, segmentRect(segment), -1);
+        }
+        task.access_points[layer_name].push_back({tangent, width, separation});
+        ++task.contacts;
+        ++task.routes_per_stripe[target.database_index];
+        stats.stripes.insert(target.database_index);
+        if (mode == "direct_extension") { ++stats.direct; ++direct_connections; }
+        else { ++stats.bridge; ++bridge_connections; }
+        const auto& start = points.front();
+        const auto& end = points.back();
+        contact_details.push_back(FPUTIL.getString(instance.get_name(), "/", instance.get_io_cell_pin_name(), " PORT ", port,
+                                                   " net=", net_name, " mode=", mode, " pin_layer=", pin.get_layer_name(),
+                                                   " route_layer=", layer_name, " target_layer=", layer_name,
+                                                   " stripe_id=", target.database_index, " width=", width,
+                                                   " segments=1 spacing=", separation,
+                                                   " start=(", start.get_x(), ",", start.get_y(), ") end=(", end.get_x(), ",", end.get_y(), ")"));
+        return true;
+      };
+
+      for (const auto& [layer_name, rails] : task.rails) {
+        auto found = task.targets->find(layer_name);
+        if (found == task.targets->end()) continue;
+        auto targets = found->second;
+        const auto& first_pin = rails.front();
+        const PlanarCoord center((first_pin.get_ll_x() + first_pin.get_ur_x()) / 2, (first_pin.get_ll_y() + first_pin.get_ur_y()) / 2);
+        auto distance = [&](const StripeTarget& target) {
+          const auto point = bridge_target_point(target.segment, center);
+          if (point.get_x() == INT32_MIN || point.get_y() == INT32_MIN) return int64_t(INT64_MAX);
+          return int64_t(std::abs(point.get_x() - center.get_x())) + std::abs(point.get_y() - center.get_y());
+        };
+        std::stable_sort(targets.begin(), targets.end(), [&](const auto& a, const auto& b) { return distance(a) < distance(b); });
+        auto* layer = findRoutingLayer(layer_name);
+        for (const auto& target : targets) {
+          if (!can_add(layer_name, target.database_index)) continue;
+          const bool perpendicular = normal_x ? target.segment.is_horizontal() : target.segment.is_vertical();
+          if (phase == 0 && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
+          if (phase > 0 && !config.pg_io_core_connect.allow_bridge) continue;
+          for (const auto& pin : rails) {
+            const int32_t width = pin_width(pin, layer, target.segment.get_width());
+            if (width == 0) { ++task.layers[layer_name].rejected["PIN_NARROWER_THAN_STRIPE"]; continue; }
+            const int32_t low = normal_x ? pin.get_ll_y() : pin.get_ll_x();
+            const int32_t high = normal_x ? pin.get_ur_y() : pin.get_ur_x();
+            std::set<int32_t> tangents;
+            const int32_t first = FPUTIL.alignUp(low + width / 2, grid);
+            const int32_t last = FPUTIL.alignDown(high - width / 2, grid);
+            if (phase == 0) {
+              const int32_t coordinate = normal_x ? target.segment.get_start_y() : target.segment.get_start_x();
+              if (coordinate >= first && coordinate <= last) tangents.insert(coordinate);
+            } else {
+              const auto start = start_at(pin, width, first);
+              if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
+              const int32_t separation = std::max({grid, layer->get_io_spacing(), configured_bridge_spacing});
+              const int32_t pitch = FPUTIL.alignUp(width + separation, grid);
+              for (int64_t coordinate = first; coordinate <= last; coordinate += pitch) tangents.insert(static_cast<int32_t>(coordinate));
+
+            }
+            for (const int32_t tangent : tangents) {
+              if (!can_add(layer_name, target.database_index)) break;
+              const auto start = start_at(pin, width, tangent);
+              if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
+              const auto end = phase == 0 ? direct_extension_target_point(target.segment, start)
+                                          : bridge_target_point(target.segment, start);
+              if (end.get_x() == INT32_MIN || end.get_y() == INT32_MIN) {
+                ++task.layers[layer_name].rejected[phase == 0 ? "DIRECT_EXTENSION_STRIPE_NOT_ALIGNED" : "NO_STRAIGHT_PATH"];
+                continue;
+              }
+              if (start.get_x() != end.get_x() && start.get_y() != end.get_y()) {
+                ++task.layers[layer_name].rejected[phase == 0 ? "DIRECT_EXTENSION_NOT_COLLINEAR" : "NO_STRAIGHT_PATH"];
+                continue;
+              }
+              try_path(pin, target, width, {start, end}, phase == 0 ? "direct_extension" : "straight_bridge");
+            }
+          }
+        }
+      }
+    }
+  }
+  std::vector<std::string> layer_details;
+  for (auto& task : tasks) {
+    const std::string terminal = task.instance->get_name() + "/" + task.instance->get_io_cell_pin_name() + " PORT " + std::to_string(task.port);
+    bool complete = true;
+    for (const auto& [layer, rails] : task.rails) {
+      const auto& stats = task.layers[layer];
+      if (config.pg_io_core_connect.require_each_pin_layer && stats.count() == 0) {
+        failures.push_back({terminal, "NO_LEGAL_PATH_" + layer});
+        complete = false;
+      }
+      std::string detail = FPUTIL.getString(terminal, " layer=", layer, " rails=", rails.size(), " routes=", stats.count(),
+                                            " stripes=", stats.stripes.size(), " direct=", stats.direct, " bridge=", stats.bridge,
+                                            " candidates=", stats.candidates);
+      for (const auto& [reason, count] : stats.rejected) detail += FPUTIL.getString(" ", reason, "=", count);
+      layer_details.push_back(std::move(detail));
+    }
+    if (task.contacts < config.pg_io_core_connect.min_contacts_per_port) {
+      failures.push_back({terminal, "INSUFFICIENT_CONTACTS"});
+      complete = false;
+    }
+    if (complete) ++connected_ports;
+  }
+  std::set<std::string> unresolved;
+  for (const auto& failure : failures) unresolved.insert(failure.terminal);
+
+  FPLOG.info(Loc::current(), "IO core PG: ", connected_ports, " connected ports, ", unresolved.size(),
+             " unresolved ports (direct=", direct_connections, ", bridge=", bridge_connections, ").");
+  if (!config.pg_temp_directory_path.empty()) {
+    std::ofstream report(config.pg_temp_directory_path + "/io_core_connect.rpt");
+    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size() << "\nDirect connections: "
+           << direct_connections << "\nBridge connections: " << bridge_connections << "\n";
+    for (const auto& failure : failures) report << failure.terminal << " " << failure.reason << "\n";
+    report << "[layers]\n";
+    for (const auto& detail : layer_details) report << detail << "\n";
+    report << "[contacts: DBU]\n";
+    for (const auto& contact : contact_details) report << contact << "\n";
+  }
+  if (!failures.empty()) {
+    if (config.pg_io_core_connect.fail_on_unresolved) {
+      FPLOG.error(Loc::current(), "IO core PG incomplete: ", unresolved.size(), " ports. See io_core_connect.rpt.");
+    } else {
+      FPLOG.warn(Loc::current(), "IO core PG incomplete: ", unresolved.size(), " ports; continuing. See io_core_connect.rpt.");
+    }
+  }
+  FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 void PDNGenerator::buildMacroConnect(PGModel& pg_model)
 {
   Monitor monitor;
@@ -1263,8 +1936,14 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   const int32_t grid = std::max(1, database.get_manufacture_grid());
   auto snap = [&](int32_t value) { return FPUTIL.alignDown(value, grid); };
   int32_t connected = 0;
-  std::vector<std::pair<int32_t, std::string>> pending;
+  struct Pending {
+    int32_t component;
+    bool required;
+    std::string terminal;
+  };
+  std::vector<Pending> pending;
   std::vector<std::string> unresolved;
+  std::vector<std::string> optional_unresolved;
   for (const auto& [terminal, net_idx] : bindings) {
     auto instance_it = instances.find(terminal.first);
     if (instance_it == instances.end()) {
@@ -1273,6 +1952,18 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
     auto& instance = *instance_it->second;
     const auto& master = database.get_cell_master_map().at(instance.get_master_name());
     const bool pad = master.get_pad() || master.get_pad_filler() || master.get_corner();
+    const auto& net_name = database.get_pg_net_list()[net_idx].get_name();
+    // The dedicated connector owns the definition-file supply pin only.
+    if (config.pg_io_core_connect.enabled && instance.get_io_cell_net_name() == net_name
+        && instance.get_io_cell_pin_name() == terminal.second
+        && std::find(config.pg_io_core_connect.nets.begin(), config.pg_io_core_connect.nets.end(), net_name)
+               != config.pg_io_core_connect.nets.end()) {
+      continue;
+    }
+    const bool required_net = config.pg_required_net_list.empty()
+                              || std::find(config.pg_required_net_list.begin(), config.pg_required_net_list.end(), net_name)
+                                     != config.pg_required_net_list.end();
+    const bool required_terminal = required_net && (!config.pg_io_core_connect.enabled || !pad);
     if ((!instance.get_macro() && !pad) || (pad && !config.pg_connect_pads)) {
       continue;
     }
@@ -1284,7 +1975,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
       }
     }
     if (ports.empty()) {
-      unresolved.push_back(terminal.first + "/" + terminal.second + " (no routing shape)");
+      (required_terminal ? unresolved : optional_unresolved).push_back(terminal.first + "/" + terminal.second + " (no routing shape)");
       continue;
     }
     for (const auto& [port, shapes] : ports) {
@@ -1426,23 +2117,29 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
         connected_components.insert(component);
         ++connected;
       } else {
-        pending.emplace_back(component, terminal.first + "/" + terminal.second + " PORT " + std::to_string(port));
+        pending.push_back({component, required_terminal, terminal.first + "/" + terminal.second + " PORT " + std::to_string(port)});
       }
     }
   }
-  for (const auto& [component, terminal] : pending) {
-    if (connected_components.contains(component)) {
+  for (const auto& item : pending) {
+    if (connected_components.contains(item.component)) {
       ++connected;
     } else {
-      unresolved.push_back(terminal);
+      (item.required ? unresolved : optional_unresolved).push_back(item.terminal);
     }
   }
-  FPLOG.info(Loc::current(), "PG access: ", connected, " connected ports, ", unresolved.size(), " unresolved ports.");
+  FPLOG.info(Loc::current(), "PG access: ", connected, " connected ports, ", unresolved.size(), " required unresolved ports, ",
+             optional_unresolved.size(), " optional unresolved ports.");
   if (!config.pg_temp_directory_path.empty()) {
     std::ofstream report(config.pg_temp_directory_path + "/pg_connectivity.rpt");
-    report << "Connected ports: " << connected << "\nUnresolved ports: " << unresolved.size() << "\n";
+    report << "Connected ports: " << connected << "\nUnresolved ports: " << unresolved.size()
+           << "\nOptional unresolved ports: " << optional_unresolved.size() << "\n";
     for (const auto& terminal : unresolved) {
       report << terminal << "\n";
+    }
+    if (!optional_unresolved.empty()) {
+      report << "[optional]\n";
+      for (const auto& terminal : optional_unresolved) report << terminal << "\n";
     }
   }
   for (size_t i = 0; i < std::min<size_t>(unresolved.size(), 20); ++i) {

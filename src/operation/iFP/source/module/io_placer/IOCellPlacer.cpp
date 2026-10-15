@@ -654,6 +654,9 @@ bool IOCellPlacer::placeCorners(const IOCellDefinition& definition)
     }
     instance->set_coord(corner.x, corner.y);
     instance->set_orient(corner.orient);
+    const int32_t corner_width = getOrientedWidth(*instance, corner.orient);
+    const int32_t corner_height = getOrientedHeight(*instance, corner.orient);
+    instance->set_bounding_rect(corner.x, corner.y, corner.x + corner_width, corner.y + corner_height);
     instance->set_fixed(true);
     instance->set_placed(true);
     instance->set_placement_updated(!instance->is_new_instance());
@@ -805,6 +808,7 @@ bool IOCellPlacer::placeCell(Instance& instance, IOEdgeType edge, int32_t along,
   }
   instance.set_coord(x, y);
   instance.set_orient(orient);
+  instance.set_bounding_rect(x, y, x + oriented_width, y + oriented_height);
   instance.set_fixed(fixed);
   instance.set_placed(true);
   instance.set_delete_instance(false);

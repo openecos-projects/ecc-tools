@@ -82,8 +82,9 @@ class PDNGenerator
   bool addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name, int32_t x,
                      int32_t y, int32_t width, int32_t height);
 
+  void buildIOCoreConnect(PGModel& pg_model);
   void buildMacroConnect(PGModel& pg_model);
-  void trimMacroStripeEnds();
+  void trimStripeEnds();
 
   std::vector<Instance*> _placed_macro_list;
   std::unordered_map<const Instance*, int32_t> _macro_top_layer_order;

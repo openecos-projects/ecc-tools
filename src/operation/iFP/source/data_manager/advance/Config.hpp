@@ -38,6 +38,37 @@ struct PGRingConfig
   double offset_micron = 0.0;
 };
 
+struct PGIOCoreConnectConfig
+{
+  bool enabled = false;
+  std::vector<std::string> nets;
+  std::vector<std::string> pin_layers;
+  // IO-core connections must stay on the metal layer shared by the IO pin
+  // and the core stripe.  This is the safe default for IO power cells: the
+  // connector must never create a fallback via stack on another layer.
+  bool same_layer_only = true;
+  bool select_outermost_pin = true;
+  bool connect_all_legal_stripes = true;
+  bool allow_core_detour = false;
+  int32_t max_bridge_bends = 0;
+  bool fail_on_unresolved = false;
+  bool require_each_pin_layer = true;
+  int32_t min_contacts_per_port = 1;
+  int32_t max_contacts_per_port = 0;
+  // Limits are per PORT; zero means no artificial cap.
+  int32_t max_routes_per_stripe = 0;
+  bool allow_direct_extension = true;
+  bool allow_bridge = true;
+  // IO-core connectors are restricted to a single Manhattan segment.  A
+  // direct extension additionally requires the stripe projection to overlap
+  // the core-facing outer IO rail; it must never be clamped to a stripe end.
+  bool direct_extension_only = true;
+  bool bridge_straight_only = true;
+  // Zero uses the technology IO spacing.  A positive value is an additional
+  // lower bound expressed in microns and is converted to DBU at use time.
+  double bridge_min_spacing_micron = 0.0;
+};
+
 class Config
 {
  public:
@@ -75,6 +106,8 @@ class Config
   std::string core_power_net;
   std::string core_ground_net;
   PGRingConfig pg_ring;
+  PGIOCoreConnectConfig pg_io_core_connect;
+  std::vector<std::string> pg_required_net_list;
   bool pg_connect_pads = false;
   bool pg_require_connected_pins = true;
   std::vector<std::string> pg_access_layer_list;

@@ -303,7 +303,21 @@ void PhyPlacer::addPPBoundaryRegion(PPModel& pp_model, PPRegion& pp_region, int3
 
 void PhyPlacer::insertCornerEndcap(PPModel& pp_model, int32_t& endcap_idx)
 {
-  const auto& corners = FPDM.getConfig().corner_cell_names;
+  const auto& config = FPDM.getConfig();
+  auto corners = config.corner_cell_names;
+  // Row-end corners are physical endcaps, independent of IO ring corner cells.
+  // Preserve the legacy io_pin schema by resolving its roles from side_endcap.
+  if (corners.empty() && config.io_placer_mode == IOPlacerMode::kIOPin) {
+    for (const auto* vertical : {"top", "bottom"}) {
+      for (const auto* side : {"left", "right"}) {
+        for (const auto* kind : {"inner", "outer"}) {
+          const std::string role = std::string(vertical) + "_" + side + "_" + kind;
+          corners[role] = std::string(side) == "left" ? config.left_endcap_name : config.right_endcap_name;
+        }
+      }
+    }
+    FPLOG.info(Loc::current(), "Using side_endcap masters for io_pin row corners.");
+  }
   std::map<std::pair<int32_t, int32_t>, std::pair<std::string, PlacementOrientation>> placed;
   for (auto& boundary : pp_model.get_boundary_region_list()) {
     for (bool left : {true, false}) {

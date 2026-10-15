@@ -39,6 +39,8 @@ class RoutingLayer
   int32_t get_nonprefer_track_pitch() const { return _nonprefer_track_pitch; }
   int32_t get_prefer_track_offset() const { return _prefer_track_offset; }
   int32_t get_spacing() const { return _spacing; }
+  int32_t get_io_spacing() const { return std::max(_spacing, _io_spacing); }
+  int32_t get_min_enclosed_area() const { return _min_enclosed_area; }
   Direction get_prefer_direction() const { return _prefer_direction; }
 
   // const getter
@@ -57,6 +59,8 @@ class RoutingLayer
   void set_nonprefer_track_pitch(int32_t nonprefer_track_pitch) { _nonprefer_track_pitch = nonprefer_track_pitch; }
   void set_prefer_track_offset(int32_t prefer_track_offset) { _prefer_track_offset = prefer_track_offset; }
   void set_spacing(int32_t spacing) { _spacing = spacing; }
+  void set_io_spacing(int32_t spacing) { _io_spacing = spacing; }
+  void set_min_enclosed_area(int32_t area) { _min_enclosed_area = area; }
   void set_prefer_direction(Direction prefer_direction) { _prefer_direction = prefer_direction; }
 
   // function
@@ -74,6 +78,10 @@ class RoutingLayer
   int32_t _nonprefer_track_pitch = -1;
   int32_t _prefer_track_offset = -1;
   int32_t _spacing = -1;
+  // Conservative bounds for independent IO PG paths, including wide-wire,
+  // parallel-run and end-of-line spacing rules imported from LEF.
+  int32_t _io_spacing = 0;
+  int32_t _min_enclosed_area = 0;
   Direction _prefer_direction = Direction::kNone;
 };
 
