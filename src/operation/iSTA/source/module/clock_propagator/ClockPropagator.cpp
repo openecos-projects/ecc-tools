@@ -377,9 +377,19 @@ void ClockPropagator::updateEffectiveClockState(CPClock& clock)
             = mode != definition.get_transition_map().end() && mode->second.contains(trans_type) ? mode->second.at(trans_type) : 0.0;
       }
     }
+    // Ideal clocks still need the logical transition provenance of the clock
+    // network.  OpenSTA uses the clock-path polarity to select the source edge
+    // for a sequential check, while the ideal arrival/slew values above must
+    // remain unchanged when the clock is not propagated.
+    state.predecessor_map = state.physical_predecessor_map;
+    state.predecessor_arc_delay_map = state.physical_predecessor_arc_delay_map;
+    state.predecessor_trans_type_map = state.physical_predecessor_trans_type_map;
     if (timing_point.get_clock_name() == clock.get_clock_name()) {
       timing_point.set_clock_arrival_map(state.arrival_map);
       timing_point.set_clock_slew_map(state.slew_map);
+      timing_point.set_clock_predecessor_map(state.predecessor_map);
+      timing_point.set_clock_predecessor_arc_delay_map(state.predecessor_arc_delay_map);
+      timing_point.set_clock_predecessor_trans_type_map(state.predecessor_trans_type_map);
     }
   }
 }

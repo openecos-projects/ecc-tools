@@ -36,6 +36,8 @@ class Utility
   // function
   static TransType getLaunchClockTransition(Database& database, std::string_view start);
   static double getLaunchClockEdge(Database& database, std::string_view start, std::string_view clock);
+  static TransType getClockSourceTransition(Database& database, std::string_view clock_pin, std::string_view clock_name, AnalysisType analysis,
+                                            TransType physical_transition);
   static double getClockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type);
 #if 1  // std数据结构工具函数
 

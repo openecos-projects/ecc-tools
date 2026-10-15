@@ -395,6 +395,9 @@ double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_c
   double raw_output_load = getArcOutputLoad(arc, analysis_type, output_trans_type);
   std::vector<double> delay_list;
   for (TimingArc* timing_arc : getCandidateTimingArcList(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin())) {
+    if (!arc.is_timing_arc_enabled(timing_arc->get_arc_idx())) {
+      continue;
+    }
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
       continue;
     }
@@ -433,6 +436,9 @@ double DelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_c
   double raw_output_load = getArcOutputLoad(arc, analysis_type, output_trans_type);
   std::vector<double> delay_list;
   for (TimingArc* timing_arc : getCandidateTimingArcList(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin())) {
+    if (!arc.is_timing_arc_enabled(timing_arc->get_arc_idx())) {
+      continue;
+    }
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
       continue;
     }

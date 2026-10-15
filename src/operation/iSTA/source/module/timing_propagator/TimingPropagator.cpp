@@ -209,7 +209,8 @@ void TimingPropagator::propagateDataSlewDelay(TPModel& tp_model)
   seedDataSlewList(tp_model);
   for (int32_t vertex_idx : database.get_graph_order_list()) {
     for (std::size_t arc_idx : database.get_graph_vertex_list()[vertex_idx].get_outgoing_arc_list()) {
-      if (isDisableArc(database.get_arc_list()[arc_idx])) {
+      const Arc& arc = database.get_arc_list()[arc_idx];
+      if (arc.get_is_electrical_disable_arc() || arc.get_is_loop_disable()) {
         continue;
       }
       propagateDataSlewDelayArc(arc_idx);

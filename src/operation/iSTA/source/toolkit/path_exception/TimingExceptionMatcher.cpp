@@ -141,7 +141,15 @@ std::string TimingExceptionMatcher::makePathStateTag(Database& database, std::st
                                                      const std::vector<int32_t>& exception_state_list)
 {
   std::string tag(clock);
-  if (STAUTIL.getLaunchClockTransition(database, start) == TransType::kFall) {
+  TransType source_transition = STAUTIL.getLaunchClockTransition(database, start);
+  const auto pin = database.get_pin_map().find(std::string(start));
+  if (pin != database.get_pin_map().end() && !pin->second.get_is_port()) {
+    const auto instance = database.get_instance_map().find(pin->second.get_instance_name());
+    if (instance != database.get_instance_map().end() && instance->second.get_is_sequential()) {
+      source_transition = Utility::getClockSourceTransition(database, instance->second.get_clock_pin_name(), clock, AnalysisType::kMax, source_transition);
+    }
+  }
+  if (source_transition == TransType::kFall) {
     tag += "\x1e";
   }
   for (const int32_t state : exception_state_list) {

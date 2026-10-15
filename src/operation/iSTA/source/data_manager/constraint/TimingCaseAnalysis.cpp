@@ -133,6 +133,11 @@ void propagateCaseValues(Database& database)
         if (pin == database.get_pin_map().end()) {
           continue;
         }
+        // An inout PAD may expose an output function in Liberty while it is
+        // resolved as an externally driven input in the design.
+        if (pin->second.get_direction() != PinDirection::kOutput) {
+          continue;
+        }
         LogicExpression& three_state = port.get_three_state_expression();
         if (!three_state.get_is_empty()) {
           std::optional<bool> disabled = three_state.evaluate_constant(values);
@@ -164,6 +169,8 @@ void disableInsensitiveArcs(Database& database)
   auto& effective = constraint.get_effective_case_analysis_map();
   for (Arc& arc : database.get_arc_list()) {
     arc.set_is_case_analysis_disable(false);
+    arc.set_is_function_disable(false);
+    arc.get_disabled_timing_arcs().clear();
     Pin& source_pin = database.get_pin_map().at(arc.get_source_pin());
     Pin& sink_pin = database.get_pin_map().at(arc.get_sink_pin());
     if ((arc.get_type() == ArcType::kNet && source_pin.get_is_driver_disabled()) || (arc.get_type() == ArcType::kCell && sink_pin.get_is_driver_disabled())) {
@@ -197,6 +204,9 @@ void disableInsensitiveArcs(Database& database)
     if (cell_arc != nullptr) {
       for (TimingArc& timing_arc : cell_arc->get_timing_arc_list()) {
         LogicExpression& condition = timing_arc.get_when_expression();
+        if (condition.evaluate_constant(values) == std::optional<bool>(false)) {
+          arc.get_disabled_timing_arcs().insert(timing_arc.get_arc_idx());
+        }
         if (condition.get_is_empty() || condition.evaluate_constant(values) != std::optional<bool>(false)) {
           enabled = true;
         }
@@ -208,7 +218,7 @@ void disableInsensitiveArcs(Database& database)
     }
     // A sequential output function names its state, not the triggering clock.
     // Keep clock-to-Q arcs unless their case value or explicit condition disables them.
-    if (arc.get_is_clock_arc()) {
+    if (arc.get_is_clock_arc() || arc.get_is_control_arc()) {
       continue;
     }
     const auto output = cell->second.get_port_map().find(arc.get_library_sink_port());
@@ -216,7 +226,9 @@ void disableInsensitiveArcs(Database& database)
       continue;
     }
     if (!output->second.get_function_expression().is_sensitive_to(arc.get_library_source_port(), constantInputs(database, instance->second))) {
-      arc.set_is_case_analysis_disable(true);
+      // OpenSTA excludes this arc from arrival search, but still evaluates
+      // its electrical slew when the source itself is not constant.
+      arc.set_is_function_disable(true);
     }
   }
 }

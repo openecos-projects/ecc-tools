@@ -26,6 +26,8 @@ namespace ista {
 
 class DelayCalculator
 {
+  friend class SparseTimingExportAdapter;
+
  public:
   static void initInst();
   static DelayCalculator& getInst();

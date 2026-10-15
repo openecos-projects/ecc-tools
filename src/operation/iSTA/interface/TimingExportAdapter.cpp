@@ -290,6 +290,13 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
   }
   snapshot.start_points = database.get_start_point_list();
   snapshot.end_points = database.get_end_point_list();
+  // Output-delay ports are timing endpoints even when the physical LEF marks
+  // the terminal as INPUT (common for bidirectional pad abstractions).
+  for (const auto& [pin_name, constraint] : database.get_timing_constraint().get_port_constraint_map()) {
+    if (constraint.get_has_output_delay_max() && std::find(snapshot.end_points.begin(), snapshot.end_points.end(), pin_name) == snapshot.end_points.end()) {
+      snapshot.end_points.push_back(pin_name);
+    }
+  }
 
   for (Arc& arc : database.get_arc_list()) {
     const auto source_it = pin_ids.find(arc.get_source_pin());
@@ -328,10 +335,12 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
                 if (index >= cell.arcs.size()) break;
                 TimingGraphArcSnapshot variant = exported;
                 variant.library_arc_id = static_cast<int32_t>(index++);
+                mapped = true;
+                if (!arc.is_timing_arc_enabled(timing_arc.get_arc_idx()))
+                  continue;
                 variant.sense = senseCode(timing_arc.get_sense());
                 variant.timing_type = transCode(timing_arc.get_trigger_trans_type());
                 snapshot.graph_arcs.push_back(std::move(variant));
-                mapped = true;
               }
               break;
             }
@@ -356,6 +365,15 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
     if (it != clock_outputs.end()) name = it->second;
   }
 
+  std::unordered_map<std::string, std::vector<std::string>> control_sinks_by_net;
+  for (Arc& arc : database.get_arc_list()) {
+    if (!arc.get_is_control_arc())
+      continue;
+    const auto sink = database.get_pin_map().find(arc.get_sink_pin());
+    if (sink != database.get_pin_map().end() && !sink->second.get_net_name().empty()) {
+      control_sinks_by_net[sink->second.get_net_name()].push_back(arc.get_sink_pin());
+    }
+  }
   for (auto& [net_name, net] : database.get_net_map()) {
     if (net.get_driver_pin_list().empty()) {
       addDiagnostic(snapshot, "net without a resolved driver: " + net_name);
@@ -367,6 +385,25 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
       for (const std::string& load : net.get_load_pin_list()) {
         if (load != driver)
           snapshot.net_arcs.push_back({driver, load});
+      }
+    }
+
+    // A Liberty inout PAD has two electrical roles on the same physical net.
+    // The DEF/LEF port direction is sometimes INPUT even when the SDC applies
+    // an output delay. Preserve the output role explicitly for sparse timing;
+    // the ordinary net relation above remains available for the input role.
+    for (const std::string& port_name : net.get_pin_name_list()) {
+      const auto port = database.get_pin_map().find(port_name);
+      const auto constraint = database.get_timing_constraint().get_port_constraint_map().find(port_name);
+      if (port == database.get_pin_map().end() || !port->second.get_is_port() || constraint == database.get_timing_constraint().get_port_constraint_map().end()
+          || !constraint->second.get_has_output_delay_max()) {
+        continue;
+      }
+      const auto control_sinks = control_sinks_by_net.find(net_name);
+      if (control_sinks == control_sinks_by_net.end())
+        continue;
+      for (const std::string& sink : control_sinks->second) {
+        snapshot.net_arcs.push_back({sink, port_name});
       }
     }
   }

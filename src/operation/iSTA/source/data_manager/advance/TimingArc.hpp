@@ -37,6 +37,7 @@ class TimingArc
   TransType get_check_trans_type() const { return _check_trans_type; }
   std::string& get_library_name() { return _library_name; }
   std::string& get_sdf_cond() { return _sdf_cond; }
+  LogicExpression& get_when() { return _when; }
   double get_time_unit_scale() const { return _time_unit_scale; }
   double get_cap_unit_scale() const { return _cap_unit_scale; }
   double get_slew_derate() const { return _slew_derate; }
@@ -59,6 +60,7 @@ class TimingArc
   void set_check_trans_type(const TransType& check_trans_type) { _check_trans_type = check_trans_type; }
   void set_library_name(const std::string& library_name) { _library_name = library_name; }
   void set_sdf_cond(const std::string& sdf_cond) { _sdf_cond = sdf_cond; }
+  void set_when(const LogicExpression& when) { _when = when; }
   void set_time_unit_scale(const double time_unit_scale) { _time_unit_scale = time_unit_scale; }
   void set_cap_unit_scale(const double cap_unit_scale) { _cap_unit_scale = cap_unit_scale; }
   void set_slew_derate(const double slew_derate) { _slew_derate = slew_derate; }
@@ -83,6 +85,7 @@ class TimingArc
   TransType _check_trans_type = TransType::kNone;
   std::string _library_name;
   std::string _sdf_cond;
+  LogicExpression _when;
   double _time_unit_scale = 1.0;
   double _cap_unit_scale = 1.0;
   double _slew_derate = 1.0;

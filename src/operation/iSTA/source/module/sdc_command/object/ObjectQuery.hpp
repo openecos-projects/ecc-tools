@@ -53,6 +53,8 @@ std::set<std::string> findClocksFromObjects(Database& database, const std::vecto
 std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findClockSources(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findObjectsByType(Database& database, const std::vector<std::string>& objects, QueryObjectType type);
+std::vector<std::string> findFanin(Database& database, const std::vector<std::string>& objects, bool startpoints_only, bool only_cells);
+std::vector<std::string> findFanout(Database& database, const std::vector<std::string>& objects, bool endpoints_only, bool only_cells);
 
 std::vector<std::string> getPortPinNames(Database& database, const std::vector<std::string>& object_list);
 std::vector<std::string> getFullNames(Database& database, const std::string& object_list);

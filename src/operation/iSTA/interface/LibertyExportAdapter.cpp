@@ -54,7 +54,10 @@ TimingLutSnapshot copyTable(TimingTable& table, double time_scale, double cap_sc
   if (!result.axes.empty()) {
     for (double& value : result.axes[0]) value *= first_is_cap ? cap_scale : time_scale;
   }
-  if (result.axes.size() > 1) {
+  if (result.axes.size() == 1 && (first_is_cap || table.get_variable_type1() == TimingTableVariableType::kConstrainedTransition)) {
+    // Preserve a 1D load/data-slew table in the second canonical input slot.
+    result.axes.insert(result.axes.begin(), std::vector<double>{});
+  } else if (result.axes.size() > 1) {
     for (double& value : result.axes[1]) value *= second_is_cap ? cap_scale : time_scale;
     if (first_is_cap || table.get_variable_type1() == TimingTableVariableType::kConstrainedTransition) {
       const std::size_t rows = result.axes[0].size();

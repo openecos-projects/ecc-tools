@@ -31,6 +31,7 @@ add_subdirectory(${ISTA_SOURCE})
 
 if (BUILD_TESTING)
     add_subdirectory(${HOME_ISTA}/test)
+    add_subdirectory(${PROJECT_SOURCE_DIR}/test/timing ${CMAKE_CURRENT_BINARY_DIR}/tests)
 endif ()
 
 ########################################################
