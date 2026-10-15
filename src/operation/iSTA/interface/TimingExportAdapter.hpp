@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../source/data_manager/advance/TimingEndpointQualification.hpp"
+#include "SparseTimingSnapshot.hpp"
 
 namespace ista {
 
@@ -163,6 +164,7 @@ struct TimingSnapshot
   std::vector<TimingClockSnapshot> clock_metadata;
   std::vector<TimingLibCellSnapshot> lib_cells;
   std::vector<std::string> clock_names;
+  SparseTimingSnapshot sparse;
 };
 
 class TimingExportAdapter

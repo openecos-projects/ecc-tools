@@ -491,6 +491,7 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
   if (snapshot.start_points.empty()) addDiagnostic(snapshot, "no constrained start points exported");
   if (snapshot.end_points.empty()) addDiagnostic(snapshot, "no constrained end points exported");
   if (snapshot.clock_pins.empty()) addDiagnostic(snapshot, "no sequential clock pins exported");
+  SparseTimingExportAdapter::compile(snapshot);
   return snapshot;
 }
 

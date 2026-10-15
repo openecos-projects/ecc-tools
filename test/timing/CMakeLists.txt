@@ -29,3 +29,7 @@ add_test(NAME net_threshold COMMAND net_threshold_test)
 add_executable(io_constraint_test io_constraint_test.cpp)
 target_link_libraries(io_constraint_test PRIVATE ista_sdc_command ista_delay_calculator ista_data_manager)
 add_test(NAME io_constraint COMMAND io_constraint_test)
+
+add_executable(sparse_required_rule_test sparse_required_rule_test.cpp)
+target_link_libraries(sparse_required_rule_test PRIVATE ista_interface ista_clock_propagator ista_timing_propagator ista_timing_analyzer ista_delay_calculator ista_data_manager)
+add_test(NAME sparse_required_rule COMMAND sparse_required_rule_test)

@@ -28,7 +28,8 @@ namespace py = pybind11;
 void register_imp(pybind11::module& m)
 {
   pybind11::class_<PyPlaceDB>(m, "PyPlaceDB")
-      .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr3D", py::arg("resolve_congestion") = "low")
+      .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr3D",
+           py::arg("resolve_congestion") = "low")
       .def("write_macro_placement_back", &PyPlaceDB::writeMacroPlacementBack, py::arg("node_x"), py::arg("node_y"))
       .def("apply_sizing", &PyPlaceDB::applySizing, py::arg("cell_ids"), py::arg("target_master_names"))
       .def("apply_buffer_actions", &PyPlaceDB::applyBufferActions, py::arg("actions"), py::arg("action_digest"))
@@ -73,6 +74,7 @@ void register_imp(pybind11::module& m)
       .def_readwrite("pin2node_map", &PyPlaceDB::pin2node_map)
       .def_readwrite("pin2net_map", &PyPlaceDB::pin2net_map)
       .def_readwrite("timing_schema_version", &PyPlaceDB::timing_schema_version)
+      .def_readwrite("timing_sparse", &PyPlaceDB::timing_sparse)
       .def_readwrite("timing_diagnostics", &PyPlaceDB::timing_diagnostics)
       .def_readwrite("timing_clock_names", &PyPlaceDB::timing_clock_names)
       .def_readwrite("timing_clock_info", &PyPlaceDB::timing_clock_info)

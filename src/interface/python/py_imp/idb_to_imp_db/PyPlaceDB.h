@@ -98,6 +98,7 @@ struct PyPlaceDB
   // Timing export.  Indices are design-pin ids, times are ps, capacitances
   // are pF, and CSR offsets are half-open [start, end) ranges.
   int timing_schema_version = 0;
+  pybind11::dict timing_sparse;
   pybind11::list timing_diagnostics;
   pybind11::list timing_clock_names;
   pybind11::list timing_clock_info;
@@ -289,6 +290,7 @@ struct PyPlaceDB
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
   void init_timing(const ista::TimingSnapshot& snapshot, idm::DataManager* db);
+  void init_sparse_timing(const ista::TimingSnapshot& snapshot);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
 
