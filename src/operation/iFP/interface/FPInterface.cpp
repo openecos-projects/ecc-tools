@@ -561,11 +561,8 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.pg_io_core_connect.enabled = io_core.value("enable", true);
     config.pg_io_core_connect.nets = io_core.value("nets", std::vector<std::string>{});
     config.pg_io_core_connect.pin_layers = io_core.value("pin_layers", std::vector<std::string>{});
-    config.pg_io_core_connect.same_layer_only = io_core.value("same_layer_only", true);
     config.pg_io_core_connect.select_outermost_pin = io_core.value("select_outermost_pin", true);
     config.pg_io_core_connect.connect_all_legal_stripes = io_core.value("connect_all_legal_stripes", true);
-    config.pg_io_core_connect.allow_core_detour = io_core.value("allow_core_detour", false);
-    config.pg_io_core_connect.max_bridge_bends = io_core.value("max_bridge_bends", 0);
     config.pg_io_core_connect.fail_on_unresolved = io_core.value("fail_on_unresolved", false);
     config.pg_io_core_connect.require_each_pin_layer = io_core.value("require_each_pin_layer", true);
     config.pg_io_core_connect.min_contacts_per_port = io_core.value("min_contacts_per_port", 1);
@@ -573,17 +570,11 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.pg_io_core_connect.max_routes_per_stripe = io_core.value("max_routes_per_stripe", 0);
     config.pg_io_core_connect.allow_direct_extension = io_core.value("allow_direct_extension", true);
     config.pg_io_core_connect.allow_bridge = io_core.value("allow_bridge", true);
-    config.pg_io_core_connect.direct_extension_only = io_core.value("direct_extension_only", true);
-    config.pg_io_core_connect.bridge_straight_only = io_core.value("bridge_straight_only", true);
     config.pg_io_core_connect.bridge_min_spacing_micron = io_core.value("bridge_min_spacing_micron", 0.0);
   }
   if (config.pg_io_core_connect.enabled) {
-    if (config.pg_io_core_connect.nets.empty()) {
-      FPLOG.error(Loc::current(), "io_core_connect.enable requires a non-empty nets list.");
-    }
     if (config.pg_io_core_connect.min_contacts_per_port < 1 || config.pg_io_core_connect.max_contacts_per_port < 0
         || config.pg_io_core_connect.max_routes_per_stripe < 0
-        || config.pg_io_core_connect.max_bridge_bends < 0 || config.pg_io_core_connect.max_bridge_bends > 2
         || (config.pg_io_core_connect.max_contacts_per_port > 0
             && config.pg_io_core_connect.max_contacts_per_port < config.pg_io_core_connect.min_contacts_per_port)) {
       FPLOG.error(Loc::current(), "Invalid io_core_connect contact limits.");
@@ -592,26 +583,9 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
         || config.pg_io_core_connect.bridge_min_spacing_micron < 0.0) {
       FPLOG.error(Loc::current(), "io_core_connect.bridge_min_spacing_micron must be finite and non-negative.");
     }
-    if (!config.pg_io_core_connect.direct_extension_only || !config.pg_io_core_connect.bridge_straight_only) {
-      FPLOG.warn(Loc::current(), "IO-core direct extensions and bridges only support single straight segments; overriding the configuration.");
-      config.pg_io_core_connect.direct_extension_only = true;
-      config.pg_io_core_connect.bridge_straight_only = true;
-    }
-    if (config.pg_io_core_connect.bridge_straight_only && config.pg_io_core_connect.max_bridge_bends != 0) {
-      FPLOG.warn(Loc::current(),
-                 "io_core_connect.max_bridge_bends is ignored because bent IO-core routes are disabled; using max_bridge_bends=0.");
-      config.pg_io_core_connect.max_bridge_bends = 0;
-    }
-    if (config.pg_io_core_connect.allow_core_detour) {
-      FPLOG.warn(Loc::current(), "io_core_connect.allow_core_detour is ignored because bent IO-core routes are disabled.");
-      config.pg_io_core_connect.allow_core_detour = false;
-    }
     std::set<std::string> unique_nets(config.pg_io_core_connect.nets.begin(), config.pg_io_core_connect.nets.end());
-    if (unique_nets.size() != config.pg_io_core_connect.nets.size()) {
+    if (!config.pg_io_core_connect.nets.empty() && unique_nets.size() != config.pg_io_core_connect.nets.size()) {
       FPLOG.error(Loc::current(), "io_core_connect.nets contains duplicate networks.");
-    }
-    if (config.pg_required_net_list.empty()) {
-      config.pg_required_net_list = config.pg_io_core_connect.nets;
     }
   }
   for (nlohmann::json& pg_connect_json : pdn_generator_json["global_connect"]) {

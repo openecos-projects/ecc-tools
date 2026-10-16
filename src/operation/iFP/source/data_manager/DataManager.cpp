@@ -226,6 +226,9 @@ void DataManager::printConfig()
   }
   if (_config.pg_io_core_connect.enabled) {
     auto join_names = [](const std::vector<std::string>& names) {
+      if (names.empty()) {
+        return std::string("<auto>");
+      }
       std::string result = "{";
       for (size_t i = 0; i < names.size(); ++i) {
         if (i != 0) result += " ";
@@ -234,18 +237,13 @@ void DataManager::printConfig()
       return result + "}";
     };
     FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "io_core_connect: nets=", join_names(_config.pg_io_core_connect.nets),
-               ", pin_layers=", join_names(_config.pg_io_core_connect.pin_layers), ", same_layer_only=", _config.pg_io_core_connect.same_layer_only,
-               ", outermost_pin=", _config.pg_io_core_connect.select_outermost_pin,
+               ", pin_layers=", join_names(_config.pg_io_core_connect.pin_layers), ", outermost_pin=", _config.pg_io_core_connect.select_outermost_pin,
                ", connect_all=", _config.pg_io_core_connect.connect_all_legal_stripes,
                ", min_contacts=", _config.pg_io_core_connect.min_contacts_per_port,
                ", max_contacts=", _config.pg_io_core_connect.max_contacts_per_port,
                ", max_routes_per_stripe=", _config.pg_io_core_connect.max_routes_per_stripe, ", direct_extension=",
                _config.pg_io_core_connect.allow_direct_extension, ", bridge=", _config.pg_io_core_connect.allow_bridge,
-               ", direct_extension_only=", _config.pg_io_core_connect.direct_extension_only,
-               ", bridge_straight_only=", _config.pg_io_core_connect.bridge_straight_only,
                ", bridge_min_spacing_micron=", _config.pg_io_core_connect.bridge_min_spacing_micron,
-               ", core_detour=", _config.pg_io_core_connect.allow_core_detour,
-               ", max_bridge_bends=", _config.pg_io_core_connect.max_bridge_bends,
                ", fail_on_unresolved=", _config.pg_io_core_connect.fail_on_unresolved);
   }
   if (!_config.pg_required_net_list.empty()) {

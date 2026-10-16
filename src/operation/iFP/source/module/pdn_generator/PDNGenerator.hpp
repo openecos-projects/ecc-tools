@@ -57,6 +57,7 @@ class PDNGenerator
   void generatePDN(PGModel& pg_model);
 
   void buildPGNet(PGModel& pg_model);
+  void resolveIOCoreConnectDefaults(PGModel& pg_model);
   PGNet& getPGNet(std::string net_name);
 
   void buildRail(PGModel& pg_model);

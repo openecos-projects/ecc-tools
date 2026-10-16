@@ -518,6 +518,7 @@ void PDNGenerator::buildPGNet(PGModel& pg_model)
       && (pg_model.get_default_power_net_name().empty() || pg_model.get_default_ground_net_name().empty())) {
     FPLOG.error(Loc::current(), "Rails and stripes require both core POWER and GROUND nets.");
   }
+  resolveIOCoreConnectDefaults(pg_model);
   if (config.pg_io_core_connect.enabled) {
     for (const auto& net_name : config.pg_io_core_connect.nets) {
       auto net_it = database.get_pg_net_name_to_idx_map().find(net_name);
@@ -542,6 +543,41 @@ void PDNGenerator::buildPGNet(PGModel& pg_model)
   FPLOG.info(Loc::current(), "Resolved ", bindings.size(), " instance PG terminals on ", database.get_pg_net_list().size(), " nets.");
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PDNGenerator::resolveIOCoreConnectDefaults(PGModel& pg_model)
+{
+  auto& config = FPDM.getConfig();
+  if (!config.pg_io_core_connect.enabled) {
+    return;
+  }
+
+  auto& options = config.pg_io_core_connect;
+  if (options.nets.empty()) {
+    const auto& power_net = pg_model.get_default_power_net_name();
+    const auto& ground_net = pg_model.get_default_ground_net_name();
+    if (power_net.empty() || ground_net.empty()) {
+      FPLOG.error(Loc::current(), "io_core_connect requires resolvable core POWER and GROUND nets when 'nets' is omitted.");
+    }
+    options.nets.push_back(power_net);
+    if (ground_net != power_net) {
+      options.nets.push_back(ground_net);
+    }
+  }
+
+  if (options.pin_layers.empty()) {
+    std::set<std::string> stripe_layers;
+    for (const auto& stripe : config.pg_stripe_list) {
+      if (!stripe.get_layer_name().empty()) {
+        stripe_layers.insert(stripe.get_layer_name());
+      }
+    }
+    options.pin_layers.assign(stripe_layers.begin(), stripe_layers.end());
+  }
+
+  if (config.pg_required_net_list.empty()) {
+    config.pg_required_net_list = options.nets;
+  }
 }
 
 PGNet& PDNGenerator::getPGNet(std::string net_name)
@@ -1579,10 +1615,70 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     }
   }
 
-  // All terminals get their direct paths before any bridge can occupy the
-  // corridor.  Both route classes are deliberately restricted to one
-  // Manhattan segment; there is no bend or core detour fallback.
-  for (int phase = 0; phase < 2; ++phase) {
+  enum class RouteMode { kDirectExtension, kStraightBridge };
+  const auto is_direct = [](RouteMode mode) { return mode == RouteMode::kDirectExtension; };
+  const auto route_name = [&](RouteMode mode) { return is_direct(mode) ? "direct_extension" : "straight_bridge"; };
+
+  auto start_at = [&](Side side, const InstancePinShape& pin, int32_t width, int32_t tangent) {
+    PlanarCoord start;
+    if (side.value == Side::kLeft) {
+      start.set_coord(pin.get_ur_x() - width / 2, tangent);
+    } else if (side.value == Side::kRight) {
+      start.set_coord(pin.get_ll_x() + width / 2, tangent);
+    } else if (side.value == Side::kBottom) {
+      start.set_coord(tangent, pin.get_ur_y() - width / 2);
+    } else {
+      start.set_coord(tangent, pin.get_ll_y() + width / 2);
+    }
+    start.set_x(snap_inside(start.get_x(), pin.get_ll_x(), pin.get_ur_x(), width));
+    start.set_y(snap_inside(start.get_y(), pin.get_ll_y(), pin.get_ur_y(), width));
+    return start;
+  };
+
+  auto bridge_target_point = [](const PGSegment& target, const PlanarCoord& start) {
+    // A straight bridge must touch the existing stripe span.  Do not clamp a
+    // tangent to a stripe endpoint: that would turn a bridge into an extension.
+    if (target.is_horizontal()) {
+      const int32_t x_low = target.get_ll_x() + target.get_width() / 2;
+      const int32_t x_high = target.get_ur_x() - target.get_width() / 2;
+      if (start.get_x() < x_low || start.get_x() > x_high) return PlanarCoord(INT32_MIN, INT32_MIN);
+      return PlanarCoord(start.get_x(), target.get_start_y());
+    }
+    if (target.is_vertical()) {
+      const int32_t y_low = target.get_ll_y() + target.get_width() / 2;
+      const int32_t y_high = target.get_ur_y() - target.get_width() / 2;
+      if (start.get_y() < y_low || start.get_y() > y_high) return PlanarCoord(INT32_MIN, INT32_MIN);
+      return PlanarCoord(target.get_start_x(), start.get_y());
+    }
+    return PlanarCoord(INT32_MIN, INT32_MIN);
+  };
+
+  auto direct_extension_target_point = [](Side side, const PGSegment& target, const PlanarCoord& start) {
+    // Continue the stripe from the end nearest the IO edge.  The pin tangent
+    // only needs to be in the stripe cross-section.
+    const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+    if (target.is_horizontal() && normal_x) {
+      return PlanarCoord(side.value == Side::kLeft ? target.get_start_x() : target.get_end_x(), start.get_y());
+    }
+    if (target.is_vertical() && !normal_x) {
+      return PlanarCoord(start.get_x(), side.value == Side::kBottom ? target.get_start_y() : target.get_end_y());
+    }
+    return PlanarCoord(INT32_MIN, INT32_MIN);
+  };
+
+  auto access_separation = [&](const RoutingLayer& layer, int32_t width, const PlanarCoord& start, const PlanarCoord& end) {
+    int32_t separation = std::max(grid, layer.get_io_spacing());
+    const int32_t gap = (std::abs(end.get_x() - start.get_x()) + std::abs(end.get_y() - start.get_y())) - width;
+    if (gap > 0 && layer.get_min_enclosed_area() > 0) {
+      separation = std::max(separation, static_cast<int32_t>((int64_t(layer.get_min_enclosed_area()) + gap - 1) / gap));
+    }
+    return std::max(separation, configured_bridge_spacing);
+  };
+
+  // Route direct extensions before bridges so a bridge cannot occupy a direct
+  // extension corridor. Both route classes are single Manhattan segments.
+  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge}) {
+    const bool direct = is_direct(mode);
     for (auto& task : tasks) {
       auto& instance = *task.instance;
       const auto& net_name = instance.get_io_cell_net_name();
@@ -1602,62 +1698,8 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         return options.connect_all_legal_stripes || task.contacts < options.min_contacts_per_port
                || (options.require_each_pin_layer && task.layers[layer].count() == 0);
       };
-      auto start_at = [&](const InstancePinShape& pin, int32_t width, int32_t tangent) {
-        PlanarCoord start;
-        if (side.value == Side::kLeft) {
-          start.set_coord(pin.get_ur_x() - width / 2, tangent);
-        } else if (side.value == Side::kRight) {
-          start.set_coord(pin.get_ll_x() + width / 2, tangent);
-        } else if (side.value == Side::kBottom) {
-          start.set_coord(tangent, pin.get_ur_y() - width / 2);
-        } else {
-          start.set_coord(tangent, pin.get_ll_y() + width / 2);
-        }
-        start.set_x(snap_inside(start.get_x(), pin.get_ll_x(), pin.get_ur_x(), width));
-        start.set_y(snap_inside(start.get_y(), pin.get_ll_y(), pin.get_ur_y(), width));
-        return start;
-      };
-      auto bridge_target_point = [&](const PGSegment& target, const PlanarCoord& start) {
-        // A straight bridge must touch the existing stripe span.  Do not
-        // clamp a tangent to a stripe endpoint: that would turn a bridge
-        // candidate into an implicit extension.
-        if (target.is_horizontal()) {
-          const int32_t x_low = target.get_ll_x() + target.get_width() / 2;
-          const int32_t x_high = target.get_ur_x() - target.get_width() / 2;
-          if (start.get_x() < x_low || start.get_x() > x_high) return PlanarCoord(INT32_MIN, INT32_MIN);
-          return PlanarCoord(start.get_x(), target.get_start_y());
-        }
-        if (target.is_vertical()) {
-          const int32_t y_low = target.get_ll_y() + target.get_width() / 2;
-          const int32_t y_high = target.get_ur_y() - target.get_width() / 2;
-          if (start.get_y() < y_low || start.get_y() > y_high) return PlanarCoord(INT32_MIN, INT32_MIN);
-          return PlanarCoord(target.get_start_x(), start.get_y());
-        }
-        return PlanarCoord(INT32_MIN, INT32_MIN);
-      };
-      auto direct_extension_target_point = [&](const PGSegment& target, const PlanarCoord& start) {
-        // A direct extension continues the stripe from its end nearest the
-        // IO edge.  The pin tangent only needs to be within the stripe's
-        // cross-section; its coordinate along the stripe may be outside the
-        // original core segment because that is exactly the portion extended.
-        if (target.is_horizontal() && normal_x) {
-          return PlanarCoord(side.value == Side::kLeft ? target.get_start_x() : target.get_end_x(), start.get_y());
-        }
-        if (target.is_vertical() && !normal_x) {
-          return PlanarCoord(start.get_x(), side.value == Side::kBottom ? target.get_start_y() : target.get_end_y());
-        }
-        return PlanarCoord(INT32_MIN, INT32_MIN);
-      };
-      auto access_separation = [&](const RoutingLayer& layer, int32_t width, const PlanarCoord& start, const PlanarCoord& end) {
-        int32_t separation = std::max(grid, layer.get_io_spacing());
-        const int32_t gap = (std::abs(end.get_x() - start.get_x()) + std::abs(end.get_y() - start.get_y())) - width;
-        if (gap > 0 && layer.get_min_enclosed_area() > 0) {
-          separation = std::max(separation, static_cast<int32_t>((int64_t(layer.get_min_enclosed_area()) + gap - 1) / gap));
-        }
-        return std::max(separation, configured_bridge_spacing);
-      };
       auto try_path = [&](const InstancePinShape& pin, const StripeTarget& target, int32_t width,
-                          std::vector<PlanarCoord> points, const std::string& mode) {
+                          std::vector<PlanarCoord> points, RouteMode route_mode) {
         const auto& layer_name = target.segment.get_layer_name();
         auto& stats = task.layers[layer_name];
         if (!can_add(layer_name, target.database_index)) return false;
@@ -1715,12 +1757,12 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         ++task.contacts;
         ++task.routes_per_stripe[target.database_index];
         stats.stripes.insert(target.database_index);
-        if (mode == "direct_extension") { ++stats.direct; ++direct_connections; }
+        if (is_direct(route_mode)) { ++stats.direct; ++direct_connections; }
         else { ++stats.bridge; ++bridge_connections; }
         const auto& start = points.front();
         const auto& end = points.back();
         contact_details.push_back(FPUTIL.getString(instance.get_name(), "/", instance.get_io_cell_pin_name(), " PORT ", port,
-                                                   " net=", net_name, " mode=", mode, " pin_layer=", pin.get_layer_name(),
+                                                   " net=", net_name, " mode=", route_name(route_mode), " pin_layer=", pin.get_layer_name(),
                                                    " route_layer=", layer_name, " target_layer=", layer_name,
                                                    " stripe_id=", target.database_index, " width=", width,
                                                    " segments=1 spacing=", separation,
@@ -1744,8 +1786,8 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         for (const auto& target : targets) {
           if (!can_add(layer_name, target.database_index)) continue;
           const bool perpendicular = normal_x ? target.segment.is_horizontal() : target.segment.is_vertical();
-          if (phase == 0 && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
-          if (phase > 0 && !config.pg_io_core_connect.allow_bridge) continue;
+          if (direct && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
+          if (!direct && !config.pg_io_core_connect.allow_bridge) continue;
           for (const auto& pin : rails) {
             const int32_t width = pin_width(pin, layer, target.segment.get_width());
             if (width == 0) { ++task.layers[layer_name].rejected["PIN_NARROWER_THAN_STRIPE"]; continue; }
@@ -1754,11 +1796,11 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
             std::set<int32_t> tangents;
             const int32_t first = FPUTIL.alignUp(low + width / 2, grid);
             const int32_t last = FPUTIL.alignDown(high - width / 2, grid);
-            if (phase == 0) {
+            if (direct) {
               const int32_t coordinate = normal_x ? target.segment.get_start_y() : target.segment.get_start_x();
               if (coordinate >= first && coordinate <= last) tangents.insert(coordinate);
             } else {
-              const auto start = start_at(pin, width, first);
+              const auto start = start_at(side, pin, width, first);
               if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
               const int32_t separation = std::max({grid, layer->get_io_spacing(), configured_bridge_spacing});
               const int32_t pitch = FPUTIL.alignUp(width + separation, grid);
@@ -1767,19 +1809,19 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
             }
             for (const int32_t tangent : tangents) {
               if (!can_add(layer_name, target.database_index)) break;
-              const auto start = start_at(pin, width, tangent);
+              const auto start = start_at(side, pin, width, tangent);
               if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
-              const auto end = phase == 0 ? direct_extension_target_point(target.segment, start)
-                                          : bridge_target_point(target.segment, start);
+              const auto end = direct ? direct_extension_target_point(side, target.segment, start)
+                                      : bridge_target_point(target.segment, start);
               if (end.get_x() == INT32_MIN || end.get_y() == INT32_MIN) {
-                ++task.layers[layer_name].rejected[phase == 0 ? "DIRECT_EXTENSION_STRIPE_NOT_ALIGNED" : "NO_STRAIGHT_PATH"];
+                ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_STRIPE_NOT_ALIGNED" : "NO_STRAIGHT_PATH"];
                 continue;
               }
               if (start.get_x() != end.get_x() && start.get_y() != end.get_y()) {
-                ++task.layers[layer_name].rejected[phase == 0 ? "DIRECT_EXTENSION_NOT_COLLINEAR" : "NO_STRAIGHT_PATH"];
+                ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_NOT_COLLINEAR" : "NO_STRAIGHT_PATH"];
                 continue;
               }
-              try_path(pin, target, width, {start, end}, phase == 0 ? "direct_extension" : "straight_bridge");
+              try_path(pin, target, width, {start, end}, mode);
             }
           }
         }

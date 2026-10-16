@@ -40,17 +40,16 @@ struct PGRingConfig
 
 struct PGIOCoreConnectConfig
 {
+  // IO-core routes are always same-layer, single-segment Manhattan wires.
+  // The configuration selects nets and redundancy policy; it cannot enable
+  // bent or cross-layer fallbacks.
   bool enabled = false;
+  // Empty means the resolved core POWER/GROUND nets.
   std::vector<std::string> nets;
+  // Empty means the layers declared by the core stripe definitions.
   std::vector<std::string> pin_layers;
-  // IO-core connections must stay on the metal layer shared by the IO pin
-  // and the core stripe.  This is the safe default for IO power cells: the
-  // connector must never create a fallback via stack on another layer.
-  bool same_layer_only = true;
   bool select_outermost_pin = true;
   bool connect_all_legal_stripes = true;
-  bool allow_core_detour = false;
-  int32_t max_bridge_bends = 0;
   bool fail_on_unresolved = false;
   bool require_each_pin_layer = true;
   int32_t min_contacts_per_port = 1;
@@ -59,11 +58,6 @@ struct PGIOCoreConnectConfig
   int32_t max_routes_per_stripe = 0;
   bool allow_direct_extension = true;
   bool allow_bridge = true;
-  // IO-core connectors are restricted to a single Manhattan segment.  A
-  // direct extension additionally requires the stripe projection to overlap
-  // the core-facing outer IO rail; it must never be clamped to a stripe end.
-  bool direct_extension_only = true;
-  bool bridge_straight_only = true;
   // Zero uses the technology IO spacing.  A positive value is an additional
   // lower bound expressed in microns and is converted to DBU at use time.
   double bridge_min_spacing_micron = 0.0;
