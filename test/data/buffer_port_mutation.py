@@ -43,4 +43,6 @@ def assert_output_port_buffering(place_db, action_template, action_digest):
         raise AssertionError(
             "output buffering lost connectivity or left a detached net in the port namespace"
         )
+    if ecc_py.canonicalize_net_names() != 0:
+        raise AssertionError("buffer commit left net names requiring canonicalization")
     return committed
