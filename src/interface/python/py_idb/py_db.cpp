@@ -172,6 +172,12 @@ bool saveMacroTCL(const std::string& def_name)
   return dmInst->saveMacroTCL(def_name);
 }
 
+std::size_t canonicalizeNetNames()
+{
+  auto* design = dmInst->get_idb_design();
+  return design == nullptr ? 0 : design->canonicalizeNetNames();
+}
+
 bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
                  bool is_add_space_for_escape_name /* = false*/)
 {

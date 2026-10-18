@@ -43,6 +43,7 @@ void register_idb(py::module& m)
   m.def("def_save", saveDef, py::arg("def_name"));
   // TODO:
   m.def("tcl_save", saveMacroTCL, py::arg("tcl_name"));
+  m.def("canonicalize_net_names", canonicalizeNetNames);
   m.def("netlist_save", saveNetList, py::arg("netlist_path"), py::arg("exclude_cell_names") = std::set<std::string>{},
         py::arg("is_add_space_for_escape_name") = false);
   m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("layer_map_path"));
