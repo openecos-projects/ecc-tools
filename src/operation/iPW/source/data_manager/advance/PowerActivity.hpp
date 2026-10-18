@@ -34,8 +34,14 @@ class PowerActivity
   PowerActivityOrigin get_origin() const { return _origin; }
   bool get_is_valid() const { return _is_valid; }
   // setter
-  void set_rise_transition_density(const double rise_transition_density) { _rise_transition_density = rise_transition_density; }
-  void set_fall_transition_density(const double fall_transition_density) { _fall_transition_density = fall_transition_density; }
+  void set_rise_transition_density(const double rise_transition_density)
+  {
+    _rise_transition_density = rise_transition_density;
+  }
+  void set_fall_transition_density(const double fall_transition_density)
+  {
+    _fall_transition_density = fall_transition_density;
+  }
   void set_static_probability(const double static_probability) { _static_probability = static_probability; }
   void set_origin(const PowerActivityOrigin& origin) { _origin = origin; }
   void set_is_valid(const bool is_valid) { _is_valid = is_valid; }

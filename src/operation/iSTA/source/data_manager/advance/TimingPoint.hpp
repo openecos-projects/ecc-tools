@@ -34,6 +34,7 @@ struct TimingClockPointState
   std::map<AnalysisType, std::map<TransType, double>> predecessor_arc_delay_map;
   std::map<AnalysisType, std::map<TransType, TransType>> predecessor_trans_type_map;
   std::map<AnalysisType, std::map<TransType, std::string>> physical_predecessor_map;
+  std::map<AnalysisType, std::map<TransType, int32_t>> predecessor_vertex_map;
   std::map<AnalysisType, std::map<TransType, double>> physical_predecessor_arc_delay_map;
   std::map<AnalysisType, std::map<TransType, TransType>> physical_predecessor_trans_type_map;
 };

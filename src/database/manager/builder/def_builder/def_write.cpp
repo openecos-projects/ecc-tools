@@ -1171,6 +1171,7 @@ int32_t DefWrite::write_region()
     writestr(";\n");
   }
 
+  writestr("END REGIONS\n\n");
   ECCLOG.info(ecc::Loc::current(), "Write REGIONS success...");
   return kDbSuccess;
 }
@@ -1232,8 +1233,10 @@ int32_t DefWrite::write_group()
       writestr("%s ", instance_name.c_str());
     }
 
-    const std::string region_name = format_instance_name(group->get_region()->get_name());
-    writestr("+ REGION %s ", region_name.c_str());
+    if (group->get_region() != nullptr) {
+      const std::string region_name = format_instance_name(group->get_region()->get_name());
+      writestr("+ REGION %s ", region_name.c_str());
+    }
 
     writestr(";\n");
   }

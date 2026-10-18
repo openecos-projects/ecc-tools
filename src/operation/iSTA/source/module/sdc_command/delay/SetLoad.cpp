@@ -61,16 +61,38 @@ std::vector<TransType> allTransTypes()
   return {TransType::kRise, TransType::kFall};
 }
 
-LoadTargets findLoadTargets(Database& database, const std::vector<std::string>& objects)
+LoadTargets findLoadTargets(Database& database, const std::vector<Tcl_Obj*>& objects)
 {
   LoadTargets targets;
-  for (const std::string& object : objects) {
-    const std::vector<std::string> ports = findObjects(database, {object}, QueryObjectType::kPort);
-    const std::vector<std::string> nets = findObjects(database, {object}, QueryObjectType::kNet);
-    if (ports.empty() && nets.empty()) {
-      throw std::invalid_argument("set_load object is not a port or net: " + object);
+  for (Tcl_Obj* object : objects) {
+    std::string name = Tcl_GetString(object);
+    SdcObjectType type = SdcObject::getType(object);
+    if (type == SdcObjectType::kPort) {
+      auto pin = database.get_pin_map().find(name);
+      if (pin == database.get_pin_map().end() || !pin->second.get_is_port()) {
+        throw std::invalid_argument("set_load port no longer exists: " + name);
+      }
+      targets.ports.insert(name);
+      continue;
     }
-    targets.ports.insert(ports.begin(), ports.end());
+    if (type == SdcObjectType::kNet) {
+      if (!database.get_net_map().contains(name)) {
+        throw std::invalid_argument("set_load net no longer exists: " + name);
+      }
+      targets.nets.insert(name);
+      continue;
+    }
+    // Bare names resolve to ports first. Typed get_nets results remain nets
+    // even when a top-level port has the same spelling.
+    std::vector<std::string> ports = findObjects(database, {name}, QueryObjectType::kPort);
+    if (!ports.empty()) {
+      targets.ports.insert(ports.begin(), ports.end());
+      continue;
+    }
+    std::vector<std::string> nets = findObjects(database, {name}, QueryObjectType::kNet);
+    if (nets.empty()) {
+      throw std::invalid_argument("set_load object is not a port or net: " + name);
+    }
     targets.nets.insert(nets.begin(), nets.end());
   }
   if (targets.ports.empty() && targets.nets.empty()) {
@@ -157,7 +179,7 @@ unsigned TclSetLoad::exec()
   Database& database = data_manager.getDatabase();
   LoadTargets targets;
   try {
-    targets = findLoadTargets(database, object_option->getStringList());
+    targets = findLoadTargets(database, getOptionObjects("objects"));
   } catch (const std::exception& error) {
     setTclError(error.what());
     return 0;

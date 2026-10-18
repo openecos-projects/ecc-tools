@@ -20,7 +20,6 @@
 #include "GPGDS.hpp"
 #include "Monitor.hpp"
 #include "RTHeader.hpp"
-#include "SAModel.hpp"
 
 namespace irt {
 
@@ -55,27 +54,19 @@ void SupplyAnalyzer::analyze()
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
-  SAModel sa_model = initSAModel();
   initRoutingEdgeMap();
-  buildSupplySchedule(sa_model);
-  analyzeSupply(sa_model);
-  // debugPlotSAModel(sa_model);
-  updateSummary(sa_model);
-  printSummary(sa_model);
-  outputPlanarSupplyCSV(sa_model);
-  outputLayerSupplyCSV(sa_model);
+  analyzeSupply();
+  // debugPlotSAModel();
+  updateSummary();
+  printSummary();
+  outputPlanarSupplyCSV();
+  outputLayerSupplyCSV();
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 // private
 
 SupplyAnalyzer* SupplyAnalyzer::_sa_instance = nullptr;
-
-SAModel SupplyAnalyzer::initSAModel()
-{
-  SAModel sa_model;
-  return sa_model;
-}
 
 void SupplyAnalyzer::initRoutingEdgeMap()
 {
@@ -93,59 +84,12 @@ void SupplyAnalyzer::initRoutingEdgeMap()
   }
 }
 
-void SupplyAnalyzer::buildSupplySchedule(SAModel& sa_model)
+// collect result/patch from PinAccess
+std::vector<SupplyAnalyzer::ShapeRTree> SupplyAnalyzer::buildShapeRTreeList()
 {
-  Die& die = RTDM.getDatabase().get_die();
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
-  int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
-  std::vector<std::vector<std::pair<LayerCoord, LayerCoord>>>& grid_pair_list_list = sa_model.get_grid_pair_list_list();
-  grid_pair_list_list.reserve(2 * routing_layer_list.size());
-
-  for (RoutingLayer& routing_layer : routing_layer_list) {
-    if (routing_layer.get_layer_idx() < bottom_routing_layer_idx || top_routing_layer_idx < routing_layer.get_layer_idx()) {
-      continue;
-    }
-    if (routing_layer.isPreferH()) {
-      for (int32_t begin_x = 1; begin_x <= 2; begin_x++) {
-        std::vector<std::pair<LayerCoord, LayerCoord>> grid_pair_list;
-        grid_pair_list.reserve(static_cast<size_t>(die.getXSize()) * die.getYSize() / 2);
-        for (int32_t y = 0; y < die.getYSize(); y++) {
-          for (int32_t x = begin_x; x < die.getXSize(); x += 2) {
-            grid_pair_list.emplace_back(LayerCoord(x - 1, y, routing_layer.get_layer_idx()), LayerCoord(x, y, routing_layer.get_layer_idx()));
-          }
-        }
-        grid_pair_list_list.push_back(std::move(grid_pair_list));
-      }
-    } else {
-      for (int32_t begin_y = 1; begin_y <= 2; begin_y++) {
-        std::vector<std::pair<LayerCoord, LayerCoord>> grid_pair_list;
-        grid_pair_list.reserve(static_cast<size_t>(die.getXSize()) * die.getYSize() / 2);
-        for (int32_t x = 0; x < die.getXSize(); x++) {
-          for (int32_t y = begin_y; y < die.getYSize(); y += 2) {
-            grid_pair_list.emplace_back(LayerCoord(x, y - 1, routing_layer.get_layer_idx()), LayerCoord(x, y, routing_layer.get_layer_idx()));
-          }
-        }
-        grid_pair_list_list.push_back(std::move(grid_pair_list));
-      }
-    }
-  }
-}
-
-void SupplyAnalyzer::analyzeSupply(SAModel& sa_model)
-{
-  Monitor monitor;
-  RTLOG.info(Loc::current(), "Starting...");
-
-  std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
-  std::vector<GridMap<RoutingEdge>>& routing_v_edge_map = RTDM.getDatabase().get_routing_v_edge_map();
-
-  using DetailedRTree = bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>;
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  std::vector<std::vector<std::pair<int32_t, PlanarRect>>> layer_detailed_shape_list(routing_layer_list.size());
   std::vector<std::vector<std::pair<BGRectInt, int32_t>>> layer_rtree_value_list(routing_layer_list.size());
   Die& die = RTDM.getDatabase().get_die();
-  int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
   for (auto& [net_idx, segment_list] : RTDM.getDatabase().get_net_detailed_result_map()) {
     for (Segment<LayerCoord>& segment : segment_list) {
       for (NetShape& net_shape : RTDM.getNetDetailedShapeList(net_idx, segment)) {
@@ -157,9 +101,7 @@ void SupplyAnalyzer::analyzeSupply(SAModel& sa_model)
           continue;
         }
         int32_t layer_idx = net_shape.get_layer_idx();
-        std::vector<std::pair<int32_t, PlanarRect>>& detailed_shape_list = layer_detailed_shape_list[layer_idx];
-        layer_rtree_value_list[layer_idx].emplace_back(RTUTIL.convertToBGRectInt(real_rect), static_cast<int32_t>(detailed_shape_list.size()));
-        detailed_shape_list.emplace_back(net_idx, net_shape);
+        layer_rtree_value_list[layer_idx].emplace_back(RTUTIL.convertToBGRectInt(real_rect), net_idx);
       }
     }
   }
@@ -170,35 +112,55 @@ void SupplyAnalyzer::analyzeSupply(SAModel& sa_model)
         continue;
       }
       int32_t layer_idx = patch.get_layer_idx();
-      std::vector<std::pair<int32_t, PlanarRect>>& detailed_shape_list = layer_detailed_shape_list[layer_idx];
-      layer_rtree_value_list[layer_idx].emplace_back(RTUTIL.convertToBGRectInt(real_rect), static_cast<int32_t>(detailed_shape_list.size()));
-      detailed_shape_list.emplace_back(net_idx, patch.get_real_rect());
+      layer_rtree_value_list[layer_idx].emplace_back(RTUTIL.convertToBGRectInt(real_rect), net_idx);
     }
   }
-  std::vector<DetailedRTree> layer_rtree_list(routing_layer_list.size());
+  std::vector<ShapeRTree> layer_rtree_list(routing_layer_list.size());
 #pragma omp parallel for
   for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(routing_layer_list.size()); layer_idx++) {
-    layer_rtree_list[layer_idx] = DetailedRTree(layer_rtree_value_list[layer_idx].begin(), layer_rtree_value_list[layer_idx].end());
+    layer_rtree_list[layer_idx] = ShapeRTree(layer_rtree_value_list[layer_idx].begin(), layer_rtree_value_list[layer_idx].end());
   }
-  std::vector<std::vector<std::pair<BGRectInt, int32_t>>>().swap(layer_rtree_value_list);
+  return layer_rtree_list;
+}
+
+void SupplyAnalyzer::analyzeSupply()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
+  std::vector<GridMap<RoutingEdge>>& routing_v_edge_map = RTDM.getDatabase().get_routing_v_edge_map();
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<ShapeRTree> layer_rtree_list = buildShapeRTreeList();
+  int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+
+  int32_t bottom_routing_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
+  int32_t top_routing_layer_idx = RTDM.getConfig().top_routing_layer_idx;
 
   size_t total_pair_num = 0;
-  for (std::vector<std::pair<LayerCoord, LayerCoord>>& grid_pair_list : sa_model.get_grid_pair_list_list()) {
-    total_pair_num += grid_pair_list.size();
+  for (int32_t layer_idx = bottom_routing_layer_idx; layer_idx <= top_routing_layer_idx; layer_idx++) {
+    GridMap<RoutingEdge>& routing_edge_map
+        = routing_layer_list[layer_idx].isPreferH() ? routing_h_edge_map[layer_idx] : routing_v_edge_map[layer_idx];
+    total_pair_num += static_cast<size_t>(routing_edge_map.get_x_size()) * routing_edge_map.get_y_size();
   }
 
   size_t analyzed_pair_num = 0;
-  for (std::vector<std::pair<LayerCoord, LayerCoord>>& grid_pair_list : sa_model.get_grid_pair_list_list()) {
+  for (int32_t layer_idx = bottom_routing_layer_idx; layer_idx <= top_routing_layer_idx; layer_idx++) {
+    RoutingLayer& routing_layer = routing_layer_list[layer_idx];
+    bool is_prefer_h = routing_layer.isPreferH();
+    GridMap<RoutingEdge>& routing_edge_map = is_prefer_h ? routing_h_edge_map[layer_idx] : routing_v_edge_map[layer_idx];
+    int32_t edge_x_size = routing_edge_map.get_x_size();
+    int32_t edge_y_size = routing_edge_map.get_y_size();
     Monitor stage_monitor;
 #pragma omp parallel for
-    for (std::pair<LayerCoord, LayerCoord>& grid_pair : grid_pair_list) {
-      LayerCoord first_coord = grid_pair.first;
-      LayerCoord second_coord = grid_pair.second;
+    for (int32_t edge_idx = 0; edge_idx < edge_x_size * edge_y_size; edge_idx++) {
+      // 逐层 edge map 的每个格子对应一对相邻 gcell:水平层 x 方向相邻,垂直层 y 方向相邻
+      int32_t x = edge_idx / edge_y_size;
+      int32_t y = edge_idx % edge_y_size;
+      LayerCoord first_coord(x, y, layer_idx);
+      LayerCoord second_coord = is_prefer_h ? LayerCoord(x + 1, y, layer_idx) : LayerCoord(x, y + 1, layer_idx);
       EXTLayerRect search_rect = getSearchRect(first_coord, second_coord);
-
-      bool is_horizontal = RTUTIL.isHorizontal(first_coord, second_coord);
-      RoutingEdge& routing_edge = is_horizontal ? routing_h_edge_map[first_coord.get_layer_idx()][first_coord.get_x()][first_coord.get_y()]
-                                                : routing_v_edge_map[first_coord.get_layer_idx()][first_coord.get_x()][first_coord.get_y()];
+      RoutingEdge& routing_edge = routing_edge_map[x][y];
       std::set<int32_t>& ignore_net_set = routing_edge.get_ignore_net_set();
 
       std::vector<PlanarRect> obs_rect_list;
@@ -213,8 +175,8 @@ void SupplyAnalyzer::analyzeSupply(SAModel& sa_model)
         BGRectInt query_rect = RTUTIL.convertToBGRectInt(query_real_rect);
         std::vector<std::pair<BGRectInt, int32_t>> rtree_value_list;
         layer_rtree_list[search_rect.get_layer_idx()].query(bgi::intersects(query_rect), std::back_inserter(rtree_value_list));
-        for (auto& [rect, shape_idx] : rtree_value_list) {
-          auto& [net_idx, detailed_shape] = layer_detailed_shape_list[search_rect.get_layer_idx()][shape_idx];
+        for (auto& [rect, net_idx] : rtree_value_list) {
+          PlanarRect detailed_shape = RTUTIL.convertToPlanarRect(rect);
           obs_rect_list.push_back(detailed_shape);
           if (RTUTIL.isOpenOverlap(search_rect.get_real_rect(), detailed_shape)) {
             ignore_net_set.insert(net_idx);
@@ -222,9 +184,14 @@ void SupplyAnalyzer::analyzeSupply(SAModel& sa_model)
         }
       }
       std::vector<LayerRect> wire_list = getCrossingWireList(search_rect);
+      std::vector<PlanarRect> enlarged_obs_rect_list;
+      enlarged_obs_rect_list.reserve(obs_rect_list.size());
+      for (PlanarRect& obs_rect : obs_rect_list) {
+        enlarged_obs_rect_list.push_back(RTUTIL.getEnlargedRect(obs_rect, routing_layer.getPRLSpacing(obs_rect)));
+      }
       int32_t supply = 0;
       for (LayerRect& wire : wire_list) {
-        if (isAccess(wire, obs_rect_list)) {
+        if (isAccess(wire, enlarged_obs_rect_list)) {
           supply++;
         }
       }
@@ -233,16 +200,25 @@ void SupplyAnalyzer::analyzeSupply(SAModel& sa_model)
       supply = static_cast<int32_t>(supply * 0.9);
       routing_edge.set_supply(supply);
     }
-    analyzed_pair_num += grid_pair_list.size();
+    analyzed_pair_num += static_cast<size_t>(edge_x_size) * edge_y_size;
     RTLOG.info(Loc::current(), "Analyzed ", analyzed_pair_num, "/", total_pair_num, "(", RTUTIL.getPercentage(analyzed_pair_num, total_pair_num),
                ") grid pairs", stage_monitor.getStatsInfo());
-    std::vector<std::pair<LayerCoord, LayerCoord>>().swap(grid_pair_list);
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-EXTLayerRect SupplyAnalyzer::getSearchRect(LayerCoord& first_coord, LayerCoord& second_coord)
+bool SupplyAnalyzer::isAccess(const LayerRect& wire, const std::vector<PlanarRect>& enlarged_obs_rect_list)
+{
+  for (const PlanarRect& enlarged_obs_rect : enlarged_obs_rect_list) {
+    if (RTUTIL.isOpenOverlap(enlarged_obs_rect, wire)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+EXTLayerRect SupplyAnalyzer::getSearchRect(const LayerCoord& first_coord, const LayerCoord& second_coord)
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
 
@@ -269,6 +245,8 @@ EXTLayerRect SupplyAnalyzer::getSearchRect(LayerCoord& first_coord, LayerCoord& 
       coord_list.emplace_back(second_real_rect.get_ll_x(), second_mid_coord.get_y());
       coord_list.emplace_back(second_real_rect.get_ur_x(), second_mid_coord.get_y());
       search_real_rect = RTUTIL.getBoundingBox(coord_list);
+    } else {
+      RTLOG.error(Loc::current(), "The grid_pair is not horizontal or vertical!");
     }
   }
   EXTLayerRect search_rect;
@@ -278,7 +256,7 @@ EXTLayerRect SupplyAnalyzer::getSearchRect(LayerCoord& first_coord, LayerCoord& 
   return search_rect;
 }
 
-std::vector<LayerRect> SupplyAnalyzer::getCrossingWireList(EXTLayerRect& search_rect)
+std::vector<LayerRect> SupplyAnalyzer::getCrossingWireList(const EXTLayerRect& search_rect)
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
@@ -303,25 +281,9 @@ std::vector<LayerRect> SupplyAnalyzer::getCrossingWireList(EXTLayerRect& search_
   return wire_list;
 }
 
-bool SupplyAnalyzer::isAccess(LayerRect& wire, std::vector<PlanarRect>& obs_rect_list)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  RoutingLayer& routing_layer = routing_layer_list[wire.get_layer_idx()];
-
-  for (PlanarRect& obs_rect : obs_rect_list) {
-    int32_t enlarged_size = routing_layer.getPRLSpacing(obs_rect);
-    PlanarRect enlarged_rect = RTUTIL.getEnlargedRect(obs_rect, enlarged_size);
-    if (RTUTIL.isOpenOverlap(enlarged_rect, wire)) {
-      // 阻塞
-      return false;
-    }
-  }
-  return true;
-}
-
 #if 1  // exhibit
 
-void SupplyAnalyzer::updateSummary(SAModel& sa_model)
+void SupplyAnalyzer::updateSummary()
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
@@ -334,9 +296,8 @@ void SupplyAnalyzer::updateSummary(SAModel& sa_model)
   routing_supply_map.clear();
   total_supply = 0;
 
-  std::vector<int32_t> routing_supply_list(routing_layer_list.size(), 0);
-#pragma omp parallel for
-  for (int32_t layer_idx = 0; layer_idx < static_cast<int32_t>(routing_layer_list.size()); layer_idx++) {
+  for (RoutingLayer& routing_layer : routing_layer_list) {
+    int32_t layer_idx = routing_layer.get_layer_idx();
     int32_t routing_supply = 0;
     for (GridMap<RoutingEdge>* routing_edge_map : {&routing_h_edge_map[layer_idx], &routing_v_edge_map[layer_idx]}) {
       for (int32_t x = 0; x < routing_edge_map->get_x_size(); x++) {
@@ -345,16 +306,12 @@ void SupplyAnalyzer::updateSummary(SAModel& sa_model)
         }
       }
     }
-    routing_supply_list[layer_idx] = routing_supply;
-  }
-  for (RoutingLayer& routing_layer : routing_layer_list) {
-    int32_t layer_idx = routing_layer.get_layer_idx();
-    routing_supply_map[layer_idx] = routing_supply_list[layer_idx];
-    total_supply += routing_supply_list[layer_idx];
+    routing_supply_map[layer_idx] = routing_supply;
+    total_supply += routing_supply;
   }
 }
 
-void SupplyAnalyzer::printSummary(SAModel& sa_model)
+void SupplyAnalyzer::printSummary()
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   Summary& summary = RTDM.getDatabase().get_summary();
@@ -377,7 +334,7 @@ void SupplyAnalyzer::printSummary(SAModel& sa_model)
   RTUTIL.printTableList({routing_supply_map_table});
 }
 
-void SupplyAnalyzer::outputPlanarSupplyCSV(SAModel& sa_model)
+void SupplyAnalyzer::outputPlanarSupplyCSV()
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
@@ -390,7 +347,7 @@ void SupplyAnalyzer::outputPlanarSupplyCSV(SAModel& sa_model)
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  for (std::pair<std::string, std::vector<GridMap<RoutingEdge>>*> edge_map_pair :
+  for (const auto& edge_map_pair :
        {std::make_pair("h_supply_map.csv", &routing_h_edge_map), std::make_pair("v_supply_map.csv", &routing_v_edge_map)}) {
     GridMap<RoutingEdge>& routing_edge_map = edge_map_pair.second->front();
     std::ofstream* supply_csv_file = RTUTIL.getOutputFileStream(RTUTIL.getString(sa_temp_directory_path, edge_map_pair.first));
@@ -409,7 +366,7 @@ void SupplyAnalyzer::outputPlanarSupplyCSV(SAModel& sa_model)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void SupplyAnalyzer::outputLayerSupplyCSV(SAModel& sa_model)
+void SupplyAnalyzer::outputLayerSupplyCSV()
 {
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<GridMap<RoutingEdge>>& routing_h_edge_map = RTDM.getDatabase().get_routing_h_edge_map();
@@ -442,7 +399,7 @@ void SupplyAnalyzer::outputLayerSupplyCSV(SAModel& sa_model)
 
 #if 1  // debug
 
-void SupplyAnalyzer::debugPlotSAModel(SAModel& sa_model)
+void SupplyAnalyzer::debugPlotSAModel()
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
   Die& die = RTDM.getDatabase().get_die();

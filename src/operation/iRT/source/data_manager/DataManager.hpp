@@ -42,6 +42,7 @@ class DataManager
   void rebuildAccessPointRTree();
   void rebuildGlobalResultRTree();
   void updateViolationToRTree(ChangeType change_type, const Violation& violation);
+  void replaceViolationRTree(const std::vector<Violation>& violation_list);
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> getTypeLayerNetFixedRectMap(EXTPlanarRect& region);
   std::map<int32_t, std::set<EXTLayerRect*>> getNetFixedRectMap(bool is_routing, EXTLayerRect& region);
   std::map<int32_t, std::set<AccessPoint*, CmpAccessPoint>> getNetAccessPointMap(EXTPlanarRect& region);

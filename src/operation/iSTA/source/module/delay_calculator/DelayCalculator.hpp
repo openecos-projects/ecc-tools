@@ -42,6 +42,7 @@ class DelayCalculator
   static DelayCalculator* _dc_instance;
   std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, double>>>> _parasitic_resistor_map_cache;
   std::map<std::string, std::map<AnalysisType, std::map<TransType, std::map<std::string, double>>>> _parasitic_load_map_cache;
+  std::map<std::string, std::map<AnalysisType, std::map<TransType, std::string>>> _parasitic_root_map_cache;
   std::map<std::string, std::map<AnalysisType, std::map<TransType, std::map<std::string, double>>>> _parasitic_delay_map_cache;
   std::map<std::string, std::map<AnalysisType, std::map<TransType, std::map<std::string, double>>>> _parasitic_impulse_map_cache;
   std::map<std::string, ParasiticDmpModel> _parasitic_dmp_model_cache;
@@ -141,7 +142,8 @@ class DelayCalculator
                                double input_slew, double output_load);
   TransType getOutputTransType(TimingCellArc& timing_cell_arc, TransType input_trans_type);
   std::vector<TransType> getOutputTransTypeList(TimingCellArc& timing_cell_arc, TransType input_trans_type);
-  std::vector<TimingArc*> getCandidateTimingArcList(TimingCellArc& timing_cell_arc, TransType input_trans_type, TransType output_trans_type);
+  std::vector<TimingArc*> getCandidateTimingArcList(TimingCellArc& timing_cell_arc, TransType input_trans_type, TransType output_trans_type,
+                                                    const std::string& output_pin = "");
   std::vector<TimingArc*> getCandidateTimingCheckArcList(TimingCheckArc& timing_check_arc, TransType clock_trans_type, TransType data_trans_type);
   bool isMatchTimingType(TimingArc& timing_arc, TransType trans_type);
   bool isPositiveArc(TimingArc& timing_arc);
@@ -161,8 +163,8 @@ class DelayCalculator
   double calcTimingArcSlewByRawLoad(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double output_load);
   double getArcOutputLoad(Arc& arc, AnalysisType analysis_type, TransType output_trans_type);
   double getOutputPinLoad(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type);
-  double getNetOutputLoad(Net& net, AnalysisType analysis_type, TransType output_trans_type);
-  double getParasiticNetOutputLoad(Net& net, ParasiticNet& parasitic_net, AnalysisType analysis_type, TransType trans_type);
+  double getNetOutputLoad(Net& net, const std::string& driver_pin, AnalysisType analysis_type, TransType output_trans_type);
+  double getParasiticNetOutputLoad(const std::string& driver_pin, ParasiticNet& parasitic_net, AnalysisType analysis_type, TransType trans_type);
   double getPinCapacitance(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
   double calcNetArcDelay(Arc& arc);
   double calcNetArcDelay(Arc& arc, AnalysisType analysis_type, TransType trans_type);
@@ -188,7 +190,7 @@ class DelayCalculator
                                  std::map<std::string, double>& beta_map);
   double getParasiticTotalLoad(ParasiticNet& parasitic_net, AnalysisType analysis_type, TransType trans_type);
   void buildParasiticResistorMap(ParasiticNet& parasitic_net, std::map<std::string, std::vector<std::pair<std::string, double>>>& resistor_map);
-  std::string getParasiticNodeName(ParasiticNet& parasitic_net, std::string& pin_name);
+  std::string getParasiticNodeName(ParasiticNet& parasitic_net, const std::string& pin_name);
   std::string getPinNameByParasiticNodeName(std::string& node_name);
   ParasiticDmpTimingResult& getParasiticDmpTimingResult(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type,
                                                         double input_slew, double output_load);

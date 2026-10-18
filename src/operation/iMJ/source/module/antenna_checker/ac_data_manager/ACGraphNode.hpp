@@ -23,6 +23,8 @@ class ACGraphNode
   double gate_area = 0.0;
   double diff_area = 0.0;
   bool provides_diff = false;
+  std::string pin_name;
+  std::string instance_name;
   std::vector<ACShape> shapes;
 };
 

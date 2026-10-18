@@ -47,7 +47,10 @@ class TimingClock
   void set_is_propagated(const bool is_propagated) { _is_propagated = is_propagated; }
   void set_master_clock_name(const std::string& name) { _master_clock_name = name; }
   void set_master_source(const std::string& source) { _master_source = source; }
-  void set_is_generated_combinational(const bool is_generated_combinational) { _is_generated_combinational = is_generated_combinational; }
+  void set_is_generated_combinational(const bool is_generated_combinational)
+  {
+    _is_generated_combinational = is_generated_combinational;
+  }
   // function
 
  private:

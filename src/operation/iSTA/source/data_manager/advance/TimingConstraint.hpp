@@ -17,20 +17,12 @@
 #pragma once
 
 #include "STAHeader.hpp"
+#include "TimingCaseValue.hpp"
 #include "TimingClock.hpp"
 #include "TimingException.hpp"
 #include "TimingPortConstraint.hpp"
 
 namespace ista {
-
-enum class TimingCaseValue
-{
-  kZero,
-  kOne,
-  kStatic,
-  kRise,
-  kFall
-};
 
 class TimingClockUncertainty
 {
@@ -108,6 +100,7 @@ class TimingConstraint
   std::string& get_sdc_file_path() { return _sdc_file_path; }
   std::map<std::string, TimingClock>& get_clock_map() { return _clock_map; }
   std::map<std::string, TimingPortConstraint>& get_port_constraint_map() { return _port_constraint_map; }
+  std::map<std::string, TimingCaseValue>& get_driver_case_analysis_map() { return _driver_case_analysis_map; }
   std::map<std::string, TimingCaseValue>& get_case_analysis_map() { return _case_analysis_map; }
   std::map<std::string, TimingCaseValue>& get_effective_case_analysis_map() { return _effective_case_analysis_map; }
   std::vector<TimingException>& get_path_exception_list() { return _path_exception_list; }
@@ -154,6 +147,7 @@ class TimingConstraint
   std::map<std::string, TimingPortConstraint> _port_constraint_map;
   std::map<std::string, TimingCaseValue> _case_analysis_map;
   std::map<std::string, TimingCaseValue> _effective_case_analysis_map;
+  std::map<std::string, TimingCaseValue> _driver_case_analysis_map;
   std::optional<double> _max_fanout;
   std::map<std::string, double> _port_max_fanout_map;
   std::map<std::string, TimingLoadConstraint> _net_load_map;

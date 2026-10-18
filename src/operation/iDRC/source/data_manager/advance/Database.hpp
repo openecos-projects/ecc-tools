@@ -18,6 +18,7 @@
 
 #include "CutLayer.hpp"
 #include "Die.hpp"
+#include "MacroObs.hpp"
 #include "MaxViaStackRule.hpp"
 #include "OffGridOrWrongWayRule.hpp"
 #include "RoutingLayer.hpp"
@@ -41,6 +42,7 @@ class Database
   OffGridOrWrongWayRule& get_off_grid_or_wrong_way_rule() { return _off_grid_or_wrong_way_rule; }
   std::vector<RoutingLayer>& get_routing_layer_list() { return _routing_layer_list; }
   std::vector<CutLayer>& get_cut_layer_list() { return _cut_layer_list; }
+  std::vector<MacroObs>& get_macro_obs_list() { return _macro_obs_list; }
   std::set<ViolationType>& get_exist_rule_set() { return _exist_rule_set; }
   std::map<int32_t, int32_t>& get_routing_idb_layer_id_to_idx_map() { return _routing_idb_layer_id_to_idx_map; }
   std::map<int32_t, int32_t>& get_cut_idb_layer_id_to_idx_map() { return _cut_idb_layer_id_to_idx_map; }
@@ -67,6 +69,7 @@ class Database
   OffGridOrWrongWayRule _off_grid_or_wrong_way_rule;
   std::vector<RoutingLayer> _routing_layer_list;
   std::vector<CutLayer> _cut_layer_list;
+  std::vector<MacroObs> _macro_obs_list;
   std::set<ViolationType> _exist_rule_set;
   std::map<int32_t, int32_t> _routing_idb_layer_id_to_idx_map;
   std::map<int32_t, int32_t> _cut_idb_layer_id_to_idx_map;

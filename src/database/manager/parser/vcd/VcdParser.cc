@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -29,15 +30,13 @@ namespace vcd {
 
 namespace {
 
-constexpr double kXTransitionDerateFactor = 0.5;
-
 class SignalState
 {
  public:
   SignalState() = default;
   ~SignalState() = default;
 
-  void update(int64_t time, char value)
+  void update(int64_t time, char value, bool use_window, const ActivityModelOptions& options)
   {
     value = getCanonicalValue(value);
     if (_has_value) {
@@ -45,9 +44,9 @@ class SignalState
       if (duration > 0 && _last_value == '1') {
         _high_duration += static_cast<double>(duration);
       }
-      countTransition(value, duration > 0);
+      countTransition(value, duration > 0, use_window, options);
     }
-    if (!isUnknown(value)) {
+    if (!isUnknownValue(value)) {
       _last_defined_value = value;
     }
     _last_time = time;
@@ -75,6 +74,19 @@ class SignalState
 
   void set_start_time(int64_t start_time) { _start_time = start_time; }
 
+  int64_t get_last_time() const { return _last_time; }
+  char get_last_value() const { return _last_value; }
+  void add_window_high(double high_time) { _window_high += high_time; }
+  void reset_window()
+  {
+    _window_rise = 0.0;
+    _window_fall = 0.0;
+    _window_high = 0.0;
+  }
+  double get_window_rise() const { return _window_rise; }
+  double get_window_fall() const { return _window_fall; }
+  double get_window_high() const { return _window_high; }
+
  private:
   char getCanonicalValue(char value) const
   {
@@ -87,19 +99,24 @@ class SignalState
     return 'x';
   }
 
-  bool isUnknown(char value) const { return value == 'x' || value == 'z'; }
-
-  void countTransition(char value, bool is_weighted)
+  // 折算规则统一由 vcd::evaluateTransition() 给出（averaged / time_based 两套口径）。
+  void countTransition(char value, bool is_weighted, bool use_window, const ActivityModelOptions& options)
   {
     if (!is_weighted || value == _last_value) {
       return;
     }
-    if (!isUnknown(value)) {
-      if (!isUnknown(_last_value)) {
-        _transition_count += 1.0;
-      } else if (_last_defined_value != '\0') {
-        _transition_count += value == _last_defined_value ? kXTransitionDerateFactor : 1.0;
-      }
+    const double weight = evaluateTransition(options, _last_value, value, _last_defined_value);
+    if (weight <= 0.0) {
+      return;
+    }
+    _transition_count += weight;
+    if (!use_window) {
+      return;
+    }
+    if (value == '1') {
+      _window_rise += weight;
+    } else {
+      _window_fall += weight;
     }
   }
 
@@ -110,6 +127,9 @@ class SignalState
   char _last_defined_value = '\0';
   double _transition_count = 0.0;
   double _high_duration = 0.0;
+  double _window_rise = 0.0;
+  double _window_fall = 0.0;
+  double _window_high = 0.0;
 };
 
 class VcdFileParser
@@ -118,22 +138,97 @@ class VcdFileParser
   VcdFileParser() = default;
   ~VcdFileParser() = default;
 
-  bool read(const std::string& file_path, std::map<std::string, VcdSignalActivity>& signal_activity_map)
+  bool read(const std::string& file_path, const ActivityModelOptions& options, std::map<std::string, VcdSignalActivity>& signal_activity_map)
   {
-    std::ifstream input_file(file_path);
-    if (!input_file.is_open()) {
+    _options = options;
+    if (!openFile(file_path)) {
       return false;
     }
-
-    std::string token;
-    while (input_file >> token) {
-      parseToken(token, input_file);
-    }
+    parseRemainingTokens();
     buildSignalActivityMap(signal_activity_map);
     return true;
   }
 
+  bool openWindow(const std::string& file_path, double window_length, const ActivityModelOptions& options)
+  {
+    _options = options;
+    _window = WindowState();
+    if (window_length <= 0.0) {
+      return false;
+    }
+    _window.is_active = true;
+    _window.length_ns = window_length;
+    if (!openFile(file_path) || !readHeader()) {
+      return false;
+    }
+    buildWindowSignalList();
+    return true;
+  }
+
+  bool advanceWindow(VcdWindowSignalActivity& window_activity)
+  {
+    while (!_window.is_finished && !isWindowComplete()) {
+      if (!readNextToken()) {
+        _window.is_finished = true;
+      }
+    }
+    if (isWindowComplete() || hasPendingWindow()) {
+      flushWindow(window_activity);
+      return true;
+    }
+    return false;
+  }
+
+  const std::vector<std::string>& get_window_signal_name_list() const { return _window.signal_name_list; }
+
  private:
+  // 窗口模式的全部状态：openWindow() 装配，advanceWindow() 推进，flushWindow() 结算。
+  struct WindowState
+  {
+    bool is_active = false;
+    bool is_finished = false;
+    double length_ns = 0.0;
+    int64_t length_ticks = 1;
+    int64_t begin = 0;
+    int64_t end = 0;
+    std::size_t index = 0;
+    std::vector<SignalState*> signal_list;
+    std::vector<std::string> signal_name_list;
+  };
+
+  bool openFile(const std::string& file_path)
+  {
+    _input_file.open(file_path);
+    return _input_file.is_open();
+  }
+
+  bool readNextToken()
+  {
+    std::string token;
+    if (!(_input_file >> token)) {
+      return false;
+    }
+    parseToken(token, _input_file);
+    return true;
+  }
+
+  // 先把 header 读完（$timescale / $scope / $var），停在第一个时间戳上。
+  bool readHeader()
+  {
+    while (!_has_time) {
+      if (!readNextToken()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  void parseRemainingTokens()
+  {
+    while (readNextToken()) {
+    }
+  }
+
   void parseToken(std::string& token, std::istream& input_stream)
   {
     if (token == "$timescale") {
@@ -273,6 +368,9 @@ class VcdFileParser
       for (std::pair<const std::string, SignalState>& state_pair : _signal_state_map) {
         state_pair.second.set_start_time(_start_time);
       }
+      if (_window.is_active) {
+        startWindow();
+      }
     }
     _current_time = time;
     _end_time = time;
@@ -319,7 +417,7 @@ class VcdFileParser
     std::vector<std::vector<std::string>>& signal_name_list_list = _identifier_signal_name_list_map[identifier];
     for (std::vector<std::string>& signal_name_list : signal_name_list_list) {
       for (std::string& signal_name : signal_name_list) {
-        _signal_state_map[signal_name].update(_current_time, value);
+        updateSignal(_signal_state_map[signal_name], _current_time, value);
       }
     }
   }
@@ -333,7 +431,7 @@ class VcdFileParser
     for (std::vector<std::string>& signal_name_list : signal_name_list_list) {
       std::vector<char> value_list = getBitValueList(value_token, signal_name_list.size());
       for (std::size_t bit_idx = 0; bit_idx < signal_name_list.size(); bit_idx++) {
-        _signal_state_map[signal_name_list[bit_idx]].update(_current_time, value_list[bit_idx]);
+        updateSignal(_signal_state_map[signal_name_list[bit_idx]], _current_time, value_list[bit_idx]);
       }
     }
   }
@@ -354,6 +452,87 @@ class VcdFileParser
       }
       signal_activity_map[state_pair.first] = state_pair.second.getActivity(_end_time, simulation_duration);
     }
+  }
+
+  void startWindow()
+  {
+    double tick_to_ns = _time_resolution * _time_unit_scale;
+    _window.length_ticks = std::max<int64_t>(static_cast<int64_t>(std::llround(_window.length_ns / tick_to_ns)), 1);
+    _window.begin = _start_time;
+    _window.end = _start_time + _window.length_ticks;
+  }
+
+  void buildWindowSignalList()
+  {
+    for (std::pair<const std::string, SignalState>& state_pair : _signal_state_map) {
+      _window.signal_list.push_back(&state_pair.second);
+      _window.signal_name_list.push_back(state_pair.first);
+    }
+  }
+
+  // 窗口是左闭右开 [k * length, (k + 1) * length)：正好落在边界上的事件归右窗，
+  // 也就是"第 k 个时钟沿之后那一个周期"，和 PrimeTime PX time_based 波形里
+  // 采样点 t 覆盖 [t, t + cycle) 的定义一致（边界事件算在采样点自己的周期里）。
+  bool isWindowComplete() const { return _current_time >= _window.end; }
+
+  // 文件末尾不足一窗的余量也要吐出去；正好停在边界上时最后那个时间点的翻转会
+  // 落进一个零长窗口，引擎侧按截断窗跳过（文档里说明的行为）。
+  bool hasPendingWindow() const { return _window.begin < _end_time; }
+
+  // 结算 [max(_last_time, 窗口左边界), to_time) 这段高电平；左边界之前已在上一窗结算。
+  void settleWindowHigh(SignalState& state, int64_t to_time)
+  {
+    if (!state.get_has_value() || state.get_last_value() != '1') {
+      return;
+    }
+    int64_t from_time = std::max(state.get_last_time(), _window.begin);
+    if (to_time > from_time) {
+      state.add_window_high(static_cast<double>(to_time - from_time) * _time_resolution * _time_unit_scale);
+    }
+  }
+
+  void updateSignal(SignalState& state, int64_t time, char value)
+  {
+    if (_window.is_active) {
+      settleWindowHigh(state, time);
+    }
+    state.update(time, value, _window.is_active, _options);
+  }
+
+  void settleSignalWindow(SignalState& state, std::size_t signal_index, int64_t window_end, double window_duration,
+                          VcdWindowSignalActivity& window_activity)
+  {
+    settleWindowHigh(state, window_end);
+    double rise_density = 0.0;
+    double fall_density = 0.0;
+    double static_probability = 0.0;
+    if (window_duration > 0.0) {
+      rise_density = state.get_window_rise() / window_duration;
+      fall_density = state.get_window_fall() / window_duration;
+      static_probability = state.get_window_high() / window_duration;
+    }
+    window_activity.set_signal_activity(signal_index, rise_density, fall_density, static_probability);
+    state.reset_window();
+  }
+
+  void flushWindow(VcdWindowSignalActivity& window_activity)
+  {
+    double tick_to_ns = _time_resolution * _time_unit_scale;
+    int64_t window_end = std::min(_window.end, _end_time);
+    double window_duration = static_cast<double>(window_end - _window.begin) * tick_to_ns;
+    window_activity.set_window(_window.index, static_cast<double>(_window.begin) * tick_to_ns,
+                               static_cast<double>(window_end) * tick_to_ns);
+    for (std::size_t signal_index = 0; signal_index < _window.signal_list.size(); signal_index++) {
+      settleSignalWindow(*_window.signal_list[signal_index], signal_index, window_end, window_duration, window_activity);
+    }
+    slideWindow();
+  }
+
+  void slideWindow()
+  {
+    _window.begin = _window.end;
+    _window.end += _window.length_ticks;
+    _window.index++;
   }
 
   std::string getScopePath()
@@ -560,19 +739,50 @@ class VcdFileParser
   std::map<std::string, SignalState> _signal_state_map;
   std::string _zero_time_token = "#0";
   int64_t _start_time = 0;
+  ActivityModelOptions _options;
   int64_t _current_time = 0;
   int64_t _end_time = 0;
   bool _has_time = false;
   double _time_resolution = 1.0;
   double _time_unit_scale = 1.0;
+  std::ifstream _input_file;
+  WindowState _window;
 };
 
 }  // namespace
 
-bool VcdReader::read(const std::string& file_path)
+bool VcdReader::read(const std::string& file_path, const ActivityModelOptions& options)
 {
   VcdFileParser parser;
-  return parser.read(file_path, _signal_activity_map);
+  return parser.read(file_path, options, _signal_activity_map);
+}
+
+class VcdWindowReader::Impl
+{
+ public:
+  VcdFileParser _parser;
+};
+
+VcdWindowReader::VcdWindowReader() : _impl(std::make_unique<Impl>())
+{
+}
+
+VcdWindowReader::~VcdWindowReader() = default;
+
+bool VcdWindowReader::open(const std::string& file_path, double window_length, const ActivityModelOptions& options)
+{
+  _impl = std::make_unique<Impl>();
+  _window_activity = VcdWindowSignalActivity();
+  if (!_impl->_parser.openWindow(file_path, window_length, options)) {
+    return false;
+  }
+  _window_activity.set_signal_name_list(_impl->_parser.get_window_signal_name_list());
+  return true;
+}
+
+bool VcdWindowReader::advance_window()
+{
+  return _impl->_parser.advanceWindow(_window_activity);
 }
 
 }  // namespace vcd

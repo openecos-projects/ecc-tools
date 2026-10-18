@@ -24,6 +24,7 @@ namespace ipw {
 
 class LogicExpression;
 class TimingPowerArc;
+struct PAInstanceStaticContext;
 
 class PAInstanceModel
 {
@@ -35,14 +36,31 @@ class PAInstanceModel
   ~PAInstanceModel() = default;
   // getter
   std::map<std::string, PowerActivity>& get_port_activity_map() { return _port_activity_map; }
-  std::map<TimingPowerArc*, double>& get_output_timing_power_arc_weight_map() { return _output_timing_power_arc_weight_map; }
-  std::map<OutputTimingPowerArcGroup, double>& get_output_timing_power_arc_weight_sum_map() { return _output_timing_power_arc_weight_sum_map; }
-  std::map<LogicExpression*, PowerActivity>& get_logic_expression_activity_map() { return _logic_expression_activity_map; }
-  std::map<SensitivityProbabilityKey, double>& get_sensitivity_probability_map() { return _sensitivity_probability_map; }
+  std::map<TimingPowerArc*, double>& get_output_timing_power_arc_weight_map()
+  {
+    return _output_timing_power_arc_weight_map;
+  }
+  std::map<OutputTimingPowerArcGroup, double>& get_output_timing_power_arc_weight_sum_map()
+  {
+    return _output_timing_power_arc_weight_sum_map;
+  }
+  std::map<LogicExpression*, PowerActivity>& get_logic_expression_activity_map()
+  {
+    return _logic_expression_activity_map;
+  }
+  std::map<SensitivityProbabilityKey, double>& get_sensitivity_probability_map()
+  {
+    return _sensitivity_probability_map;
+  }
   bool get_is_port_activity_map_built() const { return _is_port_activity_map_built; }
+  const PAInstanceStaticContext* get_static_context() const { return _static_context; }
   double get_clock_pin_internal_power() const { return _clock_pin_internal_power; }
   // setter
-  void set_is_port_activity_map_built(const bool is_port_activity_map_built) { _is_port_activity_map_built = is_port_activity_map_built; }
+  void set_static_context(const PAInstanceStaticContext* static_context) { _static_context = static_context; }
+  void set_is_port_activity_map_built(const bool is_port_activity_map_built)
+  {
+    _is_port_activity_map_built = is_port_activity_map_built;
+  }
   void add_clock_pin_internal_power(double power) { _clock_pin_internal_power += power; }
   // function
 
@@ -54,6 +72,7 @@ class PAInstanceModel
   std::map<SensitivityProbabilityKey, double> _sensitivity_probability_map;
   bool _is_port_activity_map_built = false;
   double _clock_pin_internal_power = 0.0;
+  const PAInstanceStaticContext* _static_context = nullptr;
 };
 
 }  // namespace ipw

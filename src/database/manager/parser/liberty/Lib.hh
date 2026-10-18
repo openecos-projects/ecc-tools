@@ -603,6 +603,8 @@ class LibPort : public LibObject
 
   void set_func_expr_str(const char* func_expr_str) { _func_expr_str = func_expr_str; }
   auto& get_func_expr_str() { return _func_expr_str; }
+  void set_three_state_expr_str(const char* expression) { _three_state_expr_str = expression; }
+  const std::string& get_three_state_expr_str() const { return _three_state_expr_str; }
 
   unsigned isInput() { return (_port_type == LibertyPortType::kInput || _port_type == LibertyPortType::kInOut); }
   unsigned isOutput() { return (_port_type == LibertyPortType::kOutput || _port_type == LibertyPortType::kInOut); }
@@ -647,6 +649,7 @@ class LibPort : public LibObject
   bool _is_clock = false;  //!< The explicit clock flag for emitted pins.
   ::LibertyExpr* _func_expr = nullptr;
   std::string _func_expr_str;  //!< store func expr string for debug.
+  std::string _three_state_expr_str;
   double _port_cap = 0.0;      //!< The input pin corresponding to the port has capacitance.
   bool _has_port_cap = false;
   std::array<std::optional<double>, MODE_TRANS_SPLIT> _port_caps{};  //!< May be port cap split max rise, max fall, min rise,

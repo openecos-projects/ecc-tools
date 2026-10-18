@@ -122,6 +122,17 @@ void DataManager::updateViolationToRTree(ChangeType change_type, const Violation
   }
 }
 
+void DataManager::replaceViolationRTree(const std::vector<Violation>& violation_list)
+{
+  std::set<Violation, CmpViolation> unique_violation_set(violation_list.begin(), violation_list.end());
+  std::vector<Database::ViolationRTree::value_type> value_list;
+  value_list.reserve(unique_violation_set.size());
+  for (const Violation& violation : unique_violation_set) {
+    value_list.emplace_back(RTUTIL.convertToBGRectInt(violation.get_violation_shape().get_real_rect()), violation);
+  }
+  _database.get_violation_rtree() = Database::ViolationRTree(value_list.begin(), value_list.end());
+}
+
 std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> DataManager::getTypeLayerNetFixedRectMap(EXTPlanarRect& region)
 {
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> type_layer_net_fixed_rect_map;

@@ -30,6 +30,8 @@ void register_imj(py::module& m)
   m.def("check_antenna", checkAntenna, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
   m.def("insert_metal", insertMetal, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
   m.def("flatten_def", defFlatten, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("analyze_driver", analyzeDriver);
+  m.def("cut_def", cutDEF, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
   m.def("destroy_mj", destroyMJ);
 }
 

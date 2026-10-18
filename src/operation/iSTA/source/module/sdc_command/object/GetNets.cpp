@@ -44,7 +44,7 @@ unsigned TclGetNets::exec()
   if (result.empty() && !getOptionOrArg("-quiet")->is_set_val()) {
     warn("no nets matched: " + patterns);
   }
-  setResult(std::move(result));
+  setResult(std::move(result), SdcObjectType::kNet);
   return 1;
 }
 

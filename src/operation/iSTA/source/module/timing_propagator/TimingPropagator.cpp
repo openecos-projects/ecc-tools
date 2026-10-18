@@ -59,13 +59,12 @@ void TimingPropagator::propagate()
   STALOG.info(Loc::current(), "Starting...");
 
   Database& database = STADM.getDatabase();
-  TimingCaseAnalysis::apply(database);
   TPModel tp_model = initTPModel();
   buildStartPointList(tp_model);
   seedStartPointList(tp_model);
   propagateDataSlewDelay(tp_model);
-  for (std::string& pin_name : database.get_timing_order_list()) {
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+  for (int32_t vertex_idx : database.get_graph_order_list()) {
+    for (std::size_t arc_idx : database.get_graph_vertex_list()[vertex_idx].get_outgoing_arc_list()) {
       if (isDisableArc(database.get_arc_list()[arc_idx])) {
         continue;
       }
@@ -98,7 +97,7 @@ bool TimingPropagator::shouldStopDataSlewPropagation(Arc& arc)
   if (arc.get_type() != ArcType::kNet || !isSequentialClockPin(arc.get_sink_pin())) {
     return false;
   }
-  return STADM.getDatabase().get_timing_point_map()[arc.get_sink_pin()].get_is_clock_point();
+  return STADM.getDatabase().getSinkTimingPoint(arc).get_is_clock_point();
 }
 
 bool TimingPropagator::isSequentialClockPin(std::string& pin_name)
@@ -195,7 +194,7 @@ void TimingPropagator::seedStartPointList(TPModel& tp_model)
 {
   Database& database = STADM.getDatabase();
   for (std::string& start_point : tp_model.get_start_point_list()) {
-    TimingPoint& timing_point = database.get_timing_point_map()[start_point];
+    TimingPoint& timing_point = database.getDriverTimingPoint(start_point);
     timing_point.set_arrival(getStartPointArrival(start_point, AnalysisType::kMax));
     timing_point.set_launch_time(getStartPointLaunchTime(start_point, AnalysisType::kMax));
     timing_point.set_clock_name(getClockName(start_point));
@@ -208,8 +207,8 @@ void TimingPropagator::propagateDataSlewDelay(TPModel& tp_model)
 {
   Database& database = STADM.getDatabase();
   seedDataSlewList(tp_model);
-  for (std::string& pin_name : database.get_timing_order_list()) {
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+  for (int32_t vertex_idx : database.get_graph_order_list()) {
+    for (std::size_t arc_idx : database.get_graph_vertex_list()[vertex_idx].get_outgoing_arc_list()) {
       if (isDisableArc(database.get_arc_list()[arc_idx])) {
         continue;
       }
@@ -235,10 +234,10 @@ void TimingPropagator::seedDataSlew(std::string& start_point, AnalysisType analy
 void TimingPropagator::seedDataSlew(std::string& start_point, AnalysisType analysis_type, TransType trans_type)
 {
   Database& database = STADM.getDatabase();
-  if (!TimingCaseAnalysis::allowsTransition(database, start_point, trans_type)) {
+  if (!TimingCaseAnalysis::allowsTransition(database, start_point, trans_type, true)) {
     return;
   }
-  TimingPoint& timing_point = database.get_timing_point_map()[start_point];
+  TimingPoint& timing_point = database.getDriverTimingPoint(start_point);
   if (isSequentialClockPin(start_point) && hasIncomingPhysicalSlewArc(start_point)
       && (timing_point.get_clock_slew_map().count(analysis_type) == 0 || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0)) {
     // A propagated divider or gated-clock path will provide the physical slew
@@ -266,16 +265,16 @@ void TimingPropagator::propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisTy
   if (shouldStopDataSlewPropagation(arc)) {
     return;
   }
-  if (!TimingCaseAnalysis::allowsTransition(database, arc.get_source_pin(), input_trans_type)) {
+  if (!TimingCaseAnalysis::allowsTransition(database, arc.get_source_pin(), input_trans_type, arc.get_type() == ArcType::kNet)) {
     return;
   }
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
+  TimingPoint& source_point = database.getSourceTimingPoint(arc);
   if (!hasDataSlew(source_point, analysis_type, input_trans_type)) {
     return;
   }
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  TimingPoint& sink_point = database.getSinkTimingPoint(arc);
   for (TransType output_trans_type : getOutputTransTypeList(arc, analysis_type, input_trans_type)) {
-    if (!TimingCaseAnalysis::allowsTransition(database, arc.get_sink_pin(), output_trans_type)) {
+    if (!TimingCaseAnalysis::allowsTransition(database, arc.get_sink_pin(), output_trans_type, arc.get_type() == ArcType::kCell)) {
       continue;
     }
     updateDataSlewDelay(arc, source_point, sink_point, analysis_type, input_trans_type, output_trans_type);
@@ -794,7 +793,7 @@ void TimingPropagator::seedPathState(std::string& start_point, AnalysisType anal
   }
   Database& database = STADM.getDatabase();
   for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
-    if (!TimingCaseAnalysis::allowsTransition(database, start_point, trans_type)) {
+    if (!TimingCaseAnalysis::allowsTransition(database, start_point, trans_type, true)) {
       continue;
     }
     const std::vector<const TimingIoDelay*> input_delays = getInputDelayList(start_point, analysis_type, trans_type);
@@ -833,7 +832,7 @@ void TimingPropagator::seedPathState(std::string& start_point, AnalysisType anal
     return;
   }
   std::string path_state_start_point = getPathStateStartPoint(start_point);
-  TimingPoint& timing_point = database.get_timing_point_map()[start_point];
+  TimingPoint& timing_point = database.getDriverTimingPoint(start_point);
   const std::vector<int32_t> initial_exception_state_list
       = TimingExceptionMatcher::initState(database, path_state_start_point, clock_name, trans_type, analysis_type);
   const std::vector<int32_t> exception_state_list
@@ -923,8 +922,8 @@ void TimingPropagator::propagateArrivalArc(std::size_t arc_idx)
   if (isDisableArc(arc)) {
     return;
   }
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  TimingPoint& source_point = database.getSourceTimingPoint(arc);
+  TimingPoint& sink_point = database.getSinkTimingPoint(arc);
   if (isFinite(source_point.get_arrival())) {
     const double candidate_arrival = source_point.get_arrival() + arc.get_delay();
     if (!isFinite(sink_point.get_arrival()) || candidate_arrival > sink_point.get_arrival() + kEpsilon) {
@@ -954,11 +953,11 @@ void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType a
     return;
   }
   Arc& arc = database.get_arc_list()[arc_idx];
-  if (!TimingCaseAnalysis::allowsTransition(database, arc.get_source_pin(), input_trans_type)) {
+  if (!TimingCaseAnalysis::allowsTransition(database, arc.get_source_pin(), input_trans_type, arc.get_type() == ArcType::kNet)) {
     return;
   }
   for (TransType output_trans_type : getOutputTransTypeList(arc, analysis_type, input_trans_type)) {
-    if (!TimingCaseAnalysis::allowsTransition(database, arc.get_sink_pin(), output_trans_type)) {
+    if (!TimingCaseAnalysis::allowsTransition(database, arc.get_sink_pin(), output_trans_type, arc.get_type() == ArcType::kCell)) {
       continue;
     }
     propagatePathStateArc(arc_idx, analysis_type, source_type, input_trans_type, output_trans_type);
@@ -973,16 +972,16 @@ void TimingPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisType a
   if (isDisableArc(arc)) {
     return;
   }
-  if (!TimingCaseAnalysis::allowsTransition(database, arc.get_source_pin(), input_trans_type)
-      || !TimingCaseAnalysis::allowsTransition(database, arc.get_sink_pin(), output_trans_type)) {
+  if (!TimingCaseAnalysis::allowsTransition(database, arc.get_source_pin(), input_trans_type, arc.get_type() == ArcType::kNet)
+      || !TimingCaseAnalysis::allowsTransition(database, arc.get_sink_pin(), output_trans_type, arc.get_type() == ArcType::kCell)) {
     return;
   }
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
+  TimingPoint& source_point = database.getSourceTimingPoint(arc);
   if (!hasPathState(source_point, analysis_type, source_type, input_trans_type)) {
     return;
   }
 
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  TimingPoint& sink_point = database.getSinkTimingPoint(arc);
   std::map<std::string, TimingPathState>& source_path_state_map = getPathStateMap(source_point, analysis_type, source_type, input_trans_type);
   for (std::pair<const std::string, TimingPathState>& source_path_state_pair : source_path_state_map) {
     TimingPathState& source_path_state = source_path_state_pair.second;

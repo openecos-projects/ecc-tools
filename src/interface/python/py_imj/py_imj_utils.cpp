@@ -135,14 +135,39 @@ bool initDefFlattenConfigMapByJSON(const std::string& config, std::map<std::stri
   return true;
 }
 
-void initDefFlattenConfigMapByDict(std::map<std::string, std::string>& config_dict,
-                                   std::map<std::string, std::any>& config_map)
+void initDefFlattenConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map)
 {
   if (config_dict.count("-hierarchy") > 0 && !config_dict["-hierarchy"].empty()) {
     config_map["-hierarchy"] = config_dict["-hierarchy"];
   }
   if (config_dict.count("-pg_connect") > 0 && !config_dict["-pg_connect"].empty()) {
     config_map["-pg_connect"] = config_dict["-pg_connect"];
+  }
+}
+
+bool initDEFCutConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
+{
+  std::ifstream stream(config);
+  if (!stream.is_open()) {
+    return false;
+  }
+  nlohmann::json json;
+  stream >> json;
+  for (std::string key : {"-rect"}) {
+    std::string value = ecc::getJsonData(json, {"MJ", key});
+    if (!value.empty()) {
+      config_map[key] = value;
+    }
+  }
+  return true;
+}
+
+void initDEFCutConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map)
+{
+  for (std::string key : {"-rect"}) {
+    if (config_dict.contains(key) && !config_dict[key].empty()) {
+      config_map[key] = config_dict[key];
+    }
   }
 }
 

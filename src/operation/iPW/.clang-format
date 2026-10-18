@@ -19,15 +19,16 @@
 Language:        Cpp
 BasedOnStyle:  Google
 
-ColumnLimit: 160
+AlignAfterOpenBracket: BlockIndent
 AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
+AllowAllArgumentsOnNextLine: false
 AllowAllParametersOfDeclarationOnNextLine: false
 AllowShortFunctionsOnASingleLine: InlineOnly
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
-BinPackArguments: true
-BinPackParameters: true
+BinPackArguments: false
+BinPackParameters: false
 BraceWrapping:
   AfterClass:            true
   AfterControlStatement: false
@@ -46,6 +47,11 @@ BraceWrapping:
   SplitEmptyNamespace:   true
 BreakBeforeBinaryOperators: All
 BreakBeforeBraces: Custom
+ColumnLimit: 120
+ContinuationIndentWidth: 4
 DerivePointerAlignment: false
+IncludeBlocks: Preserve
+PenaltyReturnTypeOnItsOwnLine: 1000
+SortIncludes: false
 SpaceAfterCStyleCast: true
 Standard: c++20

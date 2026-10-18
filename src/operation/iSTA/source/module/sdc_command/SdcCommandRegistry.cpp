@@ -21,6 +21,9 @@
 #include "exception/PathExceptionCommand.hpp"
 #include "logic/LogicCommands.hpp"
 #include "frontend/SdcTclCmd.hpp"
+#include "frontend/SetUnits.hpp"
+#include "object/GetFan.hpp"
+#include "object/GetName.hpp"
 #include "object/ObjectCommands.hpp"
 
 namespace ista::sdc {
@@ -48,6 +51,9 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclAllClocks>(interpreter, "all_clocks");
   registerCommand<TclGetFullName>(interpreter, "get_full_name");
   registerCommand<TclGetFullName>(interpreter, "get_object_name");
+  registerCommand<TclGetName>(interpreter, "get_name");
+  registerCommand<TclGetFan>(interpreter, "get_fanin");
+  registerCommand<TclGetFan>(interpreter, "get_fanout");
   registerCommand<TclGetClocks>(interpreter, "get_clock");
   registerCommand<TclGetClocks>(interpreter, "get_clocks");
   registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
@@ -116,6 +122,7 @@ void registerPathExceptionCommands(SdcCommand& interpreter)
 
 void registerSdcCommands(SdcCommand& interpreter)
 {
+  registerCommand<TclSetUnits>(interpreter, "set_units");
   registerCollectionCommands(interpreter);
   registerObjectQueryCommands(interpreter);
   registerClockConstraintCommands(interpreter);

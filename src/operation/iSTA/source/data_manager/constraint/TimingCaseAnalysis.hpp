@@ -15,7 +15,7 @@ class TimingCaseAnalysis
 {
  public:
   static void apply(Database& database);
-  static bool allowsTransition(const Database& database, std::string_view pin_name, TransType trans_type);
+  static bool allowsTransition(const Database& database, std::string_view pin_name, TransType trans_type, bool is_driver = false);
 };
 
 }  // namespace ista

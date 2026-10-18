@@ -26,9 +26,8 @@
 #include "ACUFNode.hpp"
 #include "ACUnionFind.hpp"
 #include "DataManager.hpp"
-#include "Utility.hpp"
-
 #include "IdbDesign.h"
+#include "IdbInstance.h"
 #include "IdbLayer.h"
 #include "IdbLayout.h"
 #include "IdbNet.h"
@@ -37,6 +36,7 @@
 #include "IdbTerm.h"
 #include "IdbUnits.h"
 #include "IdbVias.h"
+#include "Utility.hpp"
 #include "idm.h"
 
 namespace imj {
@@ -691,6 +691,12 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
 
     readPinAntennaInfo(ac_model, pin, instance_pin, gate_area, diff_area, provides_diff);
     int gate_node = createGateNode(gate_area, diff_area, provides_diff);
+    if (gate_node >= 0) {
+      nodes[gate_node].pin_name = pin->get_pin_name();
+      if (instance_pin && pin->get_instance() != nullptr) {
+        nodes[gate_node].instance_name = pin->get_instance()->get_name();
+      }
+    }
 
     std::vector<ACPinShape> pin_shapes;
 
@@ -1214,6 +1220,15 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
           v.type = type;
           v.ratio = ratio;
           v.threshold = threshold;
+          v.gate_area = root_data.gate_area;
+          v.diff_area = root_data.diff_area;
+          v.metal_area = metal_area_um;
+          v.side_area = side_area_um;
+          v.cut_area = cut_area_um;
+          if (root_data.gate_node_idx >= 0) {
+            v.pin_name = nodes[root_data.gate_node_idx].pin_name;
+            v.instance_name = nodes[root_data.gate_node_idx].instance_name;
+          }
 
           if (has_bbox) {
             v.lx = Utility::getRatio(bbox_lx, micron_dbu);
@@ -1644,62 +1659,32 @@ ACThresholdPick AntennaChecker::pickThreshold(const double plain_ratio, const do
 
 void AntennaChecker::writeReport(const ACModel& ac_model) const
 {
-  auto type_to_string = [](ACViolationType t) -> const char* {
-    switch (t) {
-      case ACViolationType::kAntennaPar:
-        return "PAR";
-      case ACViolationType::kAntennaDiffPar:
-        return "DiffPAR";
-      case ACViolationType::kAntennaCar:
-        return "CAR";
-      case ACViolationType::kAntennaDiffCar:
-        return "DiffCAR";
-      case ACViolationType::kAntennaPsr:
-        return "PSR";
-      case ACViolationType::kAntennaDiffPsr:
-        return "DiffPSR";
-      case ACViolationType::kAntennaCsr:
-        return "CSR";
-      case ACViolationType::kAntennaDiffCsr:
-        return "DiffCSR";
-      case ACViolationType::kAntennaCutPar:
-        return "CutPAR";
-      case ACViolationType::kAntennaCutCar:
-        return "CutCAR";
-      case ACViolationType::kAntennaDiffCutPar:
-        return "DiffCutPAR";
-      case ACViolationType::kAntennaDiffCutCar:
-        return "DiffCutCAR";
-      default:
-        return "UNKNOWN";
-    }
-  };
-
   if (!ac_model.get_report_dir().empty()) {
-    const std::string report_path = ac_model.get_report_dir() + "/antenna_check.rpt";
-    std::ofstream rpt(report_path);
+    std::string report_path = ac_model.get_report_dir() + "/antenna_check.rpt";
+    std::ofstream* stream = MJUTIL.getOutputFileStream(report_path);
+    *stream << "========================================================================\n";
+    *stream << "                      Antenna Violations Report                         \n";
+    *stream << "========================================================================\n";
+    *stream << "Total Violations: " << ac_model.get_violation_num() << "\n\n";
 
-    if (rpt.is_open()) {
-      rpt << "========================================================================\n";
-      rpt << "                      Antenna Violations Report                         \n";
-      rpt << "========================================================================\n";
-      rpt << "Total Violations: " << ac_model.get_violation_num() << "\n\n";
+    if (ac_model.get_violation_num() > 0) {
+      *stream << "Areas are in um^2; locations are in um.\n"
+              << "Gate pin identifies one gate in the connected component, not every affected gate.\n\n"
+              << "Details:\n"
+              << "------------------------------------------------------------------------\n";
 
-      if (ac_model.get_violation_num() > 0) {
-        rpt << "Details:\n";
-        rpt << "------------------------------------------------------------------------\n";
-
-        for (const auto& v : ac_model.get_violation_list()) {
-          rpt << "Net: " << v.net_name << " | Layer: " << v.layer_name << " | Type: " << type_to_string(v.type) << "\n"
-              << "  Ratio: " << v.ratio << " (Threshold: " << v.threshold << ")\n"
-              << "  Location: (" << v.lx << ", " << v.ly << ") to (" << v.hx << ", " << v.hy << ")\n\n";
+      for (const ACViolation& violation : ac_model.get_violation_list()) {
+        *stream << "Net: " << violation.net_name << " | Layer: " << violation.layer_name << " | Type: " << GetACViolationTypeName()(violation.type) << "\n"
+                << "  Ratio: " << violation.ratio << " (Threshold: " << violation.threshold << ")\n";
+        if (!violation.pin_name.empty()) {
+          *stream << "  Gate pin: " << (violation.instance_name.empty() ? violation.pin_name : violation.instance_name + "/" + violation.pin_name) << "\n";
         }
+        *stream << "  Gate area: " << violation.gate_area << " | Diffusion area: " << violation.diff_area << "\n"
+                << "  Metal area: " << violation.metal_area << " | Side area: " << violation.side_area << " | Cut area: " << violation.cut_area << "\n"
+                << "  Location: (" << violation.lx << ", " << violation.ly << ") to (" << violation.hx << ", " << violation.hy << ")\n\n";
       }
-
-      rpt.close();
-    } else {
-      MJLOG.warn(Loc::current(), "Cannot open antenna report file: ", report_path);
     }
+    MJUTIL.closeFileStream(stream);
   }
 }
 

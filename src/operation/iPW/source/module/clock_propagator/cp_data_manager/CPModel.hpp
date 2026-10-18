@@ -26,30 +26,30 @@ class CPModel
   CPModel() = default;
   ~CPModel() = default;
   // getter
-  ClockSlewState& get_clock_state(std::string_view pin_name, std::string_view clock_name)
+  ClockSlewState& get_clock_state(int32_t vertex_idx, std::string_view clock_name)
   {
-    return _clock_state_map[std::string(pin_name)][std::string(clock_name)];
+    return _clock_state_map[vertex_idx][std::string(clock_name)];
   }
-  std::string& get_clock_name(std::string_view pin_name) { return _clock_name_map[std::string(pin_name)]; }
-  const ClockSlewState* find_clock_state(std::string_view pin_name, std::string_view clock_name) const
+  std::string& get_clock_name(int32_t vertex_idx) { return _clock_name_map[vertex_idx]; }
+  const ClockSlewState* find_clock_state(int32_t vertex_idx, std::string_view clock_name) const
   {
-    const auto clock_state_map = _clock_state_map.find(std::string(pin_name));
+    const auto clock_state_map = _clock_state_map.find(vertex_idx);
     if (clock_state_map == _clock_state_map.end()) {
       return nullptr;
     }
     const auto clock_state = clock_state_map->second.find(std::string(clock_name));
     return clock_state == clock_state_map->second.end() ? nullptr : &clock_state->second;
   }
-  bool has_clock_state(std::string_view pin_name, std::string_view clock_name) const
+  bool has_clock_state(int32_t vertex_idx, std::string_view clock_name) const
   {
-    return find_clock_state(pin_name, clock_name) != nullptr;
+    return find_clock_state(vertex_idx, clock_name) != nullptr;
   }
   // setter
-  void set_clock_name(std::string_view pin_name, std::string_view clock_name) { _clock_name_map[std::string(pin_name)] = clock_name; }
+  void set_clock_name(int32_t vertex_idx, std::string_view clock_name) { _clock_name_map[vertex_idx] = clock_name; }
 
  private:
-  std::map<std::string, std::string> _clock_name_map;
-  std::map<std::string, std::map<std::string, ClockSlewState>> _clock_state_map;
+  std::map<int32_t, std::string> _clock_name_map;
+  std::map<int32_t, std::map<std::string, ClockSlewState>> _clock_state_map;
 };
 
 }  // namespace ipw

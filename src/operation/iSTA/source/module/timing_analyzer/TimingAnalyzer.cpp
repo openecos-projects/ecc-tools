@@ -92,6 +92,14 @@ void TimingAnalyzer::analyzeFanoutConstraints()
     }
     for (const std::string& driver : drivers) {
       Pin& pin = database.get_pin_map().at(driver);
+      if (pin.get_is_driver_disabled()) {
+        continue;
+      }
+      double driver_fanout_load = fanout_load;
+      if (!pin.get_is_port() && loads.contains(driver)) {
+        TimingCellPort* port = getFanoutCellPort(pin);
+        driver_fanout_load -= port == nullptr ? 1.0 : port->get_fanout_load();
+      }
       std::optional<double> pin_limit;
       if (pin.get_is_port()) {
         const auto port_limit = constraint.get_port_max_fanout_map().find(driver);
@@ -114,7 +122,7 @@ void TimingAnalyzer::analyzeFanoutConstraints()
       TimingFanoutCheck check;
       check.set_net_name(net_name);
       check.set_driver_pin(driver);
-      check.set_fanout_load(fanout_load);
+      check.set_fanout_load(driver_fanout_load);
       check.set_limit(*limit);
       checks.push_back(check);
     }
@@ -362,9 +370,8 @@ void TimingAnalyzer::propagateRequired()
 
   seedEndPointRequired(required_time);
 
-  for (auto iter = database.get_timing_order_list().rbegin(); iter != database.get_timing_order_list().rend(); ++iter) {
-    std::string& pin_name = *iter;
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+  for (auto iter = database.get_graph_order_list().rbegin(); iter != database.get_graph_order_list().rend(); ++iter) {
+    for (std::size_t arc_idx : database.get_graph_vertex_list()[*iter].get_outgoing_arc_list()) {
       if (isDisableArc(database.get_arc_list()[arc_idx])) {
         continue;
       }
@@ -1133,11 +1140,14 @@ std::vector<std::pair<std::string, TransType>> TimingAnalyzer::getClockPathPinLi
 {
   Database& database = STADM.getDatabase();
   std::vector<std::pair<std::string, TransType>> clock_path_pin_list;
-  std::string pin_name = clock_pin_name;
+  auto pin = database.get_pin_map().find(clock_pin_name);
+  int32_t vertex_idx = pin == database.get_pin_map().end() ? -1 : pin->second.get_load_vertex_idx();
   TransType current_trans_type = trans_type;
-  while (!pin_name.empty() && database.get_timing_point_map().count(pin_name) > 0) {
-    clock_path_pin_list.emplace_back(pin_name, current_trans_type);
-    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+  std::set<int32_t> visited;
+  while (vertex_idx >= 0 && visited.insert(vertex_idx).second) {
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    clock_path_pin_list.emplace_back(vertex.get_pin_name(), current_trans_type);
+    TimingPoint& timing_point = vertex.get_timing_point();
     const TimingClockPointState* state = timing_point.find_clock_state(clock_name);
     if (state == nullptr || !state->predecessor_map.contains(analysis_type)
         || !state->predecessor_map.at(analysis_type).contains(current_trans_type)) {
@@ -1148,7 +1158,10 @@ std::vector<std::pair<std::string, TransType>> TimingAnalyzer::getClockPathPinLi
         && state->predecessor_trans_type_map.at(analysis_type).contains(current_trans_type)) {
       predecessor_trans_type = state->predecessor_trans_type_map.at(analysis_type).at(current_trans_type);
     }
-    pin_name = state->predecessor_map.at(analysis_type).at(current_trans_type);
+    if (!state->predecessor_vertex_map.contains(analysis_type) || !state->predecessor_vertex_map.at(analysis_type).contains(current_trans_type)) {
+      break;
+    }
+    vertex_idx = state->predecessor_vertex_map.at(analysis_type).at(current_trans_type);
     current_trans_type = predecessor_trans_type;
   }
   std::reverse(clock_path_pin_list.begin(), clock_path_pin_list.end());
@@ -1211,8 +1224,8 @@ void TimingAnalyzer::propagateRequiredArc(Arc& arc)
   if (shouldStopDataPropagation(arc)) {
     return;
   }
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  TimingPoint& source_point = database.getSourceTimingPoint(arc);
+  TimingPoint& sink_point = database.getSinkTimingPoint(arc);
   if (isFinite(sink_point.get_required())) {
     source_point.set_required(std::min(source_point.get_required(), sink_point.get_required() - arc.get_delay()));
   }
@@ -1221,8 +1234,8 @@ void TimingAnalyzer::propagateRequiredArc(Arc& arc)
 void TimingAnalyzer::updateSlack()
 {
   Database& database = STADM.getDatabase();
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    TimingPoint& timing_point = timing_pair.second;
+  for (GraphVertex& vertex : database.get_graph_vertex_list()) {
+    TimingPoint& timing_point = vertex.get_timing_point();
     if (isFinite(timing_point.get_arrival()) && isFinite(timing_point.get_required())) {
       timing_point.set_slack(timing_point.get_required() - timing_point.get_arrival());
     }
@@ -1345,9 +1358,8 @@ void TimingAnalyzer::buildPathDiversionList(std::string& end_point, AnalysisType
   std::vector<std::string> path_pin_name_list;
   std::vector<TransType> path_trans_type_list;
   std::vector<std::string> path_state_tag_list;
-  buildPathTrace(end_point, analysis_type, source_type, *path_state, path_pin_name_list, path_trans_type_list, path_state_tag_list);
-  std::vector<std::size_t> path_arc_idx_list
-      = getPathArcIdxList(path_pin_name_list, path_trans_type_list, path_state_tag_list, analysis_type, source_type);
+  std::vector<std::size_t> path_arc_idx_list;
+  buildPathTrace(end_point, analysis_type, source_type, *path_state, path_pin_name_list, path_trans_type_list, path_state_tag_list, path_arc_idx_list);
   buildPathDiversionList(end_point, analysis_type, source_type, path_pin_name_list, path_trans_type_list, path_arc_idx_list);
 }
 
@@ -1357,16 +1369,16 @@ void TimingAnalyzer::buildPathDiversionList(std::string& end_point, AnalysisType
 {
   Database& database = STADM.getDatabase();
   for (std::size_t sink_idx = 1; sink_idx < path_pin_name_list.size(); sink_idx++) {
-    std::string& sink_pin = path_pin_name_list[sink_idx];
     TransType sink_trans_type = path_trans_type_list[sink_idx];
     std::size_t path_arc_idx = path_arc_idx_list[sink_idx - 1];
-    for (std::size_t diversion_arc_idx : database.get_incoming_arc_list_map()[sink_pin]) {
+    for (std::size_t diversion_arc_idx :
+         database.get_graph_vertex_list()[database.get_arc_list()[path_arc_idx].get_sink_vertex_idx()].get_incoming_arc_list()) {
       if (diversion_arc_idx == path_arc_idx || isDisableArc(database.get_arc_list()[diversion_arc_idx])
           || shouldStopDataPropagation(database.get_arc_list()[diversion_arc_idx])) {
         continue;
       }
       Arc& diversion_arc = database.get_arc_list()[diversion_arc_idx];
-      TimingPoint& source_point = database.get_timing_point_map()[diversion_arc.get_source_pin()];
+      TimingPoint& source_point = database.getSourceTimingPoint(diversion_arc);
       for (TransType input_trans_type : {TransType::kRise, TransType::kFall}) {
         if (!hasPathState(source_point, analysis_type, source_type, input_trans_type)
             || !isOutputTransType(diversion_arc, analysis_type, input_trans_type, sink_trans_type)) {
@@ -1434,7 +1446,7 @@ TimingPathState* TimingAnalyzer::updateDiversionPathState(std::string& pin_name,
                                                           TransType predecessor_trans_type, double arrival)
 {
   Database& database = STADM.getDatabase();
-  TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+  TimingPoint& timing_point = database.getSinkTimingPoint(database.get_arc_list()[predecessor_arc_idx]);
   const std::vector<int32_t> exception_state_list
       = TimingExceptionMatcher::advanceState(database, source_path_state.get_exception_state_list(), pin_name, trans_type);
   const std::string path_state_tag
@@ -1675,9 +1687,8 @@ TimingPath TimingAnalyzer::buildTimingPath(std::string& end_point, AnalysisType 
   std::vector<std::string> path_pin_name_list;
   std::vector<TransType> path_trans_type_list;
   std::vector<std::string> path_state_tag_list;
-  buildPathTrace(end_point, analysis_type, source_type, end_path_state, path_pin_name_list, path_trans_type_list, path_state_tag_list);
-  std::vector<std::size_t> path_arc_idx_list
-      = getPathArcIdxList(path_pin_name_list, path_trans_type_list, path_state_tag_list, analysis_type, source_type);
+  std::vector<std::size_t> path_arc_idx_list;
+  buildPathTrace(end_point, analysis_type, source_type, end_path_state, path_pin_name_list, path_trans_type_list, path_state_tag_list, path_arc_idx_list);
   const double normal_required_time = getEndPointRequired(end_path_state, end_point, end_path_state.get_arrival(), analysis_type);
   double required_time = calcPathRequiredTime(end_point, end_path_state, analysis_type);
   double slack = calcPathSlack(end_path_state, required_time, analysis_type);
@@ -1705,8 +1716,8 @@ TimingPath TimingAnalyzer::buildTimingPath(std::string& end_point, AnalysisType 
     double arc_delay = 0.0;
     if (i > 0) {
       arc = &database.get_arc_list()[path_arc_idx_list[i - 1]];
-      TimingPathState& path_state = getPathState(database.get_timing_point_map()[path_pin_name_list[i]], analysis_type, source_type,
-                                                 path_trans_type_list[i], path_state_tag_list[i]);
+      TimingPathState& path_state
+          = getPathState(database.getSinkTimingPoint(*arc), analysis_type, source_type, path_trans_type_list[i], path_state_tag_list[i]);
       arc_delay = path_state.get_predecessor_arc_delay();
       updatePathDelay(timing_path, arc, arc_delay);
     }
@@ -1722,38 +1733,29 @@ TimingPath TimingAnalyzer::buildTimingPath(std::string& end_point, AnalysisType 
 
 void TimingAnalyzer::buildPathTrace(std::string& end_point, AnalysisType analysis_type, PathSourceType source_type, TimingPathState& end_path_state,
                                     std::vector<std::string>& path_pin_name_list, std::vector<TransType>& path_trans_type_list,
-                                    std::vector<std::string>& path_state_tag_list)
+                                    std::vector<std::string>& path_state_tag_list, std::vector<std::size_t>& path_arc_idx_list)
 {
   Database& database = STADM.getDatabase();
   std::string pin_name = end_point;
-  TransType current_trans_type = end_path_state.get_trans_type();
-  std::string path_state_tag = end_path_state.get_path_state_tag();
+  TimingPathState* state = &end_path_state;
   while (!pin_name.empty()) {
     path_pin_name_list.push_back(pin_name);
-    path_trans_type_list.push_back(current_trans_type);
-    path_state_tag_list.push_back(path_state_tag);
-    TimingPathState& path_state = getPathState(database.get_timing_point_map()[pin_name], analysis_type, source_type, current_trans_type, path_state_tag);
-    pin_name = path_state.get_predecessor();
-    current_trans_type = path_state.get_predecessor_trans_type();
-    path_state_tag = path_state.get_predecessor_path_state_tag();
+    path_trans_type_list.push_back(state->get_trans_type());
+    path_state_tag_list.push_back(state->get_path_state_tag());
+    if (state->get_predecessor().empty()) {
+      break;
+    }
+    std::size_t arc_idx = state->get_predecessor_arc_idx();
+    Arc& arc = database.get_arc_list()[arc_idx];
+    path_arc_idx_list.push_back(arc_idx);
+    pin_name = arc.get_source_pin();
+    state = &getPathState(database.getSourceTimingPoint(arc), analysis_type, source_type, state->get_predecessor_trans_type(),
+                          state->get_predecessor_path_state_tag());
   }
   std::reverse(path_pin_name_list.begin(), path_pin_name_list.end());
   std::reverse(path_trans_type_list.begin(), path_trans_type_list.end());
   std::reverse(path_state_tag_list.begin(), path_state_tag_list.end());
-}
-
-std::vector<std::size_t> TimingAnalyzer::getPathArcIdxList(std::vector<std::string>& path_pin_name_list, std::vector<TransType>& path_trans_type_list,
-                                                           std::vector<std::string>& path_state_tag_list, AnalysisType analysis_type,
-                                                           PathSourceType source_type)
-{
-  Database& database = STADM.getDatabase();
-  std::vector<std::size_t> path_arc_idx_list;
-  for (size_t i = 1; i < path_pin_name_list.size(); i++) {
-    TimingPoint& timing_point = database.get_timing_point_map()[path_pin_name_list[i]];
-    TimingPathState& path_state = getPathState(timing_point, analysis_type, source_type, path_trans_type_list[i], path_state_tag_list[i]);
-    path_arc_idx_list.push_back(path_state.get_predecessor_arc_idx());
-  }
-  return path_arc_idx_list;
+  std::reverse(path_arc_idx_list.begin(), path_arc_idx_list.end());
 }
 
 void TimingAnalyzer::updatePathDelay(TimingPath& timing_path, Arc* arc, double arc_delay)
@@ -1830,7 +1832,7 @@ TimingPathPoint TimingAnalyzer::makeTimingPathPoint(std::string& pin_name, Arc* 
 {
   Database& database = STADM.getDatabase();
   Pin& pin = database.get_pin_map()[pin_name];
-  TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+  TimingPoint& timing_point = arc == nullptr ? database.getDriverTimingPoint(pin_name) : database.getSinkTimingPoint(*arc);
   TimingPathState& path_state = getPathState(timing_point, analysis_type, source_type, trans_type, path_state_tag);
   TimingPathPoint path_point;
   path_point.set_pin_name(pin_name);

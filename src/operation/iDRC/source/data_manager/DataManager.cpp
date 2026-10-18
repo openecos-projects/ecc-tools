@@ -120,6 +120,7 @@ void DataManager::wrapDatabase()
   wrapDesignRule();
   wrapLayerList();
   wrapLayerInfo();
+  wrapMacroObsList();
 }
 
 void DataManager::wrapDBInfo()
@@ -643,6 +644,76 @@ void DataManager::wrapLayerInfo()
         || !cut_layer_name_to_idx_map.emplace(cut_layer_list[i].get_layer_name(), static_cast<int32_t>(i)).second) {
       DRCLOG.error(Loc::current(), "The cut layer id or name is duplicated!");
     }
+  }
+}
+
+namespace {
+
+// 收集这个 macro 自己的 pin shape，按层索引
+std::map<int32_t, std::vector<PlanarRect>> collectMacroPinRectMap(idb::IdbInstance* idb_instance)
+{
+  std::map<int32_t, std::vector<PlanarRect>> pin_rect_map;
+  for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
+    for (idb::IdbLayerShape* port_box : idb_pin->get_port_box_list()) {
+      if (port_box->get_layer() == nullptr) {
+        continue;
+      }
+      std::vector<PlanarRect>& pin_rect_list = pin_rect_map[port_box->get_layer()->get_id()];
+      for (idb::IdbRect* rect : port_box->get_rect_list()) {
+        pin_rect_list.emplace_back(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+    }
+  }
+  return pin_rect_map;
+}
+
+}  // namespace
+
+void DataManager::wrapMacroObsList()
+{
+  std::vector<MacroObs>& macro_obs_list = _database.get_macro_obs_list();
+  auto* idb_design = dmInst->get_idb_def_service()->get_design();
+  std::vector<idb::IdbInstance*>& idb_instance_list = idb_design->get_instance_list()->get_instance_list();
+  for (idb::IdbInstance* idb_instance : idb_instance_list) {
+    if (idb_instance == nullptr || idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
+      continue;
+    }
+    idb::IdbCellMaster* idb_cell_master = idb_instance->get_cell_master();
+    if (!idb_cell_master->has_macro_property()) {
+      continue;
+    }
+    std::map<int32_t, std::vector<PlanarRect>> pin_rect_map = collectMacroPinRectMap(idb_instance);
+
+    idb::macro::MacroProperty* macro_property = idb_cell_master->get_macro_property();
+    MacroObs macro_obs;
+    for (idb::IdbLayerShape* obs_box : idb_instance->get_obs_box_list()) {
+      if (obs_box->get_layer() == nullptr) {
+        continue;
+      }
+      idb::macro::ObsSpacing* obs_spacing = macro_property->find_obs_spacing(obs_box->get_layer());
+      if (obs_spacing == nullptr) {
+        continue;
+      }
+      MacroObsLayer macro_obs_layer;
+      macro_obs_layer.layer_idx = obs_box->get_layer()->get_id();
+      macro_obs_layer.is_routing = obs_box->get_layer()->is_routing();
+      macro_obs_layer.min_spacing = obs_spacing->get_min_spacing();
+      idb::IdbRect bounding_box = obs_box->get_bounding_box();
+      macro_obs_layer.bounding_box
+          = PlanarRect(bounding_box.get_low_x(), bounding_box.get_low_y(), bounding_box.get_high_x(), bounding_box.get_high_y());
+      for (idb::IdbRect* rect : obs_box->get_rect_list()) {
+        macro_obs_layer.obs_rect_list.emplace_back(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+      auto pin_rect_iter = pin_rect_map.find(macro_obs_layer.layer_idx);
+      if (pin_rect_iter != pin_rect_map.end()) {
+        macro_obs_layer.pin_rect_list = pin_rect_iter->second;
+      }
+      macro_obs.obs_layer_list.push_back(std::move(macro_obs_layer));
+    }
+    if (macro_obs.obs_layer_list.empty()) {
+      continue;
+    }
+    macro_obs_list.push_back(std::move(macro_obs));
   }
 }
 

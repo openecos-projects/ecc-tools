@@ -17,6 +17,7 @@
 #pragma once
 
 #include "Arc.hpp"
+#include "GraphVertex.hpp"
 #include "Instance.hpp"
 #include "Net.hpp"
 #include "ParasiticLibrary.hpp"
@@ -37,6 +38,9 @@ class Database
   Database() = default;
   ~Database() = default;
   // getter
+  std::vector<GraphVertex>& get_graph_vertex_list() { return _graph_vertex_list; }
+  std::vector<int32_t>& get_graph_order_list() { return _graph_order_list; }
+  std::map<std::string, TimingPoint>& get_driver_timing_point_map() { return _driver_timing_point_map; }
   std::string& get_design_name() { return _design_name; }
   std::map<std::string, Instance>& get_instance_map() { return _instance_map; }
   std::map<std::string, Pin>& get_pin_map() { return _pin_map; }
@@ -57,8 +61,24 @@ class Database
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
   // function
+  TimingPoint& getDriverTimingPoint(const std::string& pin_name)
+  {
+    auto iter = _driver_timing_point_map.find(pin_name);
+    return iter == _driver_timing_point_map.end() ? _timing_point_map.at(pin_name) : iter->second;
+  }
+  TimingPoint& getSourceTimingPoint(Arc& arc)
+  {
+    return arc.get_type() == ArcType::kNet ? getDriverTimingPoint(arc.get_source_pin()) : _timing_point_map.at(arc.get_source_pin());
+  }
+  TimingPoint& getSinkTimingPoint(Arc& arc)
+  {
+    return arc.get_type() == ArcType::kCell ? getDriverTimingPoint(arc.get_sink_pin()) : _timing_point_map.at(arc.get_sink_pin());
+  }
 
  private:
+  std::vector<GraphVertex> _graph_vertex_list;
+  std::vector<int32_t> _graph_order_list;
+  std::map<std::string, TimingPoint> _driver_timing_point_map;
   std::string _design_name;
   std::map<std::string, Instance> _instance_map;
   std::map<std::string, Pin> _pin_map;

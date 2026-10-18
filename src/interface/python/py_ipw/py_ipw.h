@@ -21,7 +21,7 @@
 namespace python_interface {
 
 bool initPW(std::string& config, std::map<std::string, std::string>& config_dict);
-bool runPW();
+bool runPW(const bool is_peak = false, const bool is_avg = false);
 bool destroyPW();
 
 }  // namespace python_interface

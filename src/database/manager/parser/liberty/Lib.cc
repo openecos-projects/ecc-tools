@@ -885,6 +885,9 @@ LibPort::LibPort(LibPort&& other) noexcept
       _clock_gate_enable_pin(other._clock_gate_enable_pin), _clock_gate_test_pin(other._clock_gate_test_pin),
       _clock_gate_out_pin(other._clock_gate_out_pin), _is_clock(other._is_clock)
 {
+  _func_expr = other._func_expr;
+  _func_expr_str = std::move(other._func_expr_str);
+  _three_state_expr_str = std::move(other._three_state_expr_str);
   _port_cap = other._port_cap;
   _has_port_cap = other._has_port_cap;
   _port_caps = std::move(other._port_caps);
@@ -902,6 +905,9 @@ LibPort& LibPort::operator=(LibPort&& rhs) noexcept
     _clock_gate_test_pin = rhs._clock_gate_test_pin;
     _clock_gate_out_pin = rhs._clock_gate_out_pin;
     _is_clock = rhs._is_clock;
+    _func_expr = rhs._func_expr;
+    _func_expr_str = std::move(rhs._func_expr_str);
+    _three_state_expr_str = std::move(rhs._three_state_expr_str);
     _port_cap = rhs._port_cap;
     _has_port_cap = rhs._has_port_cap;
     _port_caps = std::move(rhs._port_caps);
@@ -919,6 +925,7 @@ void LibPort::inheritBusAttributes(const LibPort& bus)
   _is_clock = bus._is_clock;
   _func_expr = bus._func_expr;
   _func_expr_str = bus._func_expr_str;
+  _three_state_expr_str = bus._three_state_expr_str;
   _port_cap = bus._port_cap;
   // A bus that declares a single `capacitance` records the value here and raises this
   // flag. Bits inherit the value, so they must inherit the flag as well; without it a

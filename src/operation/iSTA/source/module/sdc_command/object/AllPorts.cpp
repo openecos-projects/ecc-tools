@@ -40,7 +40,7 @@ unsigned TclAllInputs::exec()
     }
   }
   std::sort(ports.begin(), ports.end());
-  setResult(std::move(ports));
+  setResult(std::move(ports), SdcObjectType::kPort);
   return 1;
 }
 
@@ -57,7 +57,7 @@ unsigned TclAllOutputs::exec()
     }
   }
   std::sort(ports.begin(), ports.end());
-  setResult(std::move(ports));
+  setResult(std::move(ports), SdcObjectType::kPort);
   return 1;
 }
 

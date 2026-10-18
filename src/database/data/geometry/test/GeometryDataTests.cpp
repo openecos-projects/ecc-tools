@@ -1,15 +1,21 @@
 #include "GeometryEdit.h"
 #include "GeometryDelta.h"
+#include "GeometryLayerMetadata.h"
 #include "GeometrySpatialIndex.h"
 #include "GeometrySnapshotSchema.h"
 #include "GeometryStore.h"
+#include "GeometryThumbnail.h"
 #include "GeometryTilePyramid.h"
 #include "GeometryTypes.h"
 #include "ShapeId.h"
 #include "ShapeTable.h"
 
+#include <zlib.h>
+
 #include <cassert>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
 #include <vector>
@@ -776,6 +782,103 @@ void test_snapshot_header_has_stable_schema_identity()
   assert(header.record_count == 123);
 }
 
+uint32_t read_be32(const std::vector<uint8_t>& bytes, size_t offset)
+{
+  return (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1]) << 16)
+         | (static_cast<uint32_t>(bytes[offset + 2]) << 8) | static_cast<uint32_t>(bytes[offset + 3]);
+}
+
+void test_render_thumbnail_png_writes_valid_png()
+{
+  GeometryStore store;
+  store.add_rect(1, Rect32{0, 0, 800, 400}, OwnerRef{OwnerType::kDie});
+  store.add_rect(2, Rect32{100, 100, 300, 200}, OwnerRef{OwnerType::kCore});
+  store.add_rect(2, Rect32{400, 50, 700, 350}, OwnerRef{OwnerType::kCore});
+
+  LinePayload horizontal;
+  horizontal.begin = Point32{0, 390};
+  horizontal.end = Point32{800, 390};
+  horizontal.width = 10;
+  store.add_line(3, horizontal, OwnerRef{OwnerType::kNetWireSegment});
+
+  LinePayload vertical;
+  vertical.begin = Point32{390, 0};
+  vertical.end = Point32{390, 400};
+  vertical.width = 10;
+  store.add_line(3, vertical, OwnerRef{OwnerType::kNetWireSegment});
+
+  PointPayload point;
+  point.point = Point32{200, 300};
+  store.add_point(4, point, OwnerRef{OwnerType::kPinPortShape});
+
+  // Layer without metadata (structural background, drawn underneath).
+  store.add_rect(9, Rect32{0, 0, 800, 400}, OwnerRef{OwnerType::kDie});
+
+  std::vector<GeometryLayerMetadata> layers(3);
+  layers[0].layer_id = 1;
+  layers[0].name = "METAL1";
+  layers[1].layer_id = 2;
+  layers[1].name = "M2";
+  layers[2].layer_id = 3;
+  layers[2].name = "VIA1";
+  layers[2].type = "via";
+
+  const std::filesystem::path png_path = std::filesystem::temp_directory_path() / "geometry_thumbnail_test.png";
+  assert(render_thumbnail_png(store, layers, png_path, 256, 128));
+
+  std::ifstream in(png_path, std::ios::binary);
+  const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  in.close();
+  assert(bytes.size() > 8 + 12 + 13);
+
+  static constexpr uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+  for (size_t i = 0; i < 8; ++i) {
+    assert(bytes[i] == kSignature[i]);
+  }
+
+  assert(read_be32(bytes, 8) == 13);
+  assert(bytes[12] == 'I' && bytes[13] == 'H' && bytes[14] == 'D' && bytes[15] == 'R');
+  assert(read_be32(bytes, 16) == 256);
+  assert(read_be32(bytes, 20) == 128);
+  assert(bytes[24] == 8);
+  assert(bytes[25] == 2);
+
+  std::vector<uint8_t> compressed;
+  size_t offset = 8;
+  while (offset + 12 <= bytes.size()) {
+    const uint32_t length = read_be32(bytes, offset);
+    const bool is_idat = bytes[offset + 4] == 'I' && bytes[offset + 5] == 'D' && bytes[offset + 6] == 'A'
+                         && bytes[offset + 7] == 'T';
+    if (is_idat) {
+      compressed.insert(compressed.end(), bytes.begin() + offset + 8, bytes.begin() + offset + 8 + length);
+    }
+    offset += 12 + length;
+  }
+  assert(!compressed.empty());
+
+  std::vector<uint8_t> raw(128 * (1 + 256 * 3));
+  uLongf raw_size = raw.size();
+  assert(uncompress(raw.data(), &raw_size, compressed.data(), compressed.size()) == Z_OK);
+  assert(raw_size == raw.size());
+
+  bool has_non_white_pixel = false;
+  for (size_t row = 0; row < 128 && !has_non_white_pixel; ++row) {
+    const size_t row_begin = row * (1 + 256 * 3);
+    for (size_t i = 1; i < 1 + 256 * 3; ++i) {
+      if (raw[row_begin + i] != 255) {
+        has_non_white_pixel = true;
+        break;
+      }
+    }
+  }
+  assert(has_non_white_pixel);
+
+  std::filesystem::remove(png_path);
+
+  GeometryStore empty_store;
+  assert(!render_thumbnail_png(empty_store, {}, png_path, 64, 64));
+}
+
 }  // namespace
 
 int main()
@@ -807,5 +910,6 @@ int main()
   test_geometry_edit_command_carries_expected_version();
   test_geometry_edit_diagnostic_flags_round_trip();
   test_snapshot_header_has_stable_schema_identity();
+  test_render_thumbnail_png_writes_valid_png();
   return 0;
 }

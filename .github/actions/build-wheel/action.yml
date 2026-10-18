@@ -64,7 +64,7 @@ runs:
       env:
         SCCACHE_GHA_ENABLED: "true"
       run: |
-        export CMAKE_ARGS="-DCMAKE_PREFIX_PATH=${ECC_BOOST_ROOT} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
+        export CMAKE_ARGS="-DBUILD_TESTING=ON -DCMAKE_PREFIX_PATH=${ECC_BOOST_ROOT} -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache"
         uv sync --no-install-project
         uv build --wheel --no-build-isolation --verbose
         mkdir -p dist/wheel/repaired

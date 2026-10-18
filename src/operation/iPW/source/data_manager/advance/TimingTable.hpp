@@ -43,7 +43,8 @@ class TimingTable
 
     double val1 = slew;
     double val2 = constrain_slew_or_load;
-    if (_variable_type1 == TimingTableVariableType::kOutputCapacitance || _variable_type1 == TimingTableVariableType::kConstrainedTransition) {
+    if (_variable_type1 == TimingTableVariableType::kOutputCapacitance
+        || _variable_type1 == TimingTableVariableType::kConstrainedTransition) {
       val1 = constrain_slew_or_load;
       val2 = slew;
     }
@@ -128,7 +129,18 @@ class TimingTable
     return y1 + ((x - x1) * (y2 - y1) / (x2 - x1));
   }
 
-  double bilinearInterpolation(double q11, double q12, double q21, double q22, double x1, double x2, double y1, double y2, double x, double y)
+  double bilinearInterpolation(
+      double q11,
+      double q12,
+      double q21,
+      double q22,
+      double x1,
+      double x2,
+      double y1,
+      double y2,
+      double x,
+      double y
+  )
   {
     if (std::abs(x2 - x1) < PW_ERROR) {
       return linearInterpolate(y1, y2, q11, q12, y);

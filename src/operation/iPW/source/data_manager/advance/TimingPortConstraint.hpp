@@ -58,10 +58,12 @@ class TimingPortConstraint
   bool get_has_load() const { return !_pin_load_map.empty() || !_wire_load_map.empty(); }
   double get_load(AnalysisType analysis_type, TransType trans_type) const
   {
-    if (!hasLoadValue(_pin_load_map, analysis_type, trans_type) && !hasLoadValue(_wire_load_map, analysis_type, trans_type)) {
+    if (!hasLoadValue(_pin_load_map, analysis_type, trans_type)
+        && !hasLoadValue(_wire_load_map, analysis_type, trans_type)) {
       return _load;
     }
-    return getLoadValue(_pin_load_map, analysis_type, trans_type) + getLoadValue(_wire_load_map, analysis_type, trans_type);
+    return getLoadValue(_pin_load_map, analysis_type, trans_type)
+           + getLoadValue(_wire_load_map, analysis_type, trans_type);
   }
   // setter
   void set_input_transition(AnalysisType analysis_type, TransType trans_type, const double input_transition)
@@ -89,7 +91,11 @@ class TimingPortConstraint
   // function
 
  private:
-  static double getLoadValue(const std::map<AnalysisType, std::map<TransType, double>>& load_map, AnalysisType analysis_type, TransType trans_type)
+  static double getLoadValue(
+      const std::map<AnalysisType, std::map<TransType, double>>& load_map,
+      AnalysisType analysis_type,
+      TransType trans_type
+  )
   {
     const auto analysis = load_map.find(analysis_type);
     if (analysis == load_map.end()) {
@@ -99,7 +105,11 @@ class TimingPortConstraint
     return transition == analysis->second.end() ? 0.0 : transition->second;
   }
 
-  static bool hasLoadValue(const std::map<AnalysisType, std::map<TransType, double>>& load_map, AnalysisType analysis_type, TransType trans_type)
+  static bool hasLoadValue(
+      const std::map<AnalysisType, std::map<TransType, double>>& load_map,
+      AnalysisType analysis_type,
+      TransType trans_type
+  )
   {
     const auto analysis = load_map.find(analysis_type);
     return analysis != load_map.end() && analysis->second.contains(trans_type);

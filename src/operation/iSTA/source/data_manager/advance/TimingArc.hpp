@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include "LogicExpression.hpp"
 #include "STAHeader.hpp"
 #include "TimingArcSense.hpp"
 #include "TimingTable.hpp"
@@ -29,6 +30,7 @@ class TimingArc
   TimingArc() = default;
   ~TimingArc() = default;
   // getter
+  LogicExpression& get_when_expression() { return _when_expression; }
   TimingArcSense get_sense() const { return _sense; }
   int32_t get_arc_idx() const { return _arc_idx; }
   TransType get_trigger_trans_type() const { return _trigger_trans_type; }
@@ -50,6 +52,7 @@ class TimingArc
   std::map<TransType, TimingTable>& get_slew_table_map() { return _slew_table_map; }
   std::map<TransType, TimingTable>& get_check_table_map() { return _check_table_map; }
   // setter
+  void set_when_expression(const LogicExpression& expression) { _when_expression = expression; }
   void set_sense(const TimingArcSense& sense) { _sense = sense; }
   void set_arc_idx(const int32_t arc_idx) { _arc_idx = arc_idx; }
   void set_trigger_trans_type(const TransType& trigger_trans_type) { _trigger_trans_type = trigger_trans_type; }
@@ -73,6 +76,7 @@ class TimingArc
   // function
 
  private:
+  LogicExpression _when_expression;
   TimingArcSense _sense = TimingArcSense::kNone;
   int32_t _arc_idx = -1;
   TransType _trigger_trans_type = TransType::kNone;

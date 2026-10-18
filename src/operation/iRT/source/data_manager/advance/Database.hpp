@@ -74,8 +74,6 @@ class Database
   RegionRoute& get_region_route() { return _region_route; }
   int32_t get_detection_distance() const { return _detection_distance; }
   GridMap<PlanarRect>& get_gcell_map() { return _gcell_map; }
-  GridMap<RoutingEdge>& get_planar_routing_h_edge_map() { return _planar_routing_h_edge_map; }
-  GridMap<RoutingEdge>& get_planar_routing_v_edge_map() { return _planar_routing_v_edge_map; }
   std::vector<GridMap<RoutingEdge>>& get_routing_h_edge_map() { return _routing_h_edge_map; }
   std::vector<GridMap<RoutingEdge>>& get_routing_v_edge_map() { return _routing_v_edge_map; }
   std::array<std::map<int32_t, FixedRectRTree>, 2>& get_type_layer_fixed_rect_rtree_map() { return _type_layer_fixed_rect_rtree_map; }
@@ -122,8 +120,6 @@ class Database
   RegionRoute _region_route;
   int32_t _detection_distance = -1;
   GridMap<PlanarRect> _gcell_map;
-  GridMap<RoutingEdge> _planar_routing_h_edge_map;
-  GridMap<RoutingEdge> _planar_routing_v_edge_map;
   std::vector<GridMap<RoutingEdge>> _routing_h_edge_map;
   std::vector<GridMap<RoutingEdge>> _routing_v_edge_map;
   std::array<std::map<int32_t, FixedRectRTree>, 2> _type_layer_fixed_rect_rtree_map;

@@ -306,8 +306,7 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
     exported.is_clock_arc = arc.get_is_clock_arc();
     exported.delay_max_ps = normalizedTime(arc.get_delay_max(), time_unit, 0.0, used_non_finite_fallback);
     exported.delay_min_ps = normalizedTime(arc.get_delay_min(), time_unit, 0.0, used_non_finite_fallback);
-    const auto sink_point_it = database.get_timing_point_map().find(arc.get_sink_pin());
-    exported.level = exported.is_clock_arc ? 0 : sink_point_it == database.get_timing_point_map().end() ? 0 : sink_point_it->second.get_level();
+    exported.level = exported.is_clock_arc ? 0 : database.getSinkTimingPoint(arc).get_level();
     const auto owner_it = database.get_instance_map().find(arc.get_owner_name());
     if (!arc.get_owner_name().empty() && owner_it != database.get_instance_map().end()) {
       exported.library_cell = owner_it->second.get_cell_name();
@@ -358,13 +357,17 @@ TimingSnapshot TimingExportAdapter::exportSnapshot()
   }
 
   for (auto& [net_name, net] : database.get_net_map()) {
-    const std::string driver = net.get_driver_pin().empty() ? (net.get_driver_pin_list().empty() ? "" : net.get_driver_pin_list().front()) : net.get_driver_pin();
-    if (driver.empty()) {
+    if (net.get_driver_pin_list().empty()) {
       addDiagnostic(snapshot, "net without a resolved driver: " + net_name);
       continue;
     }
-    for (const std::string& load : net.get_load_pin_list()) {
-      if (load != driver) snapshot.net_arcs.push_back({driver, load});
+    for (const std::string& driver : net.get_driver_pin_list()) {
+      if (database.get_pin_map().at(driver).get_is_driver_disabled())
+        continue;
+      for (const std::string& load : net.get_load_pin_list()) {
+        if (load != driver)
+          snapshot.net_arcs.push_back({driver, load});
+      }
     }
   }
 

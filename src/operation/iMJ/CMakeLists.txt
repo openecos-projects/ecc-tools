@@ -16,6 +16,8 @@ set(CMAKE_CXX_STANDARD 20)
 ############################ debug source module ############################
 
 # set(DEBUG_IMJ_ANTENNA_CHECKER ON)
+# set(DEBUG_IMJ_DRIVER_ANALYZER ON)
+# set(DEBUG_IMJ_DEF_CUTTER ON)
 # set(DEBUG_IMJ_FILLER_INSERTER ON)
 # set(DEBUG_IMJ_METAL_INSERTER ON)
 

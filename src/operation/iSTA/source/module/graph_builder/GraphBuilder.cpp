@@ -20,6 +20,7 @@
 #include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
+#include "TimingCaseAnalysis.hpp"
 #include "Utility.hpp"
 
 namespace ista {
@@ -61,6 +62,8 @@ void GraphBuilder::build()
   buildInoutPinDirectionByGraph();
   buildNetDriverLoadList();
   buildNetArcs();
+  buildGraphVertexList();
+  TimingCaseAnalysis::apply(STADM.getDatabase());
   buildStartEndPointList();
   breakLoopArcList();
   buildTimingOrder();
@@ -89,9 +92,11 @@ void GraphBuilder::normalizePinDirectionByTimingCell()
     if (pin.get_is_port()) {
       continue;
     }
-    PinDirection timing_cell_direction = inferInoutPinDirectionByTimingCell(pin);
+    TimingCellPort* port = getTimingCellPort(pin);
+    PinDirection timing_cell_direction
+        = port != nullptr && port->get_is_input() && port->get_is_output() ? PinDirection::kInout : inferInoutPinDirectionByTimingCell(pin);
     if (timing_cell_direction != PinDirection::kNone) {
-      // Liberty is the timing authority when its port direction is unambiguous.
+      // Liberty defines the signal roles, including a genuine bidirectional port.
       pin.set_direction(timing_cell_direction);
     }
   }
@@ -234,6 +239,11 @@ std::map<std::string, PinDirection> GraphBuilder::makeInoutPinDirectionMap()
   for (std::pair<const std::string, Pin>& pin_pair : database.get_pin_map()) {
     Pin& pin = pin_pair.second;
     if (pin.get_direction() != PinDirection::kInout) {
+      continue;
+    }
+    TimingCellPort* port = getTimingCellPort(pin);
+    if (pin.get_is_port() || (port != nullptr && port->get_is_input() && port->get_is_output())) {
+      // True bidirectional ports retain both graph roles; they are not missing directions.
       continue;
     }
     if (isFloatingInoutPin(pin)) {
@@ -460,21 +470,32 @@ void GraphBuilder::makeNetDriverLoad(Net& net)
   for (std::string& pin_name : net.get_pin_name_list()) {
     Pin& pin = database.get_pin_map()[pin_name];
     if (isDriverPin(pin)) {
-      net.set_driver_pin(pin_name);
       net.get_driver_pin_list().push_back(pin_name);
-    } else {
+    }
+    if (!isDriverPin(pin) || pin.get_direction() == PinDirection::kInout) {
       net.get_load_pin_list().push_back(pin_name);
     }
   }
 
-  if (net.get_driver_pin_list().size() > 1) {
+  if (net.get_driver_pin_list().size() == 1) {
+    net.set_driver_pin(net.get_driver_pin_list().front());
+  }
+  int32_t unconditional_driver_num = 0;
+  for (std::string& driver : net.get_driver_pin_list()) {
+    Pin& pin = database.get_pin_map()[driver];
+    TimingCellPort* port = getTimingCellPort(pin);
+    if (pin.get_direction() != PinDirection::kInout && (port == nullptr || port->get_three_state_expression().get_is_empty())) {
+      ++unconditional_driver_num;
+    }
+  }
+  if (unconditional_driver_num > 1) {
     STALOG.error(Loc::current(), "The net has multiple driver pins: net=", net.get_net_name(), " drivers=", getPinNameListString(net.get_driver_pin_list()));
   }
 }
 
 bool GraphBuilder::isDriverPin(Pin& pin)
 {
-  return isDriverDirection(pin, pin.get_direction());
+  return pin.get_direction() == PinDirection::kInout || isDriverDirection(pin, pin.get_direction());
 }
 
 std::string GraphBuilder::getPinNameListString(std::vector<std::string>& pin_name_list)
@@ -493,16 +514,52 @@ void GraphBuilder::buildNetArcs()
 {
   Database& database = STADM.getDatabase();
   for (auto& [net_name, net] : database.get_net_map()) {
-    if (net.get_driver_pin().empty()) {
-      continue;
-    }
-    for (std::string& load_pin : net.get_load_pin_list()) {
-      if (load_pin == net.get_driver_pin()) {
-        continue;
+    for (std::string& driver_pin : net.get_driver_pin_list()) {
+      for (std::string& load_pin : net.get_load_pin_list()) {
+        if (load_pin != driver_pin) {
+          addArc(driver_pin, load_pin, ArcType::kNet, net_name);
+        }
       }
-      addArc(net.get_driver_pin(), load_pin, ArcType::kNet, net_name);
     }
   }
+}
+
+void GraphBuilder::buildGraphVertexList()
+{
+  Database& database = STADM.getDatabase();
+  database.get_graph_vertex_list().clear();
+  database.get_driver_timing_point_map().clear();
+  for (auto& [pin_name, pin] : database.get_pin_map()) {
+    int32_t idx = addGraphVertex(pin_name, isDriverPin(pin), database.get_timing_point_map()[pin_name]);
+    pin.set_load_vertex_idx(idx);
+    pin.set_driver_vertex_idx(idx);
+  }
+  for (auto& [pin_name, pin] : database.get_pin_map()) {
+    if (pin.get_direction() == PinDirection::kInout) {
+      database.get_graph_vertex_list()[pin.get_load_vertex_idx()].set_is_driver(false);
+      pin.set_driver_vertex_idx(addGraphVertex(pin_name, true, database.get_driver_timing_point_map()[pin_name]));
+    }
+  }
+  for (std::size_t idx = 0; idx < database.get_arc_list().size(); ++idx) {
+    Arc& arc = database.get_arc_list()[idx];
+    Pin& source = database.get_pin_map()[arc.get_source_pin()];
+    Pin& sink = database.get_pin_map()[arc.get_sink_pin()];
+    arc.set_source_vertex_idx(arc.get_type() == ArcType::kNet ? source.get_driver_vertex_idx() : source.get_load_vertex_idx());
+    arc.set_sink_vertex_idx(arc.get_type() == ArcType::kNet ? sink.get_load_vertex_idx() : sink.get_driver_vertex_idx());
+    database.get_graph_vertex_list()[arc.get_source_vertex_idx()].get_outgoing_arc_list().push_back(idx);
+    database.get_graph_vertex_list()[arc.get_sink_vertex_idx()].get_incoming_arc_list().push_back(idx);
+  }
+}
+
+int32_t GraphBuilder::addGraphVertex(const std::string& pin_name, bool is_driver, TimingPoint& point)
+{
+  Database& database = STADM.getDatabase();
+  GraphVertex vertex;
+  vertex.set_pin_name(pin_name);
+  vertex.set_is_driver(is_driver);
+  vertex.set_timing_point(&point);
+  database.get_graph_vertex_list().push_back(vertex);
+  return static_cast<int32_t>(database.get_graph_vertex_list().size()) - 1;
 }
 
 void GraphBuilder::addArc(const std::string& source_pin, const std::string& sink_pin, ArcType type, const std::string& owner_name)
@@ -554,10 +611,10 @@ void GraphBuilder::buildStartEndPointList()
   Database& database = STADM.getDatabase();
   for (auto& [pin_name, pin] : database.get_pin_map()) {
     if (isStartPoint(pin_name, pin)) {
-      appendUnique(database.get_start_point_list(), pin_name);
+      database.get_start_point_list().push_back(pin_name);
     }
     if (isEndPoint(pin_name, pin)) {
-      appendUnique(database.get_end_point_list(), pin_name);
+      database.get_end_point_list().push_back(pin_name);
     }
   }
 }
@@ -651,257 +708,92 @@ bool GraphBuilder::isEndPort(Pin& pin)
   return pin.get_is_port() && (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout);
 }
 
-void GraphBuilder::appendUnique(std::vector<std::string>& list, const std::string& value)
-{
-  if (!STAUTIL.exist(list, value)) {
-    list.push_back(value);
-  }
-}
-
 void GraphBuilder::breakLoopArcList()
 {
-  std::size_t disabled_loop_num = breakLoopArcFromStart();
-  disabled_loop_num += breakLoopArcFromEnd();
-  disabled_loop_num += breakLoopArcFromFloating();
+  Database& database = STADM.getDatabase();
+  std::vector<GraphVertex>& vertices = database.get_graph_vertex_list();
+  std::vector<GBColorType> colors(vertices.size(), GBColorType::kNone);
+  int32_t disabled_loop_num = 0;
+  // Use graph vertices, not physical pin names: PAD receive and drive are independent.
+  for (int32_t root = 0; root < static_cast<int32_t>(vertices.size()); ++root) {
+    if (colors[root] != GBColorType::kNone) {
+      continue;
+    }
+    std::vector<std::pair<int32_t, std::size_t>> stack{{root, 0}};
+    colors[root] = GBColorType::kGray;
+    while (!stack.empty()) {
+      auto& [vertex_idx, next_arc_idx] = stack.back();
+      std::vector<std::size_t>& outgoing = vertices[vertex_idx].get_outgoing_arc_list();
+      if (next_arc_idx == outgoing.size()) {
+        colors[vertex_idx] = GBColorType::kBlack;
+        stack.pop_back();
+        continue;
+      }
+      Arc& arc = database.get_arc_list()[outgoing[next_arc_idx++]];
+      if (isDisableArc(arc)) {
+        continue;
+      }
+      int32_t sink_idx = arc.get_sink_vertex_idx();
+      if (colors[sink_idx] == GBColorType::kGray) {
+        arc.set_is_loop_disable(true);
+        ++disabled_loop_num;
+        STALOG.warn(Loc::current(), "Combinational loop cut: ", arc.get_source_pin(), " -> ", arc.get_sink_pin());
+      } else if (colors[sink_idx] == GBColorType::kNone) {
+        colors[sink_idx] = GBColorType::kGray;
+        stack.emplace_back(sink_idx, 0);
+      }
+    }
+  }
   if (disabled_loop_num > 0) {
     STALOG.info(Loc::current(), "Break iSTA loop arcs: disabled_arcs=", disabled_loop_num);
-  }
-}
-
-std::size_t GraphBuilder::breakLoopArcFromStart()
-{
-  Database& database = STADM.getDatabase();
-  std::size_t disabled_loop_num = 0;
-  std::map<std::string, GBColorType> color_map;
-  for (std::string& start_point : database.get_start_point_list()) {
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[start_point]) {
-      Arc& arc = database.get_arc_list()[arc_idx];
-      if (isDisableArc(arc)) {
-        continue;
-      }
-      traverseDataPath(arc.get_sink_pin(), true, color_map, disabled_loop_num);
-    }
-  }
-  return disabled_loop_num;
-}
-
-bool GraphBuilder::traverseDataPath(std::string& pin_name, bool is_forward, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
-{
-  Database& database = STADM.getDatabase();
-  if (stopTraverse(pin_name, is_forward) || isBlack(color_map, pin_name)) {
-    return false;
-  }
-  if (isGray(color_map, pin_name)) {
-    return true;
-  }
-
-  color_map[pin_name] = GBColorType::kGray;
-  std::vector<std::size_t>& arc_idx_list = is_forward ? database.get_outgoing_arc_list_map()[pin_name] : database.get_incoming_arc_list_map()[pin_name];
-  for (std::size_t arc_idx : arc_idx_list) {
-    Arc& arc = database.get_arc_list()[arc_idx];
-    if (isDisableArc(arc)) {
-      continue;
-    }
-
-    std::string& next_pin_name = is_forward ? arc.get_sink_pin() : arc.get_source_pin();
-    if (isBlack(color_map, next_pin_name)) {
-      continue;
-    }
-    if (isGray(color_map, next_pin_name)) {
-      if (disableLoopArc(arc)) {
-        ++disabled_loop_num;
-      }
-      continue;
-    }
-    if (traverseDataPath(next_pin_name, is_forward, color_map, disabled_loop_num)) {
-      if (disableLoopArc(arc)) {
-        ++disabled_loop_num;
-      }
-      continue;
-    }
-  }
-  color_map[pin_name] = GBColorType::kBlack;
-  return false;
-}
-
-bool GraphBuilder::stopTraverse(std::string& pin_name, bool is_forward)
-{
-  Database& database = STADM.getDatabase();
-  if (is_forward) {
-    return STAUTIL.exist(database.get_end_point_list(), pin_name);
-  }
-  return STAUTIL.exist(database.get_start_point_list(), pin_name);
-}
-
-bool GraphBuilder::isBlack(std::map<std::string, GBColorType>& color_map, std::string& pin_name)
-{
-  return color_map.count(pin_name) > 0 && color_map[pin_name] == GBColorType::kBlack;
-}
-
-bool GraphBuilder::isGray(std::map<std::string, GBColorType>& color_map, std::string& pin_name)
-{
-  return color_map.count(pin_name) > 0 && color_map[pin_name] == GBColorType::kGray;
-}
-
-bool GraphBuilder::disableLoopArc(Arc& arc)
-{
-  if (arc.get_is_loop_disable()) {
-    return false;
-  }
-  arc.set_is_loop_disable(true);
-  STALOG.warn(Loc::current(), "Static timing-loop cut: ", arc.get_source_pin(), " -> ", arc.get_sink_pin(),
-              ", type=", GetArcTypeName()(arc.get_type()), ", owner=", arc.get_owner_name(),
-              ". Timing propagation skips this arc; paths through it are not analyzed.");
-  return true;
-}
-
-std::size_t GraphBuilder::breakLoopArcFromEnd()
-{
-  Database& database = STADM.getDatabase();
-  std::size_t disabled_loop_num = 0;
-  std::map<std::string, GBColorType> color_map;
-  for (std::string& end_point : database.get_end_point_list()) {
-    for (std::size_t arc_idx : database.get_incoming_arc_list_map()[end_point]) {
-      Arc& arc = database.get_arc_list()[arc_idx];
-      if (isDisableArc(arc)) {
-        continue;
-      }
-      traverseDataPath(arc.get_source_pin(), false, color_map, disabled_loop_num);
-    }
-  }
-  return disabled_loop_num;
-}
-
-std::size_t GraphBuilder::breakLoopArcFromFloating()
-{
-  Database& database = STADM.getDatabase();
-  std::size_t disabled_loop_num = 0;
-  std::map<std::string, GBColorType> color_map;
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    std::string pin_name = timing_pair.first;
-    traverseFloatingDataPath(pin_name, color_map, disabled_loop_num);
-  }
-  return disabled_loop_num;
-}
-
-void GraphBuilder::traverseFloatingDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num)
-{
-  if (isBlack(color_map, pin_name)) {
-    return;
-  }
-  // Topological ordering includes every enabled arc, including arcs crossing
-  // data start/end points. The final cleanup must cover that same graph.
-  // Use explicit frames so a deep floating component cannot exhaust the stack.
-  struct Frame
-  {
-    std::string pin;
-    std::size_t next_arc = 0;
-  };
-  Database& database = STADM.getDatabase();
-  std::vector<Frame> stack{{pin_name}};
-  color_map[pin_name] = GBColorType::kGray;
-  while (!stack.empty()) {
-    Frame& frame = stack.back();
-    const auto& outgoing = database.get_outgoing_arc_list_map()[frame.pin];
-    if (frame.next_arc == outgoing.size()) {
-      color_map[frame.pin] = GBColorType::kBlack;
-      stack.pop_back();
-      continue;
-    }
-    Arc& arc = database.get_arc_list()[outgoing[frame.next_arc++]];
-    if (isDisableArc(arc)) {
-      continue;
-    }
-    std::string& next_pin = arc.get_sink_pin();
-    if (isGray(color_map, next_pin)) {
-      if (disableLoopArc(arc)) {
-        ++disabled_loop_num;
-      }
-    } else if (!isBlack(color_map, next_pin)) {
-      color_map[next_pin] = GBColorType::kGray;
-      stack.push_back({next_pin});
-    }
   }
 }
 
 void GraphBuilder::buildTimingOrder()
 {
   Database& database = STADM.getDatabase();
-  std::map<std::string, std::size_t> indegree_map = makeIndegreeMap();
-  std::queue<std::string> pin_queue;
-  pushRootPinList(indegree_map, pin_queue);
-
+  std::vector<GraphVertex>& vertices = database.get_graph_vertex_list();
+  std::vector<int32_t> indegree_list(vertices.size(), 0);
+  std::queue<int32_t> vertex_queue;
+  for (int32_t idx = 0; idx < static_cast<int32_t>(vertices.size()); ++idx) {
+    for (std::size_t arc_idx : vertices[idx].get_incoming_arc_list()) {
+      if (!isDisableArc(database.get_arc_list()[arc_idx])) {
+        ++indegree_list[idx];
+      }
+    }
+    if (indegree_list[idx] == 0) {
+      vertices[idx].get_timing_point().set_level(1);
+      vertex_queue.push(idx);
+    }
+  }
+  database.get_graph_order_list().clear();
   database.get_timing_order_list().clear();
-  while (!pin_queue.empty()) {
-    std::string pin_name = pin_queue.front();
-    pin_queue.pop();
-    database.get_timing_order_list().push_back(pin_name);
-
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+  while (!vertex_queue.empty()) {
+    int32_t vertex_idx = vertex_queue.front();
+    vertex_queue.pop();
+    GraphVertex& vertex = vertices[vertex_idx];
+    database.get_graph_order_list().push_back(vertex_idx);
+    database.get_timing_order_list().push_back(vertex.get_pin_name());
+    for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
       Arc& arc = database.get_arc_list()[arc_idx];
       if (isDisableArc(arc)) {
         continue;
       }
-      updateSinkLevel(arc);
-      updateSinkIndegree(arc, indegree_map, pin_queue);
-    }
-  }
-}
-
-std::map<std::string, std::size_t> GraphBuilder::makeIndegreeMap()
-{
-  Database& database = STADM.getDatabase();
-  std::map<std::string, std::size_t> indegree_map;
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    timing_pair.second.set_level(0);
-    std::size_t indegree = 0;
-    for (std::size_t arc_idx : database.get_incoming_arc_list_map()[timing_pair.first]) {
-      if (!isDisableArc(database.get_arc_list()[arc_idx])) {
-        ++indegree;
+      int32_t sink_idx = arc.get_sink_vertex_idx();
+      TimingPoint& sink = vertices[sink_idx].get_timing_point();
+      sink.set_level(std::max(sink.get_level(), vertex.get_timing_point().get_level() + 1));
+      if (--indegree_list[sink_idx] == 0) {
+        vertex_queue.push(sink_idx);
       }
     }
-    indegree_map[timing_pair.first] = indegree;
-  }
-  return indegree_map;
-}
-
-void GraphBuilder::pushRootPinList(std::map<std::string, std::size_t>& indegree_map, std::queue<std::string>& pin_queue)
-{
-  Database& database = STADM.getDatabase();
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    if (indegree_map[timing_pair.first] == 0) {
-      database.get_timing_point_map()[timing_pair.first].set_level(1);
-      pin_queue.push(timing_pair.first);
-    }
-  }
-}
-
-void GraphBuilder::updateSinkLevel(Arc& arc)
-{
-  Database& database = STADM.getDatabase();
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
-  sink_point.set_level(std::max(sink_point.get_level(), source_point.get_level() + 1));
-}
-
-void GraphBuilder::updateSinkIndegree(Arc& arc, std::map<std::string, std::size_t>& indegree_map, std::queue<std::string>& pin_queue)
-{
-  if (indegree_map[arc.get_sink_pin()] > 0) {
-    --indegree_map[arc.get_sink_pin()];
-  }
-  if (indegree_map[arc.get_sink_pin()] == 0) {
-    pin_queue.push(arc.get_sink_pin());
   }
 }
 
 void GraphBuilder::printLoopInfo()
 {
   Database& database = STADM.getDatabase();
-  const std::size_t point_num = database.get_timing_point_map().size();
-  const std::size_t order_num = database.get_timing_order_list().size();
-  if (point_num != order_num) {
-    STALOG.error(Loc::current(), "Invalid timing order after loop cleanup: ordered=", order_num, ", total=", point_num,
-                 ". Timing propagation requires every timing point; inspect graph dependencies and loop-cut diagnostics.");
+  if (database.get_graph_order_list().size() != database.get_graph_vertex_list().size()) {
+    STALOG.error(Loc::current(), "Incomplete graph order after loop cleanup.");
   }
 }
 

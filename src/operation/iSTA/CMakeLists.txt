@@ -29,6 +29,10 @@ set(ISTA_SOURCE ${HOME_ISTA}/source)
 add_subdirectory(${ISTA_INTERFACE})
 add_subdirectory(${ISTA_SOURCE})
 
+if (BUILD_TESTING)
+    add_subdirectory(${HOME_ISTA}/test)
+endif ()
+
 ########################################################
 
 message(STATUS "############## iSTA: END CMAKE ##############\n")

@@ -37,6 +37,7 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "utility/logger/Logger.hpp"
 
@@ -187,6 +188,27 @@ IdbDesign::~IdbDesign()
     delete _bus_list;
     _bus_list = nullptr;
   }
+}
+
+void IdbDesign::swap(IdbDesign& other) noexcept
+{
+  _version.swap(other._version);
+  _design_name.swap(other._design_name);
+  std::swap(_units, other._units);
+  std::swap(_instance_list, other._instance_list);
+  std::swap(_io_pin_list, other._io_pin_list);
+  std::swap(_net_list, other._net_list);
+  std::swap(_via_list, other._via_list);
+  std::swap(_blockage_list, other._blockage_list);
+  std::swap(_region_list, other._region_list);
+  std::swap(_slot_list, other._slot_list);
+  std::swap(_group_list, other._group_list);
+  std::swap(_special_net_list, other._special_net_list);
+  std::swap(_fill_list, other._fill_list);
+  std::swap(_layout, other._layout);
+  std::swap(_bus_bit_chars, other._bus_bit_chars);
+  std::swap(_bus_list, other._bus_list);
+  m_instID2Name.swap(other.m_instID2Name);
 }
 
 // void IdbDesign::createDefaultVias(IdbLayers* layers)

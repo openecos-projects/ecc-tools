@@ -18,6 +18,7 @@
 
 #include "PinDirection.hpp"
 #include "STAHeader.hpp"
+#include "TimingCaseValue.hpp"
 
 namespace ista {
 
@@ -27,6 +28,10 @@ class Pin
   Pin() = default;
   ~Pin() = default;
   // getter
+  TimingCaseValue get_constant_value() const { return _constant_value; }
+  bool get_is_driver_disabled() const { return _is_driver_disabled; }
+  int32_t get_load_vertex_idx() const { return _load_vertex_idx; }
+  int32_t get_driver_vertex_idx() const { return _driver_vertex_idx; }
   std::string& get_pin_name() { return _pin_name; }
   std::string& get_full_name() { return _full_name; }
   std::string& get_instance_name() { return _instance_name; }
@@ -36,6 +41,10 @@ class Pin
   double get_y() const { return _y; }
   bool get_is_port() const { return _is_port; }
   // setter
+  void set_constant_value(TimingCaseValue value) { _constant_value = value; }
+  void set_is_driver_disabled(bool value) { _is_driver_disabled = value; }
+  void set_load_vertex_idx(int32_t idx) { _load_vertex_idx = idx; }
+  void set_driver_vertex_idx(int32_t idx) { _driver_vertex_idx = idx; }
   void set_pin_name(const std::string& pin_name) { _pin_name = pin_name; }
   void set_full_name(const std::string& full_name) { _full_name = full_name; }
   void set_instance_name(const std::string& instance_name) { _instance_name = instance_name; }
@@ -47,6 +56,10 @@ class Pin
   // function
 
  private:
+  TimingCaseValue _constant_value = TimingCaseValue::kNone;
+  bool _is_driver_disabled = false;
+  int32_t _load_vertex_idx = -1;
+  int32_t _driver_vertex_idx = -1;
   std::string _pin_name;
   std::string _full_name;
   std::string _instance_name;

@@ -36,9 +36,9 @@ bool initPW(std::string& config, std::map<std::string, std::string>& config_dict
   return true;
 }
 
-bool runPW()
+bool runPW(const bool is_peak, const bool is_avg)
 {
-  PWI.runPW();
+  PWI.runPW(is_peak, is_avg);
   return true;
 }
 

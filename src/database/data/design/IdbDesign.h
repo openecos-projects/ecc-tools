@@ -192,6 +192,7 @@ class IdbDesign
   }
 
   // operator
+  void swap(IdbDesign& other) noexcept;
   int32_t transUnitDB(double value) { return std::round(_units->get_micron_dbu() * value); }
   double transToUDB(int32_t value) { return ((double) value) / _units->get_micron_dbu(); }
 

@@ -64,6 +64,7 @@ void PDNGenerator::generate()
 
   PGModel pg_model;
   generatePDN(pg_model);
+  outputPowerLocation(pg_model);
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -74,6 +75,7 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   buildRail(pg_model);
   buildStripe(pg_model);
   alignStripeSegmentList();
+  initPowerLayerPair(pg_model);
   buildLayerConnect(pg_model);
   buildMacroConnect(pg_model);
 }
@@ -661,6 +663,27 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
   return closest_full_overlap_coord != INT32_MAX ? closest_full_overlap_coord : closest_contact_coord;
 }
 
+void PDNGenerator::initPowerLayerPair(PGModel& pg_model)
+{
+  std::map<int32_t, std::string> stripe_layer_map;
+  for (PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (pg_segment.get_type() != PGSegmentType::kStripe) {
+      continue;
+    }
+    RoutingLayer* routing_layer = findRoutingLayer(pg_segment.get_layer_name());
+    if (routing_layer != nullptr) {
+      stripe_layer_map[routing_layer->get_order()] = routing_layer->get_name();
+    }
+  }
+  if (stripe_layer_map.size() < 2) {
+    return;
+  }
+  std::map<int32_t, std::string>::reverse_iterator layer_iter = stripe_layer_map.rbegin();
+  pg_model.get_power_layer_pair().set_second_layer_name(layer_iter->second);
+  layer_iter++;
+  pg_model.get_power_layer_pair().set_first_layer_name(layer_iter->second);
+}
+
 void PDNGenerator::buildLayerConnect(PGModel& pg_model)
 {
   Monitor monitor;
@@ -701,9 +724,15 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
           if (overlap_rect.get_width() <= 0 || overlap_rect.get_height() <= 0) {
             continue;
           }
-          addViaSegment(pg_model, pg_net.get_name(), bottom_layer->get_name(), top_layer->get_name(), "",
-                        (overlap_rect.get_ll_x() + overlap_rect.get_ur_x()) / 2, (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2,
-                        overlap_rect.get_width(), overlap_rect.get_height());
+          int32_t x = (overlap_rect.get_ll_x() + overlap_rect.get_ur_x()) / 2;
+          int32_t y = (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2;
+          addViaSegment(pg_model, pg_net.get_name(), bottom_layer->get_name(), top_layer->get_name(), "", x, y, overlap_rect.get_width(),
+                        overlap_rect.get_height());
+          if (bottom_layer->get_name() == pg_model.get_power_layer_pair().get_first_layer_name()
+              && top_layer->get_name() == pg_model.get_power_layer_pair().get_second_layer_name()
+              && bottom_segment.get_type() == PGSegmentType::kStripe && top_segment.get_type() == PGSegmentType::kStripe) {
+            pg_model.get_power_net_coord_map()[pg_net.get_name()].emplace(x, y);
+          }
         }
       }
     }
@@ -831,6 +860,31 @@ void PDNGenerator::connectMacroPin(PGModel& pg_model, PGNet& pg_net, InstancePin
                   (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2, overlap_rect.get_width(), overlap_rect.get_height());
   }
 }
+
+#if 1  // output
+
+void PDNGenerator::outputPowerLocation(PGModel& pg_model)
+{
+  Monitor monitor;
+  FPLOG.info(Loc::current(), "Starting...");
+
+  int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
+  std::ofstream* power_file = FPUTIL.getOutputFileStream(FPUTIL.getString(FPDM.getConfig().pg_temp_directory_path, "power.ploc"));
+  power_file->precision(std::numeric_limits<double>::max_digits10);
+  FPUTIL.pushStream(power_file, "# name x_um y_um layer net\n");
+  for (auto& [net_name, coord_set] : pg_model.get_power_net_coord_map()) {
+    int32_t source_idx = 0;
+    for (const auto& [x, y] : coord_set) {
+      FPUTIL.pushStream(power_file, net_name, "_", source_idx++, " ", x / 1.0 / micron_dbu, " ", y / 1.0 / micron_dbu, " ",
+                        pg_model.get_power_layer_pair().get_second_layer_name(), " ", net_name, "\n");
+    }
+  }
+  FPUTIL.closeFileStream(power_file);
+
+  FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+#endif
 
 // private
 

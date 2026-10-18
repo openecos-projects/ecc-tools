@@ -544,6 +544,10 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     lib_port->set_func_expr(func_expr);
     lib_port->set_func_expr_str(expr_str);
     liberty_free_string_value(attri_value_handle);
+  } else if (is_attri("three_state")) {
+    auto* attri_value_handle = liberty_convert_string_value(attri_value);
+    lib_port->set_three_state_expr_str(attri_value_handle->value);
+    liberty_free_string_value(attri_value_handle);
   } else if (is_attri("related_pin")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* pin_name = attri_value_handle->value;

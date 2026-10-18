@@ -32,6 +32,8 @@ bool initMetalConfigMapByJSON(const std::string& config, std::map<std::string, s
 void initMetalConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 bool initDefFlattenConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initDefFlattenConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
+bool initDEFCutConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+void initDEFCutConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
 bool initMJ(std::string& config, std::map<std::string, std::string>& config_dict)
 {
@@ -90,6 +92,23 @@ bool defFlatten(std::string& config, std::map<std::string, std::string>& config_
   }
   initDefFlattenConfigMapByDict(config_dict, config_map);
   MJI.flattenDef(config_map);
+  return true;
+}
+
+bool analyzeDriver()
+{
+  MJI.analyzeDriver();
+  return true;
+}
+
+bool cutDEF(std::string& config, std::map<std::string, std::string>& config_dict)
+{
+  std::map<std::string, std::any> config_map;
+  if (!config.empty() && !initDEFCutConfigMapByJSON(config, config_map)) {
+    return false;
+  }
+  initDEFCutConfigMapByDict(config_dict, config_map);
+  MJI.cutDEF(config_map);
   return true;
 }
 

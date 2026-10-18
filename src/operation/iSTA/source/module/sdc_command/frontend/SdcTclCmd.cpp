@@ -34,6 +34,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
   for (int index = 1; index < objc; ++index) {
     const char* value = Tcl_GetString(objv[index]);
     if (next_is_option_value) {
+      _option_object_map[current_option->get_option_name()] = objv[index];
       setOptionValue(current_option, value);
       next_is_option_value = false;
       continue;
@@ -56,6 +57,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
       setInterpreterError(interp);
       return TCL_ERROR;
     }
+    _option_object_map[argument->get_option_name()] = objv[index];
     setOptionValue(argument, value);
   }
 
@@ -84,7 +86,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
   if (_has_list_result) {
     Tcl_Obj* list = Tcl_NewListObj(0, nullptr);
     for (const std::string& value : _list_result) {
-      Tcl_ListObjAppendElement(interp, list, Tcl_NewStringObj(value.c_str(), static_cast<int>(value.size())));
+      Tcl_ListObjAppendElement(interp, list, SdcObject::create(value, _list_result_type));
     }
     Tcl_SetObjResult(interp, list);
   } else if (_has_result) {
@@ -130,11 +132,30 @@ void SdcTclCmd::setResult(std::string result)
   _has_list_result = false;
 }
 
-void SdcTclCmd::setResult(std::vector<std::string> result)
+void SdcTclCmd::setResult(std::vector<std::string> result, SdcObjectType type)
 {
   _list_result = std::move(result);
+  _list_result_type = type;
   _has_list_result = true;
   _has_result = false;
+}
+
+std::vector<Tcl_Obj*> SdcTclCmd::getOptionObjects(const std::string& name)
+{
+  auto option = _option_object_map.find(name);
+  if (option == _option_object_map.end()) {
+    return {};
+  }
+  Tcl_Obj* object = option->second;
+  if (SdcObject::getType(object) != SdcObjectType::kNone) {
+    return {object};
+  }
+  int count = 0;
+  Tcl_Obj** elements = nullptr;
+  if (Tcl_ListObjGetElements(nullptr, object, &count, &elements) != TCL_OK) {
+    throw std::invalid_argument(name + " requires an object list");
+  }
+  return count == 0 ? std::vector<Tcl_Obj*>() : std::vector<Tcl_Obj*>(elements, elements + count);
 }
 
 void SdcTclCmd::resetExecutionState()
@@ -143,6 +164,8 @@ void SdcTclCmd::resetExecutionState()
   _error_message.clear();
   _result.clear();
   _list_result.clear();
+  _list_result_type = SdcObjectType::kNone;
+  _option_object_map.clear();
   _option_value_list.clear();
   _has_result = false;
   _has_list_result = false;

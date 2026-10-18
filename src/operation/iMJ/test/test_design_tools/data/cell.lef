@@ -1,0 +1,35 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+MACRO BUF
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 1 BY 1 ;
+  SYMMETRY X Y ;
+  SITE CORE ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M1 ;
+        RECT 0.00 0.40 0.10 0.60 ;
+    END
+  END A
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M1 ;
+        RECT 0.90 0.40 1.00 0.60 ;
+    END
+  END Y
+  PIN VPWR
+    DIRECTION INOUT ;
+    USE POWER ;
+    PORT
+      LAYER M1 ;
+        RECT 0.00 0.90 1.00 1.00 ;
+    END
+  END VPWR
+END BUF
+END LIBRARY

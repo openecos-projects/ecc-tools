@@ -31,6 +31,8 @@ class Arc
   Arc() = default;
   ~Arc() = default;
   // getter
+  int32_t get_source_vertex_idx() const { return _source_vertex_idx; }
+  int32_t get_sink_vertex_idx() const { return _sink_vertex_idx; }
   std::string& get_arc_name() { return _arc_name; }
   std::string& get_source_pin() { return _source_pin; }
   std::string& get_sink_pin() { return _sink_pin; }
@@ -52,6 +54,8 @@ class Arc
   bool get_is_case_analysis_disable() const { return _is_case_analysis_disable; }
   bool get_is_loop_disable() const { return _is_loop_disable; }
   // setter
+  void set_source_vertex_idx(int32_t idx) { _source_vertex_idx = idx; }
+  void set_sink_vertex_idx(int32_t idx) { _sink_vertex_idx = idx; }
   void set_arc_name(const std::string& arc_name) { _arc_name = arc_name; }
   void set_source_pin(const std::string& source_pin) { _source_pin = source_pin; }
   void set_sink_pin(const std::string& sink_pin) { _sink_pin = sink_pin; }
@@ -116,6 +120,8 @@ class Arc
   }
 
  private:
+  int32_t _source_vertex_idx = -1;
+  int32_t _sink_vertex_idx = -1;
   std::string _arc_name;
   std::string _source_pin;
   std::string _sink_pin;

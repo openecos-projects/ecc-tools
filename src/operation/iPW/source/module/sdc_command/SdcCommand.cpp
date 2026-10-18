@@ -15,6 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "SdcCommand.hpp"
+#include "object/GetFan.hpp"
 
 #ifndef _WIN32
 #include <dlfcn.h>
@@ -39,6 +40,220 @@
 namespace ipw {
 
 namespace sdc {
+
+TclGetFan::TclGetFan(const char* cmd_name) : SdcTclCmd(cmd_name)
+{
+  _is_fanin = std::string(cmd_name) == "get_fanin";
+  addOption(new ecc::TclStringOption(_is_fanin ? "-to" : "-from", 0));
+  addOption(new ecc::TclSwitchOption(_is_fanin ? "-startpoints_only" : "-endpoints_only"));
+  addOption(new ecc::TclSwitchOption("-only_cells"));
+  // IDB's internal netlist is already flat; instance names retain hierarchy.
+  addOption(new ecc::TclSwitchOption("-flat"));
+}
+
+unsigned TclGetFan::exec()
+{
+  ecc::TclOption* objects = getOptionOrArg(_is_fanin ? "-to" : "-from");
+  if (!objects->is_set_val()) {
+    setTclError(std::string(get_cmd_name()) + (_is_fanin ? " requires -to" : " requires -from"));
+    return 0;
+  }
+  std::set<std::string> roots = getQueryPins(parseObjectPatterns(objects->getStringVal(), false));
+  bool boundary_only = getOptionOrArg(_is_fanin ? "-startpoints_only" : "-endpoints_only")->is_set_val();
+  bool only_cells = getOptionOrArg("-only_cells")->is_set_val();
+  std::set<std::string> result = findFan(roots, boundary_only, only_cells);
+  setResult(std::vector<std::string>(result.begin(), result.end()));
+  return 1;
+}
+
+std::set<std::string> TclGetFan::getQueryPins(const std::vector<std::string>& objects)
+{
+  Database& database = PWDM.getDatabase();
+  std::set<std::string> roots;
+  for (const std::string& object : objects) {
+    std::vector<std::string> matches;
+    if (database.get_pin_map().contains(object) || database.get_net_map().contains(object)) {
+      matches.push_back(object);
+    } else {
+      for (QueryObjectType type : {QueryObjectType::kPort, QueryObjectType::kPin, QueryObjectType::kNet}) {
+        std::vector<std::string> typed_matches = findObjects(database, {object}, type);
+        matches.insert(matches.end(), typed_matches.begin(), typed_matches.end());
+      }
+    }
+    if (matches.empty()) {
+      throw std::invalid_argument(std::string(get_cmd_name()) + " pin, port or net not found: " + object);
+    }
+    for (const std::string& match : matches) {
+      if (database.get_pin_map().contains(match)) {
+        roots.insert(match);
+        continue;
+      }
+      for (const std::string& pin_name : database.get_net_map()[match].get_pin_name_list()) {
+        auto pin = database.get_pin_map().find(pin_name);
+        if (pin != database.get_pin_map().end() && (_is_fanin || isLoad(pin->second))) {
+          roots.insert(pin_name);
+        }
+      }
+    }
+  }
+  return roots;
+}
+
+bool TclGetFan::isLoad(Pin& pin)
+{
+  PinDirection direction = getDirection(pin);
+  return direction == PinDirection::kInout
+         || direction == (pin.get_is_port() ? PinDirection::kOutput : PinDirection::kInput);
+}
+
+PinDirection TclGetFan::getDirection(Pin& pin)
+{
+  Database& database = PWDM.getDatabase();
+  auto instance = database.get_instance_map().find(pin.get_instance_name());
+  if (!pin.get_is_port() && instance != database.get_instance_map().end()) {
+    auto cell = database.get_timing_library().get_cell_map().find(instance->second.get_cell_name());
+    if (cell != database.get_timing_library().get_cell_map().end()) {
+      auto port = cell->second.get_port_map().find(pin.get_pin_name());
+      if (port != cell->second.get_port_map().end()) {
+        if (port->second.get_is_input() && port->second.get_is_output()) {
+          return PinDirection::kInout;
+        }
+        if (port->second.get_is_input() != port->second.get_is_output()) {
+          return port->second.get_is_input() ? PinDirection::kInput : PinDirection::kOutput;
+        }
+      }
+    }
+  }
+  return pin.get_direction();
+}
+
+std::set<std::string> TclGetFan::findFan(const std::set<std::string>& roots, bool boundary_only, bool only_cells)
+{
+  Database& database = PWDM.getDatabase();
+  std::vector<std::string> pending(roots.begin(), roots.end());
+  std::set<std::string> visited;
+  std::set<std::string> result;
+  while (!pending.empty()) {
+    std::string pin_name = pending.back();
+    pending.pop_back();
+    if (!visited.insert(pin_name).second) {
+      continue;
+    }
+    Pin& pin = database.get_pin_map()[pin_name];
+    bool boundary = isRegisterBoundary(pin);
+    std::vector<std::string> adjacent = boundary ? std::vector<std::string>() : getAdjacentPins(pin, _is_fanin);
+    boundary = boundary || adjacent.empty();
+    if (!_is_fanin && boundary) {
+      // An isolated pin or a disabled/constant sink is not a timing endpoint.
+      boundary = !getAdjacentPins(pin, true).empty();
+    }
+    if (!boundary_only || boundary) {
+      if (!only_cells) {
+        result.insert(pin_name);
+      } else if (!pin.get_is_port()) {
+        result.insert(pin.get_instance_name());
+      }
+    }
+    pending.insert(pending.end(), adjacent.begin(), adjacent.end());
+  }
+  return result;
+}
+
+bool TclGetFan::isRegisterBoundary(Pin& pin)
+{
+  Database& database = PWDM.getDatabase();
+  auto instance = database.get_instance_map().find(pin.get_instance_name());
+  if (pin.get_is_port() || instance == database.get_instance_map().end()) {
+    return false;
+  }
+  if (_is_fanin) {
+    if (!instance->second.get_is_sequential()) {
+      return false;
+    }
+    if (getFullPinName(pin) == instance->second.get_clock_pin_name()) {
+      return true;
+    }
+    auto cell = database.get_timing_library().get_cell_map().find(instance->second.get_cell_name());
+    if (cell != database.get_timing_library().get_cell_map().end()) {
+      for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
+        if (arc.get_is_clock_arc() && pin.get_pin_name() == arc.get_source_port()) {
+          return true;
+        }
+      }
+    }
+  } else {
+    return instance->second.get_is_sequential() && isLoad(pin)
+           && getFullPinName(pin) != instance->second.get_clock_pin_name();
+  }
+  return false;
+}
+
+std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
+{
+  Database& database = PWDM.getDatabase();
+  std::vector<std::string> adjacent;
+  if (!isSearchPin(pin)) {
+    return adjacent;
+  }
+  if (fanin ? isLoad(pin) : isDriver(pin)) {
+    auto net = database.get_net_map().find(pin.get_net_name());
+    if (net != database.get_net_map().end()) {
+      for (const std::string& other_name : net->second.get_pin_name_list()) {
+        auto other = database.get_pin_map().find(other_name);
+        if (other != database.get_pin_map().end() && other_name != getFullPinName(pin)
+            && (fanin ? isDriver(other->second) : isLoad(other->second)) && isSearchPin(other->second)) {
+          adjacent.push_back(other_name);
+        }
+      }
+    }
+  }
+  auto instance = database.get_instance_map().find(pin.get_instance_name());
+  if (pin.get_is_port() || instance == database.get_instance_map().end()) {
+    return adjacent;
+  }
+  auto cell = database.get_timing_library().get_cell_map().find(instance->second.get_cell_name());
+  if (cell == database.get_timing_library().get_cell_map().end()) {
+    return adjacent;
+  }
+  for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
+    // Fanin includes clock-to-Q up to the register clock pin. Fanout never
+    // crosses a sequential element; reset and check arcs are not data paths.
+    if (!arc.get_is_timing_graph_arc() || arc.get_is_disable_arc() || (!_is_fanin && arc.get_is_clock_arc())) {
+      continue;
+    }
+    if (pin.get_pin_name() != (fanin ? arc.get_sink_port() : arc.get_source_port())) {
+      continue;
+    }
+    std::string other_name = instance->first + ":" + (fanin ? arc.get_source_port() : arc.get_sink_port());
+    auto other = database.get_pin_map().find(other_name);
+    if (other != database.get_pin_map().end() && isSearchPin(other->second)) {
+      adjacent.push_back(other_name);
+    }
+  }
+  return adjacent;
+}
+
+std::string TclGetFan::getFullPinName(Pin& pin)
+{
+  return pin.get_is_port() ? pin.get_pin_name() : pin.get_instance_name() + ":" + pin.get_pin_name();
+}
+
+bool TclGetFan::isSearchPin(Pin& pin)
+{
+  auto& values = PWDM.getDatabase().get_timing_constraint().get_case_analysis_map();
+  auto value = values.find(getFullPinName(pin));
+  return value == values.end()
+         || (value->second != TimingCaseValue::kZero && value->second != TimingCaseValue::kOne
+             && value->second != TimingCaseValue::kStatic);
+}
+
+bool TclGetFan::isDriver(Pin& pin)
+{
+  PinDirection direction = getDirection(pin);
+  return direction == PinDirection::kInout
+         || direction == (pin.get_is_port() ? PinDirection::kInput : PinDirection::kOutput);
+}
+
 void registerSdcCommands(SdcCommand& interpreter);
 }
 
@@ -148,7 +363,8 @@ int SdcCommand::evalScript(const std::string& script)
   while (offset < script.size()) {
     Tcl_Parse parse{};
     const char* command_start = script.data() + offset;
-    const int parse_result = Tcl_ParseCommand(_interp, command_start, static_cast<int>(script.size() - offset), 0, &parse);
+    const int parse_result
+        = Tcl_ParseCommand(_interp, command_start, static_cast<int>(script.size() - offset), 0, &parse);
     if (parse_result != TCL_OK) {
       const char* error_start = parse.commandStart != nullptr ? parse.commandStart : command_start;
       const unsigned command_line = line_number + static_cast<unsigned>(std::count(command_start, error_start, '\n'));
@@ -164,7 +380,8 @@ int SdcCommand::evalScript(const std::string& script)
       consumed = script.size() - offset;
     }
 
-    const unsigned command_line = line_number + static_cast<unsigned>(std::count(command_start, parse.commandStart, '\n'));
+    const unsigned command_line
+        = line_number + static_cast<unsigned>(std::count(command_start, parse.commandStart, '\n'));
 
     if (parse.numWords > 0) {
       Tcl_SetErrorLine(_interp, static_cast<int>(command_line));
@@ -239,7 +456,11 @@ int getDesigns(ClientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
   const char* pattern = objc == 2 ? Tcl_GetString(objv[1]) : "*";
   Tcl_Obj* result = Tcl_NewListObj(0, nullptr);
   if (!design_name.empty() && Tcl_StringMatch(design_name.c_str(), pattern) != 0) {
-    Tcl_ListObjAppendElement(interp, result, Tcl_NewStringObj(design_name.c_str(), static_cast<int>(design_name.size())));
+    Tcl_ListObjAppendElement(
+        interp,
+        result,
+        Tcl_NewStringObj(design_name.c_str(), static_cast<int>(design_name.size()))
+    );
   }
   Tcl_SetObjResult(interp, result);
   return TCL_OK;
@@ -252,14 +473,16 @@ int getLibraries(ClientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]
     return TCL_ERROR;
   }
   const char* pattern = objc == 2 ? Tcl_GetString(objv[1]) : "*";
-  std::set<std::string> library_name_set;
-  for (std::pair<const std::string, TimingCell>& cell_pair : PWDM.getDatabase().get_timing_library().get_cell_map()) {
-    library_name_set.insert(cell_pair.second.get_library_name());
-  }
+  // cell_map 只装设计用到的 cell（惰性 wrap），库名从 wrap 阶段记录的列表取（已排序去重）。
+  std::vector<std::string>& library_name_list = PWDM.getDatabase().get_timing_library().get_library_name_list();
   Tcl_Obj* result = Tcl_NewListObj(0, nullptr);
-  for (const std::string& library_name : library_name_set) {
+  for (const std::string& library_name : library_name_list) {
     if (Tcl_StringMatch(library_name.c_str(), pattern) != 0) {
-      Tcl_ListObjAppendElement(interp, result, Tcl_NewStringObj(library_name.c_str(), static_cast<int>(library_name.size())));
+      Tcl_ListObjAppendElement(
+          interp,
+          result,
+          Tcl_NewStringObj(library_name.c_str(), static_cast<int>(library_name.size()))
+      );
     }
   }
   Tcl_SetObjResult(interp, result);
@@ -285,6 +508,9 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclAllOutputs>(interpreter, "all_outputs");
   registerCommand<TclAllClocks>(interpreter, "all_clocks");
   registerCommand<TclGetObjectName>(interpreter, "get_object_name");
+  registerCommand<TclGetObjectName>(interpreter, "get_name");
+  registerCommand<TclGetFan>(interpreter, "get_fanin");
+  registerCommand<TclGetFan>(interpreter, "get_fanout");
   registerCommand<TclGetClocks>(interpreter, "get_clock");
   registerCommand<TclGetClocks>(interpreter, "get_clocks");
   registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
@@ -321,11 +547,29 @@ void registerIgnoredTimingConstraintCommands(SdcCommand& interpreter)
   // Common design SDC files also contain path-analysis constraints. They do
   // not affect power, but accepting them keeps the power-relevant commands in
   // the same file executable.
-  for (const char* command_name : {"group_path", "set_all_input_output_delays", "set_clock_gating_check", "set_clock_groups",
-                                   "set_clock_latency", "set_clock_uncertainty", "set_false_path", "set_input_delay", "set_max_area",
-                                   "set_max_capacitance", "set_max_delay", "set_max_fanout", "set_max_transition", "set_min_delay",
-                                   "set_multicycle_path", "set_operating_conditions", "set_output_delay", "set_timing_derate", "set_units",
-                                   "set_wire_load_mode", "reset_path", "unset_path_exceptions"}) {
+  for (const char* command_name :
+       {"group_path",
+        "set_all_input_output_delays",
+        "set_clock_gating_check",
+        "set_clock_groups",
+        "set_clock_latency",
+        "set_clock_uncertainty",
+        "set_false_path",
+        "set_input_delay",
+        "set_max_area",
+        "set_max_capacitance",
+        "set_max_delay",
+        "set_max_fanout",
+        "set_max_transition",
+        "set_min_delay",
+        "set_multicycle_path",
+        "set_operating_conditions",
+        "set_output_delay",
+        "set_timing_derate",
+        "set_units",
+        "set_wire_load_mode",
+        "reset_path",
+        "unset_path_exceptions"}) {
     interpreter.createCmd(command_name, &ignoreTimingConstraint);
   }
 }
@@ -346,10 +590,7 @@ void registerSdcCommands(SdcCommand& interpreter)
 
 }  // namespace ipw
 
-
 #if 1  // 时钟约束
-
-
 
 namespace ipw::sdc {
 
@@ -365,8 +606,11 @@ std::string deriveClockName(const std::vector<std::string>& source_list)
 
 }  // namespace
 
-void removeClockSourcesFromOtherClocks(std::map<std::string, TimingClock>& clock_map, const std::string& clock_name,
-                                       const std::vector<std::string>& source_list)
+void removeClockSourcesFromOtherClocks(
+    std::map<std::string, TimingClock>& clock_map,
+    const std::string& clock_name,
+    const std::vector<std::string>& source_list
+)
 {
   if (source_list.empty()) {
     return;
@@ -376,11 +620,16 @@ void removeClockSourcesFromOtherClocks(std::map<std::string, TimingClock>& clock
       continue;
     }
     std::vector<std::string>& other_sources = other_clock.get_source_list();
-    other_sources.erase(std::remove_if(other_sources.begin(), other_sources.end(),
-                                       [&](const std::string& source) {
-                                         return std::find(source_list.begin(), source_list.end(), source) != source_list.end();
-                                       }),
-                        other_sources.end());
+    other_sources.erase(
+        std::remove_if(
+            other_sources.begin(),
+            other_sources.end(),
+            [&](const std::string& source) {
+              return std::find(source_list.begin(), source_list.end(), source) != source_list.end();
+            }
+        ),
+        other_sources.end()
+    );
   }
 }
 
@@ -456,7 +705,8 @@ unsigned TclCreateClock::exec()
     }
   }
 
-  const std::string clock_name = name_option->is_set_val() ? std::string(name_option->getStringVal()) : deriveClockName(source_list);
+  const std::string clock_name
+      = name_option->is_set_val() ? std::string(name_option->getStringVal()) : deriveClockName(source_list);
   if (clock_name.empty()) {
     setTclError("create_clock requires -name for virtual clocks or multi-source clocks");
     return 0;
@@ -487,9 +737,6 @@ unsigned TclCreateClock::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -536,13 +783,15 @@ unsigned TclCreateGeneratedClock::exec()
     setTclError("create_generated_clock -add requires -name");
     return 0;
   }
-  const std::string name = getOptionOrArg("-name")->is_set_val() ? getOptionOrArg("-name")->getStringVal() : targets.front();
+  const std::string name
+      = getOptionOrArg("-name")->is_set_val() ? getOptionOrArg("-name")->getStringVal() : targets.front();
   std::string master_name;
   if (getOptionOrArg("-master_clock")->is_set_val()) {
     master_name = getOptionOrArg("-master_clock")->getStringVal();
   } else {
     for (auto& [candidate, clock] : clocks) {
-      if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), sources.front()) != clock.get_source_list().end()) {
+      if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), sources.front())
+          != clock.get_source_list().end()) {
         if (!master_name.empty()) {
           setTclError("ambiguous master; specify -master_clock");
           return 0;
@@ -621,20 +870,24 @@ unsigned TclCreateGeneratedClock::exec()
   }
   if (getOptionOrArg("-edges")->is_set_val()) {
     const std::vector<double> edges = getOptionOrArg("-edges")->getDoubleList();
-    const std::vector<double> shifts
-        = getOptionOrArg("-edge_shift")->is_set_val() ? getOptionOrArg("-edge_shift")->getDoubleList() : std::vector<double>(3, 0.0);
+    const std::vector<double> shifts = getOptionOrArg("-edge_shift")->is_set_val()
+                                           ? getOptionOrArg("-edge_shift")->getDoubleList()
+                                           : std::vector<double>(3, 0.0);
     if (edges.size() != 3 || shifts.size() != 3) {
       setTclError("-edges and -edge_shift require three values");
       return 0;
     }
     std::vector<double> times;
     for (std::size_t i = 0; i < 3; ++i) {
-      if (!std::isfinite(edges[i]) || edges[i] < 1 || edges[i] != std::floor(edges[i]) || (i && edges[i] < edges[i - 1])) {
+      if (!std::isfinite(edges[i]) || edges[i] < 1 || edges[i] != std::floor(edges[i])
+          || (i && edges[i] < edges[i - 1])) {
         setTclError("-edges requires three nondecreasing positive integers");
         return 0;
       }
       const double index = edges[i] - 1;
-      times.push_back(std::floor(index / 2) * master_period + (std::fmod(index, 2) == 0 ? master_rise : master_fall) + shifts[i]);
+      times.push_back(
+          std::floor(index / 2) * master_period + (std::fmod(index, 2) == 0 ? master_rise : master_fall) + shifts[i]
+      );
     }
     period = times[2] - times[0];
     rise = times[0];
@@ -656,7 +909,8 @@ unsigned TclCreateGeneratedClock::exec()
     rise = fall;
     fall = old_rise + period;
   }
-  if (!std::isfinite(period) || !std::isfinite(rise) || !std::isfinite(fall) || period <= 0 || fall < rise || fall >= rise + period) {
+  if (!std::isfinite(period) || !std::isfinite(rise) || !std::isfinite(fall) || period <= 0 || fall < rise
+      || fall >= rise + period) {
     setTclError("invalid generated clock waveform");
     return 0;
   }
@@ -672,8 +926,13 @@ unsigned TclCreateGeneratedClock::exec()
     for (auto& [other_name, other] : clocks) {
       std::vector<std::string>& roots = other.get_source_list();
       roots.erase(
-          std::remove_if(roots.begin(), roots.end(), [&](const std::string& pin) { return std::find(targets.begin(), targets.end(), pin) != targets.end(); }),
-          roots.end());
+          std::remove_if(
+              roots.begin(),
+              roots.end(),
+              [&](const std::string& pin) { return std::find(targets.begin(), targets.end(), pin) != targets.end(); }
+          ),
+          roots.end()
+      );
     }
   }
   clocks[name] = std::move(generated);
@@ -681,9 +940,6 @@ unsigned TclCreateGeneratedClock::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -719,7 +975,8 @@ unsigned TclSetClockTransition::exec()
   for (const std::string& name : clocks) {
     TimingClock& clock = database.get_timing_constraint().get_clock_map().at(name);
     for (AnalysisType analysis_type : {AnalysisType::kMin, AnalysisType::kMax}) {
-      if ((analysis_type == AnalysisType::kMin && max && !min) || (analysis_type == AnalysisType::kMax && min && !max)) {
+      if ((analysis_type == AnalysisType::kMin && max && !min)
+          || (analysis_type == AnalysisType::kMax && min && !max)) {
         continue;
       }
       if (!fall || rise) {
@@ -734,9 +991,6 @@ unsigned TclSetClockTransition::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -755,7 +1009,8 @@ std::set<std::string> findPropagatedClocks(Database& database, const std::vector
     const std::vector<std::string> sources = findClockSources(database, {object});
     for (const std::string& source : sources) {
       for (auto& [clock_name, clock] : database.get_timing_constraint().get_clock_map()) {
-        if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), source) != clock.get_source_list().end()) {
+        if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), source)
+            != clock.get_source_list().end()) {
           result.insert(clock_name);
         }
       }
@@ -810,12 +1065,9 @@ unsigned TclSetPropagatedClock::exec()
 
 }  // namespace ipw::sdc
 
-
 #endif
 
 #if 1  // IO约束
-
-
 
 namespace ipw::sdc {
 
@@ -840,9 +1092,12 @@ TclSetDrivingCell::TclSetDrivingCell(const char* cmd_name) : SdcTclCmd(cmd_name)
 
 unsigned TclSetDrivingCell::exec()
 {
-  if (getOptionOrArg("-multiply_by")->is_set_val()) warn("set_driving_cell -multiply_by is accepted for compatibility and ignored");
-  if (getOptionOrArg("-dont_scale")->is_set_val()) warn("set_driving_cell -dont_scale is accepted for compatibility and ignored");
-  if (getOptionOrArg("-no_design_rule")->is_set_val()) warn("set_driving_cell -no_design_rule is accepted for compatibility and ignored");
+  if (getOptionOrArg("-multiply_by")->is_set_val())
+    warn("set_driving_cell -multiply_by is accepted for compatibility and ignored");
+  if (getOptionOrArg("-dont_scale")->is_set_val())
+    warn("set_driving_cell -dont_scale is accepted for compatibility and ignored");
+  if (getOptionOrArg("-no_design_rule")->is_set_val())
+    warn("set_driving_cell -no_design_rule is accepted for compatibility and ignored");
 
   ecc::TclOption* cell_option = getOptionOrArg("-lib_cell");
   ecc::TclOption* cell_alias_option = getOptionOrArg("-cell");
@@ -857,12 +1112,14 @@ unsigned TclSetDrivingCell::exec()
 
   Database& database = PWDM.getDatabase();
   const std::string cell_name = cell_option->getStringVal();
-  std::map<std::string, TimingCell>& cell_map = database.get_timing_library().get_cell_map();
-  if (cell_name.empty() || !cell_map.contains(cell_name)) {
+  // 惰性 wrap 只覆盖设计实例用到的 cell；SDC 引用的其它库 cell 在这里按需 wrap。
+  TimingCell* timing_cell_ptr
+      = cell_name.empty() ? nullptr : database.get_timing_library().findOrWrapCell(cell_name);
+  if (timing_cell_ptr == nullptr) {
     setTclError("set_driving_cell library cell does not exist: " + cell_name);
     return 0;
   }
-  TimingCell& timing_cell = cell_map.at(cell_name);
+  TimingCell& timing_cell = *timing_cell_ptr;
 
   ecc::TclOption* library_option = getOptionOrArg("-library");
   if (library_option->is_set_val() && timing_cell.get_library_name() != library_option->getStringVal()) {
@@ -895,15 +1152,18 @@ unsigned TclSetDrivingCell::exec()
   }
 
   ecc::TclOption* from_pin_option = getOptionOrArg("-from_pin");
-  const std::string requested_from_pin = from_pin_option->is_set_val() ? from_pin_option->getStringVal() : std::string{};
+  const std::string requested_from_pin
+      = from_pin_option->is_set_val() ? from_pin_option->getStringVal() : std::string{};
   if (!requested_from_pin.empty()
-      && (!timing_cell.get_port_map().contains(requested_from_pin) || !timing_cell.get_port_map().at(requested_from_pin).get_is_input())) {
+      && (!timing_cell.get_port_map().contains(requested_from_pin)
+          || !timing_cell.get_port_map().at(requested_from_pin).get_is_input())) {
     setTclError("set_driving_cell input pin does not exist: " + cell_name + "/" + requested_from_pin);
     return 0;
   }
   std::string from_pin;
   for (TimingCellArc& timing_cell_arc : timing_cell.get_cell_arc_list()) {
-    if (timing_cell_arc.get_sink_port() != to_pin || (!requested_from_pin.empty() && timing_cell_arc.get_source_port() != requested_from_pin)) {
+    if (timing_cell_arc.get_sink_port() != to_pin
+        || (!requested_from_pin.empty() && timing_cell_arc.get_source_port() != requested_from_pin)) {
       continue;
     }
     if (!timing_cell.get_port_map().contains(timing_cell_arc.get_source_port())
@@ -922,7 +1182,8 @@ unsigned TclSetDrivingCell::exec()
   ecc::TclOption* fall_transition_option = getOptionOrArg("-input_transition_fall");
   const double rise_transition = rise_transition_option->is_set_val() ? rise_transition_option->getDoubleVal() : 0.0;
   const double fall_transition = fall_transition_option->is_set_val() ? fall_transition_option->getDoubleVal() : 0.0;
-  if (!std::isfinite(rise_transition) || rise_transition < 0.0 || !std::isfinite(fall_transition) || fall_transition < 0.0) {
+  if (!std::isfinite(rise_transition) || rise_transition < 0.0 || !std::isfinite(fall_transition)
+      || fall_transition < 0.0) {
     setTclError("set_driving_cell input transitions must be finite and non-negative");
     return 0;
   }
@@ -939,7 +1200,8 @@ unsigned TclSetDrivingCell::exec()
   }
   for (const std::string& port_name : port_list) {
     Pin& pin = database.get_pin_map().at(port_name);
-    if (!pin.get_is_port() || (pin.get_direction() != PinDirection::kInput && pin.get_direction() != PinDirection::kInout)) {
+    if (!pin.get_is_port()
+        || (pin.get_direction() != PinDirection::kInput && pin.get_direction() != PinDirection::kInout)) {
       setTclError("set_driving_cell requires input ports; '" + port_name + "' is not an input port");
       return 0;
     }
@@ -960,7 +1222,8 @@ unsigned TclSetDrivingCell::exec()
   for (const std::string& port_name : port_list) {
     TimingPortConstraint& port_constraint = getOrCreatePortConstraint(database, port_name);
     for (AnalysisType analysis_type : {AnalysisType::kMin, AnalysisType::kMax}) {
-      if ((analysis_type == AnalysisType::kMin && max && !min) || (analysis_type == AnalysisType::kMax && min && !max)) {
+      if ((analysis_type == AnalysisType::kMin && max && !min)
+          || (analysis_type == AnalysisType::kMax && min && !max)) {
         continue;
       }
       if (!fall || rise) {
@@ -975,9 +1238,6 @@ unsigned TclSetDrivingCell::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -997,8 +1257,10 @@ unsigned TclSetInputTransition::exec()
 {
   auto& data_manager = DataManager::getInst();
 
-  if (getOptionOrArg("-clock")->is_set_val()) warn("set_input_transition -clock is deprecated and ignored");
-  if (getOptionOrArg("-clock_fall")->is_set_val()) warn("set_input_transition -clock_fall is deprecated and ignored");
+  if (getOptionOrArg("-clock")->is_set_val())
+    warn("set_input_transition -clock is deprecated and ignored");
+  if (getOptionOrArg("-clock_fall")->is_set_val())
+    warn("set_input_transition -clock_fall is deprecated and ignored");
 
   ecc::TclOption* transition_option = getOptionOrArg("transition");
   ecc::TclOption* object_option = getOptionOrArg("objects");
@@ -1019,7 +1281,8 @@ unsigned TclSetInputTransition::exec()
   for (const std::string& port_name : getPortPinNames(data_manager.getDatabase(), object_option->getStringList())) {
     TimingPortConstraint& port_constraint = getOrCreatePortConstraint(data_manager.getDatabase(), port_name);
     for (AnalysisType analysis_type : {AnalysisType::kMin, AnalysisType::kMax}) {
-      if ((analysis_type == AnalysisType::kMin && max && !min) || (analysis_type == AnalysisType::kMax && min && !max)) {
+      if ((analysis_type == AnalysisType::kMin && max && !min)
+          || (analysis_type == AnalysisType::kMax && min && !max)) {
         continue;
       }
       if (!fall || rise) {
@@ -1034,9 +1297,6 @@ unsigned TclSetInputTransition::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -1081,16 +1341,38 @@ std::vector<TransType> allTransTypes()
   return {TransType::kRise, TransType::kFall};
 }
 
-LoadTargets findLoadTargets(Database& database, const std::vector<std::string>& objects)
+LoadTargets findLoadTargets(Database& database, const std::vector<Tcl_Obj*>& objects)
 {
   LoadTargets targets;
-  for (const std::string& object : objects) {
-    const std::vector<std::string> ports = findObjects(database, {object}, QueryObjectType::kPort);
-    const std::vector<std::string> nets = findObjects(database, {object}, QueryObjectType::kNet);
-    if (ports.empty() && nets.empty()) {
-      throw std::invalid_argument("set_load object is not a port or net: " + object);
+  for (Tcl_Obj* object : objects) {
+    std::string name = Tcl_GetString(object);
+    SdcObjectType type = SdcObject::getType(object);
+    if (type == SdcObjectType::kPort) {
+      auto pin = database.get_pin_map().find(name);
+      if (pin == database.get_pin_map().end() || !pin->second.get_is_port()) {
+        throw std::invalid_argument("set_load port no longer exists: " + name);
+      }
+      targets.ports.insert(name);
+      continue;
     }
-    targets.ports.insert(ports.begin(), ports.end());
+    if (type == SdcObjectType::kNet) {
+      if (!database.get_net_map().contains(name)) {
+        throw std::invalid_argument("set_load net no longer exists: " + name);
+      }
+      targets.nets.insert(name);
+      continue;
+    }
+    // Bare names resolve to ports first. Typed get_nets results remain nets
+    // even when a top-level port has the same spelling.
+    std::vector<std::string> ports = findObjects(database, {name}, QueryObjectType::kPort);
+    if (!ports.empty()) {
+      targets.ports.insert(ports.begin(), ports.end());
+      continue;
+    }
+    std::vector<std::string> nets = findObjects(database, {name}, QueryObjectType::kNet);
+    if (nets.empty()) {
+      throw std::invalid_argument("set_load object is not a port or net: " + name);
+    }
     targets.nets.insert(nets.begin(), nets.end());
   }
   if (targets.ports.empty() && targets.nets.empty()) {
@@ -1099,7 +1381,12 @@ LoadTargets findLoadTargets(Database& database, const std::vector<std::string>& 
   return targets;
 }
 
-double getLibraryPinCapacitance(Database& database, const std::string& pin_name, AnalysisType analysis_type, TransType trans_type)
+double getLibraryPinCapacitance(
+    Database& database,
+    const std::string& pin_name,
+    AnalysisType analysis_type,
+    TransType trans_type
+)
 {
   const auto pin_iter = database.get_pin_map().find(pin_name);
   if (pin_iter == database.get_pin_map().end()) {
@@ -1108,7 +1395,9 @@ double getLibraryPinCapacitance(Database& database, const std::string& pin_name,
   if (pin_iter->second.get_is_port()) {
     auto& port_constraints = database.get_timing_constraint().get_port_constraint_map();
     const auto constraint = port_constraints.find(pin_name);
-    return constraint != port_constraints.end() && constraint->second.get_has_load() ? constraint->second.get_load(analysis_type, trans_type) : 0.0;
+    return constraint != port_constraints.end() && constraint->second.get_has_load()
+               ? constraint->second.get_load(analysis_type, trans_type)
+               : 0.0;
   }
   Pin& pin = pin_iter->second;
   const auto instance_iter = database.get_instance_map().find(pin.get_instance_name());
@@ -1124,7 +1413,8 @@ double getLibraryPinCapacitance(Database& database, const std::string& pin_name,
     return 0.0;
   }
   TimingCellPort& cell_port = port_iter->second;
-  if (cell_port.get_trans_capacitance_map().contains(analysis_type) && cell_port.get_trans_capacitance_map().at(analysis_type).contains(trans_type)) {
+  if (cell_port.get_trans_capacitance_map().contains(analysis_type)
+      && cell_port.get_trans_capacitance_map().at(analysis_type).contains(trans_type)) {
     return cell_port.get_trans_capacitance_map().at(analysis_type).at(trans_type);
   }
   return cell_port.get_capacitance();
@@ -1132,7 +1422,13 @@ double getLibraryPinCapacitance(Database& database, const std::string& pin_name,
 
 }  // namespace
 
-double subtractNetLoadPinCapacitance(Database& database, const std::string& net_name, double load_value, AnalysisType analysis_type, TransType trans_type)
+double subtractNetLoadPinCapacitance(
+    Database& database,
+    const std::string& net_name,
+    double load_value,
+    AnalysisType analysis_type,
+    TransType trans_type
+)
 {
   const auto net_iter = database.get_net_map().find(net_name);
   if (net_iter == database.get_net_map().end()) {
@@ -1177,7 +1473,7 @@ unsigned TclSetLoad::exec()
   Database& database = data_manager.getDatabase();
   LoadTargets targets;
   try {
-    targets = findLoadTargets(database, object_option->getStringList());
+    targets = findLoadTargets(database, getOptionObjects("objects"));
   } catch (const std::exception& error) {
     setTclError(error.what());
     return 0;
@@ -1207,7 +1503,9 @@ unsigned TclSetLoad::exec()
     for (TransType trans_type : allTransTypes()) {
       for (const std::string& net_name : targets.nets) {
         const double effective_load
-            = subtract_pin_load ? subtractNetLoadPinCapacitance(database, net_name, load_value, analysis_type, trans_type) : load_value;
+            = subtract_pin_load
+                  ? subtractNetLoadPinCapacitance(database, net_name, load_value, analysis_type, trans_type)
+                  : load_value;
         database.get_timing_constraint().set_net_load(net_name, analysis_type, trans_type, effective_load);
       }
     }
@@ -1217,13 +1515,9 @@ unsigned TclSetLoad::exec()
 
 }  // namespace ipw::sdc
 
-
 #endif
 
 #if 1  // Tcl命令
-
-
-
 
 namespace ipw::sdc {
 
@@ -1241,6 +1535,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
   for (int index = 1; index < objc; ++index) {
     const char* value = Tcl_GetString(objv[index]);
     if (next_is_option_value) {
+      _option_object_map[current_option->get_option_name()] = objv[index];
       setOptionValue(current_option, value);
       next_is_option_value = false;
       continue;
@@ -1263,6 +1558,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
       setInterpreterError(interp);
       return TCL_ERROR;
     }
+    _option_object_map[argument->get_option_name()] = objv[index];
     setOptionValue(argument, value);
   }
 
@@ -1291,7 +1587,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
   if (_has_list_result) {
     Tcl_Obj* list = Tcl_NewListObj(0, nullptr);
     for (const std::string& value : _list_result) {
-      Tcl_ListObjAppendElement(interp, list, Tcl_NewStringObj(value.c_str(), static_cast<int>(value.size())));
+      Tcl_ListObjAppendElement(interp, list, SdcObject::create(value, _list_result_type));
     }
     Tcl_SetObjResult(interp, list);
   }
@@ -1327,10 +1623,29 @@ void SdcTclCmd::warn(const std::string& message) const
   PWLOG.warn(Loc::current(), message);
 }
 
-void SdcTclCmd::setResult(std::vector<std::string> result)
+void SdcTclCmd::setResult(std::vector<std::string> result, SdcObjectType type)
 {
   _list_result = std::move(result);
+  _list_result_type = type;
   _has_list_result = true;
+}
+
+std::vector<Tcl_Obj*> SdcTclCmd::getOptionObjects(const std::string& name)
+{
+  auto option = _option_object_map.find(name);
+  if (option == _option_object_map.end()) {
+    return {};
+  }
+  Tcl_Obj* object = option->second;
+  if (SdcObject::getType(object) != SdcObjectType::kNone) {
+    return {object};
+  }
+  int count = 0;
+  Tcl_Obj** elements = nullptr;
+  if (Tcl_ListObjGetElements(nullptr, object, &count, &elements) != TCL_OK) {
+    throw std::invalid_argument(name + " requires an object list");
+  }
+  return count == 0 ? std::vector<Tcl_Obj*>() : std::vector<Tcl_Obj*>(elements, elements + count);
 }
 
 void SdcTclCmd::resetExecutionState()
@@ -1338,6 +1653,8 @@ void SdcTclCmd::resetExecutionState()
   resetOptionArgValue();
   _error_message.clear();
   _list_result.clear();
+  _list_result_type = SdcObjectType::kNone;
+  _option_object_map.clear();
   _has_list_result = false;
 }
 
@@ -1348,12 +1665,9 @@ void SdcTclCmd::setInterpreterError(Tcl_Interp* interp) const
 
 }  // namespace ipw::sdc
 
-
 #endif
 
 #if 1  // 逻辑约束
-
-
 
 namespace ipw::sdc {
 
@@ -1367,7 +1681,9 @@ namespace {
 
 std::optional<TimingCaseValue> parseCaseValue(std::string value)
 {
-  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) { return std::tolower(character); });
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+    return std::tolower(character);
+  });
   if (value == "0" || value == "zero") {
     return TimingCaseValue::kZero;
   }
@@ -1419,12 +1735,9 @@ unsigned TclSetCaseAnalysis::exec()
 
 }  // namespace ipw::sdc
 
-
 #endif
 
 #if 1  // 对象查询
-
-
 
 namespace ipw::sdc {
 
@@ -1438,9 +1751,11 @@ unsigned TclGetCells::exec()
 {
   ecc::TclOption* objects = getOptionOrArg("cells");
   const ObjectQueryOptions options = getObjectQueryOptions(*this);
-  if (const auto error = getObjectQueryError(options, objects->is_set_val())) return setTclError("get_cells " + *error), 0;
+  if (const auto error = getObjectQueryError(options, objects->is_set_val()))
+    return setTclError("get_cells " + *error), 0;
   const std::string patterns = objects->is_set_val() ? objects->getStringVal() : "*";
-  std::vector<std::string> result = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kCell, options);
+  std::vector<std::string> result
+      = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kCell, options);
   if (result.empty() && !getOptionOrArg("-quiet")->is_set_val()) {
     warn("no cells matched: " + patterns);
   }
@@ -1449,9 +1764,6 @@ unsigned TclGetCells::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -1465,9 +1777,15 @@ unsigned TclGetClocks::exec()
 {
   ecc::TclOption* objects = getOptionOrArg("clocks");
   const ObjectQueryOptions options = getObjectQueryOptions(*this);
-  if (const auto error = getObjectQueryError(options, false)) return setTclError("get_clocks " + *error), 0;
+  if (const auto error = getObjectQueryError(options, false))
+    return setTclError("get_clocks " + *error), 0;
   const std::string patterns = objects->is_set_val() ? objects->getStringVal() : "*";
-  std::vector<std::string> result = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kClock, options);
+  std::vector<std::string> result = findObjects(
+      PWDM.getDatabase(),
+      parseObjectPatterns(patterns, options.regexp),
+      QueryObjectType::kClock,
+      options
+  );
   if (result.empty() && !getOptionOrArg("-quiet")->is_set_val()) {
     warn("no clocks matched: " + patterns);
   }
@@ -1475,15 +1793,23 @@ unsigned TclGetClocks::exec()
   return 1;
 }
 
-TclGetGeneratedClocks::TclGetGeneratedClocks(const char* cmd_name) : TclGetClocks(cmd_name) {}
+TclGetGeneratedClocks::TclGetGeneratedClocks(const char* cmd_name) : TclGetClocks(cmd_name)
+{
+}
 
 unsigned TclGetGeneratedClocks::exec()
 {
   ecc::TclOption* objects = getOptionOrArg("clocks");
   const ObjectQueryOptions options = getObjectQueryOptions(*this);
-  if (const auto error = getObjectQueryError(options, false)) return setTclError("get_generated_clocks " + *error), 0;
+  if (const auto error = getObjectQueryError(options, false))
+    return setTclError("get_generated_clocks " + *error), 0;
   const std::string patterns = objects->is_set_val() ? objects->getStringVal() : "*";
-  std::vector<std::string> result = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kClock, options);
+  std::vector<std::string> result = findObjects(
+      PWDM.getDatabase(),
+      parseObjectPatterns(patterns, options.regexp),
+      QueryObjectType::kClock,
+      options
+  );
   std::erase_if(result, [](const std::string& clock_name) {
     return !PWDM.getDatabase().get_timing_constraint().get_clock_map().at(clock_name).get_is_generated();
   });
@@ -1495,9 +1821,6 @@ unsigned TclGetGeneratedClocks::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -1514,25 +1837,24 @@ unsigned TclGetNets::exec()
 {
   ecc::TclOption* objects = getOptionOrArg("nets");
   const ObjectQueryOptions options = getObjectQueryOptions(*this);
-  if (const auto error = getObjectQueryError(options, objects->is_set_val())) return setTclError("get_nets " + *error), 0;
+  if (const auto error = getObjectQueryError(options, objects->is_set_val()))
+    return setTclError("get_nets " + *error), 0;
   for (const char* option : {"-top_net_of_hierarchical_group", "-segments", "-boundary_type"}) {
     if (getOptionOrArg(option)->is_set_val()) {
       return setTclError(std::string("get_nets ") + option + " requires hierarchical net-segment support"), 0;
     }
   }
   const std::string patterns = objects->is_set_val() ? objects->getStringVal() : "*";
-  std::vector<std::string> result = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kNet, options);
+  std::vector<std::string> result
+      = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kNet, options);
   if (result.empty() && !getOptionOrArg("-quiet")->is_set_val()) {
     warn("no nets matched: " + patterns);
   }
-  setResult(std::move(result));
+  setResult(std::move(result), SdcObjectType::kNet);
   return 1;
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -1562,7 +1884,8 @@ unsigned TclGetObjectName::exec()
   }
 
   try {
-    setResult(getObjectNames(PWDM.getDatabase(), object->getStringVal()));
+    setResult(getObjectNames(PWDM.getDatabase(), object->getStringVal(), std::string_view(get_cmd_name()) == "get_name")
+    );
   } catch (const std::exception& error) {
     setTclError(error.what());
     return 0;
@@ -1571,9 +1894,6 @@ unsigned TclGetObjectName::exec()
 }
 
 }  // namespace ipw::sdc
-
-
-
 
 namespace ipw::sdc {
 
@@ -1588,9 +1908,11 @@ unsigned TclGetPins::exec()
 {
   ecc::TclOption* objects = getOptionOrArg("pins");
   const ObjectQueryOptions options = getObjectQueryOptions(*this);
-  if (const auto error = getObjectQueryError(options, objects->is_set_val())) return setTclError("get_pins " + *error), 0;
+  if (const auto error = getObjectQueryError(options, objects->is_set_val()))
+    return setTclError("get_pins " + *error), 0;
   const std::string patterns = objects->is_set_val() ? objects->getStringVal() : "*";
-  std::vector<std::string> result = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kPin, options);
+  std::vector<std::string> result
+      = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kPin, options);
   if (getOptionOrArg("-leaf")->is_set_val()) {
     const auto& pins = PWDM.getDatabase().get_pin_map();
     std::erase_if(result, [&](const std::string& name) { return !pins.contains(name) || pins.at(name).get_is_port(); });
@@ -1604,9 +1926,6 @@ unsigned TclGetPins::exec()
 
 }  // namespace ipw::sdc
 
-
-
-
 namespace ipw::sdc {
 
 TclGetPorts::TclGetPorts(const char* cmd_name) : SdcTclCmd(cmd_name)
@@ -1619,13 +1938,15 @@ unsigned TclGetPorts::exec()
 {
   ecc::TclOption* objects = getOptionOrArg("ports");
   const ObjectQueryOptions options = getObjectQueryOptions(*this);
-  if (const auto error = getObjectQueryError(options, objects->is_set_val())) return setTclError("get_ports " + *error), 0;
+  if (const auto error = getObjectQueryError(options, objects->is_set_val()))
+    return setTclError("get_ports " + *error), 0;
   const std::string patterns = objects->is_set_val() ? objects->getStringVal() : "*";
-  std::vector<std::string> result = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kPort, options);
+  std::vector<std::string> result
+      = findObjects(PWDM.getDatabase(), parseObjectPatterns(patterns, options.regexp), QueryObjectType::kPort, options);
   if (result.empty() && !getOptionOrArg("-quiet")->is_set_val()) {
     warn("no ports matched: " + patterns);
   }
-  setResult(std::move(result));
+  setResult(std::move(result), SdcObjectType::kPort);
   return 1;
 }
 
@@ -1722,7 +2043,7 @@ unsigned TclAllInputs::exec()
     }
   }
   std::sort(port_name_list.begin(), port_name_list.end());
-  setResult(std::move(port_name_list));
+  setResult(std::move(port_name_list), SdcObjectType::kPort);
   return 1;
 }
 
@@ -1735,21 +2056,17 @@ unsigned TclAllOutputs::exec()
   std::vector<std::string> port_name_list;
   for (std::pair<const std::string, Pin>& pin_pair : PWDM.getDatabase().get_pin_map()) {
     Pin& pin = pin_pair.second;
-    if (pin.get_is_port() && (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout)) {
+    if (pin.get_is_port()
+        && (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout)) {
       port_name_list.push_back(pin_pair.first);
     }
   }
   std::sort(port_name_list.begin(), port_name_list.end());
-  setResult(std::move(port_name_list));
+  setResult(std::move(port_name_list), SdcObjectType::kPort);
   return 1;
 }
 
 }  // namespace ipw::sdc
-
-
-
-
-
 
 namespace ipw::sdc {
 
@@ -1758,24 +2075,30 @@ namespace {
 std::string trimFilterText(std::string text)
 {
   const std::size_t first = text.find_first_not_of(" \t\r\n");
-  if (first == std::string::npos) return {};
+  if (first == std::string::npos)
+    return {};
   const std::size_t last = text.find_last_not_of(" \t\r\n");
   text = text.substr(first, last - first + 1);
-  while (text.size() >= 2 && ((text.front() == '{' && text.back() == '}') || (text.front() == '(' && text.back() == ')'))) {
+  while (text.size() >= 2
+         && ((text.front() == '{' && text.back() == '}') || (text.front() == '(' && text.back() == ')'))) {
     int depth = 0;
     bool encloses_all = true;
     for (std::size_t index = 0; index < text.size(); ++index) {
-      if (text[index] == text.front()) ++depth;
-      if (text[index] == text.back()) --depth;
+      if (text[index] == text.front())
+        ++depth;
+      if (text[index] == text.back())
+        --depth;
       if (depth == 0 && index + 1 < text.size()) {
         encloses_all = false;
         break;
       }
     }
-    if (!encloses_all) break;
+    if (!encloses_all)
+      break;
     text = trimFilterText(text.substr(1, text.size() - 2));
   }
-  if (text.size() >= 2 && ((text.front() == '"' && text.back() == '"') || (text.front() == '\'' && text.back() == '\''))) {
+  if (text.size() >= 2
+      && ((text.front() == '"' && text.back() == '"') || (text.front() == '\'' && text.back() == '\''))) {
     text = text.substr(1, text.size() - 2);
   }
   return text;
@@ -1789,18 +2112,24 @@ std::size_t findFilterOperator(const std::string& expression, std::string_view o
   for (std::size_t index = 0; index + operation.size() <= expression.size(); ++index) {
     const char value = expression[index];
     if (quote != '\0') {
-      if (value == quote && (index == 0 || expression[index - 1] != '\\')) quote = '\0';
+      if (value == quote && (index == 0 || expression[index - 1] != '\\'))
+        quote = '\0';
       continue;
     }
     if (value == '"' || value == '\'') {
       quote = value;
       continue;
     }
-    if (value == '(') ++parentheses;
-    if (value == ')') --parentheses;
-    if (value == '{') ++braces;
-    if (value == '}') --braces;
-    if (parentheses == 0 && braces == 0 && expression.compare(index, operation.size(), operation) == 0) return index;
+    if (value == '(')
+      ++parentheses;
+    if (value == ')')
+      --parentheses;
+    if (value == '{')
+      ++braces;
+    if (value == '}')
+      --braces;
+    if (parentheses == 0 && braces == 0 && expression.compare(index, operation.size(), operation) == 0)
+      return index;
   }
   return std::string::npos;
 }
@@ -1812,10 +2141,16 @@ bool parseFilterNumber(const std::string& text, double& value)
   return end != text.c_str() && *end == '\0' && std::isfinite(value);
 }
 
-bool matchesFilter(const std::string& raw_expression, const std::map<std::string, std::string>& attributes, bool regexp, bool nocase)
+bool matchesFilter(
+    const std::string& raw_expression,
+    const std::map<std::string, std::string>& attributes,
+    bool regexp,
+    bool nocase
+)
 {
   const std::string expression = trimFilterText(raw_expression);
-  if (expression.empty()) return true;
+  if (expression.empty())
+    return true;
   for (std::string_view operation : {std::string_view("||"), std::string_view("&&")}) {
     const std::size_t position = findFilterOperator(expression, operation);
     if (position != std::string::npos) {
@@ -1824,16 +2159,26 @@ bool matchesFilter(const std::string& raw_expression, const std::map<std::string
       return operation == "||" ? left || right : left && right;
     }
   }
-  if (expression.front() == '!') return !matchesFilter(expression.substr(1), attributes, regexp, nocase);
+  if (expression.front() == '!')
+    return !matchesFilter(expression.substr(1), attributes, regexp, nocase);
 
-  for (std::string_view operation : {std::string_view("!~"), std::string_view("=~"), std::string_view("!="), std::string_view("=="),
-                                     std::string_view(">="), std::string_view("<="), std::string_view(">"), std::string_view("<")}) {
+  for (std::string_view operation :
+       {std::string_view("!~"),
+        std::string_view("=~"),
+        std::string_view("!="),
+        std::string_view("=="),
+        std::string_view(">="),
+        std::string_view("<="),
+        std::string_view(">"),
+        std::string_view("<")}) {
     const std::size_t position = findFilterOperator(expression, operation);
-    if (position == std::string::npos) continue;
+    if (position == std::string::npos)
+      continue;
     const std::string attribute = trimFilterText(expression.substr(0, position));
     const std::string expected = trimFilterText(expression.substr(position + operation.size()));
     const auto actual_iter = attributes.find(attribute);
-    if (actual_iter == attributes.end()) throw std::invalid_argument("unknown filter attribute: " + attribute);
+    if (actual_iter == attributes.end())
+      throw std::invalid_argument("unknown filter attribute: " + attribute);
     const std::string& actual = actual_iter->second;
     if (operation == "=~" || operation == "!~") {
       bool match = false;
@@ -1846,8 +2191,15 @@ bool matchesFilter(const std::string& raw_expression, const std::map<std::string
       } else if (nocase) {
         std::string folded_actual = actual;
         std::string folded_expected = expected;
-        std::transform(folded_actual.begin(), folded_actual.end(), folded_actual.begin(), [](unsigned char value) { return std::tolower(value); });
-        std::transform(folded_expected.begin(), folded_expected.end(), folded_expected.begin(), [](unsigned char value) { return std::tolower(value); });
+        std::transform(folded_actual.begin(), folded_actual.end(), folded_actual.begin(), [](unsigned char value) {
+          return std::tolower(value);
+        });
+        std::transform(
+            folded_expected.begin(),
+            folded_expected.end(),
+            folded_expected.begin(),
+            [](unsigned char value) { return std::tolower(value); }
+        );
         match = Tcl_StringMatch(folded_actual.c_str(), folded_expected.c_str()) != 0;
       } else {
         match = Tcl_StringMatch(actual.c_str(), expected.c_str()) != 0;
@@ -1863,13 +2215,17 @@ bool matchesFilter(const std::string& raw_expression, const std::map<std::string
     if (!parseFilterNumber(actual, left) || !parseFilterNumber(expected, right)) {
       throw std::invalid_argument("numeric filter comparison requires numbers: " + expression);
     }
-    if (operation == ">=") return left >= right;
-    if (operation == "<=") return left <= right;
-    if (operation == ">") return left > right;
+    if (operation == ">=")
+      return left >= right;
+    if (operation == "<=")
+      return left <= right;
+    if (operation == ">")
+      return left > right;
     return left < right;
   }
   const auto attribute = attributes.find(expression);
-  return attribute != attributes.end() && attribute->second != "false" && attribute->second != "0" && !attribute->second.empty();
+  return attribute != attributes.end() && attribute->second != "false" && attribute->second != "0"
+         && !attribute->second.empty();
 }
 
 struct ObjectMatch
@@ -1899,13 +2255,19 @@ std::string leafName(std::string name)
   return separator == std::string::npos ? name : name.substr(separator + 1);
 }
 
-void addObjectMatch(std::vector<ObjectMatch>& matches, std::string object_name, std::string display, std::string object_class,
-                           std::map<std::string, std::string> attributes = {})
+void addObjectMatch(
+    std::vector<ObjectMatch>& matches,
+    std::string object_name,
+    std::string display,
+    std::string object_class,
+    std::map<std::string, std::string> attributes = {}
+)
 {
   ObjectMatch match;
   match.object_name = std::move(object_name);
   match.names = {match.object_name};
-  if (display != match.object_name) match.names.push_back(display);
+  if (display != match.object_name)
+    match.names.push_back(display);
   match.names.push_back(leafName(display));
   attributes["name"] = leafName(display);
   attributes["full_name"] = display;
@@ -1917,7 +2279,8 @@ void addObjectMatch(std::vector<ObjectMatch>& matches, std::string object_name, 
 bool hasUnescapedBracket(const std::string& pattern)
 {
   for (std::size_t index = 0; index < pattern.size(); ++index) {
-    if ((pattern[index] == '[' || pattern[index] == ']') && (index == 0 || pattern[index - 1] != '\\')) return true;
+    if ((pattern[index] == '[' || pattern[index] == ']') && (index == 0 || pattern[index - 1] != '\\'))
+      return true;
   }
   return false;
 }
@@ -1927,7 +2290,8 @@ std::string escapeGlobBrackets(const std::string& pattern)
   std::string escaped;
   escaped.reserve(pattern.size() + 4);
   for (std::size_t index = 0; index < pattern.size(); ++index) {
-    if ((pattern[index] == '[' || pattern[index] == ']') && (index == 0 || pattern[index - 1] != '\\')) escaped.push_back('\\');
+    if ((pattern[index] == '[' || pattern[index] == ']') && (index == 0 || pattern[index - 1] != '\\'))
+      escaped.push_back('\\');
     escaped.push_back(pattern[index]);
   }
   return escaped;
@@ -1938,30 +2302,47 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
   std::vector<ObjectMatch> matches;
   if (type == QueryObjectType::kClock || type == QueryObjectType::kAny) {
     for (auto& [name, clock] : database.get_timing_constraint().get_clock_map()) {
-      addObjectMatch(matches, name, name, "clock", {{"period", std::to_string(clock.get_period())},
-                                                     {"is_generated", clock.get_is_generated() ? "true" : "false"},
-                                                     {"is_propagated", clock.get_is_propagated() ? "true" : "false"}});
+      addObjectMatch(
+          matches,
+          name,
+          name,
+          "clock",
+          {{"period", std::to_string(clock.get_period())},
+           {"is_generated", clock.get_is_generated() ? "true" : "false"},
+           {"is_propagated", clock.get_is_propagated() ? "true" : "false"}}
+      );
     }
   }
   if (type == QueryObjectType::kPort || type == QueryObjectType::kPin || type == QueryObjectType::kAny) {
     for (auto& [name, pin] : database.get_pin_map()) {
-      if ((type == QueryObjectType::kPort && !pin.get_is_port()) || (type == QueryObjectType::kPin && pin.get_is_port())) continue;
+      if ((type == QueryObjectType::kPort && !pin.get_is_port())
+          || (type == QueryObjectType::kPin && pin.get_is_port()))
+        continue;
       const std::string display = pin.get_is_port() ? name : pin.get_instance_name() + "/" + pin.get_pin_name();
-      std::map<std::string, std::string> attributes{{"direction", directionName(pin.get_direction())},
-                                                    {"is_port", pin.get_is_port() ? "true" : "false"}};
+      std::map<std::string, std::string> attributes{
+          {"direction", directionName(pin.get_direction())},
+          {"is_port", pin.get_is_port() ? "true" : "false"}
+      };
       if (!pin.get_is_port()) {
         attributes["pin_name"] = pin.get_pin_name();
         const auto instance = database.get_instance_map().find(pin.get_instance_name());
-        if (instance != database.get_instance_map().end()) attributes["ref_name"] = instance->second.get_cell_name();
+        if (instance != database.get_instance_map().end())
+          attributes["ref_name"] = instance->second.get_cell_name();
       }
       addObjectMatch(matches, name, display, pin.get_is_port() ? "port" : "pin", std::move(attributes));
     }
   }
   if (type == QueryObjectType::kCell || type == QueryObjectType::kAny) {
     for (auto& [name, instance] : database.get_instance_map()) {
-      addObjectMatch(matches, name, name, "cell", {{"ref_name", instance.get_cell_name()},
-                                                   {"is_sequential", instance.get_is_sequential() ? "true" : "false"},
-                                                   {"is_clock_gating_cell", instance.get_is_clock_gating() ? "true" : "false"}});
+      addObjectMatch(
+          matches,
+          name,
+          name,
+          "cell",
+          {{"ref_name", instance.get_cell_name()},
+           {"is_sequential", instance.get_is_sequential() ? "true" : "false"},
+           {"is_clock_gating_cell", instance.get_is_clock_gating() ? "true" : "false"}}
+      );
     }
   }
   if (type == QueryObjectType::kNet || type == QueryObjectType::kAny) {
@@ -1975,29 +2356,41 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
 QueryObjectType getObjectType(Database& database, const std::string& name)
 {
   const auto pin = database.get_pin_map().find(name);
-  if (pin != database.get_pin_map().end()) return pin->second.get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
-  if (database.get_timing_constraint().get_clock_map().contains(name)) return QueryObjectType::kClock;
-  if (database.get_instance_map().contains(name)) return QueryObjectType::kCell;
-  if (database.get_net_map().contains(name)) return QueryObjectType::kNet;
+  if (pin != database.get_pin_map().end())
+    return pin->second.get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
+  if (database.get_timing_constraint().get_clock_map().contains(name))
+    return QueryObjectType::kClock;
+  if (database.get_instance_map().contains(name))
+    return QueryObjectType::kCell;
+  if (database.get_net_map().contains(name))
+    return QueryObjectType::kNet;
   return QueryObjectType::kAny;
 }
 
-std::set<std::string> collectRelatedObjects(Database& database, const std::vector<std::string>& objects, QueryObjectType target)
+std::set<std::string> collectRelatedObjects(
+    Database& database,
+    const std::vector<std::string>& objects,
+    QueryObjectType target
+)
 {
   std::set<std::string> result;
   for (const std::string& object_pattern : objects) {
     const std::vector<std::string> object_names = findObjects(database, {object_pattern}, QueryObjectType::kAny);
     for (const std::string& object_name : object_names) {
       const QueryObjectType source = getObjectType(database, object_name);
-      if (source == target) result.insert(object_name);
+      if (source == target)
+        result.insert(object_name);
       if (source == QueryObjectType::kPin || source == QueryObjectType::kPort) {
         Pin& pin = database.get_pin_map().at(object_name);
-        if (target == QueryObjectType::kCell && !pin.get_instance_name().empty()) result.insert(pin.get_instance_name());
-        if (target == QueryObjectType::kNet && !pin.get_net_name().empty()) result.insert(pin.get_net_name());
+        if (target == QueryObjectType::kCell && !pin.get_instance_name().empty())
+          result.insert(pin.get_instance_name());
+        if (target == QueryObjectType::kNet && !pin.get_net_name().empty())
+          result.insert(pin.get_net_name());
       }
       if (source == QueryObjectType::kCell) {
         for (const std::string& pin_name : database.get_instance_map().at(object_name).get_pin_name_list()) {
-          if (target == QueryObjectType::kPin) result.insert(pin_name);
+          if (target == QueryObjectType::kPin)
+            result.insert(pin_name);
           if (target == QueryObjectType::kNet && database.get_pin_map().contains(pin_name)
               && !database.get_pin_map().at(pin_name).get_net_name().empty()) {
             result.insert(database.get_pin_map().at(pin_name).get_net_name());
@@ -2007,10 +2400,12 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       if (source == QueryObjectType::kNet) {
         Net& net = database.get_net_map().at(object_name);
         for (const std::string& pin_name : net.get_pin_name_list()) {
-          if (target == QueryObjectType::kPin && database.get_pin_map().contains(pin_name) && !database.get_pin_map().at(pin_name).get_is_port()) {
+          if (target == QueryObjectType::kPin && database.get_pin_map().contains(pin_name)
+              && !database.get_pin_map().at(pin_name).get_is_port()) {
             result.insert(pin_name);
           }
-          if (target == QueryObjectType::kPort && database.get_pin_map().contains(pin_name) && database.get_pin_map().at(pin_name).get_is_port()) {
+          if (target == QueryObjectType::kPort && database.get_pin_map().contains(pin_name)
+              && database.get_pin_map().at(pin_name).get_is_port()) {
             result.insert(pin_name);
           }
           if (target == QueryObjectType::kCell && database.get_pin_map().contains(pin_name)
@@ -2021,7 +2416,9 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       }
       if (target == QueryObjectType::kClock && (source == QueryObjectType::kPin || source == QueryObjectType::kPort)) {
         for (auto& [clock_name, clock] : database.get_timing_constraint().get_clock_map()) {
-          if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), object_name) != clock.get_source_list().end()) result.insert(clock_name);
+          if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), object_name)
+              != clock.get_source_list().end())
+            result.insert(clock_name);
         }
       }
     }
@@ -2032,16 +2429,23 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
 bool matchObjectName(std::string actual, std::string pattern, const ObjectQueryOptions& options, bool escape_brackets)
 {
   if (options.nocase) {
-    std::transform(actual.begin(), actual.end(), actual.begin(), [](unsigned char value) { return std::tolower(value); });
-    std::transform(pattern.begin(), pattern.end(), pattern.begin(), [](unsigned char value) { return std::tolower(value); });
+    std::transform(actual.begin(), actual.end(), actual.begin(), [](unsigned char value) {
+      return std::tolower(value);
+    });
+    std::transform(pattern.begin(), pattern.end(), pattern.begin(), [](unsigned char value) {
+      return std::tolower(value);
+    });
   }
-  if (options.exact) return actual == pattern;
+  if (options.exact)
+    return actual == pattern;
   if (options.regexp) {
     const std::string expression = "^(?:" + pattern + ")$";
-    if (Tcl_RegExpMatch(SdcCommand::getInst().getInterp(), "", expression.c_str()) < 0) throw std::invalid_argument("invalid regular expression: " + pattern);
+    if (Tcl_RegExpMatch(SdcCommand::getInst().getInterp(), "", expression.c_str()) < 0)
+      throw std::invalid_argument("invalid regular expression: " + pattern);
     return Tcl_RegExpMatch(SdcCommand::getInst().getInterp(), actual.c_str(), expression.c_str()) == 1;
   }
-  if (escape_brackets) pattern = escapeGlobBrackets(pattern);
+  if (escape_brackets)
+    pattern = escapeGlobBrackets(pattern);
   return Tcl_StringMatch(actual.c_str(), pattern.c_str()) != 0;
 }
 
@@ -2063,17 +2467,30 @@ std::vector<std::string> parseObjectPatterns(const std::string& text, bool regex
   return result;
 }
 
-std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, bool regexp)
+std::vector<std::string> findObjects(
+    Database& database,
+    const std::vector<std::string>& patterns,
+    QueryObjectType type,
+    bool regexp
+)
 {
   ObjectQueryOptions options;
   options.regexp = regexp;
   return findObjects(database, patterns, type, options);
 }
 
-std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, const ObjectQueryOptions& options)
+std::vector<std::string> findObjects(
+    Database& database,
+    const std::vector<std::string>& patterns,
+    QueryObjectType type,
+    const ObjectQueryOptions& options
+)
 {
-  if (options.regexp && options.exact) throw std::invalid_argument("-regexp and -exact are mutually exclusive");
-  const std::set<std::string> of_objects = options.of_objects.empty() ? std::set<std::string>{} : collectRelatedObjects(database, options.of_objects, type);
+  if (options.regexp && options.exact)
+    throw std::invalid_argument("-regexp and -exact are mutually exclusive");
+  const std::set<std::string> of_objects = options.of_objects.empty()
+                                               ? std::set<std::string>{}
+                                               : collectRelatedObjects(database, options.of_objects, type);
   const std::vector<ObjectMatch> object_matches = collectObjectMatches(database, type);
   std::set<std::string> found;
 
@@ -2083,8 +2500,10 @@ std::vector<std::string> findObjects(Database& database, const std::vector<std::
   };
   auto matches = [&](const ObjectMatch& candidate, const std::string& pattern, bool escape_brackets) {
     for (std::size_t index = 0; index < candidate.names.size(); ++index) {
-      if (index == 2 && !options.hierarchical) continue;
-      if (matchObjectName(candidate.names[index], pattern, options, escape_brackets)) return true;
+      if (index == 2 && !options.hierarchical)
+        continue;
+      if (matchObjectName(candidate.names[index], pattern, options, escape_brackets))
+        return true;
     }
     return false;
   };
@@ -2181,35 +2600,47 @@ std::vector<std::string> getPortPinNames(Database& database, const std::vector<s
   return pin_names;
 }
 
-std::vector<std::string> getObjectNames(Database& database, const std::string& object_list)
+std::vector<std::string> getObjectNames(Database& database, const std::string& object_list, bool name_only)
 {
   const std::vector<std::string> patterns = parseObjectPatterns(object_list, false);
+  if (name_only && patterns.size() != 1) {
+    throw std::invalid_argument("get_name requires exactly one object");
+  }
   if (patterns.empty()) {
     // An empty collection is a valid result of get_ports/get_pins and must
     // remain an empty collection when passed to get_object_name.
     return {};
   }
 
-  const std::vector<ObjectMatch> object_matches = collectObjectMatches(database, QueryObjectType::kAny);
-  std::map<std::string, std::string> full_names;
-  for (const ObjectMatch& match : object_matches) {
-    full_names.emplace(match.object_name, match.attributes.at("full_name"));
-  }
-
   std::vector<std::string> result;
   std::set<std::string> emitted;
   for (const std::string& pattern : patterns) {
-    const std::vector<std::string> matches = findObjects(database, {pattern}, QueryObjectType::kAny);
+    // get_name commonly consumes a single already-resolved collection item.
+    // Do not rebuild all design attributes for every item in an SDC foreach.
+    std::vector<std::string> matches;
+    if (database.get_pin_map().contains(pattern) || database.get_instance_map().contains(pattern)
+        || database.get_net_map().contains(pattern)
+        || database.get_timing_constraint().get_clock_map().contains(pattern)) {
+      matches.push_back(pattern);
+    } else {
+      matches = findObjects(database, {pattern}, QueryObjectType::kAny);
+    }
     if (matches.empty()) {
       throw std::invalid_argument("object '" + pattern + "' does not exist");
     }
+    if (name_only && matches.size() != 1) {
+      throw std::invalid_argument("get_name requires exactly one object");
+    }
     for (const std::string& match : matches) {
-      const auto full_name = full_names.find(match);
-      if (full_name == full_names.end()) {
-        throw std::invalid_argument("object '" + match + "' has no full name");
+      std::string full_name = match;
+      auto pin = database.get_pin_map().find(match);
+      if (pin != database.get_pin_map().end() && !pin->second.get_is_port()
+          && !database.get_timing_constraint().get_clock_map().contains(match)) {
+        full_name = name_only ? pin->second.get_pin_name()
+                              : pin->second.get_instance_name() + "/" + pin->second.get_pin_name();
       }
-      if (emitted.insert(full_name->second).second) {
-        result.push_back(full_name->second);
+      if (emitted.insert(full_name).second) {
+        result.push_back(full_name);
       }
     }
   }
@@ -2227,21 +2658,28 @@ void addObjectQueryOptions(SdcTclCmd& command, bool hierarchical, bool exact, bo
   command.addOption(new ecc::TclSwitchOption("-regexp"));
   command.addOption(new ecc::TclSwitchOption("-nocase"));
   command.addOption(new ecc::TclStringOption("-filter", 0));
-  if (hierarchical) command.addOption(new ecc::TclSwitchOption("-hierarchical"));
-  if (exact) command.addOption(new ecc::TclSwitchOption("-exact"));
-  if (of_objects) command.addOption(new ecc::TclStringListOption("-of_objects", 0));
+  if (hierarchical)
+    command.addOption(new ecc::TclSwitchOption("-hierarchical"));
+  if (exact)
+    command.addOption(new ecc::TclSwitchOption("-exact"));
+  if (of_objects)
+    command.addOption(new ecc::TclStringListOption("-of_objects", 0));
 }
 
 ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command)
 {
   ObjectQueryOptions options;
-  for (const auto& [name, target] : std::initializer_list<std::pair<const char*, bool*>>{{"-regexp", &options.regexp},
-                                                                                        {"-nocase", &options.nocase},
-                                                                                        {"-exact", &options.exact},
-                                                                                        {"-hierarchical", &options.hierarchical}}) {
-    if (ecc::TclOption* option = command.getOptionOrArg(name); option != nullptr) *target = option->is_set_val();
+  for (const auto& [name, target] : std::initializer_list<std::pair<const char*, bool*>>{
+           {"-regexp", &options.regexp},
+           {"-nocase", &options.nocase},
+           {"-exact", &options.exact},
+           {"-hierarchical", &options.hierarchical}
+       }) {
+    if (ecc::TclOption* option = command.getOptionOrArg(name); option != nullptr)
+      *target = option->is_set_val();
   }
-  if (ecc::TclOption* filter = command.getOptionOrArg("-filter"); filter != nullptr && filter->is_set_val()) options.filter = filter->getStringVal();
+  if (ecc::TclOption* filter = command.getOptionOrArg("-filter"); filter != nullptr && filter->is_set_val())
+    options.filter = filter->getStringVal();
   if (ecc::TclOption* objects = command.getOptionOrArg("-of_objects"); objects != nullptr && objects->is_set_val()) {
     options.of_objects = objects->getStringList();
   }
@@ -2250,10 +2688,14 @@ ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command)
 
 std::optional<std::string> getObjectQueryError(const ObjectQueryOptions& options, bool has_patterns)
 {
-  if (options.regexp && options.exact) return "-regexp and -exact are mutually exclusive";
-  if (options.nocase && !options.regexp) return "-nocase requires -regexp";
-  if (has_patterns && !options.of_objects.empty()) return "patterns and -of_objects are mutually exclusive";
-  if (options.hierarchical && !options.of_objects.empty()) return "-hierarchical and -of_objects are mutually exclusive";
+  if (options.regexp && options.exact)
+    return "-regexp and -exact are mutually exclusive";
+  if (options.nocase && !options.regexp)
+    return "-nocase requires -regexp";
+  if (has_patterns && !options.of_objects.empty())
+    return "patterns and -of_objects are mutually exclusive";
+  if (options.hierarchical && !options.of_objects.empty())
+    return "-hierarchical and -of_objects are mutually exclusive";
   return std::nullopt;
 }
 

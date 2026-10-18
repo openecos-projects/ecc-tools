@@ -156,13 +156,104 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
                           std::move(drc_check_region_list));
 }
 
-std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape> drc_env_shape_list,
-                                                           std::vector<DRCShape> drc_result_shape_list,
-                                                           std::set<ViolationType> drc_check_type_set,
+// 1. assume no instance is placed within "spacing" distance, only check routing shapes
+// 2. assume macros are seperated at least "spacing" distance, parallel check each macro
+std::vector<Violation> DRCInterface::getMacroViolationList(std::vector<DRCShape> drc_result_shape_list,
                                                            std::vector<DRCShape> drc_check_region_list)
 {
-  std::vector<Violation> violation_list = DRCRV.verify(std::move(drc_env_shape_list), std::move(drc_result_shape_list),
-                                                       std::move(drc_check_type_set), std::move(drc_check_region_list));
+  const std::vector<MacroObs>& macro_obs_list = DRCDM.getDatabase().get_macro_obs_list();
+
+  int32_t thread_num = std::min(static_cast<int32_t>(macro_obs_list.size()), omp_get_max_threads());
+  std::vector<std::vector<Violation>> violation_list_list(macro_obs_list.size());
+#pragma omp parallel for num_threads(std::max(thread_num, 1))
+  for (int32_t i = 0; i < static_cast<int32_t>(macro_obs_list.size()); i++) {
+    const MacroObs& macro_obs = macro_obs_list[i];
+    std::vector<Violation>& violation_list = violation_list_list[i];
+    for (const MacroObsLayer& macro_obs_layer : macro_obs.obs_layer_list) {
+      PlanarRect check_rect = DRCUTIL.getEnlargedRect(macro_obs_layer.bounding_box, macro_obs_layer.min_spacing);
+      if (!drc_check_region_list.empty()) {
+        bool is_in_check_region = false;
+        for (const DRCShape& drc_check_region : drc_check_region_list) {
+          if (DRCUTIL.isClosedOverlap(check_rect, drc_check_region.get_rect())) {
+            is_in_check_region = true;
+            break;
+          }
+        }
+        if (!is_in_check_region) {
+          continue;
+        }
+      }
+      std::map<int32_t, GTLPolySetInt> net_polyset_map;
+      for (const DRCShape& drc_result_shape : drc_result_shape_list) {
+        if (drc_result_shape.get_layer_idx() != macro_obs_layer.layer_idx
+            || drc_result_shape.get_is_routing() != macro_obs_layer.is_routing) {
+          continue;
+        }
+        if (!DRCUTIL.isClosedOverlap(check_rect, drc_result_shape.get_rect())) {
+          continue;
+        }
+        net_polyset_map[drc_result_shape.get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_result_shape.get_rect());
+      }
+
+      for (auto& [net_idx, net_polyset] : net_polyset_map) {
+        std::vector<GTLRectInt> max_rect_list;
+        gtl::get_max_rectangles(max_rect_list, net_polyset);
+        std::vector<PlanarRect> violation_rect_list;
+        for (const GTLRectInt& max_rect : max_rect_list) {
+          PlanarRect result_rect = DRCUTIL.convertToPlanarRect(max_rect);
+          // exempt wires which are overlapped with macro pin
+          if (isMacroPinOverlapped(macro_obs_layer.pin_rect_list, result_rect)) {
+            continue;
+          }
+          for (const PlanarRect& obs_rect : macro_obs_layer.obs_rect_list) {
+            if (macro_obs_layer.min_spacing <= DRCUTIL.getEuclideanDistance(obs_rect, result_rect)) {
+              continue;
+            }
+            violation_rect_list.push_back(DRCUTIL.getSpacingRect(obs_rect, result_rect));
+          }
+        }
+
+        GTLPolySetInt violation_polyset;
+        for (PlanarRect& violation_rect : violation_rect_list) {
+          violation_polyset += DRCUTIL.convertToGTLRectInt(violation_rect);
+        }
+        std::vector<GTLRectInt> merged_rect_list;
+        gtl::get_max_rectangles(merged_rect_list, violation_polyset);
+        for (const GTLRectInt& merged_rect : merged_rect_list) {
+          Violation violation;
+          violation.set_violation_type(ViolationType::kMacroObsSpacing);
+          violation.set_is_routing(true);
+          violation.set_violation_net_set({net_idx});
+          violation.set_required_size(macro_obs_layer.min_spacing);
+          violation.set_layer_idx(macro_obs_layer.layer_idx);
+          violation.set_rect(DRCUTIL.convertToPlanarRect(merged_rect));
+          violation_list.push_back(std::move(violation));
+        }
+      }
+    }
+  }
+
+  std::vector<Violation> violation_list;
+  for (std::vector<Violation>& sub_violation_list : violation_list_list) {
+    violation_list.insert(violation_list.end(), sub_violation_list.begin(), sub_violation_list.end());
+  }
+  std::sort(violation_list.begin(), violation_list.end(), CmpViolation());
+  violation_list.erase(std::unique(violation_list.begin(), violation_list.end()), violation_list.end());
+  return violation_list;
+}
+
+bool DRCInterface::isMacroPinOverlapped(const std::vector<PlanarRect>& pin_rect_list, const PlanarRect& rect)
+{
+  for (const PlanarRect& pin_rect : pin_rect_list) {
+    if (DRCUTIL.isOpenOverlap(pin_rect, rect)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<ids::Violation> DRCInterface::convertToIDSViolationList(const std::vector<Violation>& violation_list)
+{
   std::vector<ids::Violation> ids_violation_list;
   ids_violation_list.reserve(violation_list.size());
   for (const Violation& violation : violation_list) {
@@ -179,6 +270,21 @@ std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape>
     ids_violation_list.push_back(std::move(ids_violation));
   }
   return ids_violation_list;
+}
+
+std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape> drc_env_shape_list,
+                                                           std::vector<DRCShape> drc_result_shape_list,
+                                                           std::set<ViolationType> drc_check_type_set,
+                                                           std::vector<DRCShape> drc_check_region_list)
+{
+  std::vector<Violation> violation_list = DRCRV.verify(std::move(drc_env_shape_list), drc_result_shape_list, std::move(drc_check_type_set),
+                                                       drc_check_region_list);
+  bool need_check_macro = drc_check_type_set.empty() || DRCUTIL.exist(drc_check_type_set, ViolationType::kMacroObsSpacing);
+  if (need_check_macro) {
+    std::vector<Violation> macro_violation_list = getMacroViolationList(std::move(drc_result_shape_list), std::move(drc_check_region_list));
+    violation_list.insert(violation_list.end(), macro_violation_list.begin(), macro_violation_list.end());
+  }
+  return convertToIDSViolationList(violation_list);
 }
 
 #endif
@@ -596,7 +702,7 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
                                 idb_segment->get_delta_rect()->get_high_x(), idb_segment->get_delta_rect()->get_high_y());
           PlanarRect rect = DRCUTIL.getOffsetRect(delta_rect, offset_coord);
           DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()), LayerRect(rect, idb_segment->get_layer()->get_id()), true);
-          drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
+          drc_shape.set_source_type(ids::Shape::SourceType::kPatch);
           result_shape_list.push_back(std::move(drc_shape));
         }
       }
@@ -626,6 +732,8 @@ std::vector<DRCShape> DRCInterface::buildResultShapeList()
   DRCLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
   return result_shape_list;
 }
+
+
 
 void DRCInterface::printSummary(std::map<std::string, std::vector<ids::Violation>>& type_violation_map)
 {

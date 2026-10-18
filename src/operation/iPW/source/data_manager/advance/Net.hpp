@@ -26,13 +26,16 @@ class Net
   Net() = default;
   ~Net() = default;
   // getter
+  uint64_t get_index() const { return _index; }
   std::vector<std::string>& get_driver_pin_list() { return _driver_pin_list; }
   std::vector<std::string>& get_load_pin_list() { return _load_pin_list; }
   std::vector<std::string>& get_pin_name_list() { return _pin_name_list; }
   // setter
+  void set_index(const uint64_t index) { _index = index; }
   // function
 
  private:
+  uint64_t _index = 0;
   std::vector<std::string> _driver_pin_list;
   std::vector<std::string> _load_pin_list;
   std::vector<std::string> _pin_name_list;

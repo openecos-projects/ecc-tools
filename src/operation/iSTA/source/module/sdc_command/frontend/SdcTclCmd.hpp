@@ -18,6 +18,7 @@
 
 #include "STAHeader.hpp"
 #include "ScriptEngine.hh"
+#include "sdc_data_manager/SdcObject.hpp"
 
 namespace ista::sdc {
 
@@ -34,7 +35,8 @@ class SdcTclCmd : public ecc::TclCmd
   void setTclError(std::string error_message) { _error_message = std::move(error_message); }
   void warn(const std::string& message) const;
   void setResult(std::string result);
-  void setResult(std::vector<std::string> result);
+  void setResult(std::vector<std::string> result, SdcObjectType type = SdcObjectType::kNone);
+  std::vector<Tcl_Obj*> getOptionObjects(const std::string& name);
   const std::vector<std::pair<std::string, std::string>>& getOptionValueList() const { return _option_value_list; }
 
   ClientData getClientData() const { return _client_data; }
@@ -47,6 +49,8 @@ class SdcTclCmd : public ecc::TclCmd
   std::string _error_message;
   std::string _result;
   std::vector<std::string> _list_result;
+  SdcObjectType _list_result_type = SdcObjectType::kNone;
+  std::map<std::string, Tcl_Obj*> _option_object_map;
   std::vector<std::pair<std::string, std::string>> _option_value_list;
   bool _has_result = false;
   bool _has_list_result = false;

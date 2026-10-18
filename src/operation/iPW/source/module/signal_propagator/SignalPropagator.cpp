@@ -19,6 +19,7 @@
 #include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
+#include "SharedDriverResultCache.hpp"
 
 namespace ipw {
 
@@ -71,33 +72,79 @@ bool SignalPropagator::isDisableArc(Arc& arc)
 
 bool SignalPropagator::shouldStopSignalSlewPropagation(Arc& arc)
 {
-  if (arc.get_type() != ArcType::kNet || !isSequentialClockPin(arc.get_sink_pin())) {
+  if (arc.get_type() != ArcType::kNet) {
     return false;
   }
-  return PWDM.getDatabase().get_timing_point_map()[arc.get_sink_pin()].get_is_clock_point();
+  const uint32_t sink_pin_index = arc.get_sink_pin_index();
+  if (!isSequentialClockPin(sink_pin_index)) {
+    return false;
+  }
+  // 必须读实时的 TimingPoint：ClockPropagator 在建图之后才 mark clock point，
+  // PinStaticContext 里的 is_clock_point 只是那时的快照。
+  TimingPoint* timing_point = findTimingPoint(sink_pin_index);
+  return timing_point != nullptr && timing_point->get_is_clock_point();
+}
+
+TimingPoint* SignalPropagator::findTimingPoint(uint32_t pin_index)
+{
+  const std::vector<Database::PinStaticContext>& pin_static_context_list
+      = PWDM.getDatabase().get_pin_static_context_list();
+  if (pin_index >= pin_static_context_list.size()) {
+    return nullptr;
+  }
+  return pin_static_context_list[pin_index].timing_point;
+}
+
+bool SignalPropagator::isSequentialClockPin(uint32_t pin_index)
+{
+  const std::vector<Database::PinStaticContext>& pin_static_context_list
+      = PWDM.getDatabase().get_pin_static_context_list();
+  if (pin_index >= pin_static_context_list.size()) {
+    return false;
+  }
+  const Database::PinStaticContext& pin_static_context = pin_static_context_list[pin_index];
+  if (pin_static_context.pin == nullptr || pin_static_context.instance == nullptr
+      || pin_static_context.full_name == nullptr || pin_static_context.pin->get_is_port()) {
+    return false;
+  }
+  Instance& instance = *pin_static_context.instance;
+  return instance.get_is_sequential() && *pin_static_context.full_name == instance.get_clock_pin_name();
 }
 
 bool SignalPropagator::isSequentialClockPin(std::string& pin_name)
 {
   Database& database = PWDM.getDatabase();
-  Pin& pin = database.get_pin_map()[pin_name];
-  if (pin.get_is_port() || database.get_instance_map().count(pin.get_instance_name()) == 0) {
+  auto pin_iter = database.get_pin_map().find(pin_name);
+  if (pin_iter == database.get_pin_map().end()) {
     return false;
   }
-  Instance& instance = database.get_instance_map()[pin.get_instance_name()];
-  return instance.get_is_sequential() && pin_name == instance.get_clock_pin_name();
+  return isSequentialClockPin(static_cast<uint32_t>(pin_iter->second.get_index()));
 }
 
-bool SignalPropagator::hasIncomingPhysicalSlewArc(std::string& pin_name)
+bool SignalPropagator::hasIncomingPhysicalSlewArc(uint32_t pin_index)
 {
   Database& database = PWDM.getDatabase();
-  for (std::size_t arc_idx : database.get_incoming_arc_list_map()[pin_name]) {
+  const std::vector<std::vector<uint32_t>>& incoming_arc_index_list = database.get_incoming_arc_index_list();
+  if (pin_index >= incoming_arc_index_list.size()) {
+    return false;
+  }
+  for (uint32_t arc_idx : incoming_arc_index_list[pin_index]) {
     Arc& arc = database.get_arc_list()[arc_idx];
     if (arc.get_type() == ArcType::kNet && !isDisableArc(arc)) {
       return true;
     }
   }
   return false;
+}
+
+bool SignalPropagator::hasIncomingPhysicalSlewArc(std::string& pin_name)
+{
+  Database& database = PWDM.getDatabase();
+  auto pin_iter = database.get_pin_map().find(pin_name);
+  if (pin_iter == database.get_pin_map().end()) {
+    return false;
+  }
+  return hasIncomingPhysicalSlewArc(static_cast<uint32_t>(pin_iter->second.get_index()));
 }
 
 void SignalPropagator::seedSignalSlewList()
@@ -117,12 +164,17 @@ void SignalPropagator::seedSignalSlew(std::string& source_pin, AnalysisType anal
 void SignalPropagator::seedSignalSlew(std::string& source_pin, AnalysisType analysis_type, TransType trans_type)
 {
   Database& database = PWDM.getDatabase();
-  if (!database.get_timing_constraint().allowsTransition(source_pin, trans_type)) {
+  if (!database.get_timing_constraint().allowsTransition(
+          source_pin,
+          trans_type,
+          database.get_pin_map().at(source_pin).get_direction() == PinDirection::kInout
+      )) {
     return;
   }
-  TimingPoint& timing_point = database.get_timing_point_map()[source_pin];
+  TimingPoint& timing_point = database.getDriverTimingPoint(source_pin);
   if (isSequentialClockPin(source_pin) && hasIncomingPhysicalSlewArc(source_pin)
-      && (timing_point.get_clock_slew_map().count(analysis_type) == 0 || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0)) {
+      && (timing_point.get_clock_slew_map().count(analysis_type) == 0
+          || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0)) {
     return;
   }
   timing_point.get_data_slew_map()[analysis_type][trans_type] = getSourcePinSlew(source_pin, analysis_type, trans_type);
@@ -133,7 +185,8 @@ double SignalPropagator::getSourcePinSlew(std::string& source_pin, AnalysisType 
   Database& database = PWDM.getDatabase();
   Pin& pin = database.get_pin_map()[source_pin];
   if (pin.get_is_port()) {
-    std::map<std::string, TimingPortConstraint>& port_constraint_map = database.get_timing_constraint().get_port_constraint_map();
+    std::map<std::string, TimingPortConstraint>& port_constraint_map
+        = database.get_timing_constraint().get_port_constraint_map();
     if (port_constraint_map.count(source_pin) == 0) {
       return 0.0;
     }
@@ -177,10 +230,15 @@ double SignalPropagator::getSourcePinSlew(std::string& source_pin, AnalysisType 
   return 0.0;
 }
 
-std::optional<double> SignalPropagator::getDrivingCellSlew(std::string& source_pin, AnalysisType analysis_type, TransType trans_type)
+std::optional<double> SignalPropagator::getDrivingCellSlew(
+    std::string& source_pin,
+    AnalysisType analysis_type,
+    TransType trans_type
+)
 {
   Database& database = PWDM.getDatabase();
-  std::map<std::string, TimingPortConstraint>& port_constraint_map = database.get_timing_constraint().get_port_constraint_map();
+  std::map<std::string, TimingPortConstraint>& port_constraint_map
+      = database.get_timing_constraint().get_port_constraint_map();
   if (!port_constraint_map.contains(source_pin)) {
     return std::nullopt;
   }
@@ -197,12 +255,20 @@ std::optional<double> SignalPropagator::getDrivingCellSlew(std::string& source_p
     return std::nullopt;
   }
   for (TimingCellArc& timing_cell_arc : timing_cell.get_cell_arc_list()) {
-    if (timing_cell_arc.get_source_port() != driving_cell->get_from_pin() || timing_cell_arc.get_sink_port() != driving_cell->get_to_pin()) {
+    if (timing_cell_arc.get_source_port() != driving_cell->get_from_pin()
+        || timing_cell_arc.get_sink_port() != driving_cell->get_to_pin()) {
       continue;
     }
     double output_slew = 0.0;
-    if (PWDC.calculateDrivingCell(source_pin, timing_cell_arc, analysis_type, trans_type, driving_cell->get_input_transition_rise(),
-                                   driving_cell->get_input_transition_fall(), output_slew)) {
+    if (PWDC.calculateDrivingCell(
+            source_pin,
+            timing_cell_arc,
+            analysis_type,
+            trans_type,
+            driving_cell->get_input_transition_rise(),
+            driving_cell->get_input_transition_fall(),
+            output_slew
+        )) {
       return output_slew;
     }
   }
@@ -228,74 +294,165 @@ double SignalPropagator::getClockSlew(std::string& pin_name, AnalysisType analys
     return 0.0;
   }
   TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
-  if (timing_point.get_clock_slew_map().count(analysis_type) == 0 || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0) {
+  if (timing_point.get_clock_slew_map().count(analysis_type) == 0
+      || timing_point.get_clock_slew_map()[analysis_type].count(trans_type) == 0) {
     return 0.0;
   }
   return timing_point.get_clock_slew_map()[analysis_type][trans_type];
 }
 
+double SignalPropagator::getClockSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type)
+{
+  std::map<AnalysisType, std::map<TransType, double>>& clock_slew_map = timing_point.get_clock_slew_map();
+  auto analysis_iter = clock_slew_map.find(analysis_type);
+  if (analysis_iter == clock_slew_map.end()) {
+    return 0.0;
+  }
+  auto trans_iter = analysis_iter->second.find(trans_type);
+  return trans_iter == analysis_iter->second.end() ? 0.0 : trans_iter->second;
+}
+
+// 按"层桶"推进：桶内每个 pin 的源斜率都已定值，于是①可以并行算，②必须按原序串行提交。
+// 桶 = signal_order 上的连续区间（buildSignalLevel 保证），提交顺序与旧逐 pin 实现完全一致。
 void SignalPropagator::propagateSignalSlew()
 {
   Database& database = PWDM.getDatabase();
-  for (std::string& pin_name : database.get_signal_order_list()) {
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
-      if (isDisableArc(database.get_arc_list()[arc_idx])) {
-        continue;
-      }
-      propagateSignalSlewArc(arc_idx);
+  const std::vector<int32_t>& pin_order_list = database.get_graph_order_list();
+  if (pin_order_list.empty()) {
+    return;
+  }
+  const std::vector<uint32_t>& level_begin_list = database.get_signal_level_begin_list();
+  // 没有层信息时退化成"一 pin 一桶"：与旧实现等价，只是没有并行度。
+  std::vector<uint32_t> fallback_begin_list;
+  const std::vector<uint32_t>* bucket_begin_list = &level_begin_list;
+  if (level_begin_list.size() < 2) {
+    fallback_begin_list.reserve(pin_order_list.size() + 1);
+    for (std::size_t idx = 0; idx <= pin_order_list.size(); idx++) {
+      fallback_begin_list.push_back(static_cast<uint32_t>(idx));
+    }
+    bucket_begin_list = &fallback_begin_list;
+  }
+  const int32_t thread_num = std::max(PWDM.getConfig().thread_number, 1);
+
+  // 每个 pin 一个结果槽；同桶内不同 pin 槽位不同，所以并行写各自槽位无竞争。
+  std::vector<std::vector<SlewUpdate>> update_list;
+  for (std::size_t bucket = 0; bucket + 1 < bucket_begin_list->size(); bucket++) {
+    const std::size_t begin = (*bucket_begin_list)[bucket];
+    const std::size_t end = (*bucket_begin_list)[bucket + 1];
+    const std::int64_t bucket_pin_num = static_cast<std::int64_t>(end) - static_cast<std::int64_t>(begin);
+    if (bucket_pin_num <= 0) {
+      continue;
+    }
+    update_list.resize(static_cast<std::size_t>(bucket_pin_num));
+#pragma omp parallel for schedule(dynamic, 32) num_threads(thread_num)
+    for (std::int64_t i = 0; i < bucket_pin_num; i++) {
+      const std::size_t in_bucket_idx = static_cast<std::size_t>(i);
+      std::vector<SlewUpdate>& updates = update_list[in_bucket_idx];
+      updates.clear();
+      computeSignalSlewPin(pin_order_list[begin + in_bucket_idx], updates);
+    }
+    // 串行提交：严格按 signal_order 原序逐 pin 回放，保持同一 sink 的更新次序不变。
+    for (std::size_t in_bucket_idx = 0; in_bucket_idx < update_list.size(); in_bucket_idx++) {
+      applySignalSlewList(update_list[in_bucket_idx]);
     }
   }
 }
 
-void SignalPropagator::propagateSignalSlewArc(std::size_t arc_idx)
+void SignalPropagator::computeSignalSlewPin(uint32_t pin_index, std::vector<SlewUpdate>& updates)
 {
-  propagateSignalSlewArc(arc_idx, AnalysisType::kMax, TransType::kRise);
-  propagateSignalSlewArc(arc_idx, AnalysisType::kMax, TransType::kFall);
-  propagateSignalSlewArc(arc_idx, AnalysisType::kMin, TransType::kRise);
-  propagateSignalSlewArc(arc_idx, AnalysisType::kMin, TransType::kFall);
+  Database& database = PWDM.getDatabase();
+  for (std::size_t arc_idx : database.get_graph_vertex_list()[pin_index].get_outgoing_arc_list()) {
+    if (isDisableArc(database.get_arc_list()[arc_idx])) {
+      continue;
+    }
+    computeSignalSlewArc(arc_idx, updates);
+  }
 }
 
-void SignalPropagator::propagateSignalSlewArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type)
+void SignalPropagator::computeSignalSlewArc(uint32_t arc_idx, std::vector<SlewUpdate>& updates)
+{
+  computeSignalSlewArc(arc_idx, AnalysisType::kMax, TransType::kRise, updates);
+  computeSignalSlewArc(arc_idx, AnalysisType::kMax, TransType::kFall, updates);
+  computeSignalSlewArc(arc_idx, AnalysisType::kMin, TransType::kRise, updates);
+  computeSignalSlewArc(arc_idx, AnalysisType::kMin, TransType::kFall, updates);
+}
+
+// 阶段①：纯计算。除了 thread_local 的延时缓存，不写任何共享状态。
+void SignalPropagator::computeSignalSlewArc(
+    uint32_t arc_idx,
+    AnalysisType analysis_type,
+    TransType input_trans_type,
+    std::vector<SlewUpdate>& updates
+)
 {
   Database& database = PWDM.getDatabase();
   Arc& arc = database.get_arc_list()[arc_idx];
   if (isDisableArc(arc) || shouldStopSignalSlewPropagation(arc)
-      || !database.get_timing_constraint().allowsTransition(arc.get_source_pin(), input_trans_type)) {
+      || !database.get_timing_constraint().allowsTransition(
+          arc.get_source_pin(),
+          input_trans_type,
+          arc.get_type() == ArcType::kNet
+              && database.get_pin_map().at(arc.get_source_pin()).get_direction() == PinDirection::kInout
+      )) {
     return;
   }
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  if (!hasSignalSlew(source_point, analysis_type, input_trans_type)) {
+  TimingPoint* source_point = &database.getSourceTimingPoint(arc);
+  if (source_point == nullptr || !hasSignalSlew(*source_point, analysis_type, input_trans_type)) {
     return;
   }
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  const uint32_t sink_pin_index = arc.get_sink_pin_index();
+  if (findTimingPoint(sink_pin_index) == nullptr) {
+    return;
+  }
   for (TransType output_trans_type : getOutputTransTypeList(arc, input_trans_type)) {
-    if (!database.get_timing_constraint().allowsTransition(arc.get_sink_pin(), output_trans_type)) {
+    if (!database.get_timing_constraint().allowsTransition(
+            arc.get_sink_pin(),
+            output_trans_type,
+            arc.get_type() == ArcType::kCell
+                && database.get_pin_map().at(arc.get_sink_pin()).get_direction() == PinDirection::kInout
+        )) {
       continue;
     }
-    updateSignalSlew(arc, source_point, sink_point, analysis_type, input_trans_type, output_trans_type);
+    DCTask dc_task;
+    dc_task.set_arc(&arc);
+    dc_task.set_analysis_type(analysis_type);
+    dc_task.set_input_trans_type(input_trans_type);
+    dc_task.set_output_trans_type(output_trans_type);
+    dc_task.set_input_slew(getSignalSlew(*source_point, analysis_type, input_trans_type));
+    if (isSequentialClockPin(arc.get_source_pin_index())) {
+      dc_task.set_output_slew_input_slew(getClockSlew(*source_point, analysis_type, input_trans_type));
+    }
+    PWDC.calculate(dc_task);
+    if (!dc_task.get_is_valid()) {
+      continue;
+    }
+    updates.push_back(SlewUpdate{
+        static_cast<uint32_t>(arc.get_sink_vertex_idx()),
+        analysis_type,
+        output_trans_type,
+        dc_task.get_output_slew()
+    });
   }
 }
 
-void SignalPropagator::updateSignalSlew(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                                        TransType input_trans_type, TransType output_trans_type)
+// 阶段②：唯一写 TimingPoint 的地方，按 updates 的记录序回放。
+void SignalPropagator::applySignalSlewList(const std::vector<SlewUpdate>& updates)
 {
-  DCTask dc_task;
-  dc_task.set_arc(&arc);
-  dc_task.set_analysis_type(analysis_type);
-  dc_task.set_input_trans_type(input_trans_type);
-  dc_task.set_output_trans_type(output_trans_type);
-  dc_task.set_input_slew(getSignalSlew(source_point, analysis_type, input_trans_type));
-  if (isSequentialClockPin(arc.get_source_pin())) {
-    dc_task.set_output_slew_input_slew(getClockSlew(arc.get_source_pin(), analysis_type, input_trans_type));
+  for (const SlewUpdate& update : updates) {
+    TimingPoint* timing_point = &PWDM.getDatabase().get_graph_vertex_list()[update.sink_vertex_idx].get_timing_point();
+    if (timing_point == nullptr) {
+      continue;
+    }
+    updateSignalSlew(*timing_point, update.analysis_type, update.trans_type, update.slew);
   }
-  PWDC.calculate(dc_task);
-  if (!dc_task.get_is_valid()) {
-    return;
-  }
-  updateSignalSlew(sink_point, analysis_type, output_trans_type, dc_task.get_output_slew());
 }
 
-void SignalPropagator::updateSignalSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double signal_slew)
+void SignalPropagator::updateSignalSlew(
+    TimingPoint& timing_point,
+    AnalysisType analysis_type,
+    TransType trans_type,
+    double signal_slew
+)
 {
   if (!hasSignalSlew(timing_point, analysis_type, trans_type)
       || isBetterSlew(signal_slew, timing_point.get_data_slew_map()[analysis_type][trans_type], analysis_type)) {
@@ -305,7 +462,8 @@ void SignalPropagator::updateSignalSlew(TimingPoint& timing_point, AnalysisType 
 
 bool SignalPropagator::hasSignalSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type)
 {
-  return timing_point.get_data_slew_map().count(analysis_type) > 0 && timing_point.get_data_slew_map()[analysis_type].count(trans_type) > 0;
+  return timing_point.get_data_slew_map().count(analysis_type) > 0
+         && timing_point.get_data_slew_map()[analysis_type].count(trans_type) > 0;
 }
 
 double SignalPropagator::getSignalSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type)

@@ -16,13 +16,12 @@
 // ***************************************************************************************
 #include "ClockPropagator.hpp"
 
+#include <functional>
+
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
-#include "TimingCaseAnalysis.hpp"
-
-#include <functional>
 
 namespace ista {
 
@@ -57,7 +56,6 @@ void ClockPropagator::propagate()
 {
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
-  TimingCaseAnalysis::apply(STADM.getDatabase());
   initTimingPointList();
   CPModel cp_model = initCPModel();
   buildClockSourceList(cp_model);
@@ -108,28 +106,29 @@ void ClockPropagator::buildClockSourceList(CPModel& cp_model)
 void ClockPropagator::initTimingPointList()
 {
   Database& database = STADM.getDatabase();
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    timing_pair.second.set_arrival(-std::numeric_limits<double>::infinity());
-    timing_pair.second.set_required(std::numeric_limits<double>::infinity());
-    timing_pair.second.set_slack(0.0);
-    timing_pair.second.set_launch_time(0.0);
-    timing_pair.second.get_predecessor().clear();
-    timing_pair.second.get_clock_name().clear();
-    timing_pair.second.clear_clock_state_map();
-    timing_pair.second.get_clock_arrival_map().clear();
-    timing_pair.second.get_clock_slew_map().clear();
-    timing_pair.second.get_physical_clock_arrival_map().clear();
-    timing_pair.second.get_physical_clock_slew_map().clear();
-    timing_pair.second.get_path_state_map().clear();
-    timing_pair.second.get_data_slew_map().clear();
-    timing_pair.second.get_clock_predecessor_map().clear();
-    timing_pair.second.get_clock_predecessor_arc_delay_map().clear();
-    timing_pair.second.get_clock_predecessor_trans_type_map().clear();
-    timing_pair.second.get_physical_clock_predecessor_map().clear();
-    timing_pair.second.get_physical_clock_predecessor_arc_delay_map().clear();
-    timing_pair.second.get_physical_clock_predecessor_trans_type_map().clear();
-    timing_pair.second.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
-    timing_pair.second.set_is_clock_point(false);
+  for (GraphVertex& vertex : database.get_graph_vertex_list()) {
+    TimingPoint& point = vertex.get_timing_point();
+    point.set_arrival(-std::numeric_limits<double>::infinity());
+    point.set_required(std::numeric_limits<double>::infinity());
+    point.set_slack(0.0);
+    point.set_launch_time(0.0);
+    point.get_predecessor().clear();
+    point.get_clock_name().clear();
+    point.clear_clock_state_map();
+    point.get_clock_arrival_map().clear();
+    point.get_clock_slew_map().clear();
+    point.get_physical_clock_arrival_map().clear();
+    point.get_physical_clock_slew_map().clear();
+    point.get_path_state_map().clear();
+    point.get_data_slew_map().clear();
+    point.get_clock_predecessor_map().clear();
+    point.get_clock_predecessor_arc_delay_map().clear();
+    point.get_clock_predecessor_trans_type_map().clear();
+    point.get_physical_clock_predecessor_map().clear();
+    point.get_physical_clock_predecessor_arc_delay_map().clear();
+    point.get_physical_clock_predecessor_trans_type_map().clear();
+    point.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
+    point.set_is_clock_point(false);
   }
 }
 
@@ -143,22 +142,24 @@ void ClockPropagator::markClockPointList(CPModel& cp_model)
 void ClockPropagator::markClockPoint(CPClock& clock)
 {
   Database& database = STADM.getDatabase();
-  std::queue<std::string> pin_queue;
+  std::queue<int32_t> pin_queue;
   for (const auto& clock_source : clock.get_source_list()) {
     if (!database.get_timing_point_map().contains(clock_source)) {
       STALOG.warn(Loc::current(), "clock '", clock.get_clock_name(), "' has no source");
       continue;
     }
-    pin_queue.push(clock_source);
+    pin_queue.push(database.get_pin_map().at(clock_source).get_driver_vertex_idx());
   }
 
   while (!pin_queue.empty()) {
-    std::string pin_name = pin_queue.front();
+    int32_t vertex_idx = pin_queue.front();
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    std::string& pin_name = vertex.get_pin_name();
     pin_queue.pop();
 
     Pin& pin = database.get_pin_map().at(pin_name);
     // Multiple exported clock modes have no internal data fanout to analyze.
-    if (pin.get_is_port() && pin.get_direction() == PinDirection::kOutput && database.get_outgoing_arc_list_map()[pin_name].empty()) {
+    if (pin.get_is_port() && pin.get_direction() == PinDirection::kOutput && vertex.get_outgoing_arc_list().empty()) {
       continue;
     }
     bool another_root = false;
@@ -173,7 +174,7 @@ void ClockPropagator::markClockPoint(CPClock& clock)
     if (another_root) {
       continue;
     }
-    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+    TimingPoint& timing_point = vertex.get_timing_point();
     if (timing_point.has_clock_state(clock.get_clock_name())) {
       continue;
     }
@@ -186,12 +187,12 @@ void ClockPropagator::markClockPoint(CPClock& clock)
     if (shouldStopClockPropagation(pin_name)) {
       continue;
     }
-    for (const auto& arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+    for (const auto& arc_idx : vertex.get_outgoing_arc_list()) {
       Arc& arc = database.get_arc_list()[arc_idx];
       if (isDisableArc(arc)) {
         continue;
       }
-      pin_queue.push(arc.get_sink_pin());
+      pin_queue.push(arc.get_sink_vertex_idx());
     }
   }
 }
@@ -202,12 +203,14 @@ void ClockPropagator::propagateClockArrival(CPModel& cp_model)
   for (CPClock& clock : cp_model.clock_list) {
     seedPhysicalClockState(clock);
     propagateClockSlewDelay(clock);
-    for (std::string& pin_name : database.get_timing_order_list()) {
-      if (TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+    for (int32_t vertex_idx : database.get_graph_order_list()) {
+      GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+      std::string& pin_name = vertex.get_pin_name();
+      if (TimingPoint& timing_point = vertex.get_timing_point();
           !timing_point.has_clock_state(clock.get_clock_name()) || shouldStopClockPropagation(pin_name)) {
         continue;
       }
-      for (const auto& arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+      for (const auto& arc_idx : vertex.get_outgoing_arc_list()) {
         if (isDisableArc(database.get_arc_list()[arc_idx])) {
           continue;
         }
@@ -234,7 +237,7 @@ void ClockPropagator::seedPhysicalClockState(CPClock& clock)
     if (!database.get_timing_point_map().contains(pin_name)) {
       continue;
     }
-    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+    TimingPoint& timing_point = database.getDriverTimingPoint(pin_name);
     TimingClockPointState& state = timing_point.get_clock_state(clock.get_clock_name());
     state.physical_arrival_map[AnalysisType::kMax][TransType::kRise] = 0.0;
     state.physical_arrival_map[AnalysisType::kMax][TransType::kFall] = 0.0;
@@ -254,33 +257,39 @@ bool ClockPropagator::seedGeneratedClockState(CPClock& clock, const TimingClock&
   const std::string& master_source = definition.get_master_source();
   const bool combinational = definition.get_generated_clock_definition().has_value()
                              && definition.get_generated_clock_definition()->combinational;
-  std::set<std::string> source_path_points;
-  std::queue<std::string> pin_queue;
+  std::set<int32_t> source_path_points;
+  std::queue<int32_t> pin_queue;
   for (const std::string& target : clock.get_source_list()) {
-    if (database.get_timing_point_map().contains(target)) pin_queue.push(target);
+    if (database.get_timing_point_map().contains(target))
+      pin_queue.push(database.get_pin_map().at(target).get_driver_vertex_idx());
   }
 
   bool found_master = false;
   while (!pin_queue.empty()) {
-    std::string pin_name = pin_queue.front();
+    int32_t vertex_idx = pin_queue.front();
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    const std::string& pin_name = vertex.get_pin_name();
     pin_queue.pop();
-    if (!source_path_points.insert(pin_name).second) continue;
-    TimingPoint& point = database.get_timing_point_map().at(pin_name);
+    if (!source_path_points.insert(vertex_idx).second)
+      continue;
+    TimingPoint& point = vertex.get_timing_point();
     const bool is_source_boundary = master_source.empty() ? hasPhysicalClockState(point, master_name) : pin_name == master_source;
     if (is_source_boundary && hasPhysicalClockState(point, master_name)) {
       found_master = true;
       continue;
     }
-    for (std::size_t arc_idx : database.get_incoming_arc_list_map()[pin_name]) {
+    for (std::size_t arc_idx : vertex.get_incoming_arc_list()) {
       Arc& arc = database.get_arc_list()[arc_idx];
       if (isDisableArc(arc) || (combinational && arc.get_is_clock_arc())) continue;
-      pin_queue.push(arc.get_source_pin());
+      pin_queue.push(arc.get_source_vertex_idx());
     }
   }
   if (!found_master) return false;
 
-  for (const std::string& pin_name : source_path_points) {
-    TimingPoint& point = database.get_timing_point_map().at(pin_name);
+  for (int32_t vertex_idx : source_path_points) {
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    const std::string& pin_name = vertex.get_pin_name();
+    TimingPoint& point = vertex.get_timing_point();
     TimingClockPointState& generated_state = point.get_clock_state(clock.get_clock_name());
     const bool is_source_boundary = master_source.empty() ? hasPhysicalClockState(point, master_name) : pin_name == master_source;
     if (const TimingClockPointState* master_state = point.find_clock_state(master_name);
@@ -293,12 +302,16 @@ bool ClockPropagator::seedGeneratedClockState(CPClock& clock, const TimingClock&
   // Timing order normally resolves the source path in one pass. Repeating permits
   // clock-to-Q paths that cross a graph levelization boundary.
   for (std::size_t pass = 0; pass < source_path_points.size(); ++pass) {
-    for (const std::string& source_pin : source_path_points) {
-      TimingPoint& source_point = database.get_timing_point_map().at(source_pin);
+    for (int32_t vertex_idx : database.get_graph_order_list()) {
+      if (!source_path_points.contains(vertex_idx))
+        continue;
+      GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+      TimingPoint& source_point = vertex.get_timing_point();
       if (!hasPhysicalClockState(source_point, clock.get_clock_name())) continue;
-      for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[source_pin]) {
+      for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
         Arc& arc = database.get_arc_list()[arc_idx];
-        if (!source_path_points.contains(arc.get_sink_pin()) || isDisableArc(arc) || (combinational && arc.get_is_clock_arc())) continue;
+        if (!source_path_points.contains(arc.get_sink_vertex_idx()) || isDisableArc(arc) || (combinational && arc.get_is_clock_arc()))
+          continue;
         propagateClockSlewDelayArc(clock, arc_idx, AnalysisType::kMax);
         propagateClockSlewDelayArc(clock, arc_idx, AnalysisType::kMin);
         propagateClockArrivalArc(clock, arc_idx, AnalysisType::kMax);
@@ -308,8 +321,7 @@ bool ClockPropagator::seedGeneratedClockState(CPClock& clock, const TimingClock&
   }
 
   return std::ranges::all_of(clock.get_source_list(), [&](const std::string& target) {
-    return database.get_timing_point_map().contains(target)
-           && hasPhysicalClockState(database.get_timing_point_map().at(target), clock.get_clock_name());
+    return database.get_timing_point_map().contains(target) && hasPhysicalClockState(database.getDriverTimingPoint(target), clock.get_clock_name());
   });
 }
 
@@ -328,8 +340,11 @@ void ClockPropagator::updateEffectiveClockState(CPClock& clock)
 {
   Database& database = STADM.getDatabase();
   TimingClock& definition = database.get_timing_constraint().get_clock_map().at(std::string(clock.get_clock_name()));
-  for (const auto& pin_name : clock.get_clock_point_list()) {
-    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+  for (GraphVertex& vertex : database.get_graph_vertex_list()) {
+    TimingPoint& timing_point = vertex.get_timing_point();
+    if (!timing_point.has_clock_state(clock.get_clock_name())) {
+      continue;
+    }
     TimingClockPointState& state = timing_point.get_clock_state(clock.get_clock_name());
     if (clock.get_is_propagated()) {
       state.arrival_map = state.physical_arrival_map;
@@ -372,12 +387,14 @@ void ClockPropagator::updateEffectiveClockState(CPClock& clock)
 void ClockPropagator::propagateClockSlewDelay(CPClock& clock)
 {
   Database& database = STADM.getDatabase();
-  for (std::string& pin_name : database.get_timing_order_list()) {
-    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
+  for (int32_t vertex_idx : database.get_graph_order_list()) {
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    std::string& pin_name = vertex.get_pin_name();
+    TimingPoint& timing_point = vertex.get_timing_point();
     if (!timing_point.has_clock_state(clock.get_clock_name()) || shouldStopClockPropagation(pin_name)) {
       continue;
     }
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+    for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
       if (isDisableArc(database.get_arc_list()[arc_idx])) {
         continue;
       }
@@ -397,8 +414,8 @@ void ClockPropagator::propagateClockSlewDelayArc(CPClock& clock, std::size_t arc
 {
   Database& database = STADM.getDatabase();
   Arc& arc = database.get_arc_list()[arc_idx];
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  TimingPoint& source_point = database.getSourceTimingPoint(arc);
+  TimingPoint& sink_point = database.getSinkTimingPoint(arc);
   if (!source_point.has_clock_state(clock.get_clock_name()) || !sink_point.has_clock_state(clock.get_clock_name())) {
     return;
   }
@@ -450,8 +467,8 @@ void ClockPropagator::propagateClockArrivalArc(CPClock& clock, std::size_t arc_i
   if (isDisableArc(arc)) {
     return;
   }
-  TimingPoint& source_point = database.get_timing_point_map()[arc.get_source_pin()];
-  TimingPoint& sink_point = database.get_timing_point_map()[arc.get_sink_pin()];
+  TimingPoint& source_point = database.getSourceTimingPoint(arc);
+  TimingPoint& sink_point = database.getSinkTimingPoint(arc);
   if (!source_point.has_clock_state(clock.get_clock_name()) || !sink_point.has_clock_state(clock.get_clock_name())) {
     return;
   }
@@ -505,6 +522,7 @@ void ClockPropagator::updateClockPredecessor(TimingPoint& timing_point, std::str
 {
   TimingClockPointState& state = timing_point.get_clock_state(clock_name);
   state.physical_predecessor_map[analysis_type][trans_type] = arc.get_source_pin();
+  state.predecessor_vertex_map[analysis_type][trans_type] = arc.get_source_vertex_idx();
   state.physical_predecessor_arc_delay_map[analysis_type][trans_type] = arc_delay;
   state.physical_predecessor_trans_type_map[analysis_type][trans_type] = predecessor_trans_type;
 }

@@ -36,7 +36,7 @@ unsigned TclGetPorts::exec()
   if (result.empty() && !getOptionOrArg("-quiet")->is_set_val()) {
     warn("no ports matched: " + patterns);
   }
-  setResult(std::move(result));
+  setResult(std::move(result), SdcObjectType::kPort);
   return 1;
 }
 
