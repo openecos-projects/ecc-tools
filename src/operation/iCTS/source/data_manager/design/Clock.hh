@@ -40,6 +40,8 @@ enum class ClockPropagationKind
   kBuffer,
   kInverter,
   kClockGate,
+  kIoPad,
+  kClockMux,
 };
 
 enum class ClockPropagationOrigin

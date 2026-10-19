@@ -161,7 +161,18 @@ class ClockTopologySynthesis
   auto synthesize() -> bool
   {
     auto root_inputs = collectRootInputs(*_sink_domains);
-    const auto source_trunk_lengths_um = collectSourceTrunkLengthsUm(*_wrapper, _clock->get_clock_source(), root_inputs);
+    // When the traced chain separates the declared source net from the frontier net that
+    // carried the domain sinks (a pad or mux plus pre-existing buffers), the source-to-root
+    // trunk must reconnect the frontier net so those traced stages stay connected to the
+    // sinks; otherwise the historical source net is kept.
+    auto* frontier_net = resolveCommonFrontierNet();
+    auto* trunk_source = _clock->get_clock_source();
+    if (frontier_net == nullptr || frontier_net->get_driver() == nullptr || frontier_net == _clock->get_clock_source_net()) {
+      frontier_net = nullptr;
+    } else {
+      trunk_source = frontier_net->get_driver();
+    }
+    const auto source_trunk_lengths_um = collectSourceTrunkLengthsUm(*_wrapper, trunk_source, root_inputs);
     if (!source_trunk_lengths_um.has_value()) {
       CTSLOG.warn(Loc::current(), "Topology: DBU-per-micron is unavailable for clock \"", _clock->get_clock_name(), "\".");
       return false;
@@ -171,7 +182,7 @@ class ClockTopologySynthesis
         return false;
       }
     }
-    return buildAndCommitSourceTrunk(root_inputs);
+    return buildAndCommitSourceTrunk(root_inputs, frontier_net);
   }
 
  private:
@@ -246,7 +257,26 @@ class ClockTopologySynthesis
     return true;
   }
 
-  auto buildAndCommitSourceTrunk(const std::vector<Pin*>& root_inputs) -> bool
+  // The net the domain sinks came from (recorded by ClockDistribution::prepare); all
+  // domains must agree on it, otherwise the trunk keeps the declared source net.
+  auto resolveCommonFrontierNet() const -> Net*
+  {
+    Net* common = nullptr;
+    for (const auto& context : *_sink_domains) {
+      auto* net = context.previous_sink_net;
+      if (net == nullptr) {
+        return nullptr;
+      }
+      if (common == nullptr) {
+        common = net;
+      } else if (common != net) {
+        return nullptr;
+      }
+    }
+    return common;
+  }
+
+  auto buildAndCommitSourceTrunk(const std::vector<Pin*>& root_inputs, Net* frontier_net) -> bool
   {
     const auto source_trunk_domain = SinkDomainKind::kSourceToRoot;
     const auto* const source_trunk_label = ToString(source_trunk_domain);
@@ -256,7 +286,9 @@ class ClockTopologySynthesis
       clock_source_net = clock_source->get_net();
       _clock->set_clock_source_net(clock_source_net);
     }
-    if (clock_source == nullptr || clock_source_net == nullptr) {
+    auto* source_net = frontier_net != nullptr ? frontier_net : clock_source_net;
+    auto* source_pin = frontier_net != nullptr ? frontier_net->get_driver() : clock_source;
+    if (source_pin == nullptr || source_net == nullptr) {
       _status_recorder->append(*_clock, DomainStatus::kFailed, source_trunk_domain, _valid_sinks, root_inputs.size(), "missing clock source or source net");
       CTSLOG.warn(Loc::current(), "Topology: clock \"", _clock->get_clock_name(), "\" source trunk formation failed because the source pin or net is missing.");
       Topology::resetClockTopology(*_design, *_clock);
@@ -270,8 +302,8 @@ class ClockTopologySynthesis
         .design = _design,
         .wrapper = _wrapper,
         .fast_sta = _fast_sta,
-        .source_net = clock_source_net,
-        .clock_source = clock_source,
+        .source_net = source_net,
+        .clock_source = source_pin,
         .root_inputs = root_inputs,
         .object_name_prefix = source_trunk_prefix,
         .characterization_library = _characterization_library,
@@ -290,7 +322,7 @@ class ClockTopologySynthesis
       return false;
     }
 
-    auto pending_clock_layout = ClockLayoutBuilder::makeSourceToRootLayout(*_clock, _clock_index, *clock_source_net, source_trunk_build, source_trunk_phase);
+    auto pending_clock_layout = ClockLayoutBuilder::makeSourceToRootLayout(*_clock, _clock_index, *source_net, source_trunk_build, source_trunk_phase);
     if (!ClockTreeRealization::commitInsertedObjects(InsertedObjectCommitInput{
             .design = _design,
             .clock = _clock,

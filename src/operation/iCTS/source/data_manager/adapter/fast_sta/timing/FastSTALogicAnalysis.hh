@@ -50,6 +50,7 @@ struct LogicAnalysis
   bool tagged = false;
   std::vector<std::array<std::vector<FastStaTimingPoint>, 2U>> tagged_early;
   std::vector<std::array<std::vector<FastStaTimingPoint>, 2U>> tagged_late;
+  std::size_t skipped_launch_arc_count = 0U;
   std::size_t conditional_fallback_arc_count = 0U;
   std::size_t conditional_extrema_bundle_count = 0U;
   double propagation_runtime_s = 0.0;

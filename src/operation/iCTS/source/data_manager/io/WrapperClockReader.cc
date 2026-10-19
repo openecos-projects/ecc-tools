@@ -512,6 +512,10 @@ auto classifyCtsInstFromIdbInst(const Wrapper& wrapper, idb::IdbInstance* idb_in
     return {.type = InstType::kMacroBlock, .role = "macro_clock_sink", .reason = "idb_macro_block", .input_pin_name = {}, .output_pin_name = {}};
   }
 
+  if (cell_master != nullptr && cell_master->is_pad()) {
+    return {.type = InstType::kIoPad, .role = "io_pad", .reason = "idb_io_pad", .input_pin_name = {}, .output_pin_name = {}};
+  }
+
   auto* lib_cell = findLibCell(wrapper, idb_inst);
   const auto clock_input_pins = collectClockInputPins(idb_inst);
   auto* primary_clock_pin = clock_input_pins.empty() ? nullptr : clock_input_pins.front();
@@ -664,6 +668,20 @@ class Wrapper::CtsClockReader
       if (clock == nullptr) {
         clearClockReadData();
         return false;
+      }
+    }
+    // Re-assert the model shape the trace proved, once every pin and instance has been
+    // materialized: pin-level classification cannot see which stage the trace crossed,
+    // and it runs again for pins outside the traced path.
+    for (const auto& clock_target : clock_targets) {
+      for (const auto& step : clock_target.propagation_steps) {
+        if (step.kind != ClockTracePropagationKind::kClockMux) {
+          continue;
+        }
+        auto* cts_inst = _design->findInst(step.inst_name);
+        if (cts_inst != nullptr && !cts_inst->is_mux()) {
+          cts_inst->set_type(InstType::kMux);
+        }
       }
     }
     return true;
@@ -889,6 +907,16 @@ class Wrapper::CtsClockReader
       if (input_net == nullptr || output_net == nullptr || input_pin == nullptr || output_pin == nullptr || cts_inst == nullptr) {
         return nullptr;
       }
+      if (step.kind == ClockTracePropagationKind::kClockMux || step.kind == ClockTracePropagationKind::kIoPad) {
+        // LEF marks a pad's PAD pin bidirectional, and an undecidable-select stage is not
+        // classified as a mux by liberty alone. The trace step is the evidence for how
+        // this instance takes part in the clock network, so it decides the model shape.
+        if (step.kind == ClockTracePropagationKind::kIoPad) {
+          input_pin->set_type(PinType::kIn);
+        } else if (!cts_inst->is_mux()) {
+          cts_inst->set_type(InstType::kMux);
+        }
+      }
       input_pin->set_net(input_net);
       output_pin->set_net(output_net);
       input_net->add_load(input_pin);
@@ -913,6 +941,12 @@ class Wrapper::CtsClockReader
           break;
         case ClockTracePropagationKind::kClockGate:
           kind = ClockPropagationKind::kClockGate;
+          break;
+        case ClockTracePropagationKind::kIoPad:
+          kind = ClockPropagationKind::kIoPad;
+          break;
+        case ClockTracePropagationKind::kClockMux:
+          kind = ClockPropagationKind::kClockMux;
           break;
       }
       const auto arc_status = clock->addPropagationArc({.inst = cts_inst,

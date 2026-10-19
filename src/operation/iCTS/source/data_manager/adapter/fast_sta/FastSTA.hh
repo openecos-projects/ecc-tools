@@ -538,6 +538,7 @@ struct FastStaTimingSummary
   std::size_t unsupported_count = 0U;
   std::size_t conditional_fallback_arc_count = 0U;
   std::size_t conditional_extrema_bundle_count = 0U;
+  std::size_t skipped_launch_arc_count = 0U;
   std::size_t setup_violation_count = 0U;
   std::size_t hold_violation_count = 0U;
   std::size_t slew_violation_count = 0U;

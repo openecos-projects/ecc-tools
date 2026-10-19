@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "Logger.hh"
 #include "SDCClockReader.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALibertyModel.hh"
@@ -334,12 +335,16 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
       if (!active && !model.clock_gate.has_value()) {
         continue;
       }
-      node.kind = FastStaNodeKind::kBufferInput;
-      output.kind = FastStaNodeKind::kBufferOutput;
       const auto existing = context.buffer_input_node_id_by_inst.find(output.inst_name);
       if (existing != context.buffer_input_node_id_by_inst.end() && existing->second != node_id) {
-        return "multiple_active_clock_inputs:" + output.inst_name;
+        // The clock tree already decided which input this instance takes the clock from,
+        // from the trace's own propagation arc: a clock gate, an IO pad, or a stage whose
+        // select is not pinned. A second clock-capable input is the other side of that
+        // same stage, not a second clock entering it.
+        continue;
       }
+      node.kind = FastStaNodeKind::kBufferInput;
+      output.kind = FastStaNodeKind::kBufferOutput;
       context.buffer_input_node_id_by_inst[output.inst_name] = node_id;
       context.buffer_output_node_id_by_inst[output.inst_name] = arc.to_node_id;
       output.clock_from_port = arc.from_port;
@@ -462,7 +467,12 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     }
     for (FastStaNodeId node_id = 0U; node_id < declared_clock.size(); ++node_id) {
       if (declared_clock.at(node_id) == declaration.clock_name && !source_reachable.at(node_id)) {
-        return "generated_clock_target_not_reached_from_source:" + declaration.clock_name + ":" + context.nodes.at(node_id).name;
+        // The target cannot be reached from the source through the clock graph. That is
+        // expected when a black box sits in between, as with a PLL output, and is not
+        // evidence that the declaration is wrong: the waveform is resolved from the
+        // declaration itself. Report it, and keep the source checks above fatal.
+        CTSLOG.warn(Loc::current(), "FastSTA: generated clock \"", declaration.clock_name, "\" target \"", context.nodes.at(node_id).name,
+                    "\" is not reachable from its source through the clock graph; a black-box boundary is assumed.");
       }
     }
     declaration.master_clock_name = master;

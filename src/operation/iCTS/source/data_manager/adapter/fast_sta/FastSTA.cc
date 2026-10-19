@@ -187,6 +187,17 @@ auto FastSTA::synchronizeClockContext(FastStaContextId pending_id, const FastSta
           && (context->clock_name != input.clock->get_clock_name() || context->clock_net_name != input.clock->get_clock_net_name()
               || context->clock_period_ns != input.clock->get_clock_period_ns() || context->source_node_id >= context->nodes.size()
               || context->nodes.at(context->source_node_id).name != Design::getPinFullName(input.clock->get_clock_source())))) {
+    // Five comparisons can reject here, so name the one that did.
+    if (input.clock != nullptr) {
+      const auto source_name
+          = context->source_node_id < context->nodes.size() ? context->nodes.at(context->source_node_id).name : std::string{"<out_of_range>"};
+      CTSLOG.warn(Loc::current(), "FastSTA: clock input changed for \"", context->clock_name, "\": name \"", context->clock_name, "\" -> \"",
+                  input.clock->get_clock_name(), "\", net \"", context->clock_net_name, "\" -> \"", input.clock->get_clock_net_name(), "\", period ",
+                  context->clock_period_ns, " -> ", input.clock->get_clock_period_ns(), ", source \"", source_name, "\" -> \"",
+                  Design::getPinFullName(input.clock->get_clock_source()), "\".");
+    } else {
+      CTSLOG.warn(Loc::current(), "FastSTA: clock scope changed for \"", context->clock_name, "\": the context had a clock scope and the input has none.");
+    }
     return {.failure_reason = "clock_topology_clock_input_changed"};
   }
   if (FastStaBuilder::matchesClockInput(*context, input)) {

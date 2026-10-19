@@ -34,6 +34,7 @@
 #include "FastSTA.hh"
 #include "FastSTAClockState.hh"
 #include "FastSTALibertyModel.hh"
+#include "Logger.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
 #include "io/Wrapper.hh"
 #include "timing/FastSTAClockTiming.hh"
@@ -49,10 +50,12 @@ auto lookupPowerTable(const std::vector<FastStaLibertyTable>& tables, double inp
       continue;
     }
     const auto value = table.lookup(input_slew_ns, output_load_pf);
-    if (!value.has_value() || !std::isfinite(*value) || *value < 0.0) {
-      return std::nullopt;
+    if (!value.has_value() || !std::isfinite(*value)) {
+      continue;
     }
-    return value;
+    // Internal energy is non-negative by definition: a negative entry is
+    // characterization noise, not a reason to drop the whole clock's power.
+    return std::max(0.0, *value);
   }
   return std::nullopt;
 }
@@ -137,51 +140,60 @@ auto calcNetSwitchingPowerW(const FastStaContext& context, const FastStaNet& net
   return 0.5 * std::max(0.0, net.load_cap_pf) * 1e-12 * *voltage * *voltage * *activity_density * 1e9;
 }
 
-auto calcBufferPower(FastStaContext& context, FastStaNodeId output_node_id, double activity_density) -> bool
+// Returns nullptr when the node's power was established, or the name of the check that
+// could not be satisfied. Each cause is distinct: a missing model, a missing table, and a
+// missing timing state call for different reactions from whoever reads the log.
+auto calcBufferPower(FastStaContext& context, FastStaNodeId output_node_id, double activity_density) -> const char*
 {
   if (output_node_id >= context.nodes.size()) {
-    return false;
+    return "node_out_of_range";
   }
   auto& node = context.nodes.at(output_node_id);
   node.area_um2 = 0.0;
   node.leakage_power_w = 0.0;
   node.internal_power_w = 0.0;
   if (node.kind != FastStaNodeKind::kBufferOutput || node.domain != FastStaNodeDomain::kClock) {
-    return true;
+    return nullptr;
   }
   const auto cell_iter = context.liberty_cell_by_master.find(node.cell_master);
   if (cell_iter == context.liberty_cell_by_master.end()) {
-    return false;
+    return "cell_model_unavailable";
   }
   const auto& cell = cell_iter->second;
   if (!std::isfinite(cell.area_um2) || !cell.leakage_power_w.has_value() || !std::isfinite(*cell.leakage_power_w) || *cell.leakage_power_w < 0.0) {
-    return false;
+    return "cell_area_or_leakage_unavailable";
   }
   node.area_um2 = std::max(0.0, cell.area_um2);
   node.leakage_power_w = *cell.leakage_power_w;
   if (node.clock_inactive) {
     // A statically closed gate retains its cell leakage/area but no toggling
     // output or characterized clock-arc internal energy.
-    return true;
+    return nullptr;
   }
   if (node.output_net_ids.empty() || node.output_net_ids.front() >= context.nets.size()) {
     // A clock-domain driver whose output is not connected to anything drives no
     // load, so it has no characterized internal energy to draw on. Keep its
     // cell leakage and area and treat the internal power as zero, mirroring the
     // statically inactive case above, instead of failing the whole clock.
-    return true;
+    return nullptr;
   }
   const auto input_node_id = findBufferInputNode(context, node);
-  if (input_node_id >= context.nodes.size() || !context.nodes.at(input_node_id).timing.valid) {
-    return false;
+  if (input_node_id >= context.nodes.size()) {
+    return "buffer_input_node_unavailable";
+  }
+  if (!context.nodes.at(input_node_id).timing.valid) {
+    return "buffer_input_timing_invalid";
   }
   const auto& net = context.nets.at(node.output_net_ids.front());
-  const auto internal_energy_mw_ns = lookupPowerTable(cell.timing_arc.internal_power_tables, context.nodes.at(input_node_id).timing.slew_ns, net.load_cap_pf);
+  const auto input_slew_ns = context.nodes.at(input_node_id).timing.slew_ns;
+  const auto internal_energy_mw_ns = lookupPowerTable(cell.timing_arc.internal_power_tables, input_slew_ns, net.load_cap_pf);
   if (!internal_energy_mw_ns.has_value()) {
-    return false;
+    CTSLOG.warn(Loc::current(), "FastSTA power: internal power lookup failed for \"", node.cell_master,
+                "\": tables=", cell.timing_arc.internal_power_tables.size(), " slew=", input_slew_ns, " ns load=", net.load_cap_pf, " pF.");
+    return "internal_power_table_unavailable";
   }
   node.internal_power_w = *internal_energy_mw_ns * 1e-12 * activity_density * 1e9;
-  return std::isfinite(node.internal_power_w);
+  return std::isfinite(node.internal_power_w) ? nullptr : "internal_power_not_finite";
 }
 
 auto sumPower(const FastStaContext& context) -> FastStaPowerSummary
@@ -231,6 +243,7 @@ auto FastStaPower::update(FastStaContext& context) -> bool
   context.power = {};
   context.power_valid = false;
   if (!context.timing_valid && !context.clock_timing_valid) {
+    CTSLOG.warn(Loc::current(), "FastSTA power: clock \"", context.clock_name, "\" has neither timing nor clock timing.");
     return false;
   }
   for (auto& net : context.nets) {
@@ -243,7 +256,15 @@ auto FastStaPower::update(FastStaContext& context) -> bool
   }
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto activity_density = nodeActivityDensity(context, context.nodes.at(node_id));
-    if (!activity_density.has_value() || !calcBufferPower(context, node_id, *activity_density)) {
+    if (!activity_density.has_value()) {
+      CTSLOG.warn(Loc::current(), "FastSTA power: activity density unavailable for node \"", context.nodes.at(node_id).name, "\" of clock \"",
+                  context.nodes.at(node_id).clock_name, "\" (period ", FastStaConstraints::period(context, context.nodes.at(node_id).clock_name), " ns).");
+      context.power = {};
+      return false;
+    }
+    if (const auto* reason = calcBufferPower(context, node_id, *activity_density); reason != nullptr) {
+      CTSLOG.warn(Loc::current(), "FastSTA power: node \"", context.nodes.at(node_id).name, "\" master \"", context.nodes.at(node_id).cell_master,
+                  "\" cannot be modeled: ", reason, ".");
       context.power = {};
       return false;
     }
@@ -285,7 +306,7 @@ auto FastStaPower::updatePreparedRegion(FastStaContext& context, const FastStaDi
   for (const auto node_id : dirty_region.node_ids) {
     if (node_id < context.nodes.size() && context.nodes.at(node_id).kind == FastStaNodeKind::kBufferOutput) {
       const auto activity_density = nodeActivityDensity(context, context.nodes.at(node_id));
-      if (!activity_density.has_value() || !calcBufferPower(context, node_id, *activity_density)) {
+      if (!activity_density.has_value() || calcBufferPower(context, node_id, *activity_density) != nullptr) {
         context.power = {};
         context.power_valid = false;
         return false;

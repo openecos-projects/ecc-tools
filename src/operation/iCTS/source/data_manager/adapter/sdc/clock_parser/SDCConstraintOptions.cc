@@ -44,6 +44,11 @@ auto SdcSubsetEvaluator::reportIgnored(const std::string& command, const std::st
   _data.ignored.emplace_back(command + ":" + detail);
 }
 
+auto SdcSubsetEvaluator::refreshStatus() -> void
+{
+  _data.status = _data.issues.empty() ? SdcConstraintStatusCode::kOk : _data.issues.front().code;
+}
+
 auto SdcSubsetEvaluator::parseOptions(const std::string& command, const std::vector<SdcValue>& args, std::initializer_list<std::string_view> value_options,
                                       std::initializer_list<std::string_view> flag_options, std::initializer_list<std::string_view> repeated_options)
     -> std::optional<SdcCommandOptions>

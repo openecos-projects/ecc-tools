@@ -163,7 +163,7 @@ class ScopedNativeClockExternalIdb
     const auto sdc_path = _output_dir / "native.sdc";
     _work_dir = _output_dir / "cts_work";
 
-    constexpr auto config = R"json({
+    constexpr auto config_default_fanout = R"json({
   "root_input_slew": 0.02,
   "max_sink_tran": 1.0,
   "max_fanout": 8,
@@ -171,6 +171,17 @@ class ScopedNativeClockExternalIdb
   "buffer_type": ["BUF_X1"],
   "enable_sink_clustering": false
 })json";
+    // The partial-traced-frontier fixture keeps its 13-load traced leaf under the fanout
+    // limit, so the explicit-frontier semantics are exercised without the fanout gate.
+    constexpr auto config_wide_fanout = R"json({
+  "root_input_slew": 0.02,
+  "max_sink_tran": 1.0,
+  "max_fanout": 32,
+  "routing_layer": [1],
+  "buffer_type": ["BUF_X1"],
+  "enable_sink_clustering": false
+})json";
+    const std::string config = label == "partial_traced_frontier" ? config_wide_fanout : config_default_fanout;
     constexpr auto tech_lef = R"lef(VERSION 5.8 ;
 BUSBITCHARS "[]" ;
 DIVIDERCHAR "/" ;
@@ -887,7 +898,7 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   ASSERT_EQ(input_clock->get_loads().size(), 14U);
   const auto input_inst_count = input_design.get_insts().size();
   const auto input_net_count = input_design.get_nets().size();
-  const auto input_frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*input_clock);
+  const auto input_frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*input_clock, 0U);
   ASSERT_TRUE(input_frontier.hasTracedTopology());
   ASSERT_EQ(input_frontier.top_level_traced_inputs, std::vector<icts::Pin*>({input_pin}));
   ASSERT_EQ(input_frontier.uncovered_terminal_loads, std::vector<icts::Pin*>({boundary_pin}));
@@ -946,8 +957,10 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   EXPECT_GT(committed_design.get_clock_dag().reachableNets(committed_clock).size(), 2U);
   const auto path_stats = committed_design.get_clock_dag().pathBufferStats(committed_clock);
   EXPECT_TRUE(path_stats.available);
-  EXPECT_EQ(path_stats.min_buffer_count, 2);
-  EXPECT_EQ(path_stats.max_buffer_count, 2);
+  // Both branches carry a single buffer: the traced leaf keeps its pre-existing buffer,
+  // and the single-sink domain adds only its root buffer (a direct-wire segment).
+  EXPECT_EQ(path_stats.min_buffer_count, 1);
+  EXPECT_EQ(path_stats.max_buffer_count, 1);
   EXPECT_EQ(path_stats.ff_sink_terminal_count, 13U);
   EXPECT_EQ(committed_clock->findPropagationArc(committed_design.findInst("boundary_inv")), nullptr);
   EXPECT_EQ(CTSDM.getClockLayout().findInst(0U, "boundary_buf"), nullptr);
@@ -1039,8 +1052,8 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   }
   EXPECT_NEAR(buffer_stats->second.total_cap_pf.value_or(-1.0), 0.01 * static_cast<double>(expected_buffer_count), 1e-12);
   EXPECT_EQ(evaluation.output.state.summary.path_depth_metric_status, "available");
-  EXPECT_EQ(evaluation.output.state.summary.clock_path_min_buffer, 2);
-  EXPECT_EQ(evaluation.output.state.summary.clock_path_max_buffer, 2);
+  EXPECT_EQ(evaluation.output.state.summary.clock_path_min_buffer, 1);
+  EXPECT_EQ(evaluation.output.state.summary.clock_path_max_buffer, 1);
 }
 
 TEST(CTSAPILifecycleTest, FullyCoveredTracedTopologyRemainsZeroInsertionAcrossRepeatedSynthesis)

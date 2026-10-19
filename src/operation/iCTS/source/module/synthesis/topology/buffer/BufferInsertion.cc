@@ -131,6 +131,26 @@ auto ReconnectExistingNet(const TopologyNetConnectionInput& input) -> void
   ConnectNet(input);
 }
 
+// Reconnect the net to the new sinks while keeping its other attached loads (e.g. a
+// traced stage input); only the sinks being taken over are replaced.
+auto ReconnectExistingNetPreservingLoads(const TopologyNetConnectionInput& input) -> void
+{
+  auto& net = *input.net;
+  std::vector<Pin*> loads;
+  loads.reserve(net.get_loads().size() + input.sinks.size());
+  for (auto* load : net.get_loads()) {
+    if (load != nullptr && load->get_net() == &net) {
+      loads.push_back(load);
+    }
+  }
+  loads.insert(loads.end(), input.sinks.begin(), input.sinks.end());
+  ReconnectExistingNet(TopologyNetConnectionInput{
+      .net = input.net,
+      .driver = input.driver,
+      .sinks = loads,
+  });
+}
+
 auto CreateBufferInstance(Topology::Build& result, const std::string& inst_name, const std::string& cell_master, const std::string& input_pin_name,
                           const std::string& output_pin_name, const Point<int>& location) -> BufferCreation
 {

@@ -251,7 +251,7 @@ TEST(ClockDAGTest, NestedBranchedTracedTopologyUsesOnlyDeterministicTopLevelAndU
   clock_pins.clock->add_load(uncovered_sink);
   clock_pins.clock->add_load(nested_sink_a);
 
-  const auto frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*clock_pins.clock);
+  const auto frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*clock_pins.clock, 0U);
   ASSERT_TRUE(frontier.hasTracedTopology());
   ASSERT_EQ(frontier.top_level_traced_inputs, std::vector<icts::Pin*>({top_buffer.input}));
   ASSERT_EQ(frontier.uncovered_terminal_loads, std::vector<icts::Pin*>({uncovered_sink}));

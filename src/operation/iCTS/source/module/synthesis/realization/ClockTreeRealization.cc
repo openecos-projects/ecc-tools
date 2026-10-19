@@ -312,10 +312,11 @@ auto ClockTreeRealization::partitionClockSinks(const std::vector<Pin*>& sinks) -
   return output;
 }
 
-auto ClockTreeRealization::deriveSynthesisFrontier(const Clock& clock) -> ClockSynthesisFrontier
+auto ClockTreeRealization::deriveSynthesisFrontier(const Clock& clock, unsigned max_fanout) -> ClockSynthesisFrontier
 {
   ClockSynthesisFrontier frontier;
   std::unordered_set<const Pin*> traced_outputs;
+  std::unordered_set<const Pin*> traced_tree_outputs;
   for (const auto& arc : clock.get_propagation_arcs()) {
     if (arc.origin != ClockPropagationOrigin::kTracedInput) {
       continue;
@@ -323,6 +324,9 @@ auto ClockTreeRealization::deriveSynthesisFrontier(const Clock& clock) -> ClockS
     frontier.has_traced_topology = true;
     if (arc.output_pin != nullptr) {
       traced_outputs.insert(arc.output_pin);
+      if (arc.kind == ClockPropagationKind::kBuffer || arc.kind == ClockPropagationKind::kInverter) {
+        traced_tree_outputs.insert(arc.output_pin);
+      }
     }
   }
 
@@ -336,7 +340,18 @@ auto ClockTreeRealization::deriveSynthesisFrontier(const Clock& clock) -> ClockS
     }
   }
   for (auto* terminal_load : clock.get_loads()) {
-    if (terminal_load != nullptr && !is_driven_by_traced_output(terminal_load)) {
+    if (terminal_load == nullptr) {
+      continue;
+    }
+    const auto* load_net = terminal_load->get_net();
+    const auto* load_driver = load_net == nullptr ? nullptr : load_net->get_driver();
+    // A pre-existing tree stage whose output net already exceeds the configured fanout
+    // limit cannot serve as the sinks' cover: the structure under it must be synthesized.
+    // A boundary stage (pad/mux/gate) is left alone here -- its own downstream region
+    // continues the distribution from its output.
+    const bool tree_stage_over_limit
+        = max_fanout != 0U && load_driver != nullptr && traced_tree_outputs.contains(load_driver) && load_net->get_loads().size() > max_fanout;
+    if (!is_driven_by_traced_output(terminal_load) || tree_stage_over_limit) {
       frontier.uncovered_terminal_loads.push_back(terminal_load);
     }
   }
@@ -454,7 +469,7 @@ auto ClockTreeRealization::connectSinkDomainDownstreamNet(const SinkDomainDownst
 
 auto ClockTreeRealization::restoreClockSourceNetToSynthesisFrontier(Clock& clock) -> ClockSynthesisFrontier
 {
-  auto frontier = deriveSynthesisFrontier(clock);
+  auto frontier = deriveSynthesisFrontier(clock, 0U);
   auto* clock_source = clock.get_clock_source();
   auto* clock_source_net = clock.get_clock_source_net();
   if (clock_source_net == nullptr && clock_source != nullptr) {

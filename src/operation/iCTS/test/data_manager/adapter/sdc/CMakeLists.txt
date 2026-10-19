@@ -2,6 +2,7 @@ icts_add_test_executable(
   icts_test_data_manager_adapter_sdc
   SOURCES
     ${ICTS_TEST}/data_manager/adapter/sdc/ClockTraceTest.cc
+    ${ICTS_TEST}/data_manager/adapter/sdc/SdcConstraintStatusTest.cc
   LIBS
     icts_source_data_manager_adapter_sdc
 )

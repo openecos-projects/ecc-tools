@@ -123,7 +123,7 @@ class ClockTreeRealization
   ClockTreeRealization() = delete;
 
   static auto partitionClockSinks(const std::vector<Pin*>& sinks) -> ClockSinkPartitionOutput;
-  static auto deriveSynthesisFrontier(const Clock& clock) -> ClockSynthesisFrontier;
+  static auto deriveSynthesisFrontier(const Clock& clock, unsigned max_fanout) -> ClockSynthesisFrontier;
   static auto makeSinkDomainPrefix(const Clock& clock, std::size_t clock_index, SinkDomainKind sink_domain) -> std::string;
   static auto addRootBufferForSinkDomain(const SinkDomainRootBufferSelectionInput& input) -> SinkDomainRootBufferOutput;
   static auto addRootBufferForSinkDomain(const SinkDomainRootBufferInput& input) -> SinkDomainRootBufferOutput;

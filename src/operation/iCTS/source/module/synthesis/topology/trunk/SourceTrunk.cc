@@ -250,7 +250,7 @@ auto BuildSourceTrunkTree(const SourceTrunkInput& input) -> SourceTrunkBuild
   }
 
   SourceNetSideEffectGuard source_net_side_effects(source_net, clock_source, valid_root_inputs);
-  ReconnectExistingNet(TopologyNetConnectionInput{
+  ReconnectExistingNetPreservingLoads(TopologyNetConnectionInput{
       .net = &source_net,
       .driver = clock_source,
       .sinks = valid_root_inputs,

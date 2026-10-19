@@ -526,16 +526,18 @@ TEST(FastSTATest, PowerUpdateRejectsMalformedInternalPowerTable)
   EXPECT_DOUBLE_EQ(context.power.total_power_w, 0.0);
 }
 
-TEST(FastSTATest, PowerUpdateRejectsNegativeInternalPowerEnergy)
+TEST(FastSTATest, PowerUpdateClampsNegativeInternalPowerEnergy)
 {
   auto context = MakeTinyContext();
   ASSERT_TRUE(icts::FastStaTiming::update(context));
   auto& power_table = context.liberty_cell_by_master.at("BUF_X1").timing_arc.internal_power_tables.front();
   std::ranges::fill(power_table.values, -1.0);
 
-  EXPECT_FALSE(icts::FastStaPower::update(context));
-  EXPECT_FALSE(context.power_valid);
-  EXPECT_DOUBLE_EQ(context.power.total_power_w, 0.0);
+  // Internal energy is non-negative by definition: negative characterization entries
+  // are clamped to zero instead of dropping the whole clock's power.
+  EXPECT_TRUE(icts::FastStaPower::update(context));
+  EXPECT_TRUE(context.power_valid);
+  EXPECT_DOUBLE_EQ(context.power.total_power_w, 0.01003);
 }
 
 TEST(FastSTATest, PowerUpdateRejectsUnavailableLeakagePower)

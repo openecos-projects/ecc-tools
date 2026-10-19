@@ -444,6 +444,7 @@ auto buildSeedSet(const std::vector<FastStaTimingRelationFact>& relations) -> Fa
 
 auto FillLogicSummary(const FastStaContext& context, const LogicAnalysis& analysis, FastStaTimingSummary& summary) -> void
 {
+  summary.skipped_launch_arc_count = analysis.skipped_launch_arc_count;
   summary.conditional_fallback_arc_count = analysis.conditional_fallback_arc_count;
   summary.conditional_extrema_bundle_count = analysis.conditional_extrema_bundle_count;
   summary.logic_propagation_runtime_s = analysis.propagation_runtime_s;

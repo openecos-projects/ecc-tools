@@ -101,6 +101,10 @@ auto PropagationKindName(ClockPropagationKind kind) -> const char*
       return "inverter";
     case ClockPropagationKind::kClockGate:
       return "clock_gate";
+    case ClockPropagationKind::kIoPad:
+      return "io_pad";
+    case ClockPropagationKind::kClockMux:
+      return "clock_mux";
   }
   return "unknown";
 }
@@ -131,6 +135,8 @@ auto InstTypeName(InstType type) -> const char*
       return "boundary_load";
     case InstType::kMacroBlock:
       return "macro_block";
+    case InstType::kIoPad:
+      return "io_pad";
     case InstType::kUnknown:
       return "unknown";
   }
@@ -641,9 +647,10 @@ auto ClockDAG::rebuild(const std::vector<Clock*>& clocks) -> bool
         issue.message = "propagation pin directions are incompatible";
         add_issue(graph, std::move(issue));
       }
-      const bool physical_kind_matches = (arc->kind == ClockPropagationKind::kBuffer && arc->inst->is_buffer())
-                                         || (arc->kind == ClockPropagationKind::kInverter && arc->inst->is_inverter())
-                                         || (arc->kind == ClockPropagationKind::kClockGate && arc->inst->is_clock_gate());
+      const bool physical_kind_matches
+          = (arc->kind == ClockPropagationKind::kBuffer && arc->inst->is_buffer()) || (arc->kind == ClockPropagationKind::kInverter && arc->inst->is_inverter())
+            || (arc->kind == ClockPropagationKind::kClockGate && arc->inst->is_clock_gate())
+            || (arc->kind == ClockPropagationKind::kIoPad && arc->inst->is_io_pad()) || (arc->kind == ClockPropagationKind::kClockMux && arc->inst->is_mux());
       if (!physical_kind_matches) {
         auto issue = issue_base;
         SetIssueCode(issue, ClockGraphIssueCode::kPhysicalKindMismatch);
