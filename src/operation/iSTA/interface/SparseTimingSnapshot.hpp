@@ -15,6 +15,10 @@ struct SparseTimingState
   int32_t domain = -1;
   int32_t tag = -1;
   int32_t source_type = 0;
+  // 0 is the load/receiver role; 1 is the separate driver role of a
+  // bidirectional pin.  The Python schema keeps the physical pin identity;
+  // this field is used while compiling role-specific state and RC edges.
+  int32_t role = 0;
   int32_t level = 0;
   int32_t slew_group = -1;
   std::array<bool, 2> valid{false, false};

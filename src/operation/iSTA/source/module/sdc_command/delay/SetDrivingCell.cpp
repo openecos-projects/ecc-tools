@@ -107,6 +107,14 @@ unsigned TclSetDrivingCell::exec()
     if (timing_cell_arc.get_sink_port() != to_pin || (!requested_from_pin.empty() && timing_cell_arc.get_source_port() != requested_from_pin)) {
       continue;
     }
+    // A three-state enable/disable arc controls whether the output drives the
+    // pad; it is not the data arc represented by set_driving_cell.  Pad cells
+    // commonly declare OE before their data input I, so considering control
+    // arcs here can select OE -> PAD and apply the enable LUT as input delay
+    // (for ICS55 this produces an artificial ~218 ns slew).
+    if (timing_cell_arc.get_is_control_arc()) {
+      continue;
+    }
     if (!timing_cell.get_port_map().contains(timing_cell_arc.get_source_port())
         || !timing_cell.get_port_map().at(timing_cell_arc.get_source_port()).get_is_input()) {
       continue;

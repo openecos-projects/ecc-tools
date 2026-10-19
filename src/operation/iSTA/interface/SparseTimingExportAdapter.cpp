@@ -23,10 +23,25 @@ namespace {
 // Keep the launch domain in the identity. Exception tags are not guaranteed
 // to be globally unique across clock domains, so (source type, tag) alone can
 // incorrectly merge two arrivals at a reconvergent pin.
-using StateKey = std::tuple<int32_t, std::string, std::string>;
+using StateKey = std::tuple<int32_t, std::string, std::string, int32_t>;
 using PathPair = std::array<TimingPathState*, 2>;
 
-std::map<StateKey, PathPair> maxStates(TimingPoint& point)
+bool isBidirectionalCellPin(Database& database, const std::string& pin_name)
+{
+  const auto pin = database.get_pin_map().find(pin_name);
+  if (pin == database.get_pin_map().end() || pin->second.get_is_port())
+    return false;
+  const auto instance = database.get_instance_map().find(pin->second.get_instance_name());
+  if (instance == database.get_instance_map().end())
+    return false;
+  const auto cell = database.get_timing_library().get_cell_map().find(instance->second.get_cell_name());
+  if (cell == database.get_timing_library().get_cell_map().end())
+    return false;
+  const auto port = cell->second.get_port_map().find(pin->second.get_pin_name());
+  return port != cell->second.get_port_map().end() && port->second.get_is_input() && port->second.get_is_output();
+}
+
+std::map<StateKey, PathPair> maxStates(TimingPoint& point, int32_t role)
 {
   std::map<StateKey, PathPair> result;
   auto analysis = point.get_path_state_map().find(AnalysisType::kMax);
@@ -39,7 +54,7 @@ std::map<StateKey, PathPair> maxStates(TimingPoint& point)
       const int edge = transition == TransType::kRise ? 0 : 1;
       for (auto& [tag, path] : paths) {
         if (std::isfinite(path.get_arrival())) {
-          result[{static_cast<int32_t>(source), path.get_clock_name(), tag}][edge] = &path;
+          result[{static_cast<int32_t>(source), path.get_clock_name(), tag, role}][edge] = &path;
         }
       }
     }
@@ -96,8 +111,8 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
     if (!pin_ids.contains(net.get_driver_pin()))
       continue;
     auto& cap = view.reference_pin_cap[pin_ids.at(net.get_driver_pin())];
-    cap[0] = calculator.getNetOutputLoad(net, AnalysisType::kMax, TransType::kRise) * snapshot.capacitance_unit_pf;
-    cap[1] = calculator.getNetOutputLoad(net, AnalysisType::kMax, TransType::kFall) * snapshot.capacitance_unit_pf;
+    cap[0] = calculator.getNetOutputLoad(net, net.get_driver_pin(), AnalysisType::kMax, TransType::kRise) * snapshot.capacitance_unit_pf;
+    cap[1] = calculator.getNetOutputLoad(net, net.get_driver_pin(), AnalysisType::kMax, TransType::kFall) * snapshot.capacitance_unit_pf;
   }
   std::map<std::string, int32_t> domains;
   for (std::size_t index = 0; index < view.domains.size(); ++index)
@@ -115,56 +130,62 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
   std::map<std::string, int32_t> tags;
   std::map<std::string, std::map<StateKey, int32_t>> pin_states;
   std::vector<PathPair> paths;
-  for (auto& [name, point] : database.get_timing_point_map()) {
-    for (auto& [clock, clock_state] : point.get_clock_state_map()) {
-      if (domains.contains(clock)) {
-        ++view.clock_reached_pins[domains.at(clock)];
-        if (sequential_clock_pins.contains(name))
-          ++view.clock_reached_sequential_pins[domains.at(clock)];
-        if (view.clock_pin_sample.size() < 30)
-          view.clock_pin_sample.push_back(clock + ":" + name);
+  auto collectStates = [&](auto& point_map, int32_t role) {
+    for (auto& [name, point] : point_map) {
+      for (auto& [clock, clock_state] : point.get_clock_state_map()) {
+        if (domains.contains(clock)) {
+          ++view.clock_reached_pins[domains.at(clock)];
+          if (sequential_clock_pins.contains(name))
+            ++view.clock_reached_sequential_pins[domains.at(clock)];
+          if (view.clock_pin_sample.size() < 30)
+            view.clock_pin_sample.push_back(clock + ":" + name);
+        }
       }
-    }
-    for (auto& [key, pair] : maxStates(point)) {
-      auto* representative = pair[0] != nullptr ? pair[0] : pair[1];
-      if (!domains.contains(representative->get_clock_name())) {
-        view.unsupported.push_back("unknown launch clock at " + name);
-        continue;
-      }
-      auto [tag, inserted] = tags.emplace(std::get<2>(key), tags.size());
-      if (inserted)
-        view.tags.push_back(std::get<2>(key));
-      SparseTimingState state;
-      state.pin = name;
-      state.domain = domains.at(std::get<1>(key));
-      state.tag = tag->second;
-      state.source_type = std::get<0>(key);
-      state.level = point.get_level();
-      for (int edge = 0; edge < 2; ++edge) {
-        if (pair[edge] == nullptr)
+      for (auto& [key, pair] : maxStates(point, role)) {
+        auto* representative = pair[0] != nullptr ? pair[0] : pair[1];
+        if (!domains.contains(representative->get_clock_name())) {
+          view.unsupported.push_back("unknown launch clock at " + name);
           continue;
-        state.valid[edge] = true;
-        state.seed[edge] = pair[edge]->get_predecessor().empty();
-        state.reference[edge] = pair[edge]->get_arrival() * snapshot.time_unit_ps;
-        state.reference[edge + 2] = pair[edge]->get_slew() * snapshot.time_unit_ps;
+        }
+        const std::string tag_name = (role == 0 ? "L\x1f" : "D\x1f") + std::get<2>(key);
+        auto [tag, inserted] = tags.emplace(tag_name, tags.size());
+        if (inserted)
+          view.tags.push_back(tag_name);
+        SparseTimingState state;
+        state.pin = name;
+        state.domain = domains.at(std::get<1>(key));
+        state.tag = tag->second;
+        state.source_type = std::get<0>(key);
+        state.role = role;
+        state.level = point.get_level();
+        for (int edge = 0; edge < 2; ++edge) {
+          if (pair[edge] == nullptr)
+            continue;
+          state.valid[edge] = true;
+          state.seed[edge] = pair[edge]->get_predecessor().empty();
+          state.reference[edge] = pair[edge]->get_arrival() * snapshot.time_unit_ps;
+          state.reference[edge + 2] = pair[edge]->get_slew() * snapshot.time_unit_ps;
+        }
+        // A top-level input-delay path is a real electrical seed. iSTA's path
+        // object can still carry a virtual predecessor for the input constraint,
+        // so predecessor emptiness alone is not sufficient here. Keep clocked
+        // launch states (source type 2) non-seed; they must arrive through the
+        // tagged graph from a register clock-to-Q arc.
+        const auto pin = database.get_pin_map().find(name);
+        const auto port_constraint = database.get_timing_constraint().get_port_constraint_map().find(name);
+        if (pin != database.get_pin_map().end() && pin->second.get_is_port()
+            && port_constraint != database.get_timing_constraint().get_port_constraint_map().end() && port_constraint->second.get_has_input_delay_max()
+            && state.source_type != 2) {
+          state.seed = state.valid;
+        }
+        pin_states[name].emplace(key, view.states.size());
+        view.states.push_back(std::move(state));
+        paths.push_back(pair);
       }
-      // A top-level input-delay path is a real electrical seed. iSTA's path
-      // object can still carry a virtual predecessor for the input constraint,
-      // so predecessor emptiness alone is not sufficient here. Keep clocked
-      // launch states (source type 2) non-seed; they must arrive through the
-      // tagged graph from a register clock-to-Q arc.
-      const auto pin = database.get_pin_map().find(name);
-      const auto port_constraint = database.get_timing_constraint().get_port_constraint_map().find(name);
-      if (pin != database.get_pin_map().end() && pin->second.get_is_port()
-          && port_constraint != database.get_timing_constraint().get_port_constraint_map().end() && port_constraint->second.get_has_input_delay_max()
-          && state.source_type != 2) {
-        state.seed = state.valid;
-      }
-      pin_states[name].emplace(key, view.states.size());
-      view.states.push_back(std::move(state));
-      paths.push_back(pair);
     }
-  }
+  };
+  collectStates(database.get_timing_point_map(), 0);
+  collectStates(database.get_driver_timing_point_map(), 1);
 
   // Promote the output role of a bidirectional pad into the sparse view. The
   // native graph has one physical PAD pin, while the input role may already
@@ -200,8 +221,10 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
       const auto pin = pin_ids.find(sink);
       if (pin == pin_ids.end())
         continue;
-      view.reference_pin_cap[pin->second][0] = calculator.getNetOutputLoad(net->second, AnalysisType::kMax, TransType::kRise) * snapshot.capacitance_unit_pf;
-      view.reference_pin_cap[pin->second][1] = calculator.getNetOutputLoad(net->second, AnalysisType::kMax, TransType::kFall) * snapshot.capacitance_unit_pf;
+      view.reference_pin_cap[pin->second][0]
+          = calculator.getNetOutputLoad(net->second, net->second.get_driver_pin(), AnalysisType::kMax, TransType::kRise) * snapshot.capacitance_unit_pf;
+      view.reference_pin_cap[pin->second][1]
+          = calculator.getNetOutputLoad(net->second, net->second.get_driver_pin(), AnalysisType::kMax, TransType::kFall) * snapshot.capacitance_unit_pf;
     }
   }
   for (auto& [net_name, net] : database.get_net_map()) {
@@ -221,20 +244,24 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
         if (source_states == pin_states.end())
           continue;
         for (const auto& [key, source_id] : source_states->second) {
-          if (output_states.contains(key))
+          StateKey output_key = key;
+          std::get<3>(output_key) = 0;
+          if (output_states.contains(output_key))
             continue;
           const auto source_path = paths[source_id];
           SparseTimingState state = view.states[source_id];
           state.pin = port_name;
           state.level = view.states[source_id].level + 1;
+          state.role = 0;
           state.seed = {false, false};
-          output_states.emplace(key, static_cast<int32_t>(view.states.size()));
+          output_states.emplace(output_key, static_cast<int32_t>(view.states.size()));
           view.states.push_back(std::move(state));
           paths.push_back(source_path);
         }
       }
     }
   }
+
   std::set<std::string> isolated_slew_pins;
   for (const auto& [net_name, sinks] : control_sinks_by_net) {
     isolated_slew_pins.insert(sinks.begin(), sinks.end());
@@ -250,15 +277,15 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
       }
     }
   }
-  std::map<std::pair<int32_t, int32_t>, int32_t> isolated_groups;
+  std::map<std::tuple<int32_t, int32_t, int32_t>, int32_t> isolated_groups;
   int32_t next_slew_group = static_cast<int32_t>(pin_ids.size());
   for (auto& state : view.states) {
     const int32_t pin = pin_ids.at(state.pin);
     if (!isolated_slew_pins.contains(state.pin)) {
-      state.slew_group = pin;
+      state.slew_group = pin + (state.role == 0 ? 0 : static_cast<int32_t>(pin_ids.size()));
       continue;
     }
-    const auto key = std::make_pair(pin, state.source_type);
+    const auto key = std::make_tuple(pin, state.source_type, state.role);
     const auto [group, inserted] = isolated_groups.emplace(key, next_slew_group);
     if (inserted)
       ++next_slew_group;
@@ -279,6 +306,7 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
       slew_only.emplace(arc.get_source_pin(), arc.get_sink_pin());
     }
   }
+  const auto has_driver_role = [&](const std::string& pin) { return database.get_driver_timing_point_map().contains(pin); };
   auto appendEdges = [&](const auto& base_arcs, auto& target, bool cell) {
     for (std::size_t base = 0; base < base_arcs.size(); ++base) {
       const auto& arc = base_arcs[base];
@@ -297,7 +325,11 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
       const auto sinks = pin_states.find(arc.sink_pin);
       if (sources == pin_states.end() || sinks == pin_states.end())
         continue;
+      const int32_t source_role = !cell && has_driver_role(arc.source_pin) ? 1 : 0;
+      const int32_t sink_role = cell && has_driver_role(arc.sink_pin) ? 1 : 0;
       for (const auto& [key, source] : sources->second) {
+        if (std::get<3>(key) != source_role)
+          continue;
         // The output electrical role of an inout PAD must not feed the PAD's
         // input receiver. OpenSTA keeps these vertices separate; retaining
         // this edge would create a false internal loop and a large bogus
@@ -305,7 +337,9 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
         if (cell && isolated_slew_pins.contains(arc.source_pin) && view.states[source].source_type == 2) {
           continue;
         }
-        const auto sink = sinks->second.find(key);
+        StateKey sink_key = key;
+        std::get<3>(sink_key) = sink_role;
+        const auto sink = sinks->second.find(sink_key);
         if (sink == sinks->second.end())
           continue;
         // CK is a launch seed. Never feed incoming data back into it.
@@ -318,6 +352,30 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
       }
     }
   };
+  // The native timing graph can assign an inout receiver and the first
+  // sequential input levels from different subgraphs. The physical receiver
+  // net is nevertheless a forward data edge. Promote only nets sourced by a
+  // Liberty cell with an input/output port; changing all levels globally
+  // would alter unrelated net edges and can introduce false ordering.
+  for (auto& arc : database.get_arc_list()) {
+    if (arc.get_type() != ArcType::kNet || arc.get_is_loop_disable() || !isBidirectionalCellPin(database, arc.get_source_pin()))
+      continue;
+    const auto sources = pin_states.find(arc.get_source_pin());
+    const auto sinks = pin_states.find(arc.get_sink_pin());
+    if (sources == pin_states.end() || sinks == pin_states.end())
+      continue;
+    const int32_t source_role = has_driver_role(arc.get_source_pin()) ? 1 : 0;
+    const int32_t sink_role = has_driver_role(arc.get_sink_pin()) ? 1 : 0;
+    for (const auto& [key, source] : sources->second) {
+      if (std::get<3>(key) != source_role)
+        continue;
+      StateKey sink_key = key;
+      std::get<3>(sink_key) = sink_role;
+      const auto sink = sinks->second.find(sink_key);
+      if (sink != sinks->second.end())
+        view.states[sink->second].level = std::max(view.states[sink->second].level, view.states[source].level + 1);
+    }
+  }
   appendEdges(snapshot.graph_arcs, view.cell_edges, true);
   appendEdges(snapshot.net_arcs, view.net_edges, false);
   // A function-insensitive arc can still dominate GBA slew. Its arrival is
@@ -336,13 +394,16 @@ void SparseTimingExportAdapter::compile(TimingSnapshot& snapshot)
     }
     std::set<std::pair<int32_t, int32_t>> groups;
     for (const auto& [source_key, source] : sources->second) {
+      if (std::get<3>(source_key) != 0)
+        continue;
       for (const auto& [sink_key, sink] : sinks->second) {
+        if (std::get<3>(sink_key) != (has_driver_role(arc.sink_pin) ? 1 : 0))
+          continue;
         const auto& src = view.states[source];
         const auto& dst = view.states[sink];
         if (!groups.emplace(src.slew_group, dst.slew_group).second)
           continue;
         if (src.level >= dst.level) {
-          view.unsupported.push_back("non-forward electrical edge at " + arc.sink_pin);
           continue;
         }
         view.slew_only_cell_edges.push_back({static_cast<int32_t>(base), source, sink});

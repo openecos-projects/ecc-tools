@@ -490,6 +490,19 @@ TEST(FastSTATest, TimingPowerAndMasterChangeUpdateContext)
   EXPECT_NEAR(context.power.leakage_power_w, 0.02, 1e-12);
 }
 
+TEST(FastSTATest, PowerUpdateUsesClockDomainVoltageWithMixedLibraries)
+{
+  auto context = MakeTinyContext();
+  auto io_cell = MakeCell("IO_3V3", 0.20, 1.5, 0.01);
+  io_cell.voltage_v = 3.3;
+  context.liberty_cell_by_master.emplace("IO_3V3", std::move(io_cell));
+
+  ASSERT_TRUE(icts::FastStaTiming::update(context));
+  EXPECT_TRUE(icts::FastStaPower::update(context));
+  EXPECT_TRUE(context.power_valid);
+  EXPECT_GT(context.power.total_power_w, 0.0);
+}
+
 TEST(FastSTATest, PowerUpdateRejectsMissingInternalPowerTable)
 {
   auto context = MakeTinyContext();

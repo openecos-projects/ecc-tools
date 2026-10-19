@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -58,6 +59,27 @@ void appendQualification(pybind11::list& valid, pybind11::list& reasons, const i
 {
   valid.append(pybind11::make_tuple(qualification.valid[0], qualification.valid[1]));
   reasons.append(pybind11::make_tuple(static_cast<int32_t>(qualification.reason[0]), static_cast<int32_t>(qualification.reason[1])));
+}
+
+// Liberty equivalence is a timing property.  The physical LEF master is the
+// authority for a sizing writeback, so keep cells with different physical pin
+// schemas in separate runtime families even when the Liberty exporter grouped
+// them under one timing family.  This is needed for libraries whose Liberty
+// and LEF disagree about a pin direction on one VT variant.
+std::string physicalPinSignature(const TimingLibCellSnapshot& cell, idb::IdbCellMaster* master)
+{
+  if (master == nullptr) return "missing:" + cell.name;
+  std::vector<std::tuple<std::string, int, int>> terms;
+  for (auto* term : master->get_term_list()) {
+    if (term == nullptr) continue;
+    terms.emplace_back(term->get_name(), static_cast<int>(term->get_direction()), static_cast<int>(term->get_type()));
+  }
+  std::sort(terms.begin(), terms.end());
+  std::ostringstream signature;
+  for (const auto& [name, direction, type] : terms) {
+    signature << name << ':' << direction << ':' << type << ';';
+  }
+  return signature.str();
 }
 
 }  // namespace
@@ -199,23 +221,56 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   std::unordered_map<std::string, int32_t> cell_ids;
   auto* physical_masters = db == nullptr || db->get_idb_layout() == nullptr
                                ? nullptr : db->get_idb_layout()->get_cell_master_list();
-  for (const TimingLibCellSnapshot& cell : snapshot.lib_cells) {
+
+  // Split Liberty families when their physical LEF pin schemas differ.  The
+  // resulting ordered view is used consistently for all cell, pin, arc and
+  // instance mappings below.
+  std::vector<const TimingLibCellSnapshot*> ordered_cells;
+  std::vector<int32_t> ordered_main_ids;
+  int32_t next_main_id = 0;
+  std::size_t physical_family_splits = 0;
+  for (std::size_t begin = 0; begin < snapshot.lib_cells.size();) {
+    const int32_t original_main_id = snapshot.lib_cells[begin].main_id;
+    std::size_t end = begin + 1;
+    while (end < snapshot.lib_cells.size() && snapshot.lib_cells[end].main_id == original_main_id) ++end;
+    std::map<std::string, std::vector<const TimingLibCellSnapshot*>> physical_groups;
+    for (std::size_t index = begin; index < end; ++index) {
+      const auto& cell = snapshot.lib_cells[index];
+      auto* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
+      physical_groups[physicalPinSignature(cell, master)].push_back(&cell);
+    }
+    if (physical_groups.size() > 1) physical_family_splits += physical_groups.size() - 1;
+    for (auto& [signature, group] : physical_groups) {
+      (void) signature;
+      for (const auto* cell : group) {
+        ordered_cells.push_back(cell);
+        ordered_main_ids.push_back(next_main_id);
+      }
+      ++next_main_id;
+    }
+    begin = end;
+  }
+
+  for (std::size_t index = 0; index < ordered_cells.size(); ++index) {
+    const auto& cell = *ordered_cells[index];
     const int32_t id = static_cast<int32_t>(cell_ids.size());
     cell_ids.emplace(cell.name, id);
     flat_libcell_names.append(cell.name);
-    flat_libcell_info.append(pybind11::make_tuple(cell.name, cell.main_id, cell.size_index, cell.vt_index));
+    flat_libcell_info.append(pybind11::make_tuple(cell.name, ordered_main_ids[index], cell.size_index, cell.vt_index));
     idb::IdbCellMaster* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
     flat_libcell_width.append(master == nullptr ? 0.0 : static_cast<double>(master->get_width()));
     flat_libcell_height.append(master == nullptr ? 0.0 : static_cast<double>(master->get_height()));
     flat_libcell_leakage.append(cell.leakage);
   }
   main_id_2_cell_id_start.append(0);
-  for (std::size_t index = 1; index < snapshot.lib_cells.size(); ++index) {
-    if (snapshot.lib_cells[index].main_id != snapshot.lib_cells[index - 1].main_id) {
+  for (std::size_t index = 1; index < ordered_cells.size(); ++index) {
+    if (ordered_main_ids[index] != ordered_main_ids[index - 1]) {
       main_id_2_cell_id_start.append(index);
     }
   }
-  if (!snapshot.lib_cells.empty()) main_id_2_cell_id_start.append(snapshot.lib_cells.size());
+  if (!ordered_cells.empty()) main_id_2_cell_id_start.append(ordered_cells.size());
+  timing_diagnostics.append("Physical timing families split by LEF pin schema: "
+                            + std::to_string(physical_family_splits));
   int32_t sizeable_families = 0;
   for (std::size_t main_id = 0; main_id + 1 < main_id_2_cell_id_start.size(); ++main_id) {
     const auto begin = main_id_2_cell_id_start[main_id].cast<std::size_t>();
@@ -226,7 +281,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     bool physical_family = true;
     bool buffer_family = true;
     for (std::size_t cell_id = begin; cell_id < end; ++cell_id) {
-      const auto& cell = snapshot.lib_cells[cell_id];
+      const auto& cell = *ordered_cells[cell_id];
       buffer_family = buffer_family && cell.is_buffer;
       auto* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
       if (master == nullptr || master->get_width() <= 0 || master->get_height() <= 0
@@ -242,7 +297,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     if (physical_family && buffer_family) buffer_main_type_candidate_indices.append(main_id);
     sizeable_families += sizeable;
     flat_libcell_main_id2size_vt_limit.append(
-        pybind11::make_tuple(snapshot.lib_cells[begin].name, size_limit, vt_limit));
+      pybind11::make_tuple(ordered_cells[begin]->name, size_limit, vt_limit));
   }
   if (buffer_main_type_candidate_indices.size() == 1) {
     buffer_main_type_index = buffer_main_type_candidate_indices[0].cast<int32_t>();
@@ -262,7 +317,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       const int32_t node_id = mapId(node_ids, instance->get_name());
       const int32_t cell_id = mapId(cell_ids, instance->get_cell_master()->get_name());
       if (node_id < 0 || cell_id < 0) continue;
-      const int32_t main_id = snapshot.lib_cells[cell_id].main_id;
+      const int32_t main_id = ordered_main_ids[cell_id];
       inst_main_id[static_cast<std::size_t>(node_id)] = main_id;
       inst_libcell_offset[static_cast<std::size_t>(node_id)]
           = cell_id - main_id_2_cell_id_start[main_id].cast<int32_t>();
@@ -275,7 +330,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     if (timing_pin == timing_pins.end()) continue;
     const auto instance = instance_cells.find(timing_pin->second.instance_name);
     if (instance == instance_cells.end()) continue;
-    const auto& ports = snapshot.lib_cells[instance->second].ports;
+    const auto& ports = ordered_cells[instance->second]->ports;
     const std::string port_name = name.substr(name.rfind(':') + 1);
     for (std::size_t offset = 0; offset < ports.size(); ++offset) {
       if (ports[offset].name == port_name) {
@@ -290,7 +345,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   int32_t flat_arc_id = 0;
   int32_t flat_pin_id = 0;
   int32_t missing_physical_pin_shapes = 0;
-  for (const TimingLibCellSnapshot& cell : snapshot.lib_cells) {
+  for (const auto* cell_ptr : ordered_cells) {
+    const auto& cell = *cell_ptr;
     auto* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
     for (const TimingLibPortSnapshot& port : cell.ports) {
       auto* term = master == nullptr ? nullptr : master->findTerm(port.name);

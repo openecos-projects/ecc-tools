@@ -107,11 +107,9 @@ bool DelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCellAr
 
   const double output_load = getOutputPinLoad(output_pin, analysis_type, output_trans_type);
   bool has_result = false;
-  double selected_delay = 0.0;
-  double selected_slew = 0.0;
   for (TransType input_trans_type : {TransType::kRise, TransType::kFall}) {
     const double input_slew = input_trans_type == TransType::kRise ? input_transition_rise : input_transition_fall;
-    for (TimingArc* timing_arc : getCandidateTimingArcList(timing_cell_arc, input_trans_type, output_trans_type, output_pin)) {
+    for (TimingArc* timing_arc : getCandidateTimingArcList(timing_cell_arc, input_trans_type, output_trans_type)) {
       const bool has_delay_table = timing_arc->get_delay_table_map().contains(output_trans_type);
       const bool has_slew_table = timing_arc->get_slew_table_map().contains(output_trans_type);
       if (!has_delay_table && !has_slew_table) {
@@ -126,19 +124,20 @@ bool DelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCellAr
       }
       const double output_slew
           = has_slew_table ? calcTimingArcSlew(output_pin, *timing_arc, analysis_type, output_trans_type, input_slew, output_load) : input_slew;
-      if (!has_result || (analysis_type == AnalysisType::kMin && load_delay < selected_delay)
-          || (analysis_type == AnalysisType::kMax && load_delay > selected_delay)) {
-        selected_delay = load_delay;
-        selected_slew = output_slew;
-        has_result = true;
-      }
+      // OpenSTA resolves an external driver annotation against the first
+      // matching Liberty arc. Conditional variants therefore follow library
+      // declaration order instead of being combined as max/min candidates.
+      timing_result.set_delay(load_delay);
+      timing_result.set_slew(output_slew);
+      has_result = true;
+      break;
     }
+    if (has_result)
+      break;
   }
   if (!has_result) {
     return false;
   }
-  timing_result.set_delay(selected_delay);
-  timing_result.set_slew(selected_slew);
   return true;
 }
 

@@ -400,7 +400,10 @@ auto DataManager::readClockData() -> DataManagerStatus
     for (const auto& clock_name : traceable_clock_names) {
       if (!accepted_clock_names.contains(clock_name)) {
         CTSLOG.warn(Loc::current(), "CTS data input found no target net for SDC clock \"", clock_name, "\".");
-        return failureStatus(DataManagerStatusCode::kExternalDataError, "clock_trace_no_targets");
+        // A declared clock may be intentionally absent from the post-place
+        // netlist (for example an unused JTAG clock).  Keep it in the SDC
+        // diagnostics, but let CTS continue with clocks that have a resolved
+        // target instead of rejecting the complete design.
       }
     }
   } else {

@@ -52,8 +52,14 @@ namespace {
 
 struct ClockTreeIdbNetPins
 {
-  std::vector<idb::IdbPin*> io_pins;
-  std::vector<idb::IdbPin*> inst_pins;
+  struct PinRef
+  {
+    std::string instance_name;
+    std::string pin_name;
+  };
+
+  std::vector<PinRef> io_pins;
+  std::vector<PinRef> inst_pins;
 };
 
 struct ClockTreeIdbMaterializationScope
@@ -108,6 +114,20 @@ auto FindIdbInstPinByCtsPinName(idb::IdbInstance* idb_inst, const std::string& p
   return nullptr;
 }
 
+auto ResolveIdbPin(idb::IdbDesign* idb_design, const ClockTreeIdbNetPins::PinRef& ref, bool io_pin) -> idb::IdbPin*
+{
+  if (idb_design == nullptr) {
+    return nullptr;
+  }
+  if (io_pin) {
+    return idb_design->get_io_pin_list() == nullptr ? nullptr : idb_design->get_io_pin_list()->find_pin(ref.pin_name);
+  }
+  if (idb_design->get_instance_list() == nullptr) {
+    return nullptr;
+  }
+  return FindIdbInstPinByCtsPinName(idb_design->get_instance_list()->find_instance(ref.instance_name), ref.pin_name);
+}
+
 auto CollectClockTreeIdbNetPins(idb::IdbNet* idb_net) -> ClockTreeIdbNetPins
 {
   ClockTreeIdbNetPins pins;
@@ -115,11 +135,40 @@ auto CollectClockTreeIdbNetPins(idb::IdbNet* idb_net) -> ClockTreeIdbNetPins
     return pins;
   }
   if (idb_net->get_io_pins() != nullptr) {
-    pins.io_pins = idb_net->get_io_pins()->get_pin_list();
+    for (auto* pin : idb_net->get_io_pins()->get_pin_list()) {
+      if (pin != nullptr) {
+        pins.io_pins.push_back({.instance_name = {}, .pin_name = pin->get_pin_name()});
+      }
+    }
   }
   if (idb_net->get_instance_pin_list() != nullptr) {
-    pins.inst_pins = idb_net->get_instance_pin_list()->get_pin_list();
+    for (auto* pin : idb_net->get_instance_pin_list()->get_pin_list()) {
+      if (pin != nullptr && pin->get_instance() != nullptr) {
+        pins.inst_pins.push_back({.instance_name = pin->get_instance()->get_name(), .pin_name = pin->get_pin_name()});
+      }
+    }
   }
+  return pins;
+}
+
+auto CollectPdnPins(idb::IdbNet* idb_net) -> std::vector<idb::IdbPin*>
+{
+  std::vector<idb::IdbPin*> pins;
+  if (idb_net == nullptr) {
+    return pins;
+  }
+  const auto collect = [&](idb::IdbPins* pin_list) {
+    if (pin_list == nullptr) {
+      return;
+    }
+    for (auto* pin : pin_list->get_pin_list()) {
+      if (pin != nullptr && pin->get_term() != nullptr && pin->get_term()->is_pdn()) {
+        pins.push_back(pin);
+      }
+    }
+  };
+  collect(idb_net->get_io_pins());
+  collect(idb_net->get_instance_pin_list());
   return pins;
 }
 
@@ -566,6 +615,11 @@ class Wrapper::CtsClockIdbWriter
       idb_ignore_loads.push_back(idb_ignore_load);
     }
 
+    // Some imported DEFs leave a PG pin in the regular-net pin list (PULP's
+    // wildcard VDD connection is one example).  Rewriting the clock net must
+    // not silently lose that pin.  Save it before detaching the clock pins and
+    // reconnect it to the matching special net after the clock net is rebuilt.
+    const auto preexisting_pdn_pins = CollectPdnPins(idb_net);
     DetachIdbNetPins(_wrapper->_idb_design, idb_net);
     if (!AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, idb_driver)) {
       _failure_reason = "clock_tree_driver_pin_connect_failed";
@@ -580,6 +634,21 @@ class Wrapper::CtsClockIdbWriter
     for (auto* idb_ignore_load : idb_ignore_loads) {
       if (!AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, idb_ignore_load)) {
         _failure_reason = "clock_tree_ignore_load_pin_connect_failed";
+        return false;
+      }
+    }
+    for (auto* pdn_pin : preexisting_pdn_pins) {
+      if (pdn_pin == nullptr) {
+        continue;
+      }
+      auto* special_net = pdn_pin->get_special_net();
+      if (special_net == nullptr && pdn_pin->get_term() != nullptr && _wrapper->_idb_design->get_special_net_list() != nullptr) {
+        special_net = _wrapper->_idb_design->get_special_net_list()->find_net(pdn_pin->get_term_name());
+      }
+      const bool restored = special_net != nullptr ? _wrapper->_idb_design->connectPinToSpecialNet(pdn_pin, special_net)
+                                                   : AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, pdn_pin);
+      if (!restored) {
+        _failure_reason = "clock_tree_pdn_pin_restore_failed";
         return false;
       }
     }
@@ -610,10 +679,12 @@ class Wrapper::CtsClockIdbWriter
         continue;
       }
       DetachIdbNetPins(_wrapper->_idb_design, idb_net);
-      for (auto* io_pin : net_pins.io_pins) {
+      for (const auto& io_pin_ref : net_pins.io_pins) {
+        auto* io_pin = ResolveIdbPin(_wrapper->_idb_design, io_pin_ref, true);
         idb_clock_tree_restored = AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, io_pin) && idb_clock_tree_restored;
       }
-      for (auto* inst_pin : net_pins.inst_pins) {
+      for (const auto& inst_pin_ref : net_pins.inst_pins) {
+        auto* inst_pin = ResolveIdbPin(_wrapper->_idb_design, inst_pin_ref, false);
         idb_clock_tree_restored = AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, inst_pin) && idb_clock_tree_restored;
       }
     }
@@ -636,24 +707,36 @@ class Wrapper::CtsClockIdbWriter
 
   // Every pin that was on a rewritten net before materialization must still be
   // connected afterwards; a dropped pin is a typed failure, never a silent edit.
-  static auto findDroppedPreexistingPin(const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data)
+  auto findDroppedPreexistingPin(const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data)
       -> std::optional<std::pair<std::string, std::string>>
   {
     for (const auto& [net_name, net_pins] : restore_data.pins_by_net_name) {
       if (!scope.touched_net_names.contains(net_name)) {
         continue;
       }
-      for (auto* io_pin : net_pins.io_pins) {
-        if (io_pin != nullptr && io_pin->get_net() == nullptr) {
+      for (const auto& io_pin_ref : net_pins.io_pins) {
+        auto* io_pin = ResolveIdbPin(_wrapper->_idb_design, io_pin_ref, true);
+        if (io_pin != nullptr && io_pin->get_term() != nullptr && io_pin->get_term()->is_pdn()) {
+          // DEF wildcard PG pins may be represented in the regular-net
+          // snapshot even though they are not part of the clock topology.
+          // Their regular connection can be rebuilt by the PG materializer.
+          continue;
+        }
+        if (io_pin != nullptr && io_pin->get_net() == nullptr && io_pin->get_special_net() == nullptr) {
           return std::pair{net_name, io_pin->get_pin_name()};
         }
       }
-      for (auto* inst_pin : net_pins.inst_pins) {
-        if (inst_pin == nullptr || inst_pin->get_net() != nullptr) {
+      for (const auto& inst_pin_ref : net_pins.inst_pins) {
+        auto* inst_pin = ResolveIdbPin(_wrapper->_idb_design, inst_pin_ref, false);
+        if (inst_pin != nullptr && inst_pin->get_term() != nullptr && inst_pin->get_term()->is_pdn()) {
+          // See the IO-pin case above.  Ordinary signal pins still retain the
+          // strict dropped-pin contract.
           continue;
         }
-        auto* inst = inst_pin->get_instance();
-        return std::pair{net_name, inst == nullptr ? inst_pin->get_pin_name() : inst->get_name() + "/" + inst_pin->get_pin_name()};
+        if (inst_pin == nullptr || inst_pin->get_net() != nullptr || inst_pin->get_special_net() != nullptr) {
+          continue;
+        }
+        return std::pair{net_name, inst_pin == nullptr ? inst_pin_ref.pin_name : inst_pin_ref.instance_name + "/" + inst_pin_ref.pin_name};
       }
     }
     return std::nullopt;
