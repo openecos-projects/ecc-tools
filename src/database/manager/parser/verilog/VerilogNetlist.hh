@@ -65,6 +65,17 @@ struct NetConnection
   NetId source;
   SourceLocation location;
 };
+struct HierarchicalPort
+{
+  std::string instance;
+  std::string name;
+  Direction direction;
+  NetId net;
+  // Exact elaborated ownership; escaped names may contain hierarchy separators.
+  size_t leaf_begin = 0;
+  size_t leaf_end = 0;
+  int depth = 0;
+};
 struct Netlist
 {
   std::string source;
@@ -76,6 +87,7 @@ struct Netlist
   std::vector<NetBus> buses;
   std::vector<NetConnection> assignments;
   std::vector<NetConnection> inouts;
+  std::vector<HierarchicalPort> hierarchical_ports;
 };
 struct Hierarchy;
 struct NetlistResult

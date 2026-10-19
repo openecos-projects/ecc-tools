@@ -18,6 +18,7 @@
 
 #include "DataManager.hpp"
 #include "DelayCalculator.hpp"
+#include "HierarchyConstraints.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "TimingExceptionMatcher.hpp"
@@ -524,7 +525,8 @@ std::vector<std::string> TimingAnalyzer::getEndPointClockNames(std::string& end_
     if (instance.get_is_sequential() && database.get_timing_point_map().contains(instance.get_clock_pin_name())) {
       std::vector<std::string> names;
       for (const auto& [clock_name, state] : database.get_timing_point_map().at(instance.get_clock_pin_name()).get_clock_state_map()) {
-        names.push_back(clock_name);
+        if (!state.is_source_path_only)
+          names.push_back(clock_name);
       }
       if (!names.empty()) return names;
     }
@@ -1457,11 +1459,16 @@ TimingPathState* TimingAnalyzer::updateDiversionPathState(std::string& pin_name,
                                                           TransType predecessor_trans_type, double arrival)
 {
   Database& database = STADM.getDatabase();
+  const auto& incoming = database.get_arc_list().at(predecessor_arc_idx);
+  if (source_path_state.get_is_clock_source_path() && incoming.get_type() == ArcType::kNet
+      && !clockAllowsNetArc(database, source_path_state.get_clock_name(), predecessor, pin_name))
+    return nullptr;
   TimingPoint& timing_point = database.getSinkTimingPoint(database.get_arc_list()[predecessor_arc_idx]);
   const std::vector<int32_t> exception_state_list
-      = TimingExceptionMatcher::advanceState(database, source_path_state.get_exception_state_list(), pin_name, trans_type);
-  const std::string path_state_tag
-      = TimingExceptionMatcher::makePathStateTag(database, source_path_state.get_start_point(), source_path_state.get_clock_name(), exception_state_list);
+      = TimingExceptionMatcher::advanceState(database, source_path_state.get_exception_state_list(), pin_name, trans_type,
+                                             database.get_arc_list()[predecessor_arc_idx].get_type() == ArcType::kNet ? predecessor : "");
+  const std::string path_state_tag = TimingExceptionMatcher::makePathStateTag(database, source_path_state.get_start_point(), source_path_state.get_clock_name(),
+                                                                              exception_state_list, source_path_state.get_is_clock_source_path());
   std::map<std::string, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
   if (path_state_map.count(path_state_tag) > 0 && !isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
     return nullptr;
@@ -1475,6 +1482,7 @@ TimingPathState* TimingAnalyzer::updateDiversionPathState(std::string& pin_name,
   path_state.set_predecessor_arc_delay(predecessor_arc_delay);
   path_state.set_launch_time(source_path_state.get_launch_time());
   path_state.set_clock_name(source_path_state.get_clock_name());
+  path_state.set_is_clock_source_path(source_path_state.get_is_clock_source_path());
   path_state.set_crpr_clock_pin(source_path_state.get_crpr_clock_pin());
   path_state.set_path_state_tag(path_state_tag);
   path_state.set_predecessor_path_state_tag(source_path_state.get_path_state_tag());

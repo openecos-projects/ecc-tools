@@ -35,6 +35,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
     const char* value = Tcl_GetString(objv[index]);
     if (next_is_option_value) {
       _option_object_map[current_option->get_option_name()] = objv[index];
+      _option_object_value_list.emplace_back(current_option->get_option_name(), objv[index]);
       setOptionValue(current_option, value);
       next_is_option_value = false;
       continue;
@@ -58,6 +59,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
       return TCL_ERROR;
     }
     _option_object_map[argument->get_option_name()] = objv[index];
+    _option_object_value_list.emplace_back(argument->get_option_name(), objv[index]);
     setOptionValue(argument, value);
   }
 
@@ -158,6 +160,34 @@ std::vector<Tcl_Obj*> SdcTclCmd::getOptionObjects(const std::string& name)
   return count == 0 ? std::vector<Tcl_Obj*>() : std::vector<Tcl_Obj*>(elements, elements + count);
 }
 
+std::vector<std::string> SdcTclCmd::getObjectCollectionNames(Tcl_Obj* object)
+{
+  std::vector<std::string> names;
+  const auto* list_type = Tcl_GetObjType("list");
+  std::function<void(Tcl_Obj*, bool, int)> append = [&](Tcl_Obj* value, bool root, int depth) {
+    if (depth > 64)
+      throw std::invalid_argument("object collection nesting exceeds 64 levels");
+    if (SdcObject::getType(value) != SdcObjectType::kNone || (!root && value->typePtr != list_type)) {
+      names.emplace_back(Tcl_GetString(value));
+      return;
+    }
+    int count = 0;
+    Tcl_Obj** elements = nullptr;
+    if (Tcl_ListObjGetElements(nullptr, value, &count, &elements) != TCL_OK)
+      throw std::invalid_argument("invalid object collection");
+    for (int i = 0; i < count; ++i)
+      append(elements[i], false, depth + 1);
+  };
+  append(object, true, 0);
+  return names;
+}
+
+std::vector<std::string> SdcTclCmd::getOptionObjectNames(const std::string& name)
+{
+  const auto option = _option_object_map.find(name);
+  return option == _option_object_map.end() ? std::vector<std::string>{} : getObjectCollectionNames(option->second);
+}
+
 void SdcTclCmd::resetExecutionState()
 {
   resetOptionArgValue();
@@ -166,6 +196,7 @@ void SdcTclCmd::resetExecutionState()
   _list_result.clear();
   _list_result_type = SdcObjectType::kNone;
   _option_object_map.clear();
+  _option_object_value_list.clear();
   _option_value_list.clear();
   _has_result = false;
   _has_list_result = false;

@@ -34,6 +34,9 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
   nlohmann::json json;
   config_file >> json;
 
+  std::string hierarchy = ecc::getJsonData(json, {"STA", "-hierarchy_verilog"});
+  if (!hierarchy.empty())
+    config_map["-hierarchy_verilog"] = hierarchy;
   std::string value = ecc::getJsonData(json, {"STA", "-temp_directory_path"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-temp_directory_path", value));
@@ -94,6 +97,8 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
 
 void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map)
 {
+  if (config_dict.contains("-hierarchy_verilog"))
+    config_map["-hierarchy_verilog"] = config_dict["-hierarchy_verilog"];
   if (config_dict.count("-temp_directory_path") > 0 && !config_dict["-temp_directory_path"].empty()) {
     config_map["-temp_directory_path"] = config_dict["-temp_directory_path"];
   }

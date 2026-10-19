@@ -16,9 +16,10 @@
 // ***************************************************************************************
 #include "ObjectQuery.hpp"
 
+#include "HierarchyConstraints.hpp"
+#include "ObjectFilter.hpp"
 #include "STAHeader.hpp"
 #include "SdcCommand.hpp"
-#include "ObjectFilter.hpp"
 #include "frontend/SdcTclCmd.hpp"
 
 namespace ista::sdc {
@@ -133,6 +134,12 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
       addObjectMatch(matches, name, display, pin.get_is_port() ? "port" : "pin", std::move(attributes));
     }
   }
+  if (type == QueryObjectType::kPin || type == QueryObjectType::kAny) {
+    for (const auto& [name, pin] : database.get_hierarchy_pin_map()) {
+      addObjectMatch(matches, name, pin.instance + "/" + pin.port, "pin",
+                     {{"direction", directionName(pin.direction)}, {"is_port", "false"}, {"is_hierarchical", "true"}, {"pin_name", pin.port}});
+    }
+  }
   if (type == QueryObjectType::kCell || type == QueryObjectType::kAny) {
     for (auto& [name, instance] : database.get_instance_map()) {
       addObjectMatch(matches, name, name, "cell", {{"ref_name", instance.get_cell_name()},
@@ -150,6 +157,8 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
 
 QueryObjectType getObjectType(Database& database, const std::string& name)
 {
+  if (database.get_hierarchy_pin_map().contains(name))
+    return QueryObjectType::kPin;
   const auto pin = database.get_pin_map().find(name);
   if (pin != database.get_pin_map().end()) return pin->second.get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
   if (database.get_timing_constraint().get_clock_map().contains(name)) return QueryObjectType::kClock;
@@ -169,10 +178,25 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
 {
   std::set<std::string> result;
   for (const std::string& object_pattern : objects) {
-    const std::vector<std::string> object_names = findObjects(database, {object_pattern}, QueryObjectType::kAny);
+    const std::vector<std::string> object_names = getObjectType(database, object_pattern) != QueryObjectType::kAny
+                                                      ? std::vector<std::string>{object_pattern}
+                                                      : findObjects(database, {object_pattern}, QueryObjectType::kAny);
     for (const std::string& object_name : object_names) {
       const QueryObjectType source = getObjectType(database, object_name);
       if (source == target) result.insert(object_name);
+      if (database.get_hierarchy_pin_map().contains(object_name)) {
+        const auto& pin = checkedHierarchyPin(database, object_name);
+        if (target == QueryObjectType::kNet)
+          result.insert(pin.net);
+        if (target == QueryObjectType::kClock) {
+          for (const auto& [name, clock] : database.get_timing_constraint().get_clock_map()) {
+            const auto& sources = clock.get_source_objects();
+            if (std::find(sources.begin(), sources.end(), object_name) != sources.end())
+              result.insert(name);
+          }
+        }
+        continue;  // Hierarchical modules have no physical cell/library object.
+      }
       if (source == QueryObjectType::kCell && target == QueryObjectType::kLibCell) {
         Instance& instance = database.get_instance_map().at(object_name);
         auto cell = database.get_timing_library().get_cell_map().find(instance.get_cell_name());
@@ -279,6 +303,75 @@ std::vector<std::string> findObjects(Database& database, const std::vector<std::
 std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, const ObjectQueryOptions& options)
 {
   if (options.regexp && options.exact) throw std::invalid_argument("-regexp and -exact are mutually exclusive");
+  // Exported SDCs contain thousands of exact scalar/bus queries. Avoid
+  // rebuilding a multi-million-pin display catalogue for each one. Numeric
+  // Tcl character classes retain their normal-match-then-literal fallback.
+  if (!options.regexp && !options.nocase && !options.hierarchical && options.filter.empty() && options.of_objects.empty()
+      && (type == QueryObjectType::kPin || type == QueryObjectType::kPort || type == QueryObjectType::kCell || type == QueryObjectType::kClock)) {
+    auto lookup = [&](std::string name, std::set<std::string>& out) {
+      if (type == QueryObjectType::kPin) {
+        auto insert = [&](const std::string& key) {
+          if (database.get_hierarchy_pin_map().contains(key))
+            out.insert(key);
+          else if (database.get_pin_map().contains(key) && !database.get_pin_map().at(key).get_is_port())
+            out.insert(key);
+        };
+        insert(name);
+        // Either instance or escaped port identifiers can contain '/'. Check
+        // every split, preserving all matches if display names are ambiguous.
+        for (size_t slash = name.find('/'); slash != std::string::npos; slash = name.find('/', slash + 1)) {
+          name[slash] = ':';
+          insert(name);
+          name[slash] = '/';
+        }
+      } else if (type == QueryObjectType::kPort) {
+        if (database.get_pin_map().contains(name) && database.get_pin_map().at(name).get_is_port())
+          out.insert(name);
+      } else if (type == QueryObjectType::kCell && database.get_instance_map().contains(name))
+        out.insert(name);
+      else if (type == QueryObjectType::kClock && database.get_timing_constraint().get_clock_map().contains(name))
+        out.insert(name);
+    };
+    std::set<std::string> exact;
+    bool complete = true;
+    for (const auto& pattern : patterns) {
+      if (!options.exact && pattern.find_first_of("*?\\") != std::string::npos) {
+        complete = false;
+        break;
+      }
+      std::vector<std::string> candidates{std::string{}};
+      for (size_t i = 0; i < pattern.size() && complete; ++i) {
+        if (pattern[i] != '[' || options.exact) {
+          for (auto& name : candidates)
+            name += pattern[i];
+          continue;
+        }
+        const auto end = pattern.find(']', i + 1);
+        if (end == std::string::npos || end == i + 1
+            || !std::all_of(pattern.begin() + i + 1, pattern.begin() + end, [](char c) { return c >= '0' && c <= '9'; })
+            || candidates.size() * (end - i - 1) > 256) {
+          complete = false;
+          break;
+        }
+        std::vector<std::string> expanded;
+        for (const auto& name : candidates)
+          for (size_t j = i + 1; j < end; ++j)
+            expanded.push_back(name + pattern[j]);
+        candidates = std::move(expanded);
+        i = end;
+      }
+      if (!complete)
+        break;
+      std::set<std::string> matches;
+      for (const auto& candidate : candidates)
+        lookup(candidate, matches);
+      if (matches.empty())
+        lookup(pattern, matches);
+      exact.insert(matches.begin(), matches.end());
+    }
+    if (complete)
+      return {exact.begin(), exact.end()};
+  }
   const std::set<std::string> of_objects = options.of_objects.empty() ? std::set<std::string>{} : collectRelatedObjects(database, options.of_objects, type);
   const std::vector<ObjectMatch> object_matches = collectObjectMatches(database, type);
   std::set<std::string> found;
@@ -331,9 +424,13 @@ std::vector<std::string> findClockSources(Database& database, const std::vector<
 {
   std::set<std::string> sources;
   for (const std::string& object : objects) {
-    for (const std::string& match : findObjects(database, {object}, QueryObjectType::kAny)) {
+    const auto direct_type = getObjectType(database, object);
+    const auto matches = direct_type == QueryObjectType::kAny ? findObjects(database, {object}, QueryObjectType::kAny) : std::vector<std::string>{object};
+    for (const std::string& match : matches) {
       const QueryObjectType type = getObjectType(database, match);
       if (type == QueryObjectType::kPort || type == QueryObjectType::kPin) {
+        if (database.get_hierarchy_pin_map().contains(match))
+          checkedHierarchyPin(database, match);
         sources.insert(match);
       } else if (type == QueryObjectType::kNet) {
         Net& net = database.get_net_map().at(match);
@@ -374,7 +471,7 @@ std::set<std::string> findClocksFromObjects(Database& database, const std::vecto
     }
     for (const std::string& source : findClockSources(database, {object})) {
       for (auto& [clock_name, clock] : database.get_timing_constraint().get_clock_map()) {
-        if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), source) != clock.get_source_list().end()) {
+        if (std::find(clock.get_source_objects().begin(), clock.get_source_objects().end(), source) != clock.get_source_objects().end()) {
           result.insert(clock_name);
         }
       }
@@ -390,6 +487,11 @@ std::set<std::string> findExceptionObjects(Database& database, const std::vector
 {
   std::set<std::string> result;
   for (const std::string& object : objects) {
+    if (database.get_hierarchy_pin_map().contains(object)) {
+      checkedHierarchyPin(database, object);
+      result.insert(object);
+      continue;
+    }
     if (database.get_pin_map().contains(object) || database.get_instance_map().contains(object) || database.get_net_map().contains(object)
         || database.get_timing_constraint().get_clock_map().contains(object)) {
       result.insert(object);
@@ -399,7 +501,11 @@ std::set<std::string> findExceptionObjects(Database& database, const std::vector
     if (matches.empty()) {
       throw std::invalid_argument("exception object not found: " + object);
     }
-    result.insert(matches.begin(), matches.end());
+    for (const auto& match : matches) {
+      if (database.get_hierarchy_pin_map().contains(match))
+        checkedHierarchyPin(database, match);
+      result.insert(match);
+    }
   }
   if (result.empty()) {
     throw std::invalid_argument("empty timing exception collection");
@@ -411,6 +517,8 @@ std::vector<std::string> getPortPinNames(Database& database, const std::vector<s
 {
   std::vector<std::string> pin_names;
   for (const std::string& object_name : object_list) {
+    if (database.get_hierarchy_pin_map().contains(object_name))
+      throw std::invalid_argument("this constraint requires leaf pins or top-level ports; hierarchical pin: " + object_name);
     std::string pin_name = object_name;
     if (!pin_name.empty() && pin_name.front() == '\\') {
       pin_name.erase(pin_name.begin());

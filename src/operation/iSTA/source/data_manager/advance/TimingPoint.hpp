@@ -26,6 +26,9 @@ namespace ista {
 
 struct TimingClockPointState
 {
+  // Generated insertion traces are retained upstream of the declared target,
+  // but must not create launch/capture clocks or normal forward propagation.
+  bool is_source_path_only = false;
   std::map<AnalysisType, std::map<TransType, double>> arrival_map;
   std::map<AnalysisType, std::map<TransType, double>> slew_map;
   std::map<AnalysisType, std::map<TransType, double>> physical_arrival_map;
@@ -72,7 +75,11 @@ class TimingPoint
     return _path_state_map;
   }
   bool get_is_clock_point() const { return _is_clock_point; }
-  bool has_clock_state(std::string_view clock_name) const { return _clock_state_map.contains(std::string(clock_name)); }
+  bool has_clock_state(std::string_view clock_name) const
+  {
+    const auto* state = find_clock_state(clock_name);
+    return state != nullptr && !state->is_source_path_only;
+  }
   TimingClockPointState& get_clock_state(std::string_view clock_name) { return _clock_state_map[std::string(clock_name)]; }
   const TimingClockPointState* find_clock_state(std::string_view clock_name) const
   {

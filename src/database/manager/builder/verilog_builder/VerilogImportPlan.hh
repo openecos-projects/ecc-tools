@@ -46,6 +46,7 @@ struct VerilogImportPlan
   std::vector<PlannedBus> port_buses;
   std::vector<PlannedBus> net_buses;
   std::vector<PlannedInstance> instances;
+  std::vector<verilog::HierarchicalPort> hierarchical_ports;
 };
 struct ImportPlanResult
 {

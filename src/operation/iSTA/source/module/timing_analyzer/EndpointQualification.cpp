@@ -32,9 +32,8 @@ bool hasCaptureClock(Database& database, const std::string& pin_name, TransType 
 {
   const auto point = database.get_timing_point_map().find(pin_name);
   if (point == database.get_timing_point_map().end()) return false;
-  for (const auto& [name, state] : point->second.get_clock_state_map()) {
-    if (hasCaptureClockState(database, pin_name, name, transition))
-      return true;
+  for (const auto& entry : point->second.get_clock_state_map()) {
+    if (hasCaptureClockState(database, pin_name, entry.first, transition)) return true;
   }
   return false;
 }
@@ -50,6 +49,11 @@ bool hasCaptureClockState(Database& database, const std::string& pin_name, const
     return false;
   const auto clock = point->second.get_clock_state_map().find(clock_name);
   if (clock == point->second.get_clock_state_map().end())
+    return false;
+  // A clock state reached only through the clock's own source path is not a capture
+  // path: the data endpoint is launched by that clock, never captured by it, so it
+  // must not qualify a setup/recovery check or a sparse capture row.
+  if (clock->second.is_source_path_only)
     return false;
   const auto analysis = clock->second.arrival_map.find(AnalysisType::kMin);
   if (analysis == clock->second.arrival_map.end())

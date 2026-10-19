@@ -15,10 +15,11 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "DataManager.hpp"
+#include "HierarchyConstraints.hpp"
 #include "Logger.hpp"
 #include "STAHeader.hpp"
-#include "object/ObjectQuery.hpp"
 #include "clock/ClockCommands.hpp"
+#include "object/ObjectQuery.hpp"
 
 namespace ista::sdc {
 
@@ -44,12 +45,13 @@ void removeClockSourcesFromOtherClocks(std::map<std::string, TimingClock>& clock
     if (other_name == clock_name) {
       continue;
     }
-    std::vector<std::string>& other_sources = other_clock.get_source_list();
+    std::vector<std::string> other_sources = other_clock.get_source_objects();
     other_sources.erase(std::remove_if(other_sources.begin(), other_sources.end(),
                                        [&](const std::string& source) {
                                          return std::find(source_list.begin(), source_list.end(), source) != source_list.end();
                                        }),
                         other_sources.end());
+    setClockSources(STADM.getDatabase(), other_clock, other_sources);
   }
 }
 
@@ -147,9 +149,6 @@ unsigned TclCreateClock::exec()
     }
   }
 
-  if (!getOptionOrArg("-add")->is_set_val()) {
-    removeClockSourcesFromOtherClocks(clock_map, clock_name, unique_source_list);
-  }
   TimingClock timing_clock;
   timing_clock.set_clock_name(clock_name);
   timing_clock.set_period(period);
@@ -159,8 +158,12 @@ unsigned TclCreateClock::exec()
   if (comment_option->is_set_val()) {
     timing_clock.set_comment(comment_option->getStringVal());
   }
-  timing_clock.set_source_list(unique_source_list);
+  setClockSources(database, timing_clock, unique_source_list);
   timing_clock.set_is_propagated(false);
+  if (!getOptionOrArg("-add")->is_set_val()) {
+    removeClockSourcesFromOtherClocks(clock_map, clock_name, unique_source_list);
+  }
+
   clock_map[clock_name] = std::move(timing_clock);
   return 1;
 }

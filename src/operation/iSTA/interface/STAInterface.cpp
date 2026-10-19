@@ -16,8 +16,10 @@
 // ***************************************************************************************
 #include "STAInterface.hpp"
 
-#include <stdexcept>
 #include <cmath>
+#include <stdexcept>
+
+#include "HierarchyImport.hpp"
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -98,6 +100,11 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   DelayCalculator::initInst();
   SdcCommand::initInst();
   sdc::registerSdcCommands(SdcCommand::getInst());
+  if (config_map.contains("-hierarchy_verilog")) {
+    const auto file = std::any_cast<std::string>(config_map.at("-hierarchy_verilog"));
+    if (!file.empty())
+      readHierarchy(STADM.getDatabase(), *dmInst->get_idb_layout(), file);
+  }
   STADM.readConstraint();
 
   _initialized = true;

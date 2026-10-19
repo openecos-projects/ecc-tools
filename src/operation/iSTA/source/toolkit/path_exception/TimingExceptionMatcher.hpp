@@ -31,10 +31,10 @@ class TimingExceptionMatcher
  public:
   static std::vector<int32_t> initState(Database& database, std::string_view start, std::string_view clock, TransType start_trans_type,
                                         AnalysisType analysis_type);
-  static std::vector<int32_t> advanceState(Database& database, const std::vector<int32_t>& state_list, std::string_view pin_name,
-                                           TransType trans_type);
-  static std::string makePathStateTag(Database& database, std::string_view start, std::string_view clock,
-                                      const std::vector<int32_t>& exception_state_list);
+  static std::vector<int32_t> advanceState(Database& database, const std::vector<int32_t>& state_list, std::string_view pin_name, TransType trans_type,
+                                           std::string_view source_pin = {});
+  static std::string makePathStateTag(Database& database, std::string_view start, std::string_view clock, const std::vector<int32_t>& exception_state_list,
+                                      bool clock_source_path = false);
   static bool isFalsePath(Database& database, std::string_view start, std::string_view launch_clock, std::string_view end,
                           std::string_view capture_clock, AnalysisType analysis_type, TransType end_trans_type,
                           TransType capture_clock_trans_type, const std::vector<int32_t>& exception_state_list);

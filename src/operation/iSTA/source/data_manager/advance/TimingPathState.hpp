@@ -27,6 +27,8 @@ class TimingPathState
   TimingPathState() = default;
   ~TimingPathState() = default;
   // getter
+  bool get_is_clock_source_path() const { return _is_clock_source_path; }
+  void set_is_clock_source_path(bool value) { _is_clock_source_path = value; }
   double get_arrival() const { return _arrival; }
   double get_slew() const { return _slew; }
   double get_launch_time() const { return _launch_time; }
@@ -67,6 +69,7 @@ class TimingPathState
   // function
 
  private:
+  bool _is_clock_source_path = false;
   double _arrival = -std::numeric_limits<double>::infinity();
   double _slew = 0.0;
   double _launch_time = 0.0;

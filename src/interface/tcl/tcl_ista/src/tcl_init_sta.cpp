@@ -24,6 +24,7 @@ namespace tcl {
 
 TclInitSTA::TclInitSTA(const char* cmd_name) : TclCmd(cmd_name)
 {
+  _config_list.push_back(std::make_pair("-hierarchy_verilog", ValueType::kString));
   // std::string temp_directory_path;  // required
   _config_list.push_back(std::make_pair("-temp_directory_path", ValueType::kString));
   // int32_t thread_number;            // optional

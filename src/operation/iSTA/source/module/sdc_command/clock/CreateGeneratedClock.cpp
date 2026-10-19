@@ -15,8 +15,9 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "DataManager.hpp"
-#include "object/ObjectQuery.hpp"
+#include "HierarchyConstraints.hpp"
 #include "clock/ClockCommands.hpp"
+#include "object/ObjectQuery.hpp"
 
 namespace ista::sdc {
 
@@ -75,7 +76,7 @@ unsigned TclCreateGeneratedClock::exec()
     master_name = getOptionOrArg("-master_clock")->getStringVal();
   } else {
     for (auto& [candidate, clock] : clocks) {
-      if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), sources.front()) != clock.get_source_list().end()) {
+      if (std::find(clock.get_source_objects().begin(), clock.get_source_objects().end(), sources.front()) != clock.get_source_objects().end()) {
         if (!master_name.empty()) {
           setTclError("ambiguous master; specify -master_clock");
           return 0;
@@ -205,7 +206,7 @@ unsigned TclCreateGeneratedClock::exec()
   generated.set_clock_name(name);
   generated.set_master_clock_name(master_name);
   generated.set_master_source(sources.front());
-  generated.set_source_list(targets);
+  setClockSources(database, generated, targets);
   GeneratedClockDefinition definition;
   definition.master_clock = master_name;
   definition.master_source = sources.front();
@@ -228,12 +229,7 @@ unsigned TclCreateGeneratedClock::exec()
     generated.set_comment(getOptionOrArg("-comment")->getStringVal());
   }
   if (!getOptionOrArg("-add")->is_set_val()) {
-    for (auto& [other_name, other] : clocks) {
-      std::vector<std::string>& roots = other.get_source_list();
-      roots.erase(
-          std::remove_if(roots.begin(), roots.end(), [&](const std::string& pin) { return std::find(targets.begin(), targets.end(), pin) != targets.end(); }),
-          roots.end());
-    }
+    removeClockSourcesFromOtherClocks(clocks, name, targets);
   }
   clocks[name] = std::move(generated);
   return 1;

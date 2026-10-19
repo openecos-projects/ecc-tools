@@ -80,6 +80,7 @@ class ConnectivityLowerer
   }
 
  private:
+  int _module_depth = 0;
   std::optional<PortShape> libraryPort(std::string_view cell, std::string_view port) const
   {
     const auto found = _hierarchy.library.find(cell);
@@ -110,9 +111,16 @@ class ConnectivityLowerer
     if (_flat.nets.size() >= zBit)
       throw Error(location, "net count exceeds frontend limit");
     const auto id = static_cast<NetId>(_flat.nets.size());
-    if (!_net_names.emplace(name).second)
-      throw Error(location, "flattened net name collision: " + name);
-    _flat.nets.push_back({name, type});
+    // A scalar escaped identifier such as \bus[0] and a packed bus bit
+    // bus[0] are distinct symbols. Flattened display names may collide;
+    // connectivity continues to use their separate NetIds.
+    std::string unique_name = name;
+    if (!_net_names.emplace(unique_name).second) {
+      unique_name += "$" + std::to_string(id);
+      while (!_net_names.emplace(unique_name).second)
+        unique_name += "$";
+    }
+    _flat.nets.push_back({std::move(unique_name), type});
     return id;
   }
   Signal makeSignal(ConnectedScope& scope, const std::string& name, NetType type, std::optional<std::pair<int32_t, int32_t>> range,
@@ -373,6 +381,19 @@ class ConnectivityLowerer
     }
     ConnectedScope child(*expansion.scope);
     allocate(child);
+    const size_t port_begin = _flat.hierarchical_ports.size();
+    const size_t leaf_begin = _flat.instances.size();
+    for (const auto& name : module.ports) {
+      const auto& formal = child.symbols.at(name);
+      const auto range = formal.declaration.type.range;
+      for (size_t bit = 0; bit < formal.signal.bits.size(); ++bit) {
+        const auto index = range ? int64_t(range->first) + (range->first <= range->second ? int64_t(bit) : -int64_t(bit)) : 0;
+        _flat.hierarchical_ports.push_back({parent.prefix + expansion.name, range ? indexed(name, index) : name,
+                                            formal.declaration.direction, formal.signal.bits[bit], leaf_begin, leaf_begin,
+                                            _module_depth + 1});
+      }
+    }
+    const size_t port_end = _flat.hierarchical_ports.size();
     std::unordered_set<std::string_view> formal_names(module.ports.begin(), module.ports.end());
     for (size_t i = 0; i < ports.size(); ++i) {
       const auto& actual = ports[i];
@@ -402,7 +423,11 @@ class ConnectivityLowerer
           _flat.inouts.push_back({formal.signal.bits[bit], value.bits[bit], actual.location});
       }
     }
+    ++_module_depth;
     connect(child);
+    --_module_depth;
+    for (size_t i = port_begin; i < port_end; ++i)
+      _flat.hierarchical_ports[i].leaf_end = _flat.instances.size();
   }
   void libraryInstance(const Instance& instance, const std::string& name, const std::vector<Connection>& ports,
                        const ModuleInterface& interface, ConnectedScope& parent, size_t array_count, size_t offset)

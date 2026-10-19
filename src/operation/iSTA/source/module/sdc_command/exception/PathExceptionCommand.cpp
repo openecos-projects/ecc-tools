@@ -193,20 +193,26 @@ TimingException TclPathException::parsePathSelector(Database& database, bool req
   for (const std::pair<const char*, TransType>& selector : {std::pair{"-from", TransType::kNone}, std::pair{"-rise_from", TransType::kRise},
                                                             std::pair{"-fall_from", TransType::kFall}}) {
     if (getOptionOrArg(selector.first)->is_set_val()) {
-      exception.set_from_objects(findExceptionObjects(database, getOptionOrArg(selector.first)->getStringList()));
+      exception.set_from_objects(findExceptionObjects(database, getOptionObjectNames(selector.first)));
       exception.set_from_trans_type(selector.second);
     }
   }
   for (const std::pair<const char*, TransType>& selector : {std::pair{"-to", TransType::kNone}, std::pair{"-rise_to", TransType::kRise},
                                                             std::pair{"-fall_to", TransType::kFall}}) {
     if (getOptionOrArg(selector.first)->is_set_val()) {
-      exception.set_to_objects(findExceptionObjects(database, getOptionOrArg(selector.first)->getStringList()));
+      exception.set_to_objects(findExceptionObjects(database, getOptionObjectNames(selector.first)));
       exception.set_to_trans_type(selector.second);
     }
   }
 
+  for (const auto* objects : {&exception.get_from_objects(), &exception.get_to_objects()}) {
+    for (const auto& object : *objects) {
+      if (database.get_hierarchy_pin_map().contains(object))
+        throw std::invalid_argument("hierarchical -from/-to endpoints are not supported; use a valid timing endpoint: " + object);
+    }
+  }
   std::vector<TimingExceptionThrough> through_list;
-  for (const auto& [option, value] : getOptionValueList()) {
+  for (const auto& [option, value] : getOptionObjectValueList()) {
     TransType trans_type = TransType::kNone;
     if (option == "-rise_through") {
       trans_type = TransType::kRise;
@@ -216,7 +222,7 @@ TimingException TclPathException::parsePathSelector(Database& database, bool req
       continue;
     }
     TimingExceptionThrough through;
-    through.set_objects(findExceptionObjects(database, parseObjectPatterns(value, false)));
+    through.set_objects(findExceptionObjects(database, getObjectCollectionNames(value)));
     through.set_trans_type(trans_type);
     through_list.push_back(std::move(through));
   }

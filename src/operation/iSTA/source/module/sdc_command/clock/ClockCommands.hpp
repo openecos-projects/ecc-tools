@@ -7,9 +7,12 @@
 // ***************************************************************************************
 #pragma once
 
+#include "TimingClock.hpp"
 #include "frontend/SdcTclCmd.hpp"
 
 namespace ista::sdc {
+
+void removeClockSourcesFromOtherClocks(std::map<std::string, TimingClock>& clocks, const std::string& name, const std::vector<std::string>& sources);
 
 class TclSetClockTransition : public SdcTclCmd
 {

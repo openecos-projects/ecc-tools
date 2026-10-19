@@ -54,12 +54,12 @@ class ClockPropagator
   bool hasPhysicalClockState(const TimingPoint& timing_point, std::string_view clock_name);
   void updateEffectiveClockState(CPClock& clock);
   void propagateClockSlewDelay(CPClock& clock);
-  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type);
-  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
+  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, bool respect_boundaries = true);
+  void propagateClockSlewDelayArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type, bool respect_boundaries = true);
   void updateClockSlewDelay(std::string_view clock_name, Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
                             TransType input_trans_type, TransType output_trans_type);
-  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type);
-  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
+  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, bool respect_boundaries = true);
+  void propagateClockArrivalArc(CPClock& clock, std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type, bool respect_boundaries = true);
   void updateClockPathState(std::string_view clock_name, Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
                             TransType input_trans_type, TransType output_trans_type);
   bool hasClockArrival(const TimingPoint& timing_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type);

@@ -96,8 +96,8 @@ class TimingPropagator
   std::string getPathStateStartPoint(std::string& start_point);
   void seedPathState(std::string& start_point, AnalysisType analysis_type);
   void seedInputPathState(std::string& start_point, AnalysisType analysis_type, TransType trans_type, const TimingIoDelay& delay);
-  void seedPathState(std::string& start_point, AnalysisType analysis_type, TransType trans_type, std::string_view clock_name, double arrival,
-                     double slew, double launch_time, TransType clock_trans_type);
+  void seedPathState(std::string& start_point, AnalysisType analysis_type, TransType trans_type, std::string_view clock_name, double arrival, double slew,
+                     double launch_time, TransType clock_trans_type, bool clock_source_path = false);
   PathSourceType getStartPointSourceType(std::string& start_point, AnalysisType analysis_type);
   bool hasInputDelay(std::string& start_point, AnalysisType analysis_type);
   bool isInputStartPoint(std::string& start_point);

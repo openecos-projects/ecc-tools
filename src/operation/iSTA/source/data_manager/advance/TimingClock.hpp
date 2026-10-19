@@ -43,6 +43,12 @@ class TimingClock
  public:
   TimingClock() = default;
   ~TimingClock() = default;
+  const std::vector<std::string>& get_source_objects() const { return _has_source_objects ? _source_objects : _source_list; }
+  void set_source_objects(std::vector<std::string> objects)
+  {
+    _source_objects = std::move(objects);
+    _has_source_objects = true;
+  }
   // getter
   std::string& get_clock_name() { return _clock_name; }
   std::vector<std::string>& get_source_list() { return _source_list; }
@@ -101,6 +107,8 @@ class TimingClock
   // function
 
  private:
+  bool _has_source_objects = false;
+  std::vector<std::string> _source_objects;
   std::string _master_clock_name;
   std::string _master_source;
   std::optional<GeneratedClockDefinition> _generated_clock_definition;

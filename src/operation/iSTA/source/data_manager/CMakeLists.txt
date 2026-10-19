@@ -1,6 +1,7 @@
 add_library(ista_data_manager
     ${ISTA_DATA_MANAGER}/DataManager.cpp
     ${ISTA_DATA_MANAGER}/constraint/TimingCaseAnalysis.cpp
+    ${ISTA_DATA_MANAGER}/constraint/HierarchyConstraints.cpp
 )
 
 target_link_libraries(ista_data_manager

@@ -17,6 +17,7 @@
 #include "TimingExceptionMatcher.hpp"
 
 #include "Database.hpp"
+#include "HierarchyConstraints.hpp"
 #include "Utility.hpp"
 
 namespace ista {
@@ -113,8 +114,8 @@ std::vector<int32_t> TimingExceptionMatcher::initState(Database& database, std::
   return state_list;
 }
 
-std::vector<int32_t> TimingExceptionMatcher::advanceState(Database& database, const std::vector<int32_t>& state_list,
-                                                          std::string_view pin_name, TransType trans_type)
+std::vector<int32_t> TimingExceptionMatcher::advanceState(Database& database, const std::vector<int32_t>& state_list, std::string_view pin_name,
+                                                          TransType trans_type, std::string_view source_pin)
 {
   std::vector<int32_t> next_state_list = state_list;
   const std::vector<TimingException>& exceptions = database.get_timing_constraint().get_path_exception_list();
@@ -125,12 +126,23 @@ std::vector<int32_t> TimingExceptionMatcher::advanceState(Database& database, co
       continue;
     }
     const std::vector<TimingExceptionThrough>& through_list = exceptions[exception_index].get_through_list();
+    int previous_crossing = std::numeric_limits<int>::min();
     while (static_cast<std::size_t>(state) < through_list.size()) {
       const TimingExceptionThrough& through = through_list[state];
-      if (!matchesThroughObjects(database, through.get_objects(), pin_name)
-          || (through.get_trans_type() != TransType::kNone && through.get_trans_type() != trans_type)) {
-        break;
+      int crossing = matchesThroughObjects(database, through.get_objects(), pin_name) ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min();
+      for (const auto& object : through.get_objects()) {
+        if (!database.get_hierarchy_pin_map().contains(object))
+          continue;
+        const auto& boundary = checkedHierarchyPin(database, object);
+        if (!crossesHierarchyPin(database, boundary, source_pin, pin_name))
+          continue;
+        const int position = hierarchyCrossingPosition(database, boundary, source_pin, pin_name);
+        if (position >= previous_crossing && (crossing == std::numeric_limits<int>::min() || position < crossing))
+          crossing = position;
       }
+      if (crossing == std::numeric_limits<int>::min() || (through.get_trans_type() != TransType::kNone && through.get_trans_type() != trans_type))
+        break;
+      previous_crossing = crossing;
       ++state;
     }
   }
@@ -138,9 +150,11 @@ std::vector<int32_t> TimingExceptionMatcher::advanceState(Database& database, co
 }
 
 std::string TimingExceptionMatcher::makePathStateTag(Database& database, std::string_view start, std::string_view clock,
-                                                     const std::vector<int32_t>& exception_state_list)
+                                                     const std::vector<int32_t>& exception_state_list, bool clock_source_path)
 {
   std::string tag(clock);
+  if (clock_source_path)
+    tag += "\x1d";
   TransType source_transition = STAUTIL.getLaunchClockTransition(database, start);
   const auto pin = database.get_pin_map().find(std::string(start));
   if (pin != database.get_pin_map().end() && !pin->second.get_is_port()) {

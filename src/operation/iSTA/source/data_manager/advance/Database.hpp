@@ -18,6 +18,7 @@
 
 #include "Arc.hpp"
 #include "GraphVertex.hpp"
+#include "HierarchyPin.hpp"
 #include "Instance.hpp"
 #include "Net.hpp"
 #include "ParasiticLibrary.hpp"
@@ -58,6 +59,8 @@ class Database
   TimingConstraint& get_timing_constraint() { return _timing_constraint; }
   Summary& get_summary() { return _summary; }
   std::vector<TimingFanoutCheck>& get_fanout_check_list() { return _fanout_check_list; }
+  std::unordered_map<std::string, size_t>& get_hierarchy_instance_index() { return _hierarchy_instance_index; }
+  std::map<std::string, HierarchyPin>& get_hierarchy_pin_map() { return _hierarchy_pin_map; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
   // function
@@ -76,6 +79,8 @@ class Database
   }
 
  private:
+  std::map<std::string, HierarchyPin> _hierarchy_pin_map;
+  std::unordered_map<std::string, size_t> _hierarchy_instance_index;
   std::vector<GraphVertex> _graph_vertex_list;
   std::vector<int32_t> _graph_order_list;
   std::map<std::string, TimingPoint> _driver_timing_point_map;

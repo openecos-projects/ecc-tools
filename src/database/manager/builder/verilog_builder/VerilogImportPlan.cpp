@@ -92,6 +92,11 @@ class PlanBuilder
       }
       _plan.instances.push_back(std::move(instance));
     }
+    for (const auto& port : _flat.hierarchical_ports) {
+      auto resolved = port;
+      resolved.net = mapped(port.net);
+      _plan.hierarchical_ports.push_back(std::move(resolved));
+    }
     return std::move(_plan);
   }
 
