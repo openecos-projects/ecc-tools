@@ -70,21 +70,37 @@ auto nodeActivityDensity(const FastStaContext& context, const FastStaNode& node)
   return clockActivityDensity(FastStaConstraints::period(context, node.clock_name));
 }
 
-auto resolveVoltage(const FastStaContext& context) -> std::optional<double>
+auto resolveCellVoltage(const FastStaContext& context, const std::string& cell_master) -> std::optional<double>
 {
-  if (context.wrapper != nullptr) {
-    // A source port can drive only sequential clock pins: no buffer model is
-    // required, but its net switching power still uses the actual library supply.
-    return context.wrapper->querySupplyVoltage();
+  if (const auto cell = context.liberty_cell_by_master.find(cell_master); cell != context.liberty_cell_by_master.end()) {
+    const double voltage = cell->second.voltage_v;
+    return std::isfinite(voltage) && voltage > 0.0 ? std::optional<double>{voltage} : std::nullopt;
   }
+  // Sequential sinks need not have an extracted buffer/arc model.
+  return context.wrapper != nullptr ? context.wrapper->queryCellSupplyVoltage(cell_master) : std::nullopt;
+}
+
+auto resolveNetVoltage(const FastStaContext& context, const FastStaNet& net) -> std::optional<double>
+{
+  const auto& driver = context.nodes.at(net.driver_node_id);
+  if (!driver.cell_master.empty()) {
+    return resolveCellVoltage(context, driver.cell_master);
+  }
+
+  // A primary input has no Liberty driver. Infer its swing only from the
+  // connected cells, never from unrelated libraries or unused buffer candidates.
+  // Conflicting load supplies cannot establish an unambiguous external swing.
   std::optional<double> voltage;
-  for (const auto& [_, cell] : context.liberty_cell_by_master) {
-    if (std::isfinite(cell.voltage_v) && cell.voltage_v > 0.0) {
-      if (voltage.has_value() && *voltage != cell.voltage_v) {
-        return std::nullopt;
-      }
-      voltage = cell.voltage_v;
+  for (const auto load_id : net.load_node_ids) {
+    const auto& load = context.nodes.at(load_id);
+    if (load.cell_master.empty()) {
+      continue;
     }
+    const auto load_voltage = resolveCellVoltage(context, load.cell_master);
+    if (!load_voltage.has_value() || (voltage.has_value() && *voltage != *load_voltage)) {
+      return std::nullopt;
+    }
+    voltage = load_voltage;
   }
   return voltage;
 }
@@ -102,9 +118,23 @@ auto findBufferInputNode(const FastStaContext& context, const FastStaNode& outpu
   return kInvalidFastStaNodeId;
 }
 
-auto calcNetSwitchingPowerW(const FastStaNet& net, double voltage, double activity_density) -> double
+auto calcNetSwitchingPowerW(const FastStaContext& context, const FastStaNet& net) -> std::optional<double>
 {
-  return 0.5 * std::max(0.0, net.load_cap_pf) * 1e-12 * voltage * voltage * activity_density * 1e9;
+  if (net.domain != FastStaNetDomain::kClock) {
+    return 0.0;
+  }
+  const auto activity_density = nodeActivityDensity(context, context.nodes.at(net.driver_node_id));
+  if (!activity_density.has_value()) {
+    return std::nullopt;
+  }
+  if (*activity_density == 0.0 || net.load_cap_pf <= 0.0) {
+    return 0.0;
+  }
+  const auto voltage = resolveNetVoltage(context, net);
+  if (!voltage.has_value()) {
+    return std::nullopt;
+  }
+  return 0.5 * std::max(0.0, net.load_cap_pf) * 1e-12 * *voltage * *voltage * *activity_density * 1e9;
 }
 
 auto calcBufferPower(FastStaContext& context, FastStaNodeId output_node_id, double activity_density) -> bool
@@ -203,20 +233,13 @@ auto FastStaPower::update(FastStaContext& context) -> bool
   if (!context.timing_valid && !context.clock_timing_valid) {
     return false;
   }
-  const auto voltage = resolveVoltage(context);
-  if (!voltage.has_value()) {
-    return false;
-  }
   for (auto& net : context.nets) {
     net.switching_power_w = 0.0;
-    if (net.domain != FastStaNetDomain::kClock) {
-      continue;
-    }
-    const auto activity_density = nodeActivityDensity(context, context.nodes.at(net.driver_node_id));
-    if (!activity_density.has_value()) {
+    const auto switching_power = calcNetSwitchingPowerW(context, net);
+    if (!switching_power.has_value()) {
       return false;
     }
-    net.switching_power_w = calcNetSwitchingPowerW(net, *voltage, *activity_density);
+    net.switching_power_w = *switching_power;
   }
   for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
     const auto activity_density = nodeActivityDensity(context, context.nodes.at(node_id));
@@ -247,21 +270,16 @@ auto FastStaPower::updatePreparedRegion(FastStaContext& context, const FastStaDi
     context.power_valid = false;
     return false;
   }
-  const auto voltage = resolveVoltage(context);
-  if (!voltage.has_value()) {
-    context.power = {};
-    context.power_valid = false;
-    return false;
-  }
   for (const auto net_id : dirty_region.net_ids) {
     if (net_id < context.nets.size()) {
       auto& net = context.nets.at(net_id);
-      const auto activity_density = nodeActivityDensity(context, context.nodes.at(net.driver_node_id));
-      if (!activity_density.has_value()) {
+      const auto switching_power = calcNetSwitchingPowerW(context, net);
+      if (!switching_power.has_value()) {
+        context.power = {};
         context.power_valid = false;
         return false;
       }
-      net.switching_power_w = net.domain == FastStaNetDomain::kClock ? calcNetSwitchingPowerW(net, *voltage, *activity_density) : 0.0;
+      net.switching_power_w = *switching_power;
     }
   }
   for (const auto node_id : dirty_region.node_ids) {

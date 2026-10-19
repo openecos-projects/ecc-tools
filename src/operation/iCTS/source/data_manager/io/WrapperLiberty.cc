@@ -488,21 +488,14 @@ auto Wrapper::queryLibertyRevision() const -> std::uint64_t
   return _liberty_revision;
 }
 
-auto Wrapper::querySupplyVoltage() const -> std::optional<double>
+auto Wrapper::queryCellSupplyVoltage(const std::string& cell_master) const -> std::optional<double>
 {
-  loadLibertyIfNeeded();
-  if (_liberty_generation == nullptr) {
+  auto* cell = findLibertyCell(cell_master);
+  auto* library = cell != nullptr ? cell->get_owner_lib() : nullptr;
+  if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0) {
     return std::nullopt;
   }
-  std::optional<double> voltage;
-  for (const auto& library : _liberty_generation->get_libraries()) {
-    if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0
-        || (voltage.has_value() && *voltage != library->get_nom_voltage())) {
-      return std::nullopt;
-    }
-    voltage = library->get_nom_voltage();
-  }
-  return voltage;
+  return library->get_nom_voltage();
 }
 
 auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibCell*

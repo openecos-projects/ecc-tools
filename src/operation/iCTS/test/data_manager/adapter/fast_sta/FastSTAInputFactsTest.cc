@@ -32,10 +32,12 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "FastSTA.hh"
 #include "FastSTAConstraints.hh"
 #include "FastSTAEvents.hh"
+#include "FastSTAPower.hh"
 #include "IdbLayout.h"
 #include "SDCClockReader.hh"
 #include "clock_state/FastSTAClockState.hh"
@@ -119,6 +121,30 @@ class FastSTAInputFactsTestInterface : public ::testing::Test
   idb::IdbLayout _layout;
   icts::Wrapper _wrapper;
 };
+
+TEST_F(FastSTAInputFactsTestInterface, SourceToSequentialPinsUsesTheirLibraryWithUnrelatedIoLoaded)
+{
+  const ScopedTimingInput standard_cells(ReplaceInput(_library, "nom_voltage : 1;", "nom_voltage : 1.08;"));
+  const ScopedTimingInput io_cells("library(IO) { nom_voltage : 2.97; cell(IOPAD) { area : 1; } }");
+  ASSERT_TRUE(standard_cells.ready());
+  ASSERT_TRUE(io_cells.ready());
+  icts::FastStaContext context;
+  context.wrapper = &_wrapper;
+  context.clock_period_ns = 10.0;
+  context.clock_timing_valid = true;
+  context.nodes = {{.kind = icts::FastStaNodeKind::kSource, .name = "clk"}, {.kind = icts::FastStaNodeKind::kSink, .name = "ff/CLK", .cell_master = "SEQ"}};
+  context.nets = {{.name = "clk", .driver_node_id = 0U, .load_node_ids = {1U}, .load_cap_pf = 0.01}};
+  ASSERT_TRUE(context.liberty_cell_by_master.empty());
+
+  // Loading order must not select a different supply for the same clock net.
+  for (const auto& paths :
+       {std::vector<std::string>{standard_cells.path(), io_cells.path()}, std::vector<std::string>{io_cells.path(), standard_cells.path()}}) {
+    dmInst->get_config().set_lib_paths(paths);
+    ASSERT_TRUE(dmInst->readLib(paths));
+    ASSERT_TRUE(icts::FastStaPower::update(context));
+    EXPECT_NEAR(context.power.switching_power_w, 0.01e-12 * 1.08 * 1.08 / 10e-9, 1e-18);
+  }
+}
 
 TEST_F(FastSTAInputFactsTestInterface, ParsedLeakageDistinguishesMissingZeroPositiveAndInvalid)
 {
