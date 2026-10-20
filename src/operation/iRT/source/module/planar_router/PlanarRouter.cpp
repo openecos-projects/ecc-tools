@@ -145,7 +145,7 @@ void PlanarRouter::runRouteFlow()
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  constexpr int32_t max_astar_iters = 5;
+  constexpr int32_t max_astar_iters = 3;
 
   routePRNetList(_pr_task_list, {"initial LZ pattern", PRRouteMode::kInitialLZPattern});
   _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());

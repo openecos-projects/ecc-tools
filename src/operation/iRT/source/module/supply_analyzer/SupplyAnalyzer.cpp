@@ -167,7 +167,14 @@ void SupplyAnalyzer::analyzeSupply()
       {
         for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, search_rect)) {
           for (EXTLayerRect* fixed_rect : fixed_rect_set) {
-            obs_rect_list.push_back(fixed_rect->get_real_rect());
+            PlanarRect fixed_shape = fixed_rect->get_real_rect();
+            obs_rect_list.push_back(fixed_shape);
+            if (net_idx != -1) {
+              PlanarRect enlarged_fixed_shape = RTUTIL.getEnlargedRect(fixed_shape, routing_layer.getPRLSpacing(fixed_shape));
+              if (RTUTIL.isOpenOverlap(search_rect.get_real_rect(), enlarged_fixed_shape)) {
+                ignore_net_set.insert(net_idx);
+              }
+            }
           }
         }
 
