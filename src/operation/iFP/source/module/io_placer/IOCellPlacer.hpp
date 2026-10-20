@@ -31,6 +31,10 @@ class IOCellPlacer
  private:
   struct IOCellPowerMember
   {
+    // Logical role used to derive a stable instance-name prefix.  The role is
+    // technology data (for example VDD1/VSSIO3), while the electrical net is
+    // still taken from net_patterns below.
+    std::string role;
     std::string master_name;
     std::string pin_name;
     std::vector<std::string> net_patterns;
@@ -72,6 +76,7 @@ class IOCellPlacer
   bool placeFromFile(const IOCellDefinition& definition);
   bool placeCorners(const IOCellDefinition& definition);
   bool placeSide(IOEdgeType edge, const IOCellDefinition& definition, const std::vector<int32_t>& signal_indices);
+  bool normalizePowerInstanceNames(const IOCellDefinition& definition);
   bool bindIOPins(const IOCellDefinition& definition);
   bool updateIOPinPorts();
   bool placeCell(Instance& instance, IOEdgeType edge, int32_t along, PlacementOrientation orient, bool fixed = true);
@@ -91,6 +96,7 @@ class IOCellPlacer
 
   std::vector<Instance*> _power_instances;
   std::set<std::string> _used_instance_names;
+  int32_t _next_power_temp_id = 0;
   // Keep the instance and its terminal together; a net may also connect internal macros.
   struct PortBinding
   {

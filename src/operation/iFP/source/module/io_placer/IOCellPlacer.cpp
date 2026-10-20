@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "IOCellPlacer.hpp"
 
+#include <cctype>
 #include <tuple>
 
 #include "DataManager.hpp"
@@ -93,14 +94,17 @@ bool IOCellPlacer::place()
     return false;
   }
 
-  if (!bindIOPins(definition)) {
+  resetExistingPlacement(definition);
+  bool placed = false;
+  if (config.io_cell_placement_mode == PlacementMode::kFile) {
+    placed = placeFromFile(definition);
+  } else {
+    placed = placeAuto(definition);
+  }
+  if (!placed || !normalizePowerInstanceNames(definition)) {
     return false;
   }
-  resetExistingPlacement(definition);
-  if (config.io_cell_placement_mode == PlacementMode::kFile) {
-    return placeFromFile(definition);
-  }
-  return placeAuto(definition);
+  return bindIOPins(definition) && updateIOPinPorts();
 }
 
 bool IOCellPlacer::loadDefinition(IOCellDefinition& definition)
@@ -144,6 +148,7 @@ bool IOCellPlacer::loadDefinition(IOCellDefinition& definition)
     group.max_spacing_micron = group_json.value("max_spacing_micron", 1000.0);
     for (const nlohmann::json& member_json : group_json.value("members", nlohmann::json::array())) {
       IOCellPowerMember member;
+      member.role = member_json.value("role", "");
       member.master_name = member_json.value("master", "");
       member.pin_name = member_json.value("pin", "");
       if (member_json.contains("net_pattern")) {
@@ -219,6 +224,7 @@ bool IOCellPlacer::validateDefinition(const IOCellDefinition& definition)
     }
   }
   for (const IOCellPowerGroup& group : definition.power_groups) {
+    std::set<std::string> role_prefixes;
     for (const IOCellPowerMember& member : group.members) {
       if (database.get_cell_master_map().find(member.master_name) == database.get_cell_master_map().end()) {
         FPLOG.error(Loc::current(), "IO Cell power master '", member.master_name, "' is not present in LEF/database.");
@@ -236,6 +242,15 @@ bool IOCellPlacer::validateDefinition(const IOCellDefinition& definition)
         FPLOG.error(Loc::current(), "IO Cell power member '", member.master_name, "' has no pin field.");
         return false;
       }
+      std::string role = member.role.empty() ? member.pin_name : member.role;
+      while (!role.empty() && std::isdigit(static_cast<unsigned char>(role.back()))) {
+        role.pop_back();
+      }
+      std::transform(role.begin(), role.end(), role.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (role.empty() || !role_prefixes.insert(role).second) {
+        FPLOG.error(Loc::current(), "IO Cell power group '", group.name, "' has duplicate or empty power role prefix.");
+        return false;
+      }
     }
   }
   for (const IOCellFillerMaster& filler : definition.filler_masters) {
@@ -251,11 +266,237 @@ bool IOCellPlacer::validateDefinition(const IOCellDefinition& definition)
   return true;
 }
 
+bool IOCellPlacer::normalizePowerInstanceNames(const IOCellDefinition& definition)
+{
+  Database& database = FPDM.getDatabase();
+
+  // Build the role-to-name mapping from the technology definition.  Digits in
+  // a role distinguish a LEF pin variant (VDD1/VDD2) but do not change the
+  // externally visible prefix used for the physical side/index name.
+  std::map<std::string, std::string> master_to_prefix;
+  std::map<std::string, std::string> prefix_to_master;
+  for (const IOCellPowerGroup& group : definition.power_groups) {
+    for (const IOCellPowerMember& member : group.members) {
+      std::string role = member.role.empty() ? member.pin_name : member.role;
+      while (!role.empty() && std::isdigit(static_cast<unsigned char>(role.back()))) {
+        role.pop_back();
+      }
+      std::transform(role.begin(), role.end(), role.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      if (role.empty()) {
+        FPLOG.error(Loc::current(), "Cannot derive a power instance prefix for master '", member.master_name, "'.");
+        return false;
+      }
+      auto [iter, inserted] = master_to_prefix.emplace(member.master_name, role);
+      if (!inserted && iter->second != role) {
+        FPLOG.error(Loc::current(), "Power master '", member.master_name, "' has conflicting role prefixes.");
+        return false;
+      }
+      auto [prefix_iter, prefix_inserted] = prefix_to_master.emplace(role, member.master_name);
+      if (!prefix_inserted && prefix_iter->second != member.master_name) {
+        FPLOG.error(Loc::current(), "Power role prefix '", role, "' is assigned to multiple masters.");
+        return false;
+      }
+    }
+  }
+
+  using PowerByRole = std::map<std::string, std::vector<Instance*>>;
+  std::map<IOEdgeType, PowerByRole> power_by_edge;
+  const Die& die = database.get_die();
+  const int32_t die_ll_x = die.get_ll_x();
+  const int32_t die_ll_y = die.get_ll_y();
+  const int32_t die_ur_x = die.get_ur_x();
+  const int32_t die_ur_y = die.get_ur_y();
+
+  auto oriented_edge = [](PlacementOrientation orient) {
+    switch (orient) {
+      case PlacementOrientation::kN:
+        return IOEdgeType::kBottom;
+      case PlacementOrientation::kW:
+        return IOEdgeType::kRight;
+      case PlacementOrientation::kS:
+        return IOEdgeType::kTop;
+      case PlacementOrientation::kE:
+        return IOEdgeType::kLeft;
+      default:
+        return IOEdgeType::kNone;
+    }
+  };
+
+  for (Instance& instance : database.get_instance_list()) {
+    if (!isPowerMaster(definition, instance.get_master_name()) || !instance.get_placed() || instance.is_delete_instance()) {
+      continue;
+    }
+    const PlanarRect& rect = instance.get_bounding_rect();
+    std::vector<IOEdgeType> candidates;
+    if (rect.get_ll_y() == die_ll_y) {
+      candidates.push_back(IOEdgeType::kBottom);
+    }
+    if (rect.get_ur_x() == die_ur_x) {
+      candidates.push_back(IOEdgeType::kRight);
+    }
+    if (rect.get_ur_y() == die_ur_y) {
+      candidates.push_back(IOEdgeType::kTop);
+    }
+    if (rect.get_ll_x() == die_ll_x) {
+      candidates.push_back(IOEdgeType::kLeft);
+    }
+    const IOEdgeType by_orientation = oriented_edge(instance.get_orient());
+    IOEdgeType edge = IOEdgeType::kNone;
+    if (std::find(candidates.begin(), candidates.end(), by_orientation) != candidates.end()) {
+      edge = by_orientation;
+    } else if (candidates.size() == 1) {
+      edge = candidates.front();
+    }
+    if (edge == IOEdgeType::kNone) {
+      FPLOG.error(Loc::current(), "Placed IO power Cell '", instance.get_name(), "' does not lie on exactly one die edge.");
+      return false;
+    }
+
+    auto prefix_iter = master_to_prefix.find(instance.get_master_name());
+    if (prefix_iter == master_to_prefix.end()) {
+      FPLOG.error(Loc::current(), "No role prefix is defined for IO power master '", instance.get_master_name(), "'.");
+      return false;
+    }
+    power_by_edge[edge][prefix_iter->second].push_back(&instance);
+  }
+
+  const IOEdgeType edges[] = {IOEdgeType::kBottom, IOEdgeType::kRight, IOEdgeType::kTop, IOEdgeType::kLeft};
+  const char* edge_names[] = {"bottom", "right", "top", "left"};
+  struct Rename {
+    Instance* instance = nullptr;
+    std::string old_name;
+    std::string new_name;
+  };
+  std::vector<Rename> renames;
+  std::map<std::string, int32_t> target_owner;
+
+  for (size_t edge_index = 0; edge_index < 4; ++edge_index) {
+    const IOEdgeType edge = edges[edge_index];
+    auto edge_iter = power_by_edge.find(edge);
+    if (edge_iter == power_by_edge.end() || edge_iter->second.empty()) {
+      FPLOG.error(Loc::current(), "No placed IO power group was found on ", edge_names[edge_index], " edge.");
+      return false;
+    }
+    for (const auto& [prefix, master] : prefix_to_master) {
+      if (edge_iter->second.find(prefix) == edge_iter->second.end()) {
+        FPLOG.error(Loc::current(), "IO power role '", prefix, "' is missing on ", edge_names[edge_index], " edge.");
+        return false;
+      }
+    }
+    size_t expected_count = 0;
+    for (auto& [prefix, instances] : edge_iter->second) {
+      if (expected_count == 0) {
+        expected_count = instances.size();
+      } else if (instances.size() != expected_count) {
+        FPLOG.error(Loc::current(), "IO power role '", prefix, "' has ", instances.size(), " cells on ", edge_names[edge_index],
+                    "; expected ", expected_count, " for complete power groups.");
+        return false;
+      }
+      std::sort(instances.begin(), instances.end(), [edge](const Instance* lhs, const Instance* rhs) {
+        const PlanarRect& lhs_rect = lhs->get_bounding_rect();
+        const PlanarRect& rhs_rect = rhs->get_bounding_rect();
+        if (edge == IOEdgeType::kBottom || edge == IOEdgeType::kTop) {
+          if (lhs_rect.get_ll_x() != rhs_rect.get_ll_x()) {
+            return lhs_rect.get_ll_x() < rhs_rect.get_ll_x();
+          }
+        } else if (lhs_rect.get_ur_y() != rhs_rect.get_ur_y()) {
+          // Physical top-to-bottom order on the vertical edges.
+          return lhs_rect.get_ur_y() > rhs_rect.get_ur_y();
+        }
+        return lhs->get_name() < rhs->get_name();
+      });
+      for (size_t index = 0; index < instances.size(); ++index) {
+        const std::string target = prefix + "_" + edge_names[edge_index] + "_" + std::to_string(index);
+        const auto existing = database.get_instance_name_to_idx_map().find(target);
+        const int32_t instance_index = static_cast<int32_t>(instances[index] - database.get_instance_list().data());
+        if (existing != database.get_instance_name_to_idx_map().end() && existing->second != instance_index) {
+          // A name collision is allowed only when that instance is itself one
+          // of the placed power cells being changed in this pass.  Check the
+          // instance directly so a collision with a later role in the sorted
+          // traversal is handled as well.
+          const Instance& existing_instance = database.get_instance_list()[existing->second];
+          const bool moving_existing_name = isPowerMaster(definition, existing_instance.get_master_name())
+                                            && existing_instance.get_placed() && !existing_instance.is_delete_instance();
+          if (!moving_existing_name) {
+            FPLOG.error(Loc::current(), "Target IO power instance name '", target, "' is already used by another instance.");
+            return false;
+          }
+        }
+        auto [owner_iter, inserted] = target_owner.emplace(target, instance_index);
+        if (!inserted && owner_iter->second != instance_index) {
+          FPLOG.error(Loc::current(), "Duplicate target IO power instance name '", target, "'.");
+          return false;
+        }
+        if (instances[index]->get_name() != target) {
+          renames.push_back({instances[index], instances[index]->get_name(), target});
+        }
+      }
+    }
+  }
+
+  if (renames.empty()) {
+    return true;
+  }
+
+  auto rename_database_instance = [&](Instance& instance, const std::string& old_name, const std::string& new_name) {
+    auto old_iter = database.get_instance_name_to_idx_map().find(old_name);
+    if (old_iter == database.get_instance_name_to_idx_map().end()) {
+      FPLOG.error(Loc::current(), "Cannot rename unknown IO power instance '", old_name, "'.");
+      return false;
+    }
+    const int32_t index = old_iter->second;
+    database.get_instance_name_to_idx_map().erase(old_iter);
+    instance.set_name(new_name);
+    database.get_instance_name_to_idx_map()[new_name] = index;
+    for (Net& net : database.get_net_list()) {
+      for (NetPin& pin : net.get_net_pin_list()) {
+        if (!pin.get_io() && pin.get_instance_name() == old_name) {
+          pin.set_instance_name(new_name);
+        }
+      }
+    }
+    for (IOPin& io_pin : database.get_io_pin_list()) {
+      if (io_pin.get_instance_name() == old_name) {
+        io_pin.set_instance_name(new_name);
+      }
+    }
+    return true;
+  };
+
+  // Two phases keep the map valid even if an old source name happens to be a
+  // target name of another power cell.
+  std::vector<std::string> temporary_names;
+  temporary_names.reserve(renames.size());
+  for (size_t index = 0; index < renames.size(); ++index) {
+    std::string temporary = "__IFP_IO_POWER_RENAME_TMP_" + std::to_string(index);
+    while (database.get_instance_name_to_idx_map().contains(temporary)) {
+      temporary += "_";
+    }
+    temporary_names.push_back(temporary);
+    if (!rename_database_instance(*renames[index].instance, renames[index].old_name, temporary)) {
+      return false;
+    }
+  }
+  for (size_t index = 0; index < renames.size(); ++index) {
+    if (!rename_database_instance(*renames[index].instance, temporary_names[index], renames[index].new_name)) {
+      return false;
+    }
+    // Newly created ring cells do not exist in IDB yet; their final name is
+    // consumed directly by outputNewInstanceList().  Only source-netlist
+    // instances need a deferred IDB rename.
+    if (!renames[index].instance->is_new_instance()) {
+      database.get_instance_rename_map()[renames[index].old_name] = renames[index].new_name;
+    }
+  }
+  return true;
+}
+
 void IOCellPlacer::resetExistingPlacement(const IOCellDefinition& definition)
 {
   Database& database = FPDM.getDatabase();
   _power_instances.clear();
   _used_instance_names.clear();
+  _next_power_temp_id = 0;
   database.get_instance_list().reserve(database.get_instance_list().size() + 1024);
   for (Instance& instance : database.get_instance_list()) {
     _used_instance_names.insert(instance.get_name());
@@ -302,7 +543,7 @@ bool IOCellPlacer::placeAuto(const IOCellDefinition& definition)
       return false;
     }
   }
-  return updateIOPinPorts();
+  return true;
 }
 
 bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
@@ -435,7 +676,7 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
       }
     }
   }
-  return updateIOPinPorts();
+  return true;
 }
 
 bool IOCellPlacer::bindIOPins(const IOCellDefinition& definition)
@@ -474,7 +715,7 @@ bool IOCellPlacer::bindIOPins(const IOCellDefinition& definition)
         continue;
       }
       // Generated supply cells feed the ring; they are not additional package terminals.
-      if (instance.get_name().rfind("IO_POWER_", 0) == 0 || instance.is_delete_instance()) {
+      if (instance.get_name().rfind("IO_POWER_", 0) == 0 || instance.get_name().rfind("IO_POWER_TMP_", 0) == 0 || instance.is_delete_instance()) {
         continue;
       }
       if (seen.emplace(instance.get_name(), pin.get_pin_name()).second) {
@@ -825,7 +1066,10 @@ Instance* IOCellPlacer::findOrCreatePowerInstance(const IOCellPowerMember& membe
       return instance;
     }
   }
-  const std::string name = "IO_POWER_" + std::to_string(_used_instance_names.size());
+  std::string name;
+  do {
+    name = "IO_POWER_TMP_" + std::to_string(_next_power_temp_id++);
+  } while (_used_instance_names.contains(name));
   Instance* instance = createPhysicalInstance(name, member.master_name);
   instance->set_io_cell_net_name(resolvePowerNet(FPDM.getDatabase(), member.net_patterns));
   instance->set_io_cell_pin_name(member.pin_name);

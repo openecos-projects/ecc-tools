@@ -91,6 +91,7 @@ class FPInterface
 
 #if 1  // output
   void output();
+  void outputInstanceNameChanges();
   void outputFloorplan();
   void outputDie();
   void outputCore();

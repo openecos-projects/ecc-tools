@@ -198,9 +198,11 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   alignStripeSegmentList();
   buildRing(pg_model);
   buildLayerConnect(pg_model);
-  buildIOCoreConnect(pg_model);
   buildMacroConnect(pg_model);
   trimStripeEnds();
+  // Route IO-core connections against the final stripe geometry.  The trim
+  // pass may move stripe endpoints to preserve macro and PG contacts.
+  buildIOCoreConnect(pg_model);
 }
 
 void PDNGenerator::trimStripeEnds()
@@ -1387,8 +1389,16 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       const auto binding = bindings.find({instance.get_name(), shape.get_pin_name()});
       geometry.add(shape.get_layer_name(), shape, binding == bindings.end() ? -1 : binding->second);
     }
-    for (const auto& shape : FPI.getPlacedShapes(instance, master.get_obstruction_shapes())) {
-      geometry.add(shape.get_layer_name(), shape, -1);
+    // IO PG access may start at the package-facing edge of the selected rail.
+    // The LEF obstruction attached to an IO master covers that rail's own
+    // access aperture, so indexing it would reject the legal source contact.
+    // Keep obstruction checks for core macros; IO pin/PG geometry is already
+    // indexed above and remains subject to net and spacing checks.
+    const bool io_master = master.get_pad() || master.get_pad_filler() || master.get_corner();
+    if (!io_master) {
+      for (const auto& shape : FPI.getPlacedShapes(instance, master.get_obstruction_shapes())) {
+        geometry.add(shape.get_layer_name(), shape, -1);
+      }
     }
   }
 
@@ -1420,17 +1430,6 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       case Side::kTop: return -shape.get_ll_y();
     }
     return 0;
-  };
-  auto snap_inside = [&](int32_t value, int32_t low, int32_t high, int32_t width) {
-    const int32_t min_center = low + width / 2;
-    const int32_t max_center = high - width / 2;
-    if (min_center > max_center) {
-      return INT32_MIN;
-    }
-    int32_t result = snap(value);
-    if (result < min_center) result = FPUTIL.alignUp(min_center, grid);
-    if (result > max_center) result = FPUTIL.alignDown(max_center, grid);
-    return result >= min_center && result <= max_center ? result : INT32_MIN;
   };
   auto pin_width = [&](const InstancePinShape& pin, const RoutingLayer* layer, int32_t target_width) {
     const int32_t span = std::min(pin.get_width(), pin.get_height());
@@ -1466,6 +1465,11 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   int32_t connected_ports = 0;
   int32_t direct_connections = 0;
   int32_t bridge_connections = 0;
+  int32_t pin_cross_section_failures = 0;
+  int32_t stripe_cross_section_failures = 0;
+  int32_t io_inner_boundary_failures = 0;
+  int32_t stripe_inner_boundary_failures = 0;
+  int32_t non_straight_failures = 0;
 
   struct LayerContacts {
     int32_t direct = 0;
@@ -1493,6 +1497,39 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   // Treat accepted paths as obstacles even for the same net: this prevents
   // overlapping trunks from inflating the redundant-contact count.
   PGGeometryIndex io_paths(bin_size);
+
+  auto positive_overlap = [](const PlanarRect& first, const PlanarRect& second) {
+    return first.get_ll_x() < second.get_ur_x() && second.get_ll_x() < first.get_ur_x()
+           && first.get_ll_y() < second.get_ur_y() && second.get_ll_y() < first.get_ur_y();
+  };
+  auto covers_pin_cross_section = [&](const PlanarRect& wire, const InstancePinShape& pin, Side side) {
+    if (!positive_overlap(wire, pin)) {
+      return false;
+    }
+    const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+    // The wire must contain the entire IO rail width in the direction normal
+    // to the IO edge.  Tangential overlap is checked above.
+    if (normal_x) {
+      return wire.get_ll_x() <= pin.get_ll_x() && wire.get_ur_x() >= pin.get_ur_x();
+    }
+    return wire.get_ll_y() <= pin.get_ll_y() && wire.get_ur_y() >= pin.get_ur_y();
+  };
+  auto covers_stripe_cross_section = [&](const PlanarRect& wire, const PGSegment& stripe) {
+    const auto stripe_box = segmentRect(stripe);
+    if (!positive_overlap(wire, stripe_box)) {
+      return false;
+    }
+    // The wire width must cover the complete stripe width.  The longitudinal
+    // overlap is intentionally positive, so an endpoint that only touches a
+    // stripe edge is rejected.
+    if (stripe.is_horizontal()) {
+      return wire.get_ll_y() <= stripe_box.get_ll_y() && wire.get_ur_y() >= stripe_box.get_ur_y();
+    }
+    if (stripe.is_vertical()) {
+      return wire.get_ll_x() <= stripe_box.get_ll_x() && wire.get_ur_x() >= stripe_box.get_ur_x();
+    }
+    return false;
+  };
 
   for (auto& instance : database.get_instance_list()) {
     const std::string& net_name = instance.get_io_cell_net_name();
@@ -1619,36 +1656,69 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   const auto is_direct = [](RouteMode mode) { return mode == RouteMode::kDirectExtension; };
   const auto route_name = [&](RouteMode mode) { return is_direct(mode) ? "direct_extension" : "straight_bridge"; };
 
+  auto snap_tangent_inside = [&](int32_t value, int32_t low, int32_t high, int32_t width) {
+    const int32_t min_center = low + width / 2;
+    const int32_t max_center = high - width / 2;
+    if (min_center > max_center) {
+      return INT32_MIN;
+    }
+    int32_t result = snap(value);
+    if (result < min_center) result = FPUTIL.alignUp(min_center, grid);
+    if (result > max_center) result = FPUTIL.alignDown(max_center, grid);
+    return result >= min_center && result <= max_center ? result : INT32_MIN;
+  };
+
   auto start_at = [&](Side side, const InstancePinShape& pin, int32_t width, int32_t tangent) {
     PlanarCoord start;
-    if (side.value == Side::kLeft) {
-      start.set_coord(pin.get_ur_x() - width / 2, tangent);
-    } else if (side.value == Side::kRight) {
-      start.set_coord(pin.get_ll_x() + width / 2, tangent);
-    } else if (side.value == Side::kBottom) {
-      start.set_coord(tangent, pin.get_ur_y() - width / 2);
-    } else {
-      start.set_coord(tangent, pin.get_ll_y() + width / 2);
+    const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+    const int32_t tangent_coord = normal_x ? snap_tangent_inside(tangent, pin.get_ll_y(), pin.get_ur_y(), width)
+                                           : snap_tangent_inside(tangent, pin.get_ll_x(), pin.get_ur_x(), width);
+    if (tangent_coord == INT32_MIN) {
+      return PlanarCoord(INT32_MIN, INT32_MIN);
     }
-    start.set_x(snap_inside(start.get_x(), pin.get_ll_x(), pin.get_ur_x(), width));
-    start.set_y(snap_inside(start.get_y(), pin.get_ll_y(), pin.get_ur_y(), width));
+
+    // Start the centerline at the package-facing outer boundary.  The route
+    // rectangle extends by half the wire width around the centerline, so the
+    // generated wire covers the source rail cross-section from that boundary.
+    if (side.value == Side::kLeft) {
+      start.set_coord(pin.get_ll_x(), tangent_coord);
+    } else if (side.value == Side::kRight) {
+      start.set_coord(pin.get_ur_x(), tangent_coord);
+    } else if (side.value == Side::kBottom) {
+      start.set_coord(tangent_coord, pin.get_ll_y());
+    } else {
+      start.set_coord(tangent_coord, pin.get_ur_y());
+    }
     return start;
   };
 
-  auto bridge_target_point = [](const PGSegment& target, const PlanarCoord& start) {
+  auto inner_boundary_point = [](Side side, const PlanarRect& box, int32_t tangent) {
+    // The inner boundary is the side of the IO cell/stripe facing the core.
+    // The point is kept on that boundary instead of on the centerline.  A
+    // preceding collinear segment preserves the complete source cross-section
+    // while making the boundary explicit in the exported DEF geometry.
+    if (side.value == Side::kLeft) return PlanarCoord(box.get_ur_x(), tangent);
+    if (side.value == Side::kRight) return PlanarCoord(box.get_ll_x(), tangent);
+    if (side.value == Side::kBottom) return PlanarCoord(tangent, box.get_ur_y());
+    return PlanarCoord(tangent, box.get_ll_y());
+  };
+
+  auto bridge_target_inner_boundary = [](Side side, const PGSegment& target, const PlanarCoord& start) {
     // A straight bridge must touch the existing stripe span.  Do not clamp a
     // tangent to a stripe endpoint: that would turn a bridge into an extension.
     if (target.is_horizontal()) {
       const int32_t x_low = target.get_ll_x() + target.get_width() / 2;
       const int32_t x_high = target.get_ur_x() - target.get_width() / 2;
       if (start.get_x() < x_low || start.get_x() > x_high) return PlanarCoord(INT32_MIN, INT32_MIN);
-      return PlanarCoord(start.get_x(), target.get_start_y());
+      return side.value == Side::kBottom ? PlanarCoord(start.get_x(), target.get_ur_y())
+                                          : PlanarCoord(start.get_x(), target.get_ll_y());
     }
     if (target.is_vertical()) {
       const int32_t y_low = target.get_ll_y() + target.get_width() / 2;
       const int32_t y_high = target.get_ur_y() - target.get_width() / 2;
       if (start.get_y() < y_low || start.get_y() > y_high) return PlanarCoord(INT32_MIN, INT32_MIN);
-      return PlanarCoord(target.get_start_x(), start.get_y());
+      return side.value == Side::kLeft ? PlanarCoord(target.get_ur_x(), start.get_y())
+                                       : PlanarCoord(target.get_ll_x(), start.get_y());
     }
     return PlanarCoord(INT32_MIN, INT32_MIN);
   };
@@ -1676,7 +1746,9 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   };
 
   // Route direct extensions before bridges so a bridge cannot occupy a direct
-  // extension corridor. Both route classes are single Manhattan segments.
+  // extension corridor.  Each route is still a single straight line, but it
+  // may contain collinear boundary points so the exported geometry records the
+  // IO and stripe inner-boundary contacts explicitly.
   for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge}) {
     const bool direct = is_direct(mode);
     for (auto& task : tasks) {
@@ -1713,11 +1785,49 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         if (width % (2 * grid) != 0) return reject("OFF_GRID_WIDTH");
         points.erase(std::unique(points.begin(), points.end()), points.end());
         if (points.size() < 2) return reject("ALREADY_TOUCHING");
-        if (points.size() != 2) return reject("NON_STRAIGHT_PATH");
-        if (points.front().get_x() != points.back().get_x() && points.front().get_y() != points.back().get_y()) {
+        const int32_t tangent = normal_x ? points.front().get_y() : points.front().get_x();
+        const auto has_point = [&](const PlanarCoord& expected) {
+          return std::any_of(points.begin(), points.end(), [&](const auto& point) {
+            return point.get_x() == expected.get_x() && point.get_y() == expected.get_y();
+          });
+        };
+        const auto expected_io_inner = inner_boundary_point(side, pin, tangent);
+        if (!has_point(expected_io_inner)) {
+          ++io_inner_boundary_failures;
+          return reject("IO_INNER_BOUNDARY_NOT_REACHED");
+        }
+        if (!is_direct(route_mode)) {
+          const auto expected_stripe_inner = inner_boundary_point(side, segmentRect(target.segment), tangent);
+          if (points.back().get_x() != expected_stripe_inner.get_x()
+              || points.back().get_y() != expected_stripe_inner.get_y()) {
+            ++stripe_inner_boundary_failures;
+            return reject("STRIPE_INNER_BOUNDARY_NOT_REACHED");
+          }
+        }
+        const bool horizontal = points.front().get_y() == points.back().get_y();
+        const bool vertical = points.front().get_x() == points.back().get_x();
+        if (!horizontal && !vertical) {
+          ++non_straight_failures;
           return reject("NON_STRAIGHT_PATH");
         }
-        const int32_t tangent = normal_x ? points.front().get_y() : points.front().get_x();
+        const int32_t first_axis = horizontal ? points.front().get_x() : points.front().get_y();
+        const int32_t last_axis = horizontal ? points.back().get_x() : points.back().get_y();
+        const int32_t direction = last_axis > first_axis ? 1 : (last_axis < first_axis ? -1 : 0);
+        if (direction == 0) return reject("ALREADY_TOUCHING");
+        for (size_t i = 1; i < points.size(); ++i) {
+          const auto& previous = points[i - 1];
+          const auto& current = points[i];
+          if ((horizontal && current.get_y() != previous.get_y())
+              || (vertical && current.get_x() != previous.get_x())) {
+            ++non_straight_failures;
+            return reject("NON_STRAIGHT_PATH");
+          }
+          const int32_t previous_axis = horizontal ? previous.get_x() : previous.get_y();
+          const int32_t current_axis = horizontal ? current.get_x() : current.get_y();
+          if ((direction > 0 && current_axis <= previous_axis) || (direction < 0 && current_axis >= previous_axis)) {
+            return reject("BACKTRACKING_PATH");
+          }
+        }
         const int32_t separation = access_separation(*layer, width, points.front(), points.back());
         for (const auto& access : task.access_points[layer_name]) {
           if (std::abs(tangent - access.tangent) < (width + access.width) / 2 + std::max(separation, access.separation)) {
@@ -1742,12 +1852,16 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           if (!io_paths.clear(layer_name, box, -2, separation, &target_box)) return reject("BRIDGE_BLOCKED_SPACING");
           path.push_back(line);
         }
-        auto positive_overlap = [](const PlanarRect& a, const PlanarRect& b) {
-          return a.get_ll_x() < b.get_ur_x() && b.get_ll_x() < a.get_ur_x()
-                 && a.get_ll_y() < b.get_ur_y() && b.get_ll_y() < a.get_ur_y();
-        };
-        if (!positive_overlap(segmentRect(path.front()), pin)
-            || !positive_overlap(segmentRect(path.back()), segmentRect(target.segment))) return reject("NO_ENDPOINT_OVERLAP");
+        const auto pin_contact_box = segmentRect(path.front());
+        if (!covers_pin_cross_section(pin_contact_box, pin, side)) {
+          ++pin_cross_section_failures;
+          return reject("PIN_CROSS_SECTION_NOT_COVERED");
+        }
+        const auto stripe_contact_box = segmentRect(path.back());
+        if (!covers_stripe_cross_section(stripe_contact_box, target.segment)) {
+          ++stripe_cross_section_failures;
+          return reject("STRIPE_CROSS_SECTION_NOT_COVERED");
+        }
         for (auto& segment : path) {
           database.get_pg_segment_list().push_back(segment);
           add_segment_geometry(segment);
@@ -1761,12 +1875,18 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         else { ++stats.bridge; ++bridge_connections; }
         const auto& start = points.front();
         const auto& end = points.back();
+        const auto& pin_box = pin_contact_box;
+        const auto& stripe_box = stripe_contact_box;
         contact_details.push_back(FPUTIL.getString(instance.get_name(), "/", instance.get_io_cell_pin_name(), " PORT ", port,
                                                    " net=", net_name, " mode=", route_name(route_mode), " pin_layer=", pin.get_layer_name(),
                                                    " route_layer=", layer_name, " target_layer=", layer_name,
                                                    " stripe_id=", target.database_index, " width=", width,
-                                                   " segments=1 spacing=", separation,
-                                                   " start=(", start.get_x(), ",", start.get_y(), ") end=(", end.get_x(), ",", end.get_y(), ")"));
+                                                   " segments=", path.size(), " spacing=", separation,
+                                                   " start=(", start.get_x(), ",", start.get_y(), ") end=(", end.get_x(), ",", end.get_y(), ")",
+                                                   " io_inner=(", points[1].get_x(), ",", points[1].get_y(), ")",
+                                                   " stripe_inner=", is_direct(route_mode) ? std::string("NA") : FPUTIL.getString("(", end.get_x(), ",", end.get_y(), ")"),
+                                                   " pin_box=", pin_box.get_ll_x(), ",", pin_box.get_ll_y(), ",", pin_box.get_ur_x(), ",", pin_box.get_ur_y(),
+                                                   " stripe_box=", stripe_box.get_ll_x(), ",", stripe_box.get_ll_y(), ",", stripe_box.get_ur_x(), ",", stripe_box.get_ur_y()));
         return true;
       };
 
@@ -1777,7 +1897,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         const auto& first_pin = rails.front();
         const PlanarCoord center((first_pin.get_ll_x() + first_pin.get_ur_x()) / 2, (first_pin.get_ll_y() + first_pin.get_ur_y()) / 2);
         auto distance = [&](const StripeTarget& target) {
-          const auto point = bridge_target_point(target.segment, center);
+          const auto point = bridge_target_inner_boundary(side, target.segment, center);
           if (point.get_x() == INT32_MIN || point.get_y() == INT32_MIN) return int64_t(INT64_MAX);
           return int64_t(std::abs(point.get_x() - center.get_x())) + std::abs(point.get_y() - center.get_y());
         };
@@ -1787,7 +1907,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           if (!can_add(layer_name, target.database_index)) continue;
           const bool perpendicular = normal_x ? target.segment.is_horizontal() : target.segment.is_vertical();
           if (direct && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
-          if (!direct && !config.pg_io_core_connect.allow_bridge) continue;
+          if (!direct && (perpendicular || !config.pg_io_core_connect.allow_bridge)) continue;
           for (const auto& pin : rails) {
             const int32_t width = pin_width(pin, layer, target.segment.get_width());
             if (width == 0) { ++task.layers[layer_name].rejected["PIN_NARROWER_THAN_STRIPE"]; continue; }
@@ -1811,17 +1931,19 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
               if (!can_add(layer_name, target.database_index)) break;
               const auto start = start_at(side, pin, width, tangent);
               if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
+              const auto io_inner = inner_boundary_point(side, pin, normal_x ? start.get_y() : start.get_x());
               const auto end = direct ? direct_extension_target_point(side, target.segment, start)
-                                      : bridge_target_point(target.segment, start);
+                                      : bridge_target_inner_boundary(side, target.segment, start);
               if (end.get_x() == INT32_MIN || end.get_y() == INT32_MIN) {
                 ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_STRIPE_NOT_ALIGNED" : "NO_STRAIGHT_PATH"];
                 continue;
               }
-              if (start.get_x() != end.get_x() && start.get_y() != end.get_y()) {
+              if ((start.get_x() != io_inner.get_x() && start.get_y() != io_inner.get_y())
+                  || (io_inner.get_x() != end.get_x() && io_inner.get_y() != end.get_y())) {
                 ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_NOT_COLLINEAR" : "NO_STRAIGHT_PATH"];
                 continue;
               }
-              try_path(pin, target, width, {start, end}, mode);
+              try_path(pin, target, width, std::vector<PlanarCoord>{start, io_inner, end}, mode);
             }
           }
         }
@@ -1858,7 +1980,12 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   if (!config.pg_temp_directory_path.empty()) {
     std::ofstream report(config.pg_temp_directory_path + "/io_core_connect.rpt");
     report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size() << "\nDirect connections: "
-           << direct_connections << "\nBridge connections: " << bridge_connections << "\n";
+           << direct_connections << "\nBridge connections: " << bridge_connections << "\n"
+           << "Pin cross-section failures: " << pin_cross_section_failures << "\n"
+           << "Stripe cross-section failures: " << stripe_cross_section_failures << "\n"
+           << "IO inner-boundary failures: " << io_inner_boundary_failures << "\n"
+           << "Stripe inner-boundary failures: " << stripe_inner_boundary_failures << "\n"
+           << "Non-straight path failures: " << non_straight_failures << "\n";
     for (const auto& failure : failures) report << failure.terminal << " " << failure.reason << "\n";
     report << "[layers]\n";
     for (const auto& detail : layer_details) report << detail << "\n";

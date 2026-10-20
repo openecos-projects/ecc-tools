@@ -623,6 +623,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void FPInterface::wrapDatabase()
 {
+  FPDM.getDatabase().get_instance_rename_map().clear();
   wrapDBInfo();
   wrapMicronDBU();
   wrapManufactureGrid();
@@ -999,6 +1000,7 @@ void FPInterface::wrapIOPinList()
 
 void FPInterface::output()
 {
+  outputInstanceNameChanges();
   outputFloorplan();
   outputIOPinList();
   outputIOInstancePlacement();
@@ -1008,6 +1010,36 @@ void FPInterface::output()
   outputNewInstanceList();
   outputPGNetList();
   outputPGSegmentList();
+}
+
+void FPInterface::outputInstanceNameChanges()
+{
+  const auto& rename_map = FPDM.getDatabase().get_instance_rename_map();
+  if (rename_map.empty()) {
+    return;
+  }
+  idb::IdbInstanceList* instance_list = dmInst->get_idb_design()->get_instance_list();
+  std::vector<std::pair<std::string, std::string>> renames(rename_map.begin(), rename_map.end());
+  std::vector<std::string> temporary_names;
+  temporary_names.reserve(renames.size());
+  for (size_t index = 0; index < renames.size(); ++index) {
+    std::string temporary = "__IFP_IO_POWER_RENAME_TMP_" + std::to_string(index);
+    while (instance_list->contains(temporary)) {
+      temporary += "_";
+    }
+    temporary_names.push_back(temporary);
+    if (!instance_list->rename_instance(renames[index].first, temporary)) {
+      FPLOG.error(Loc::current(), "Failed to rename IDB instance '", renames[index].first, "'.");
+      return;
+    }
+  }
+  for (size_t index = 0; index < renames.size(); ++index) {
+    if (!instance_list->rename_instance(temporary_names[index], renames[index].second)) {
+      FPLOG.error(Loc::current(), "Failed to rename IDB instance '", renames[index].first, "' to '", renames[index].second, "'.");
+      return;
+    }
+  }
+  FPDM.getDatabase().get_instance_rename_map().clear();
 }
 
 void FPInterface::outputFloorplan()
