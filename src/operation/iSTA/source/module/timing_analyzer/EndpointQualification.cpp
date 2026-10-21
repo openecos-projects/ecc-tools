@@ -32,19 +32,35 @@ bool hasCaptureClock(Database& database, const std::string& pin_name, TransType 
 {
   const auto point = database.get_timing_point_map().find(pin_name);
   if (point == database.get_timing_point_map().end()) return false;
-  const auto& clocks = database.get_timing_constraint().get_clock_map();
-  for (const auto& [name, state] : point->second.get_clock_state_map()) {
-    if (state.is_source_path_only || !clocks.contains(name))
-      continue;
-    const auto analysis = state.arrival_map.find(AnalysisType::kMin);
-    if (analysis == state.arrival_map.end()) continue;
-    const auto arrival = analysis->second.find(transition);
-    if (arrival != analysis->second.end() && std::isfinite(arrival->second)) return true;
+  for (const auto& entry : point->second.get_clock_state_map()) {
+    if (hasCaptureClockState(database, pin_name, entry.first, transition)) return true;
   }
   return false;
 }
 
 }  // namespace
+
+bool hasCaptureClockState(Database& database, const std::string& pin_name, const std::string& clock_name, TransType transition)
+{
+  if (!database.get_timing_constraint().get_clock_map().contains(clock_name))
+    return false;
+  const auto point = database.get_timing_point_map().find(pin_name);
+  if (point == database.get_timing_point_map().end())
+    return false;
+  const auto clock = point->second.get_clock_state_map().find(clock_name);
+  if (clock == point->second.get_clock_state_map().end())
+    return false;
+  // A clock state reached only through the clock's own source path is not a capture
+  // path: the data endpoint is launched by that clock, never captured by it, so it
+  // must not qualify a setup/recovery check or a sparse capture row.
+  if (clock->second.is_source_path_only)
+    return false;
+  const auto analysis = clock->second.arrival_map.find(AnalysisType::kMin);
+  if (analysis == clock->second.arrival_map.end())
+    return false;
+  const auto arrival = analysis->second.find(transition);
+  return arrival != analysis->second.end() && std::isfinite(arrival->second);
+}
 
 TimingMaxQualification qualifyMaxOutput(Database& database, const std::string& pin_name)
 {

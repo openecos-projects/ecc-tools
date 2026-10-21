@@ -2,6 +2,7 @@ set(PY_IMP_SRC
     py_register_imp.cpp
     idb_to_imp_db/PyPlaceDB.cpp
     idb_to_imp_db/PyPlaceDBTiming.cpp
+    idb_to_imp_db/PyPlaceDBSparseTiming.cpp
     idb_to_imp_db/PyPlaceDBRoutbility.cpp
     idb_to_imp_db/MutationBridge.cpp
 )

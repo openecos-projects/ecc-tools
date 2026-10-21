@@ -3,6 +3,7 @@ add_library(ista_interface
     ${ISTA_INTERFACE}/HierarchyImport.cpp
     ${ISTA_INTERFACE}/LibertyExportAdapter.cpp
     ${ISTA_INTERFACE}/TimingExportAdapter.cpp
+    ${ISTA_INTERFACE}/SparseTimingExportAdapter.cpp
 )
 
 target_link_libraries(ista_interface

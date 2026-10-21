@@ -2,6 +2,7 @@ find_package(Eigen3 REQUIRED NO_MODULE)
 
 add_library(ista_delay_calculator
     ${ISTA_MODULE}/delay_calculator/DelayCalculator.cpp
+    ${ISTA_MODULE}/delay_calculator/NetThresholdAdjustment.cpp
 )
 
 target_link_libraries(ista_delay_calculator

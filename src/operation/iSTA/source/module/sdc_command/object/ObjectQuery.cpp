@@ -559,6 +559,30 @@ std::vector<std::string> getFullNames(Database& database, const std::string& obj
     return {};
   }
 
+  // get_* collections already contain canonical IDs. In sourced SDC loops,
+  // rebuilding every design object for each get_name is quadratic in design
+  // size. Preserve the pattern-query path for noncanonical input below.
+  std::vector<std::string> canonical;
+  std::set<std::string> seen;
+  bool all_canonical = true;
+  for (const auto& name : patterns) {
+    const auto pin = database.get_pin_map().find(name);
+    std::string full;
+    if (pin != database.get_pin_map().end()) {
+      full = pin->second.get_is_port() ? name : pin->second.get_instance_name() + "/" + pin->second.get_pin_name();
+    } else if (database.get_instance_map().contains(name) || database.get_net_map().contains(name)
+               || database.get_timing_constraint().get_clock_map().contains(name)) {
+      full = name;
+    } else {
+      all_canonical = false;
+      break;
+    }
+    if (seen.insert(full).second)
+      canonical.push_back(std::move(full));
+  }
+  if (all_canonical)
+    return canonical;
+
   const std::vector<ObjectMatch> object_matches = collectObjectMatches(database, QueryObjectType::kAny);
   std::map<std::string, std::string> full_names;
   for (const ObjectMatch& match : object_matches) {

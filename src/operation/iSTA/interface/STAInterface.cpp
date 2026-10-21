@@ -759,6 +759,7 @@ void STAInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib
 {
   TimingCellPort timing_cell_port;
   timing_cell_port.set_port_name(lib_port->get_port_name());
+  timing_cell_port.set_declaration_index(static_cast<int32_t>(timing_cell.get_port_map().size()));
   timing_cell_port.set_capacitance(lib_port->get_port_cap());
   timing_cell_port.set_drive_resistance(lib_port->driveResistance());
   idb::LibLibrary* library = lib_port->get_ower_cell()->get_owner_lib();
@@ -858,7 +859,14 @@ void STAInterface::wrapTimingCellArc(TimingCell& timing_cell, idb::LibArcSet* li
   idb::LibArc* lib_arc = lib_arc_set->front();
   if (isSDFDelayArc(lib_arc)) {
     TimingCellArc timing_cell_arc = wrapDelayArc(lib_arc_set);
-    timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc());
+    const bool control_arc = lib_arc->get_timing_type() == idb::LibArc::TimingType::kThreeStateEnable
+                             || lib_arc->get_timing_type() == idb::LibArc::TimingType::kThreeStateEnableRise
+                             || lib_arc->get_timing_type() == idb::LibArc::TimingType::kThreeStateEnableFall
+                             || lib_arc->get_timing_type() == idb::LibArc::TimingType::kThreeStateDisable
+                             || lib_arc->get_timing_type() == idb::LibArc::TimingType::kThreeStateDisableRise
+                             || lib_arc->get_timing_type() == idb::LibArc::TimingType::kThreeStateDisableFall;
+    timing_cell_arc.set_is_timing_graph_arc(lib_arc->isDelayArc() || control_arc);
+    timing_cell_arc.set_is_control_arc(control_arc);
     timing_cell_arc.set_is_clear_preset_arc(lib_arc->isClearPresetArc());
     timing_cell.get_cell_arc_list().push_back(timing_cell_arc);
     if (lib_arc->isClearPresetArc()) {
@@ -957,6 +965,7 @@ TimingArc STAInterface::wrapTimingArc(idb::LibArc* lib_arc)
   timing_arc.set_check_trans_type(wrapCheckTransType(lib_arc));
   timing_arc.set_library_name(lib_library->get_lib_name());
   timing_arc.set_sdf_cond(lib_arc->get_sdf_cond());
+  timing_arc.set_when(wrapLogicExpression(lib_arc->get_when()));
   timing_arc.set_time_unit_scale(wrapLibTimeUnitScale(lib_library));
   timing_arc.set_cap_unit_scale(wrapLibCapUnitScale(lib_library));
   timing_arc.set_slew_derate(lib_library->get_slew_derate_from_library());

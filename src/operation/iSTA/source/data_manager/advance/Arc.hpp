@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <array>
+
 #include "AnalysisType.hpp"
 #include "ArcType.hpp"
 #include "STAHeader.hpp"
@@ -50,8 +52,13 @@ class Arc
   std::map<TransType, TransType>& get_trans_type_map() { return _trans_type_map; }
   TimingCellArc* get_timing_cell_arc() { return _timing_cell_arc; }
   bool get_is_clock_arc() const { return _is_clock_arc; }
-  bool get_is_disable_arc() const { return _is_disable_arc || _is_case_analysis_disable; }
+  bool get_is_control_arc() const { return _is_control_arc; }
+  bool get_is_disable_arc() const { return get_is_electrical_disable_arc() || _is_function_disable; }
+  bool get_is_electrical_disable_arc() const { return _is_disable_arc || _is_case_analysis_disable; }
   bool get_is_case_analysis_disable() const { return _is_case_analysis_disable; }
+  bool is_timing_arc_enabled(int32_t index) const { return !_disabled_timing_arcs.contains(index); }
+  std::set<int32_t>& get_disabled_timing_arcs() { return _disabled_timing_arcs; }
+  const std::array<double, 4>& get_net_threshold_adjustment() const { return _net_threshold_adjustment; }
   bool get_is_loop_disable() const { return _is_loop_disable; }
   // setter
   void set_source_vertex_idx(int32_t idx) { _source_vertex_idx = idx; }
@@ -83,9 +90,12 @@ class Arc
   void set_trans_type_map(const std::map<TransType, TransType>& trans_type_map) { _trans_type_map = trans_type_map; }
   void set_timing_cell_arc(TimingCellArc* timing_cell_arc) { _timing_cell_arc = timing_cell_arc; }
   void set_is_clock_arc(const bool is_clock_arc) { _is_clock_arc = is_clock_arc; }
+  void set_is_control_arc(const bool is_control_arc) { _is_control_arc = is_control_arc; }
   void set_is_disable_arc(const bool is_disable_arc) { _is_disable_arc = is_disable_arc; }
   void set_is_case_analysis_disable(const bool value) { _is_case_analysis_disable = value; }
+  void set_is_function_disable(bool value) { _is_function_disable = value; }
   void set_is_loop_disable(const bool is_loop_disable) { _is_loop_disable = is_loop_disable; }
+  void set_net_threshold_adjustment(const std::array<double, 4>& value) { _net_threshold_adjustment = value; }
   // function
   void update_timing_arc_delay(int32_t timing_arc_idx, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double delay,
                                bool is_initialization)
@@ -140,8 +150,12 @@ class Arc
   std::map<TransType, TransType> _trans_type_map;
   TimingCellArc* _timing_cell_arc = nullptr;
   bool _is_clock_arc = false;
+  bool _is_control_arc = false;
   bool _is_disable_arc = false;
   bool _is_case_analysis_disable = false;
+  bool _is_function_disable = false;
+  std::set<int32_t> _disabled_timing_arcs;
+  std::array<double, 4> _net_threshold_adjustment{0, 0, 1, 1};
   bool _is_loop_disable = false;
 };
 

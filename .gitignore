@@ -58,6 +58,7 @@ test/**
 !test/native_scenarios.py
 !test/support.py
 !test/data/
+!test/data/buffer_port_mutation.py
 !test/data/test_python_io.py
 !test/data/timing_defaults.py
 !test/data/timing_qualification.py
@@ -67,6 +68,16 @@ test/**
 !test/operations/test_placement_map.py
 !test/timing/
 !test/timing/endpoint_qualification_test.cpp
+!test/timing/CMakeLists.txt
+!test/timing/cone_query_test.cpp
+!test/timing/case_analysis_pad_test.cpp
+!test/timing/check_slew_order_test.cpp
+!test/timing/check_lut_export_test.cpp
+!test/timing/clock_source_transition_test.cpp
+!test/timing/conditional_arc_test.cpp
+!test/timing/net_threshold_test.cpp
+!test/timing/io_constraint_test.cpp
+!test/timing/sparse_required_rule_test.cpp
 !test/fixtures/
 !test/fixtures/gcd/
 !test/fixtures/gcd/config/

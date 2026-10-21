@@ -97,6 +97,52 @@ double Utility::getClockEdgeSeparation(double launch_period, double capture_peri
   return separation == 0 ? 0 : separation - interval;
 }
 
+TransType Utility::getClockSourceTransition(Database& database, std::string_view clock_pin, std::string_view clock_name, AnalysisType analysis_type,
+                                            TransType endpoint_trans_type)
+{
+  const auto clock = database.get_timing_constraint().get_clock_map().find(std::string(clock_name));
+  if (clock == database.get_timing_constraint().get_clock_map().end())
+    return endpoint_trans_type;
+  std::set<std::pair<std::string, TransType>> visited;
+  std::string current_pin(clock_pin);
+  TransType current_transition = endpoint_trans_type;
+  for (std::size_t depth = 0; depth <= database.get_timing_point_map().size(); ++depth) {
+    if (std::find(clock->second.get_source_list().begin(), clock->second.get_source_list().end(), current_pin) != clock->second.get_source_list().end())
+      return current_transition;
+    if (!visited.emplace(current_pin, current_transition).second)
+      return current_transition;
+    const auto point = database.get_timing_point_map().find(current_pin);
+    if (point == database.get_timing_point_map().end())
+      return current_transition;
+    const TimingClockPointState* state = point->second.find_clock_state(clock_name);
+    if (state == nullptr)
+      return current_transition;
+    const auto find_predecessor = [&](const auto& transition_map, const auto& pin_map) -> std::optional<std::pair<std::string, TransType>> {
+      const auto analysis_iter = transition_map.find(analysis_type);
+      if (analysis_iter == transition_map.end())
+        return std::nullopt;
+      const auto transition_iter = analysis_iter->second.find(current_transition);
+      if (transition_iter == analysis_iter->second.end() || transition_iter->second == TransType::kNone)
+        return std::nullopt;
+      const auto pin_analysis_iter = pin_map.find(analysis_type);
+      if (pin_analysis_iter == pin_map.end())
+        return std::nullopt;
+      const auto pin_iter = pin_analysis_iter->second.find(current_transition);
+      if (pin_iter == pin_analysis_iter->second.end() || pin_iter->second.empty())
+        return std::nullopt;
+      return std::make_pair(pin_iter->second, transition_iter->second);
+    };
+    auto predecessor = find_predecessor(state->predecessor_trans_type_map, state->predecessor_map);
+    if (!predecessor.has_value())
+      predecessor = find_predecessor(state->physical_predecessor_trans_type_map, state->physical_predecessor_map);
+    if (!predecessor.has_value())
+      return current_transition;
+    current_pin = predecessor->first;
+    current_transition = predecessor->second;
+  }
+  return current_transition;
+}
+
 // private
 
 Utility* Utility::_util_instance = nullptr;

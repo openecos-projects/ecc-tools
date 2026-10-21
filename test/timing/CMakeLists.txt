@@ -1,0 +1,35 @@
+add_executable(sdc_cone_query_test cone_query_test.cpp)
+target_link_libraries(sdc_cone_query_test PRIVATE ista_sdc_command ista_data_manager)
+add_test(NAME sdc_cone_query COMMAND sdc_cone_query_test)
+
+add_executable(case_analysis_pad_test case_analysis_pad_test.cpp)
+target_link_libraries(case_analysis_pad_test PRIVATE ista_data_manager)
+add_test(NAME case_analysis_pad COMMAND case_analysis_pad_test)
+
+add_executable(check_slew_order_test check_slew_order_test.cpp)
+target_link_libraries(check_slew_order_test PRIVATE ista_delay_calculator ista_data_manager)
+add_test(NAME check_slew_order COMMAND check_slew_order_test)
+
+add_executable(check_lut_export_test check_lut_export_test.cpp)
+target_link_libraries(check_lut_export_test PRIVATE ista_interface ista_data_manager)
+add_test(NAME check_lut_export COMMAND check_lut_export_test)
+
+add_executable(clock_source_transition_test clock_source_transition_test.cpp)
+target_link_libraries(clock_source_transition_test PRIVATE ista_utility ista_data_manager)
+add_test(NAME clock_source_transition COMMAND clock_source_transition_test)
+
+add_executable(conditional_arc_test conditional_arc_test.cpp)
+target_link_libraries(conditional_arc_test PRIVATE ista_delay_calculator ista_data_manager)
+add_test(NAME conditional_arc COMMAND conditional_arc_test)
+
+add_executable(net_threshold_test net_threshold_test.cpp)
+target_link_libraries(net_threshold_test PRIVATE ista_delay_calculator ista_data_manager)
+add_test(NAME net_threshold COMMAND net_threshold_test)
+
+add_executable(io_constraint_test io_constraint_test.cpp)
+target_link_libraries(io_constraint_test PRIVATE ista_sdc_command ista_delay_calculator ista_data_manager)
+add_test(NAME io_constraint COMMAND io_constraint_test)
+
+add_executable(sparse_required_rule_test sparse_required_rule_test.cpp)
+target_link_libraries(sparse_required_rule_test PRIVATE ista_interface ista_clock_propagator ista_timing_propagator ista_timing_analyzer ista_delay_calculator ista_data_manager)
+add_test(NAME sparse_required_rule COMMAND sparse_required_rule_test)

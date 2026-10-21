@@ -179,6 +179,7 @@ void GraphBuilder::addArc(const std::string& source_pin, const std::string& sink
   arc.set_library_sink_port(library_sink_port);
   arc.set_type(type);
   arc.set_is_clock_arc(is_clock_arc);
+  arc.set_is_control_arc(timing_cell_arc != nullptr && timing_cell_arc->get_is_control_arc());
   arc.set_is_disable_arc(is_disable_arc);
   arc.set_timing_cell_arc(timing_cell_arc);
 

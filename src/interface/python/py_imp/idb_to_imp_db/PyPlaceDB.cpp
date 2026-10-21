@@ -609,7 +609,9 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     init_routability(db, inst_resort_list);
   }
   if (with_sta) {
-    init_timing(ista::TimingExportAdapter::exportSnapshot(), db);
+    const auto snapshot = ista::TimingExportAdapter::exportSnapshot();
+    init_timing(snapshot, db);
+    init_sparse_timing(snapshot);
   }
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 

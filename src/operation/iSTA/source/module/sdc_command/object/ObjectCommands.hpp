@@ -35,6 +35,22 @@ class TclGetPins : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclGetFanin : public SdcTclCmd
+{
+ public:
+  TclGetFanin(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclGetFanout : public SdcTclCmd
+{
+ public:
+  TclGetFanout(const char* cmd_name, ClientData client_data);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclGetCells : public SdcTclCmd
 {
  public:

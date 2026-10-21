@@ -8,6 +8,7 @@ add_library(ista_sdc_command
     ${ISTA_MODULE}/sdc_command/frontend/SetUnits.cpp
     ${ISTA_MODULE}/sdc_command/object/ObjectFilter.cpp
     ${ISTA_MODULE}/sdc_command/object/ObjectQuery.cpp
+    ${ISTA_MODULE}/sdc_command/object/ConeQuery.cpp
     ${ISTA_MODULE}/sdc_command/collection/RemoveFromCollection.cpp
     ${ISTA_MODULE}/sdc_command/object/AllPorts.cpp
     ${ISTA_MODULE}/sdc_command/object/CurrentDesign.cpp
@@ -22,6 +23,8 @@ add_library(ista_sdc_command
     ${ISTA_MODULE}/sdc_command/object/GetObjectNames.cpp
     ${ISTA_MODULE}/sdc_command/object/GetPins.cpp
     ${ISTA_MODULE}/sdc_command/object/GetPorts.cpp
+    ${ISTA_MODULE}/sdc_command/object/GetFanin.cpp
+    ${ISTA_MODULE}/sdc_command/object/GetFanout.cpp
     ${ISTA_MODULE}/sdc_command/clock/CreateClock.cpp
     ${ISTA_MODULE}/sdc_command/clock/CreateGeneratedClock.cpp
     ${ISTA_MODULE}/sdc_command/clock/SetClockGroups.cpp

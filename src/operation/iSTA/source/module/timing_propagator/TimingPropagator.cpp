@@ -210,7 +210,8 @@ void TimingPropagator::propagateDataSlewDelay(TPModel& tp_model)
   seedDataSlewList(tp_model);
   for (int32_t vertex_idx : database.get_graph_order_list()) {
     for (std::size_t arc_idx : database.get_graph_vertex_list()[vertex_idx].get_outgoing_arc_list()) {
-      if (isDisableArc(database.get_arc_list()[arc_idx])) {
+      const Arc& arc = database.get_arc_list()[arc_idx];
+      if (arc.get_is_electrical_disable_arc() || arc.get_is_loop_disable()) {
         continue;
       }
       propagateDataSlewDelayArc(arc_idx);
@@ -401,11 +402,14 @@ double TimingPropagator::getStartPointArrival(std::string& start_point, Analysis
   Instance& instance = database.get_instance_map()[pin.get_instance_name()];
   if (instance.get_is_sequential() && start_point == instance.get_clock_pin_name()) {
     TransType clock_trans_type = getClockTransType(instance.get_clock_to_q_arc());
-    return STAUTIL.getLaunchClockEdge(database, start_point, getClockName(start_point))
-           + getClockArrival(instance.get_clock_pin_name(), analysis_type, clock_trans_type);
+    const std::string clock_name(getClockName(start_point));
+    const TransType source_trans_type = Utility::getClockSourceTransition(database, instance.get_clock_pin_name(), clock_name, analysis_type, clock_trans_type);
+    return getClockEdge(clock_name, source_trans_type) + getClockArrival(instance.get_clock_pin_name(), analysis_type, clock_trans_type);
   }
   if (instance.get_is_sequential() && start_point == instance.get_output_pin_name()) {
     TransType clock_trans_type = getClockTransType(instance.get_clock_to_q_arc());
+    const std::string clock_name(getClockName(start_point));
+    const TransType source_trans_type = Utility::getClockSourceTransition(database, instance.get_clock_pin_name(), clock_name, analysis_type, clock_trans_type);
     double clock_slew = getClockSlew(instance.get_clock_pin_name(), analysis_type, clock_trans_type);
     DCTask dc_task;
     dc_task.set_proc_type(DCProcType::kCalculate);
@@ -417,8 +421,8 @@ double TimingPropagator::getStartPointArrival(std::string& start_point, Analysis
     dc_task.set_input_slew(clock_slew);
     STADC.calculate(dc_task);
     if (dc_task.get_is_valid()) {
-      return STAUTIL.getLaunchClockEdge(database, start_point, getClockName(start_point))
-             + getClockArrival(instance.get_clock_pin_name(), analysis_type, clock_trans_type) + dc_task.get_timing_result().get_delay();
+      return getClockEdge(clock_name, source_trans_type) + getClockArrival(instance.get_clock_pin_name(), analysis_type, clock_trans_type)
+             + dc_task.get_timing_result().get_delay();
     }
   }
   return 0.0;
@@ -436,9 +440,11 @@ double TimingPropagator::getStartPointArrival(std::string& start_point, std::str
     return getStartPointArrival(start_point, analysis_type, trans_type);
   }
   const TransType clock_trans_type = getClockTransType(instance.get_clock_to_q_arc());
-  const double clock_arrival = getClockEdge(clock_name, clock_trans_type)
-                               + getClockArrival(instance.get_clock_pin_name(), clock_name, analysis_type, clock_trans_type);
-  if (start_point == instance.get_clock_pin_name()) return clock_arrival;
+  const TransType source_trans_type = Utility::getClockSourceTransition(database, instance.get_clock_pin_name(), clock_name, analysis_type, clock_trans_type);
+  const double clock_arrival
+      = getClockEdge(clock_name, source_trans_type) + getClockArrival(instance.get_clock_pin_name(), clock_name, analysis_type, clock_trans_type);
+  if (start_point == instance.get_clock_pin_name())
+    return clock_arrival;
 
   DCTask dc_task;
   dc_task.set_proc_type(DCProcType::kCalculate);

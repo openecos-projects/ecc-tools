@@ -24,6 +24,8 @@ namespace ista {
 
 class TimingAnalyzer
 {
+  friend class SparseTimingExportAdapter;
+
  public:
   static void initInst();
   static TimingAnalyzer& getInst();
@@ -100,6 +102,7 @@ class TimingAnalyzer
   double getEndPointCaptureTime(std::string& start_point, std::string& end_point, TransType launch_transition, AnalysisType analysis_type);
   double getEndPointCaptureTime(std::string& start_point, std::string_view launch_clock, TransType launch_transition, std::string_view capture_clock,
                                 TransType capture_transition, AnalysisType analysis_type);
+  TransType getCaptureClockSourceTransType(std::string& end_point, std::string_view capture_clock, AnalysisType analysis_type, TransType endpoint_trans_type);
   double getClockEdge(std::string_view clock_name, TransType trans_type);
   std::vector<const TimingIoDelay*> getOutputDelayList(std::string& end_point, AnalysisType analysis_type, TransType trans_type);
   double getOutputRequiredTime(std::string& start_point, std::string_view launch_clock, TransType launch_trans_type, std::string& end_point,
