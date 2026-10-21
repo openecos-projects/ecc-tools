@@ -697,7 +697,10 @@ bool GlobalRouter::buildMazeTopoTree(GRNet& net, const std::vector<std::vector<P
 
 double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal) const
 {
-  double best_cost = kInf;
+  double total_supply = 0.0;
+  double total_demand = 0.0;
+  double min_short_cost = kInf;
+  bool has_edge = false;
   for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
     if (_grid_graph.isHorizontalLayer(layer_idx) != is_horizontal) {
       continue;
@@ -710,13 +713,15 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
       return kUnitWireCost;
     }
     const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
-    if (edge.supply <= kEpsilon) {
-      continue;
-    }
-    double cost = kUnitWireCost + _short_cost_list[layer_idx] * getLogistic(edge.supply - edge.getDemand());
-    best_cost = std::min(best_cost, cost);
+    has_edge = true;
+    total_supply += edge.supply;
+    total_demand += edge.getDemand();
+    min_short_cost = std::min(min_short_cost, _short_cost_list[layer_idx]);
   }
-  return best_cost;
+  if (!has_edge || total_supply <= kEpsilon) {
+    return kInf;
+  }
+  return kUnitWireCost + min_short_cost * getLogistic(total_supply - total_demand);
 }
 
 std::vector<GRNet*> GlobalRouter::getOverflowNetList()
@@ -1096,8 +1101,15 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
     via_cost[layer_idx] = getViaCost(net, node.coord, layer_idx);
   }
   std::vector<double> phi(state.layer_num + 1, 0.0);
+  std::vector<int32_t> blocked_via_prefix(state.layer_num + 1, 0);
   for (int32_t layer_idx = 0; layer_idx < state.layer_num; layer_idx++) {
-    phi[layer_idx + 1] = phi[layer_idx] + via_cost[layer_idx];
+    if (via_cost[layer_idx] >= kInf) {
+      phi[layer_idx + 1] = phi[layer_idx];
+      blocked_via_prefix[layer_idx + 1] = blocked_via_prefix[layer_idx] + 1;
+    } else {
+      phi[layer_idx + 1] = phi[layer_idx] + via_cost[layer_idx];
+      blocked_via_prefix[layer_idx + 1] = blocked_via_prefix[layer_idx];
+    }
   }
 
   std::vector<std::vector<double>> child_g(child_num, std::vector<double>(state.layer_num, kInf));
@@ -1106,6 +1118,9 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
                                                                 std::vector<std::vector<double>>(state.layer_num, std::vector<double>(state.layer_num, kInf)));
   for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
     int32_t child_idx = node.child_list[child_pos];
+    if (!state.computed[child_idx]) {
+      computeNodeDP(net, state, child_idx);
+    }
     const GRTopoNode& child_node = state.topo_tree.node_list[child_idx];
     const std::vector<int32_t>& bend_idx_list = node.child_bend_list[child_pos];
     if (bend_idx_list.empty()) {
@@ -1172,6 +1187,9 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
     int32_t best_end = -1;
     for (int32_t begin_layer = state.bottom_layer_idx; begin_layer <= begin_limit; begin_layer++) {
       for (int32_t end_layer = end_start; end_layer <= state.top_layer_idx; end_layer++) {
+        if (blocked_via_prefix[end_layer] != blocked_via_prefix[begin_layer]) {
+          continue;
+        }
         double stack_cost = phi[end_layer] - phi[begin_layer];
         double total_cost = addCost(stack_cost, sum_min[begin_layer][end_layer]);
         if (total_cost < best_cost) {
