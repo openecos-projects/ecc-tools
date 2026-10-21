@@ -10,6 +10,13 @@
 
 namespace irt {
 
+namespace {
+
+constexpr int32_t kNeighborOffsetX[4] = {1, -1, 0, 0};
+constexpr int32_t kNeighborOffsetY[4] = {0, 0, 1, -1};
+
+}  // namespace
+
 PRGridGraph::NetRouteTrial::NetRouteTrial(PRGridGraph& graph, PRNet& pr_net)
     : _graph(&graph), _pr_net(&pr_net), _old_edge_set(pr_net.get_routing_edge_set()), _net_idx(pr_net.get_net_idx())
 {
@@ -76,6 +83,37 @@ void PRGridGraph::build(Database& database)
     }
   }
 
+  // 多源 BFS：计算每个 gcell 到最近 blocked cell 的距离，只展开到 halo 半径
+  std::vector<int32_t> distance_queue;
+  for (size_t node_idx = 0; node_idx < _node_list.size(); node_idx++) {
+    if (_node_list[node_idx].is_blocked) {
+      _node_list[node_idx].blocked_distance = 0;
+      distance_queue.push_back(static_cast<int32_t>(node_idx));
+    }
+  }
+  for (size_t head = 0; head < distance_queue.size(); head++) {
+    int32_t node_idx = distance_queue[head];
+    int32_t next_distance = _node_list[node_idx].blocked_distance + 1;
+    if (next_distance > kMacroHaloRadius) {
+      continue;
+    }
+    int32_t x = node_idx / _y_size;
+    int32_t y = node_idx % _y_size;
+    for (int32_t neighbor = 0; neighbor < 4; neighbor++) {
+      int32_t neighbor_x = x + kNeighborOffsetX[neighbor];
+      int32_t neighbor_y = y + kNeighborOffsetY[neighbor];
+      if (neighbor_x < 0 || _x_size <= neighbor_x || neighbor_y < 0 || _y_size <= neighbor_y) {
+        continue;
+      }
+      int32_t neighbor_idx = neighbor_x * _y_size + neighbor_y;
+      if (_node_list[neighbor_idx].blocked_distance <= next_distance) {
+        continue;
+      }
+      _node_list[neighbor_idx].blocked_distance = next_distance;
+      distance_queue.push_back(neighbor_idx);
+    }
+  }
+
   _horizontal_edge_list.clear();
   _vertical_edge_list.clear();
   _horizontal_edge_list.resize(static_cast<size_t>(get_horizontal_x_size()) * _y_size);
@@ -112,6 +150,32 @@ void PRGridGraph::build(Database& database)
       }
     }
   }
+
+  // macro 内圈进一步压低 planar supply，使这些边更早进入饱和/overflow
+  for (int32_t x = 0; x < get_horizontal_x_size(); x++) {
+    for (int32_t y = 0; y < _y_size; y++) {
+      PRGridEdge& edge = _horizontal_edge_list[get_horizontal_edge_index(x, y)];
+      if (edge.supply <= 0) {
+        continue;
+      }
+      int32_t halo_distance = std::min(get_blocked_distance({x, y}), get_blocked_distance({x + 1, y}));
+      if (halo_distance <= kMacroSupplyReduceRadius) {
+        edge.supply = std::max(1, edge.supply - kMacroSupplyReduceNum);
+      }
+    }
+  }
+  for (int32_t x = 0; x < _x_size; x++) {
+    for (int32_t y = 0; y < get_vertical_y_size(); y++) {
+      PRGridEdge& edge = _vertical_edge_list[get_vertical_edge_index(x, y)];
+      if (edge.supply <= 0) {
+        continue;
+      }
+      int32_t halo_distance = std::min(get_blocked_distance({x, y}), get_blocked_distance({x, y + 1}));
+      if (halo_distance <= kMacroSupplyReduceRadius) {
+        edge.supply = std::max(1, edge.supply - kMacroSupplyReduceNum);
+      }
+    }
+  }
 }
 
 const PRGridNode& PRGridGraph::get_node(const PlanarCoord& coord) const
@@ -128,6 +192,14 @@ bool PRGridGraph::isCellLegal(const PlanarCoord& coord) const
     return false;
   }
   return !get_node(coord).is_blocked;
+}
+
+bool PRGridGraph::isCellInMacroHalo(const PlanarCoord& coord) const
+{
+  if (coord.get_x() < 0 || _x_size <= coord.get_x() || coord.get_y() < 0 || _y_size <= coord.get_y()) {
+    return false;
+  }
+  return get_blocked_distance(coord) <= kMacroHaloRadius;
 }
 
 uint32_t PRGridGraph::get_horizontal_edge_index(int32_t x, int32_t y) const
@@ -194,7 +266,7 @@ PREdgeCost PRGridGraph::get_edge_cost(int32_t supply, int32_t demand) const
     double overflow_ratio = demand - std::max(supply, 0) + 1;
     double overflow_ratio_sqr = overflow_ratio * overflow_ratio;
     edge_cost.is_overflow = true;
-    edge_cost.unit_cost = overflow_ratio_sqr * overflow_ratio_sqr;
+    edge_cost.unit_cost = overflow_ratio_sqr * overflow_ratio_sqr * overflow_ratio_sqr;
     return edge_cost;
   }
   double usage_ratio = demand / 1.0 / supply;
@@ -249,11 +321,13 @@ double PRGridGraph::get_segment_cost(int32_t net_idx, const PlanarCoord& first_c
     for (int32_t x = first_x; x < second_x; x++) {
       PREdgeId edge_id = get_edge_id({x, first_y}, {x + 1, first_y});
       segment_cost += get_edge(edge_id).isIgnoreNet(net_idx) ? 1.0 : get_edge_cost(edge_id, overflow_unit);
+      segment_cost += get_edge_halo_cost({x, first_y}, {x + 1, first_y});
     }
   } else {
     for (int32_t y = first_y; y < second_y; y++) {
       PREdgeId edge_id = get_edge_id({first_x, y}, {first_x, y + 1});
       segment_cost += get_edge(edge_id).isIgnoreNet(net_idx) ? 1.0 : get_edge_cost(edge_id, overflow_unit);
+      segment_cost += get_edge_halo_cost({first_x, y}, {first_x, y + 1});
     }
   }
   return segment_cost;

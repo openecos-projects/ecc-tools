@@ -152,7 +152,7 @@ void PlanarRouter::runRouteFlow()
   routePRNetList(_pr_task_list, {"congestion LZ pattern", PRRouteMode::kCongestionLZPattern});
   _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
   routePRNetList(getOverflowPRNetList(), {"overflow All pattern", PRRouteMode::kAllPattern});
-  _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
+  _grid_graph.update_congestion(_pr_com_param.get_overflow_unit() * 2);
 
   for (int32_t iter = 0; iter < max_astar_iters; iter++) {
     std::vector<PRNet*> reroute_net_list = getOverflowPRNetList();
@@ -163,7 +163,7 @@ void PlanarRouter::runRouteFlow()
     routePRNetList(reroute_net_list, {"overflow A*", PRRouteMode::kAStar});
     _grid_graph.update_congestion(_pr_com_param.get_overflow_unit());
     _pr_com_param.set_astar_search_margin(_pr_com_param.get_astar_search_margin() * 2);
-    _pr_com_param.set_overflow_unit(_pr_com_param.get_overflow_unit() * 2);
+    _pr_com_param.set_overflow_unit(_pr_com_param.get_overflow_unit() * 4);
   }
 
   uploadNetList();
@@ -244,7 +244,8 @@ std::vector<Segment<PlanarCoord>> PlanarRouter::getPlanarTopoList(const PRGridGr
   TBTask tb_task;
   tb_task.set_planar_coord_list(node_coord_list);
   tb_task.set_planar_search_region(PlanarRect(0, 0, _grid_graph.get_x_size() - 1, _grid_graph.get_y_size() - 1));
-  tb_task.set_point_legal_query([this](const PlanarCoord& coord) { return _grid_graph.isCellLegal(coord); });
+  tb_task.set_point_legal_query(
+      [this](const PlanarCoord& coord) { return _grid_graph.isCellLegal(coord) && !_grid_graph.isCellInMacroHalo(coord); });
   
   bool use_congestion_topology = pr_topo_mode == PRTopoMode::kCongestion && needCongestionAware(trial);
   tb_task.set_topo_mode(use_congestion_topology ? TBTopoMode::kCongestion : TBTopoMode::kGeometry);
@@ -379,6 +380,9 @@ void PlanarRouter::updatePRCandidate(const PRGridGraph::NetRouteTrial& trial, PR
       const PRGridEdge& routing_edge = _grid_graph.get_edge(edge_id);
       bool is_owned = trial.get_trial_edge_set().contains(edge_id);
       candidate_cost.total_wire_length += !is_owned;
+      if (!is_owned) {
+        candidate_cost.total_cost += _grid_graph.get_edge_halo_cost(edge_first, edge_second);
+      }
       if (is_owned || routing_edge.isIgnoreNet(curr_net_idx)) {
         continue;
       }
@@ -670,6 +674,9 @@ std::vector<PlanarCoord> PlanarRouter::searchAStarPath(const PRGridGraph::NetRou
       double step_cost = is_owned ? 0 : 1.0;
       if (!is_owned && !is_ignored) {
         step_cost += _grid_graph.get_edge_cost(edge_id, overflow_unit) - 1.0;
+      }
+      if (!is_owned) {
+        step_cost += _grid_graph.get_edge_halo_cost({curr_x, curr_y}, {neighbor_x, neighbor_y});
       }
       if (curr_is_horizontal != is_horizontal) {
         step_cost += corner_weight;
