@@ -16,11 +16,14 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
+
 #include <tcl_util.h>
 
 namespace python_interface {
 
-bool initPW(std::string& config, std::map<std::string, std::string>& config_dict);
+bool initPW(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool runPW(const bool is_peak = false, const bool is_avg = false);
 bool destroyPW();
 
