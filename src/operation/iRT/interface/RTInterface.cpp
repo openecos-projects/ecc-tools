@@ -26,8 +26,8 @@
 #include "PinAccessor.hpp"
 #include "PlanarRect.hpp"
 #include "RTHeader.hpp"
+#include "TARouter.hpp"
 #include "TOPOBuilder.hpp"
-#include "TrackAssigner.hpp"
 #include "ViolationReporter.hpp"
 #include "feature_irt.h"
 #include "feature_manager.h"
@@ -124,9 +124,9 @@ void RTInterface::runRT()
   RTGR.route();
   GlobalRouter::destroyInst();
 
-  TrackAssigner::initInst();
-  RTTA.assign();
-  TrackAssigner::destroyInst();
+  TARouter::initInst();
+  RTTR.route();
+  TARouter::destroyInst();
   // outputDef("irt_ta.def");
 
   DetailedRouter::initInst();
