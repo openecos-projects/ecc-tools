@@ -21,13 +21,11 @@
 #include "DetailedRouter.hpp"
 #include "EarlyRouter.hpp"
 #include "GDSPlotter.hpp"
-#include "LayerAssigner.hpp"
+#include "GlobalRouter.hpp"
 #include "Monitor.hpp"
 #include "PinAccessor.hpp"
 #include "PlanarRect.hpp"
-#include "PlanarRouter.hpp"
 #include "RTHeader.hpp"
-#include "SupplyAnalyzer.hpp"
 #include "TOPOBuilder.hpp"
 #include "TrackAssigner.hpp"
 #include "ViolationReporter.hpp"
@@ -122,20 +120,9 @@ void RTInterface::runRT()
 
   initRegionRoute();
 
-  SupplyAnalyzer::initInst();
-  RTSA.analyze();
-  SupplyAnalyzer::destroyInst();
-
-  PlanarRouter::initInst();
-  RTPR.generate();
-  PlanarRouter::destroyInst();
-
-  LayerAssigner::initInst();
-  RTLA.assign();
-  LayerAssigner::destroyInst();
-
-  std::vector<GridMap<RoutingEdge>>().swap(RTDM.getDatabase().get_routing_h_edge_map());
-  std::vector<GridMap<RoutingEdge>>().swap(RTDM.getDatabase().get_routing_v_edge_map());
+  GlobalRouter::initInst();
+  RTGR.route();
+  GlobalRouter::destroyInst();
 
   TrackAssigner::initInst();
   RTTA.assign();

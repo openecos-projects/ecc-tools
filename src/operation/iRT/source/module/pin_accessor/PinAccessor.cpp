@@ -71,9 +71,9 @@ void PinAccessor::access()
   // debugPlotPAModel(pa_model, "init");
   routePAModel(pa_model);
   uploadAccessPoint(pa_model);
-  uploadAccessResult(pa_model);
-  uploadAccessPatch(pa_model);
-  uploadViolation(pa_model);
+  // uploadAccessResult(pa_model);
+  // uploadAccessPatch(pa_model);
+  // uploadViolation(pa_model);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
