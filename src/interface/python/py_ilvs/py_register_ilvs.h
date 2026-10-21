@@ -17,6 +17,7 @@
 #pragma once
 
 #include <pybind11/pybind11.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_ilvs.h"
 
@@ -26,7 +27,7 @@ namespace py = pybind11;
 
 void register_ilvs(py::module& m)
 {
-  m.def("init_lvs", init_lvs, py::arg("temp_directory_path") = "", py::arg("thread_number") = 128);
+  m.def("init_lvs", init_lvs, py::arg("temp_directory_path") = py::none(), py::arg("thread_number") = 128);
   m.def("run_lvs", run_lvs);
   m.def("destroy_lvs", destroy_lvs);
 }
