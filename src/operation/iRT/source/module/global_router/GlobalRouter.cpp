@@ -16,14 +16,23 @@
 // ***************************************************************************************
 #include "GlobalRouter.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
+#include <map>
 #include <queue>
+#include <set>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "DataManager.hpp"
 #include "GDSPlotter.hpp"
+#include "Logger.hpp"
 #include "Monitor.hpp"
-#include "RTHeader.hpp"
 #include "RoutingLayer.hpp"
+#include "Segment.hpp"
 #include "Utility.hpp"
 #include "flute3/flute.h"
 
@@ -65,13 +74,14 @@ void GlobalRouter::route()
 
   RTDM.getDatabase().get_net_global_result_map().clear();
   initGRGridGraph();
+
   analyzeSupply();
   initGRNetList();
+  
   routeGRNetList();
   mazeRouteGRNetList();
-  for (GRNet& gr_net : _gr_net_list) {
-    outputNetResult(gr_net);
-  }
+
+  outputGlobalResult();
   RTDM.rebuildGlobalResultRTree();
   // debugPlotGRModel("after_route");
   printSummary();
@@ -83,8 +93,16 @@ void GlobalRouter::route()
 
 void GlobalRouter::initGRGridGraph()
 {
-  _grid_graph.build(RTDM.getDatabase(), RTDM.getConfig().bottom_routing_layer_idx, RTDM.getConfig().top_routing_layer_idx);
-  _short_cost_list.assign(_grid_graph.getLayerNum(), kDefaultShortCost);
+  Database& database = RTDM.getDatabase();
+  int32_t layer_num = static_cast<int32_t>(database.get_routing_layer_list().size());
+
+  std::vector<bool> is_horizontal_layer(layer_num, false);
+  for (int32_t layer_idx = 0; layer_idx < layer_num; layer_idx++) {
+    is_horizontal_layer[layer_idx] = database.get_routing_layer_list()[layer_idx].isPreferH();
+  }
+
+  _grid_graph.init(database.get_gcell_map().get_x_size(), database.get_gcell_map().get_y_size(), layer_num,
+                   RTDM.getConfig().bottom_routing_layer_idx, RTDM.getConfig().top_routing_layer_idx, is_horizontal_layer);
 }
 
 void GlobalRouter::analyzeSupply()
@@ -93,81 +111,69 @@ void GlobalRouter::analyzeSupply()
   RTLOG.info(Loc::current(), "Starting...");
 
   for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
-    Monitor layer_monitor;
-    analyzeSupplyLayer(layer_idx);
-    RTLOG.info(Loc::current(), "Analyzed layer ", layer_idx, layer_monitor.getStatsInfo());
+    RoutingLayer& routing_layer = RTDM.getDatabase().get_routing_layer_list()[layer_idx];
+    bool is_horizontal = routing_layer.isPreferH();
+    int32_t x_size = is_horizontal ? std::max(0, _grid_graph.getXSize() - 1) : _grid_graph.getXSize();
+    int32_t y_size = is_horizontal ? _grid_graph.getYSize() : std::max(0, _grid_graph.getYSize() - 1);
+
+#pragma omp parallel for collapse(2)
+    for (int32_t x = 0; x < x_size; x++) {
+      for (int32_t y = 0; y < y_size; y++) {
+        LayerCoord first_coord(x, y, layer_idx);
+        LayerCoord second_coord = is_horizontal ? LayerCoord(x + 1, y, layer_idx) : LayerCoord(x, y + 1, layer_idx);
+        EXTLayerRect search_rect = getSearchRect(first_coord, second_coord);
+        std::vector<LayerRect> wire_list = getCrossingWireList(search_rect);
+        std::vector<PlanarRect> enlarged_obs_rect_list;
+        for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, search_rect)) {
+          for (EXTLayerRect* fixed_rect : fixed_rect_set) {
+            PlanarRect fixed_shape = fixed_rect->get_real_rect();
+            enlarged_obs_rect_list.push_back(RTUTIL.getEnlargedRect(fixed_shape, routing_layer.getPRLSpacing(fixed_shape)));
+          }
+        }
+        int32_t blocked_wire_num = 0;
+        for (const LayerRect& wire : wire_list) {
+          for (const PlanarRect& enlarged_obs_rect : enlarged_obs_rect_list) {
+            if (RTUTIL.isOpenOverlap(enlarged_obs_rect, wire)) {
+              blocked_wire_num++;
+              break;
+            }
+          }
+        }
+
+        int32_t supply_num = static_cast<int32_t>(wire_list.size());
+        int32_t accessible_num = supply_num - blocked_wire_num;
+        // Reserve one accessible track; it and all inaccessible tracks become fixed demand.
+        int32_t usable_num = std::max(0, accessible_num - 1);
+        GRWireEdge& wire_edge = _grid_graph.getWireEdge(GRWireEdgeId{x, y, layer_idx});
+        wire_edge.supply = static_cast<double>(supply_num);
+        wire_edge.fixed_demand = static_cast<double>(supply_num - usable_num);
+      }
+    }
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void GlobalRouter::analyzeSupplyLayer(int32_t layer_idx)
-{
-  RoutingLayer& routing_layer = RTDM.getDatabase().get_routing_layer_list()[layer_idx];
-  bool is_horizontal = routing_layer.isPreferH();
-  int32_t x_size = is_horizontal ? std::max(0, _grid_graph.getXSize() - 1) : _grid_graph.getXSize();
-  int32_t y_size = is_horizontal ? _grid_graph.getYSize() : std::max(0, _grid_graph.getYSize() - 1);
-
-#pragma omp parallel for collapse(2)
-  for (int32_t x = 0; x < x_size; x++) {
-    for (int32_t y = 0; y < y_size; y++) {
-      LayerCoord first_coord(x, y, layer_idx);
-      LayerCoord second_coord = is_horizontal ? LayerCoord(x + 1, y, layer_idx) : LayerCoord(x, y + 1, layer_idx);
-      EXTLayerRect search_rect = getSearchRect(first_coord, second_coord);
-      std::vector<LayerRect> wire_list = getCrossingWireList(search_rect);
-      std::vector<PlanarRect> enlarged_obs_rect_list;
-      for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, search_rect)) {
-        for (EXTLayerRect* fixed_rect : fixed_rect_set) {
-          PlanarRect fixed_shape = fixed_rect->get_real_rect();
-          enlarged_obs_rect_list.push_back(RTUTIL.getEnlargedRect(fixed_shape, routing_layer.getPRLSpacing(fixed_shape)));
-        }
-      }
-      int32_t accessible_num = 0;
-      for (LayerRect& wire : wire_list) {
-        if (isAccess(wire, enlarged_obs_rect_list)) {
-          accessible_num++;
-        }
-      }
-      // reserve one wire track, keep at least zero
-      int32_t usable_num = std::max(0, accessible_num - 1);
-      GRWireEdge& wire_edge = _grid_graph.getWireEdge(GRWireEdgeId{x, y, layer_idx});
-      wire_edge.supply = static_cast<double>(wire_list.size());
-      wire_edge.fixed_demand = static_cast<double>(static_cast<int32_t>(wire_list.size()) - usable_num);
-    }
-  }
 }
 
 EXTLayerRect GlobalRouter::getSearchRect(const LayerCoord& first_coord, const LayerCoord& second_coord)
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
 
-  if (first_coord.get_layer_idx() != second_coord.get_layer_idx()) {
-    RTLOG.error(Loc::current(), "The grid_pair layer_idx is not equal!");
-  }
+  PlanarRect first_real_rect = RTUTIL.getRealRectByGCell(first_coord, gcell_axis);
+  PlanarRect second_real_rect = RTUTIL.getRealRectByGCell(second_coord, gcell_axis);
+  PlanarCoord first_mid_coord = first_real_rect.getMidPoint();
+  PlanarCoord second_mid_coord = second_real_rect.getMidPoint();
+
   PlanarRect search_real_rect;
-  {
-    PlanarRect first_real_rect = RTUTIL.getRealRectByGCell(first_coord, gcell_axis);
-    PlanarCoord first_mid_coord = first_real_rect.getMidPoint();
-    PlanarRect second_real_rect = RTUTIL.getRealRectByGCell(second_coord, gcell_axis);
-    PlanarCoord second_mid_coord = second_real_rect.getMidPoint();
-    if (RTUTIL.isHorizontal(first_coord, second_coord)) {
-      std::vector<PlanarCoord> coord_list;
-      coord_list.emplace_back(first_mid_coord.get_x(), first_real_rect.get_ll_y());
-      coord_list.emplace_back(first_mid_coord.get_x(), first_real_rect.get_ur_y());
-      coord_list.emplace_back(second_mid_coord.get_x(), second_real_rect.get_ll_y());
-      coord_list.emplace_back(second_mid_coord.get_x(), second_real_rect.get_ur_y());
-      search_real_rect = RTUTIL.getBoundingBox(coord_list);
-    } else if (RTUTIL.isVertical(first_coord, second_coord)) {
-      std::vector<PlanarCoord> coord_list;
-      coord_list.emplace_back(first_real_rect.get_ll_x(), first_mid_coord.get_y());
-      coord_list.emplace_back(first_real_rect.get_ur_x(), first_mid_coord.get_y());
-      coord_list.emplace_back(second_real_rect.get_ll_x(), second_mid_coord.get_y());
-      coord_list.emplace_back(second_real_rect.get_ur_x(), second_mid_coord.get_y());
-      search_real_rect = RTUTIL.getBoundingBox(coord_list);
-    } else {
-      RTLOG.error(Loc::current(), "The grid_pair is not horizontal or vertical!");
-    }
+  if (RTUTIL.isHorizontal(first_coord, second_coord)) {
+    search_real_rect.set_ll(std::min(first_mid_coord.get_x(), second_mid_coord.get_x()), std::min(first_real_rect.get_ll_y(), second_real_rect.get_ll_y()));
+    search_real_rect.set_ur(std::max(first_mid_coord.get_x(), second_mid_coord.get_x()), std::max(first_real_rect.get_ur_y(), second_real_rect.get_ur_y()));
+  } else if (RTUTIL.isVertical(first_coord, second_coord)) {
+    search_real_rect.set_ll(std::min(first_real_rect.get_ll_x(), second_real_rect.get_ll_x()), std::min(first_mid_coord.get_y(), second_mid_coord.get_y()));
+    search_real_rect.set_ur(std::max(first_real_rect.get_ur_x(), second_real_rect.get_ur_x()), std::max(first_mid_coord.get_y(), second_mid_coord.get_y()));
+  } else {
+    RTLOG.error(Loc::current(), "The grid_pair is not horizontal or vertical!");
   }
+
   EXTLayerRect search_rect;
   search_rect.set_real_rect(search_real_rect);
   search_rect.set_grid_rect(RTUTIL.getClosedGCellGridRect(search_rect.get_real_rect(), gcell_axis));
@@ -178,34 +184,21 @@ EXTLayerRect GlobalRouter::getSearchRect(const LayerCoord& first_coord, const La
 std::vector<LayerRect> GlobalRouter::getCrossingWireList(const EXTLayerRect& search_rect)
 {
   RoutingLayer& routing_layer = RTDM.getDatabase().get_routing_layer_list()[search_rect.get_layer_idx()];
+  const PlanarRect& real_rect = search_rect.get_real_rect();
+  int32_t layer_idx = search_rect.get_layer_idx();
   int32_t half_wire_width = routing_layer.get_min_width() / 2;
-
-  int32_t real_ll_x = search_rect.get_real_ll_x();
-  int32_t real_ll_y = search_rect.get_real_ll_y();
-  int32_t real_ur_x = search_rect.get_real_ur_x();
-  int32_t real_ur_y = search_rect.get_real_ur_y();
 
   std::vector<LayerRect> wire_list;
   if (routing_layer.isPreferH()) {
-    for (int32_t y : RTUTIL.getScaleList(real_ll_y, real_ur_y, routing_layer.getYTrackGridList())) {
-      wire_list.emplace_back(real_ll_x, y - half_wire_width, real_ur_x, y + half_wire_width, search_rect.get_layer_idx());
+    for (int32_t y : RTUTIL.getScaleList(real_rect.get_ll_y(), real_rect.get_ur_y(), routing_layer.getYTrackGridList())) {
+      wire_list.emplace_back(real_rect.get_ll_x(), y - half_wire_width, real_rect.get_ur_x(), y + half_wire_width, layer_idx);
     }
   } else {
-    for (int32_t x : RTUTIL.getScaleList(real_ll_x, real_ur_x, routing_layer.getXTrackGridList())) {
-      wire_list.emplace_back(x - half_wire_width, real_ll_y, x + half_wire_width, real_ur_y, search_rect.get_layer_idx());
+    for (int32_t x : RTUTIL.getScaleList(real_rect.get_ll_x(), real_rect.get_ur_x(), routing_layer.getXTrackGridList())) {
+      wire_list.emplace_back(x - half_wire_width, real_rect.get_ll_y(), x + half_wire_width, real_rect.get_ur_y(), layer_idx);
     }
   }
   return wire_list;
-}
-
-bool GlobalRouter::isAccess(const LayerRect& wire, const std::vector<PlanarRect>& enlarged_obs_rect_list)
-{
-  for (const PlanarRect& enlarged_obs_rect : enlarged_obs_rect_list) {
-    if (RTUTIL.isOpenOverlap(enlarged_obs_rect, wire)) {
-      return false;
-    }
-  }
-  return true;
 }
 
 void GlobalRouter::initGRNetList()
@@ -213,6 +206,7 @@ void GlobalRouter::initGRNetList()
   _gr_net_list.clear();
   std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+
   for (Net& net : net_list) {
     if (net.get_pin_list().size() < 2) {
       continue;
@@ -223,26 +217,18 @@ void GlobalRouter::initGRNetList()
     GRNet gr_net;
     gr_net.origin_net = &net;
     gr_net.bbox = net.get_bounding_box();
-    bool is_valid = true;
     for (Pin& pin : net.get_pin_list()) {
       AccessPoint& access_point = pin.get_access_point();
       PlanarCoord grid_coord = access_point.get_grid_coord();
       int32_t layer_idx = access_point.get_layer_idx();
-      if (grid_coord.get_x() < 0 || grid_coord.get_x() >= _grid_graph.getXSize() || grid_coord.get_y() < 0 || grid_coord.get_y() >= _grid_graph.getYSize()
-          || layer_idx < _grid_graph.getBottomLayerIdx() || layer_idx > _grid_graph.getTopLayerIdx()) {
-        RTLOG.warn(Loc::current(), "Skip net ", net.get_net_name(), " because pin ", pin.get_pin_name(), " has invalid access point!");
-        is_valid = false;
-        break;
-      }
       gr_net.pin_list.push_back(GRPin{&pin, grid_coord, layer_idx});
-    }
-    if (!is_valid) {
-      continue;
     }
     buildExemptEdgeSet(gr_net);
     _gr_net_list.push_back(std::move(gr_net));
   }
+
   std::sort(_gr_net_list.begin(), _gr_net_list.end(), CmpGRNet());
+
   int32_t local_net_num = 0;
   for (const GRNet& gr_net : _gr_net_list) {
     std::set<PlanarCoord, CmpPlanarCoordByXASC> coord_set;
@@ -699,7 +685,6 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
 {
   double total_supply = 0.0;
   double total_demand = 0.0;
-  double min_short_cost = kInf;
   bool has_edge = false;
   for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
     if (_grid_graph.isHorizontalLayer(layer_idx) != is_horizontal) {
@@ -716,12 +701,11 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
     has_edge = true;
     total_supply += edge.supply;
     total_demand += edge.getDemand();
-    min_short_cost = std::min(min_short_cost, _short_cost_list[layer_idx]);
   }
   if (!has_edge || total_supply <= kEpsilon) {
     return kInf;
   }
-  return kUnitWireCost + min_short_cost * getLogistic(total_supply - total_demand);
+  return kUnitWireCost + kCostWeight * getLogistic(total_supply - total_demand);
 }
 
 std::vector<GRNet*> GlobalRouter::getOverflowNetList()
@@ -1378,7 +1362,7 @@ double GlobalRouter::getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_
   if (edge.supply <= kEpsilon) {
     return kInf;
   }
-  return kUnitWireCost + _short_cost_list[edge_id.layer_idx] * getLogistic(edge.supply - edge.getDemand());
+  return kUnitWireCost + kCostWeight * getLogistic(edge.supply - edge.getDemand());
 }
 
 double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const
@@ -1591,53 +1575,77 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
   }
 }
 
-void GlobalRouter::outputNetResult(GRNet& net)
+void GlobalRouter::outputGlobalResult()
 {
-  int32_t net_idx = net.origin_net->get_net_idx();
-  std::vector<Segment<LayerCoord>>& result_list = RTDM.getDatabase().get_net_global_result_map()[net_idx];
-  result_list.reserve(result_list.size() + net.routing_tree.wire_list.size() + net.routing_tree.via_list.size());
-  for (const GRWireSegment& wire_segment : net.routing_tree.wire_list) {
-    if (wire_segment.first == wire_segment.second) {
-      continue;
+  for (GRNet& net : _gr_net_list) {
+    int32_t net_idx = net.origin_net->get_net_idx();
+    std::vector<Segment<LayerCoord>>& result_list = RTDM.getDatabase().get_net_global_result_map()[net_idx];
+    result_list.reserve(result_list.size() + net.routing_tree.wire_list.size() + net.routing_tree.via_list.size());
+    for (const GRWireSegment& wire_segment : net.routing_tree.wire_list) {
+      if (wire_segment.first == wire_segment.second) {
+        continue;
+      }
+      result_list.emplace_back(wire_segment.first, wire_segment.second);
     }
-    result_list.emplace_back(wire_segment.first, wire_segment.second);
-  }
-  for (const GRViaStack& via_stack : net.routing_tree.via_list) {
-    if (via_stack.bottom_layer_idx >= via_stack.top_layer_idx) {
-      continue;
+    for (const GRViaStack& via_stack : net.routing_tree.via_list) {
+      if (via_stack.bottom_layer_idx >= via_stack.top_layer_idx) {
+        continue;
+      }
+      result_list.emplace_back(LayerCoord(via_stack.coord, via_stack.bottom_layer_idx), LayerCoord(via_stack.coord, via_stack.top_layer_idx));
     }
-    result_list.emplace_back(LayerCoord(via_stack.coord, via_stack.bottom_layer_idx), LayerCoord(via_stack.coord, via_stack.top_layer_idx));
   }
 }
 
 void GlobalRouter::printSummary()
 {
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+
   double total_supply = 0.0;
   double total_demand = 0.0;
   double total_overflow = 0.0;
   double max_overflow = 0.0;
   int32_t overflow_edge_num = 0;
+
+  fort::char_table summary_table;
+  summary_table.set_cell_text_align(fort::text_align::right);
+  summary_table << fort::header << "routing"
+                << "supply"
+                << "demand"
+                << "overflow"
+                << "max_overflow"
+                << "overflow_edge" << fort::endr;
+
   for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
+    double layer_supply = 0.0;
+    double layer_demand = 0.0;
+    double layer_overflow = 0.0;
+    double layer_max_overflow = 0.0;
+    int32_t layer_overflow_edge_num = 0;
     const GridMap<GRWireEdge>& edge_map = _grid_graph.getEdgeMap(layer_idx);
     for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
       for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
         const GRWireEdge& edge = edge_map[x][y];
-        total_supply += edge.supply;
-        total_demand += edge.getDemand();
+        layer_supply += edge.supply;
+        layer_demand += edge.getDemand();
         double overflow = edge.getOverflow();
-        total_overflow += overflow;
-        max_overflow = std::max(max_overflow, overflow);
+        layer_overflow += overflow;
+        layer_max_overflow = std::max(layer_max_overflow, overflow);
         if (overflow > 0.0) {
-          overflow_edge_num++;
+          layer_overflow_edge_num++;
         }
       }
     }
+    summary_table << routing_layer_list[layer_idx].get_layer_name() << layer_supply << layer_demand << layer_overflow << layer_max_overflow
+                  << layer_overflow_edge_num << fort::endr;
+    total_supply += layer_supply;
+    total_demand += layer_demand;
+    total_overflow += layer_overflow;
+    max_overflow = std::max(max_overflow, layer_max_overflow);
+    overflow_edge_num += layer_overflow_edge_num;
   }
-  RTLOG.info(Loc::current(), "Total supply: ", total_supply);
-  RTLOG.info(Loc::current(), "Total demand: ", total_demand);
-  RTLOG.info(Loc::current(), "Total overflow: ", total_overflow);
-  RTLOG.info(Loc::current(), "Max overflow: ", max_overflow);
-  RTLOG.info(Loc::current(), "Overflow edge num: ", overflow_edge_num);
+  summary_table << fort::header << "Total" << total_supply << total_demand << total_overflow << max_overflow << overflow_edge_num << fort::endr;
+
+  RTUTIL.printTableList({summary_table});
 }
 
 bool GlobalRouter::isLayerInRange(int32_t layer_idx) const

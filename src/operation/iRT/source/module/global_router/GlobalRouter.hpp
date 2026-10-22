@@ -16,6 +16,12 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdint>
+#include <map>
+#include <set>
+#include <string>
+#include <vector>
+
 #include "EXTLayerRect.hpp"
 #include "GRGridGraph.hpp"
 #include "GRNet.hpp"
@@ -40,7 +46,7 @@ class GlobalRouter
 
   static constexpr double kInf = 1e18;
   static constexpr double kUnitWireCost = 1.0;
-  static constexpr double kDefaultShortCost = 10.0;
+  static constexpr double kCostWeight = 20.0;
   static constexpr double kViaBaseCost = 2.0;
   static constexpr double kSlope = 0.5;
   static constexpr double kViaDemand = 0.3;
@@ -88,10 +94,8 @@ class GlobalRouter
 
   // supply
   void analyzeSupply();
-  void analyzeSupplyLayer(int32_t layer_idx);
   EXTLayerRect getSearchRect(const LayerCoord& first_coord, const LayerCoord& second_coord);
   std::vector<LayerRect> getCrossingWireList(const EXTLayerRect& search_rect);
-  bool isAccess(const LayerRect& wire, const std::vector<PlanarRect>& enlarged_obs_rect_list);
 
   // route
   void routeGRNetList();
@@ -134,14 +138,13 @@ class GlobalRouter
   void commitRoute(GRNet& net, const GRTree& routing_tree);
   void addWireDemand(const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta);
   void addViaDemand(const GRNet& net, const GRViaStack& via_stack, std::set<GRWireEdgeId>& used_edge_set, double delta);
-  void outputNetResult(GRNet& net);
+  void outputGlobalResult();
   void printSummary();
   bool isLayerInRange(int32_t layer_idx) const;
   void debugPlotGRModel(const std::string& flag);
 
   // environment
   GRGridGraph _grid_graph;
-  std::vector<double> _short_cost_list;
   std::vector<GRNet> _gr_net_list;
 };
 

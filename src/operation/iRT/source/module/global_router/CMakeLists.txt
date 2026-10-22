@@ -1,6 +1,5 @@
 add_library(irt_global_router
     ${IRT_MODULE}/global_router/GlobalRouter.cpp
-    ${IRT_MODULE}/global_router/gr_data_manager/GRGridGraph.cpp
 )
 
 target_link_libraries(irt_global_router

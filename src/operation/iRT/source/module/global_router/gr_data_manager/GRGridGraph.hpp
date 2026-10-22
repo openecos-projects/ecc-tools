@@ -16,9 +16,11 @@
 // ***************************************************************************************
 #pragma once
 
-#include "Database.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 #include "GridMap.hpp"
-#include "PlanarCoord.hpp"
 
 namespace irt {
 
@@ -56,7 +58,25 @@ class GRGridGraph
   GRGridGraph() = default;
   ~GRGridGraph() = default;
 
-  void build(Database& database, int32_t bottom_layer_idx, int32_t top_layer_idx);
+  void init(int32_t x_size, int32_t y_size, int32_t layer_num, int32_t bottom_layer_idx, int32_t top_layer_idx,
+            const std::vector<bool>& is_horizontal_layer)
+  {
+    _x_size = x_size;
+    _y_size = y_size;
+    _layer_num = layer_num;
+    _bottom_layer_idx = bottom_layer_idx;
+    _top_layer_idx = top_layer_idx;
+    _is_horizontal_layer = is_horizontal_layer;
+
+    _edge_map.resize(_layer_num);
+    for (int32_t layer_idx = 0; layer_idx < _layer_num; layer_idx++) {
+      if (_is_horizontal_layer[layer_idx]) {
+        _edge_map[layer_idx].init(std::max(0, _x_size - 1), _y_size);
+      } else {
+        _edge_map[layer_idx].init(_x_size, std::max(0, _y_size - 1));
+      }
+    }
+  }
 
   int32_t getXSize() const { return _x_size; }
   int32_t getYSize() const { return _y_size; }
@@ -65,9 +85,17 @@ class GRGridGraph
   int32_t getTopLayerIdx() const { return _top_layer_idx; }
   bool isHorizontalLayer(int32_t layer_idx) const { return _is_horizontal_layer[layer_idx]; }
 
-  bool hasWireEdge(const GRWireEdgeId& edge_id) const;
-  const GRWireEdge& getWireEdge(const GRWireEdgeId& edge_id) const;
-  GRWireEdge& getWireEdge(const GRWireEdgeId& edge_id);
+  bool hasWireEdge(const GRWireEdgeId& edge_id) const
+  {
+    if (edge_id.layer_idx < 0 || edge_id.layer_idx >= _layer_num) {
+      return false;
+    }
+    const GridMap<GRWireEdge>& edge_map = _edge_map[edge_id.layer_idx];
+    return 0 <= edge_id.x && edge_id.x < edge_map.get_x_size() && 0 <= edge_id.y && edge_id.y < edge_map.get_y_size();
+  }
+
+  const GRWireEdge& getWireEdge(const GRWireEdgeId& edge_id) const { return _edge_map[edge_id.layer_idx][edge_id.x][edge_id.y]; }
+  GRWireEdge& getWireEdge(const GRWireEdgeId& edge_id) { return _edge_map[edge_id.layer_idx][edge_id.x][edge_id.y]; }
   const GridMap<GRWireEdge>& getEdgeMap(int32_t layer_idx) const { return _edge_map[layer_idx]; }
 
  private:

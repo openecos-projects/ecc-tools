@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <cstdint>
 #include <set>
 #include <vector>
 
