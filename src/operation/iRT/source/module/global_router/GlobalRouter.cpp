@@ -78,7 +78,7 @@ void GlobalRouter::route()
   analyzeSupply();
   initGRNetList();
   
-  routeGRNetList();
+  patternRouteGRNetList();
   mazeRouteGRNetList();
 
   outputGlobalResult();
@@ -149,6 +149,7 @@ void GlobalRouter::analyzeSupply()
         wire_edge.fixed_demand = static_cast<double>(supply_num - usable_num);
       }
     }
+
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -315,35 +316,31 @@ void GlobalRouter::buildExemptEdgeSet(GRNet& net)
   }
 }
 
-void GlobalRouter::routeGRNetList()
+void GlobalRouter::patternRouteGRNetList()
 {
   if (_gr_net_list.empty()) {
     return;
   }
   size_t next_percent = 10;
   for (size_t i = 0; i < _gr_net_list.size(); i++) {
-    routeGRNet(_gr_net_list[i]);
+    GRNet& net = _gr_net_list[i];
+    GRTree old_tree = net.routing_tree;
+    ripupRoute(net, old_tree);
+
+    GRTree new_tree;
+    if (!buildRoutingTree(net, new_tree)) {
+      commitRoute(net, old_tree);
+      RTLOG.warn(Loc::current(), "Failed to route net ", net.origin_net->get_net_name());
+    } else {
+      commitRoute(net, new_tree);
+    }
+
     size_t percent = ((i + 1) * 100) / _gr_net_list.size();
     if (percent >= next_percent || i + 1 == _gr_net_list.size()) {
       RTLOG.info(Loc::current(), "Routed ", i + 1, "/", _gr_net_list.size(), "(", percent, "%)");
       next_percent += 10;
     }
   }
-}
-
-bool GlobalRouter::routeGRNet(GRNet& net)
-{
-  GRTree old_tree = net.routing_tree;
-  ripupRoute(net, old_tree);
-
-  GRTree new_tree;
-  if (!buildRoutingTree(net, new_tree)) {
-    commitRoute(net, old_tree);
-    RTLOG.warn(Loc::current(), "Failed to route net ", net.origin_net->get_net_name());
-    return false;
-  }
-  commitRoute(net, new_tree);
-  return true;
 }
 
 void GlobalRouter::mazeRouteGRNetList()
@@ -358,9 +355,16 @@ void GlobalRouter::mazeRouteGRNetList()
     double before_cost = getTotalRoutingCost();
     std::vector<std::pair<GRNet*, GRTree>> snapshot_list;
     snapshot_list.reserve(net_list.size());
-    for (GRNet* net : net_list) {
+    size_t next_percent = 10;
+    for (size_t i = 0; i < net_list.size(); i++) {
+      GRNet* net = net_list[i];
       snapshot_list.emplace_back(net, net->routing_tree);
       routeGRNetByMaze(*net);
+      size_t percent = ((i + 1) * 100) / net_list.size();
+      if (percent >= next_percent || i + 1 == net_list.size()) {
+        RTLOG.info(Loc::current(), "Maze routed ", i + 1, "/", net_list.size(), "(", percent, "%)");
+        next_percent += 10;
+      }
     }
     double after_overflow = getTotalOverflow();
     double after_cost = getTotalRoutingCost();
@@ -699,13 +703,13 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
     }
     const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
     has_edge = true;
-    total_supply += edge.supply;
-    total_demand += edge.getDemand();
+    total_supply += edge.getUsableSupply();
+    total_demand += edge.routing_demand;
   }
   if (!has_edge || total_supply <= kEpsilon) {
     return kInf;
   }
-  return kUnitWireCost + kCostWeight * getLogistic(total_supply - total_demand);
+  return kUnitWireCost + kCostWeight * getCongestionCost(total_supply, total_demand, 1.0);
 }
 
 std::vector<GRNet*> GlobalRouter::getOverflowNetList()
@@ -994,7 +998,36 @@ bool GlobalRouter::buildTopoTree(GRNet& net)
       }
       addTopoEdge(net.topology, parent_node_idx, child_node_idx, candidate_list);
     } else {
-      addTopoEdge(net.topology, parent_node_idx, child_node_idx);
+      std::vector<int32_t> candidate_list;
+      if (parent_coord.get_y() == child_coord.get_y()) {
+        for (int32_t offset : {1, -1, 2, -2}) {
+          int32_t y = parent_coord.get_y() + offset;
+          if (y < 0 || y >= _grid_graph.getYSize()) {
+            continue;
+          }
+          std::vector<PlanarCoord> path;
+          path.emplace_back(parent_coord.get_x(), y);
+          path.emplace_back(child_coord.get_x(), y);
+          candidate_list.push_back(addPatternPath(net.topology, parent_node_idx, child_node_idx, path));
+        }
+      } else {
+        for (int32_t offset : {1, -1, 2, -2}) {
+          int32_t x = parent_coord.get_x() + offset;
+          if (x < 0 || x >= _grid_graph.getXSize()) {
+            continue;
+          }
+          std::vector<PlanarCoord> path;
+          path.emplace_back(x, parent_coord.get_y());
+          path.emplace_back(x, child_coord.get_y());
+          candidate_list.push_back(addPatternPath(net.topology, parent_node_idx, child_node_idx, path));
+        }
+      }
+      if (candidate_list.empty()) {
+        addTopoEdge(net.topology, parent_node_idx, child_node_idx);
+      } else {
+        candidate_list.insert(candidate_list.begin(), -1);
+        addTopoEdge(net.topology, parent_node_idx, child_node_idx, std::move(candidate_list));
+      }
     }
   }
 
@@ -1114,15 +1147,23 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
       }
     } else {
       for (int32_t bend_idx : bend_idx_list) {
-        computeNodeDP(net, state, bend_idx);
+        if (bend_idx >= 0) {
+          computeNodeDP(net, state, bend_idx);
+        }
       }
       for (int32_t layer_idx = state.bottom_layer_idx; layer_idx <= state.top_layer_idx; layer_idx++) {
         double best_cost = kInf;
         int32_t best_bend_idx = -1;
         for (int32_t bend_idx : bend_idx_list) {
-          const PlanarCoord& bend_coord = state.topo_tree.node_list[bend_idx].coord;
-          double wire_cost = getWireSegmentCost(net, layer_idx, node.coord, bend_coord);
-          double cost = addCost(state.d[bend_idx][layer_idx], wire_cost);
+          double cost = kInf;
+          if (bend_idx < 0) {
+            double wire_cost = getWireSegmentCost(net, layer_idx, node.coord, child_node.coord);
+            cost = addCost(state.d[child_idx][layer_idx], wire_cost);
+          } else {
+            const PlanarCoord& bend_coord = state.topo_tree.node_list[bend_idx].coord;
+            double wire_cost = getWireSegmentCost(net, layer_idx, node.coord, bend_coord);
+            cost = addCost(state.d[bend_idx][layer_idx], wire_cost);
+          }
           if (cost < best_cost) {
             best_cost = cost;
             best_bend_idx = bend_idx;
@@ -1347,7 +1388,7 @@ double GlobalRouter::getWireSegmentCost(const GRNet& net, int32_t layer_idx, con
   return kInf;
 }
 
-double GlobalRouter::getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id) const
+double GlobalRouter::getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount) const
 {
   if (edge_id.layer_idx < _grid_graph.getBottomLayerIdx() || edge_id.layer_idx > _grid_graph.getTopLayerIdx()) {
     return kInf;
@@ -1356,13 +1397,14 @@ double GlobalRouter::getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_
     return kInf;
   }
   if (isExemptWireEdge(net, edge_id)) {
-    return kUnitWireCost;
+    return amount * kUnitWireCost;
   }
   const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
-  if (edge.supply <= kEpsilon) {
+  double usable_supply = edge.getUsableSupply();
+  if (usable_supply <= kEpsilon) {
     return kInf;
   }
-  return kUnitWireCost + kCostWeight * getLogistic(edge.supply - edge.getDemand());
+  return amount * (kUnitWireCost + kCostWeight * getCongestionCost(usable_supply, edge.routing_demand, amount));
 }
 
 double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const
@@ -1376,51 +1418,38 @@ double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int3
       continue;
     }
     bool is_horizontal = _grid_graph.isHorizontalLayer(side_layer_idx);
-    if (is_horizontal) {
-      if (coord.get_x() > 0) {
-        double edge_cost = getWireEdgeCost(net, GRWireEdgeId{coord.get_x() - 1, coord.get_y(), side_layer_idx});
-        if (edge_cost >= kInf) {
-          return kInf;
-        }
-        total_cost += kViaDemand * edge_cost;
+    for (int32_t edge_offset = -1; edge_offset <= 0; edge_offset++) {
+      int32_t edge_x = is_horizontal ? coord.get_x() + edge_offset : coord.get_x();
+      int32_t edge_y = is_horizontal ? coord.get_y() : coord.get_y() + edge_offset;
+      GRWireEdgeId edge_id{edge_x, edge_y, side_layer_idx};
+      if (!_grid_graph.hasWireEdge(edge_id)) {
+        continue;
       }
-      if (coord.get_x() < _grid_graph.getXSize() - 1) {
-        double edge_cost = getWireEdgeCost(net, GRWireEdgeId{coord.get_x(), coord.get_y(), side_layer_idx});
-        if (edge_cost >= kInf) {
-          return kInf;
-        }
-        total_cost += kViaDemand * edge_cost;
+      const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
+      if (edge.getUsableSupply() <= kEpsilon) {
+        continue;
       }
-    } else {
-      if (coord.get_y() > 0) {
-        double edge_cost = getWireEdgeCost(net, GRWireEdgeId{coord.get_x(), coord.get_y() - 1, side_layer_idx});
-        if (edge_cost >= kInf) {
-          return kInf;
-        }
-        total_cost += kViaDemand * edge_cost;
+      double edge_cost = getWireEdgeCost(net, edge_id, kViaDemand);
+      if (edge_cost >= kInf) {
+        return kInf;
       }
-      if (coord.get_y() < _grid_graph.getYSize() - 1) {
-        double edge_cost = getWireEdgeCost(net, GRWireEdgeId{coord.get_x(), coord.get_y(), side_layer_idx});
-        if (edge_cost >= kInf) {
-          return kInf;
-        }
-        total_cost += kViaDemand * edge_cost;
-      }
+      total_cost += edge_cost;
     }
   }
   return total_cost;
 }
 
-double GlobalRouter::getLogistic(double value) const
+double GlobalRouter::getCongestionCost(double supply, double demand, double amount) const
 {
-  double exponent = value * kSlope;
-  if (exponent > 50.0) {
-    return 0.0;
+  double usage_ratio = (demand + amount) / supply;
+  double usage_ratio_2 = usage_ratio * usage_ratio;
+  if (usage_ratio < kCongestionKneeRatio) {
+    return usage_ratio_2 * usage_ratio_2;
   }
-  if (exponent < -50.0) {
-    return 1.0;
+  if (usage_ratio <= 1.0) {
+    return usage_ratio_2;
   }
-  return 1.0 / (1.0 + std::exp(exponent));
+  return usage_ratio_2 * usage_ratio_2;
 }
 
 double GlobalRouter::addCost(double first, double second) const
@@ -1539,6 +1568,9 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
           if (!_grid_graph.hasWireEdge(edge_id)) {
             continue;
           }
+          if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
+            continue;
+          }
           if (!used_edge_set.insert(edge_id).second) {
             continue;
           }
@@ -1556,6 +1588,9 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
           int32_t edge_x = via_stack.coord.get_x();
           GRWireEdgeId edge_id{edge_x, edge_y, side_layer_idx};
           if (!_grid_graph.hasWireEdge(edge_id)) {
+            continue;
+          }
+          if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
             continue;
           }
           if (!used_edge_set.insert(edge_id).second) {
@@ -1625,7 +1660,7 @@ void GlobalRouter::printSummary()
     for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
       for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
         const GRWireEdge& edge = edge_map[x][y];
-        layer_supply += edge.supply;
+        layer_supply += edge.getUsableSupply();
         layer_demand += edge.getDemand();
         double overflow = edge.getOverflow();
         layer_overflow += overflow;
@@ -1814,7 +1849,8 @@ void GlobalRouter::debugPlotGRModel(const std::string& flag)
           GPText gp_text;
           gp_text.set_coord(first_coord.get_x(), first_coord.get_y() + point_size);
           gp_text.set_text_type(static_cast<int32_t>(GPDataType::kInfo));
-          gp_text.set_message(RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.supply, ", demand: ", edge.getDemand()));
+          gp_text.set_message(
+              RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(), ", demand: ", edge.getDemand()));
           gp_text.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
           gp_text.set_presentation(GPTextPresentation::kLeftMiddle);
           overflow_struct.push(gp_text);

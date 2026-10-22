@@ -47,8 +47,8 @@ class GlobalRouter
   static constexpr double kInf = 1e18;
   static constexpr double kUnitWireCost = 1.0;
   static constexpr double kCostWeight = 20.0;
+  static constexpr double kCongestionKneeRatio = 0.8;
   static constexpr double kViaBaseCost = 2.0;
-  static constexpr double kSlope = 0.5;
   static constexpr double kViaDemand = 0.3;
   static constexpr double kEpsilon = 1e-6;
 
@@ -98,8 +98,7 @@ class GlobalRouter
   std::vector<LayerRect> getCrossingWireList(const EXTLayerRect& search_rect);
 
   // route
-  void routeGRNetList();
-  bool routeGRNet(GRNet& net);
+  void patternRouteGRNetList();
   void mazeRouteGRNetList();
   bool routeGRNetByMaze(GRNet& net);
   bool buildMazeRoutingTree(GRNet& net, GRTree& routing_tree);
@@ -126,9 +125,9 @@ class GlobalRouter
 
   // cost
   double getWireSegmentCost(const GRNet& net, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord) const;
-  double getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id) const;
+  double getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount = 1.0) const;
   double getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const;
-  double getLogistic(double value) const;
+  double getCongestionCost(double supply, double demand, double amount) const;
   double addCost(double first, double second) const;
   bool isExemptWireEdge(const GRNet& net, const GRWireEdgeId& edge_id) const;
   bool isAPViaSide(const GRNet& net, const PlanarCoord& coord, int32_t layer_idx) const;

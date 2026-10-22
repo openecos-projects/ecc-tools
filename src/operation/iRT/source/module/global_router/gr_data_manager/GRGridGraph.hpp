@@ -48,8 +48,10 @@ struct GRWireEdge
   double fixed_demand = 0.0;
   double routing_demand = 0.0;
 
-  double getDemand() const { return fixed_demand + routing_demand; }
-  double getOverflow() const { return std::max(0.0, getDemand() - supply); }
+  // fixed_demand is already removed from usable supply, so demand only counts routing demand.
+  double getDemand() const { return routing_demand; }
+  double getUsableSupply() const { return std::max(0.0, supply - fixed_demand); }
+  double getOverflow() const { return std::max(0.0, getDemand() - getUsableSupply()); }
 };
 
 class GRGridGraph
