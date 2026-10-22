@@ -19,6 +19,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "DataManager.hpp"
@@ -94,49 +95,42 @@ class TARouter
   TARouter& operator=(TARouter&& other) = delete;
 
   // model
+  void initTANetList();
   TANet buildTANet(Net& net);
-  bool isCoordCoveredBySegments(const LayerCoord& key, const std::vector<Segment<LayerCoord>>& segment_list) const;
   void buildTANetFromSegments(TANet& ta_net, const std::vector<Segment<LayerCoord>>& segment_list, NodeMap& node_map);
   int32_t getOrCreateNode(TANet& ta_net, NodeMap& node_map, int32_t x, int32_t y, int32_t layer_idx);
   void addEdge(TANet& ta_net, int32_t first_node_idx, int32_t second_node_idx, int32_t layer_idx, const PlanarRect& guide_rect, bool is_via);
   void attachPins(TANet& ta_net, NodeMap& node_map);
-  void attachPin(TANet& ta_net, NodeMap& node_map, Pin& pin);
-  void resolveNodeAndViaCoords(TANet& ta_net);
-  int32_t getPinTerminalScale(const TANet& ta_net, int32_t node_idx, int32_t other_node_idx, bool is_horizontal) const;
+  void updateNodeAndViaCoords(TANet& ta_net);
+  int32_t getPinTerminalTarget(const TANet& ta_net, int32_t node_idx, int32_t other_node_idx, bool is_horizontal) const;
   int32_t getPinTrackTarget(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const;
-  void buildFallbackResult(TANet& ta_net, std::vector<Segment<LayerCoord>>& segment_list);
-  int32_t countObstacleOverlap(const TANet& ta_net) const;
   // assign
   void assignTracks(TANet& ta_net);
   void assignWireTrack(TANet& ta_net, TAEdge& edge);
   void commitNetUsage(TANet& ta_net);
-  void reserveViaFootprint(TANet& ta_net, const TAEdge& edge);
+  void addViaUsage(TANet& ta_net, const TAEdge& edge);
   void rerouteOverflowNets();
-  std::set<int32_t> collectOverflowNetSet() const;
+  std::set<int32_t> getOverflowNets() const;
   void updateTrackHistory();
   double getTrackHistory(int32_t layer_idx, int32_t track_coord) const;
   void ripupNet(const TANet& ta_net);
+  Direction getEdgeDirection(const TANet& ta_net, const TAEdge& edge) const;
   bool isHorizontalEdge(const TANet& ta_net, const TAEdge& edge) const;
+  bool isVerticalEdge(const TANet& ta_net, const TAEdge& edge) const;
+  std::pair<int32_t, int32_t> getEdgeScaleRange(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const;
   double getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const;
   void addTrackUsage(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx);
   // output
   void outputNet(TANet& ta_net);
+  void updateSummary();
+  void printSummary();
   void addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& first_coord, const LayerCoord& second_coord);
   void addViaSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& coord, int32_t below_layer_idx);
-
-  // diagnostics
-  void resetWarningCounters();
-  void reportWarningSummary() const;
 
   // resource
   std::map<int32_t, std::map<int32_t, std::vector<TrackInterval>>> _track_usage;
   std::map<int32_t, std::map<int32_t, double>> _track_history;
   std::vector<TANet> _ta_net_list;
-
-  std::set<int32_t> _pin_not_on_gr_net_set;
-  std::set<int32_t> _obstacle_overlap_net_set;
-  std::set<int32_t> _fallback_net_set;
-  int32_t _no_free_track_count = 0;
 };
 
 }  // namespace irt

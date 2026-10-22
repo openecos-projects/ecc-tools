@@ -58,18 +58,33 @@ void TARouter::route()
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  Database& database = RTDM.getDatabase();
-  resetWarningCounters();
   _track_usage.clear();
-  std::map<int32_t, std::vector<Segment<LayerCoord>>>& detailed_result_map = database.get_net_detailed_result_map();
-  detailed_result_map.clear();
+  RTDM.getDatabase().get_net_detailed_result_map().clear();
 
+  initTANetList();
+
+  for (TANet& ta_net : _ta_net_list) {
+    assignTracks(ta_net);
+  }
+
+  rerouteOverflowNets();
+
+  for (TANet& ta_net : _ta_net_list) {
+    outputNet(ta_net);
+  }
+
+  updateSummary();
+  printSummary();
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void TARouter::initTANetList()
+{
+  Database& database = RTDM.getDatabase();
   std::vector<Net>& net_list = database.get_net_list();
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& global_result_map = database.get_net_global_result_map();
 
-  int32_t routed_net_num = 0;
-  int32_t total_net_num = static_cast<int32_t>(global_result_map.size());
-  int32_t next_percent = 10;
   _ta_net_list.clear();
   for (Net& net : net_list) {
     if (net.get_pin_list().size() < 2) {
@@ -84,45 +99,7 @@ void TARouter::route()
       continue;
     }
     _ta_net_list.push_back(std::move(ta_net));
-    routed_net_num++;
-    if (total_net_num > 0 && routed_net_num * 100 >= total_net_num * next_percent) {
-      RTLOG.info(Loc::current(), "Built ", routed_net_num, "/", total_net_num, " nets");
-      next_percent += 10;
-    }
   }
-
-  for (TANet& ta_net : _ta_net_list) {
-    assignTracks(ta_net);
-  }
-  rerouteOverflowNets();
-
-  for (TANet& ta_net : _ta_net_list) {
-    outputNet(ta_net);
-  }
-
-  reportWarningSummary();
-  RTLOG.info(Loc::current(), "Assigned ", routed_net_num, " nets with ", detailed_result_map.size(), " detailed results");
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void TARouter::resetWarningCounters()
-{
-  _pin_not_on_gr_net_set.clear();
-  _obstacle_overlap_net_set.clear();
-  _fallback_net_set.clear();
-  _no_free_track_count = 0;
-}
-
-void TARouter::reportWarningSummary() const
-{
-  int32_t total = static_cast<int32_t>(_pin_not_on_gr_net_set.size() + _obstacle_overlap_net_set.size() + _fallback_net_set.size()
-                                       + _no_free_track_count);
-  if (total == 0) {
-    return;
-  }
-  RTLOG.warn(Loc::current(), "TA warnings: pin_not_on_gr_nets=", _pin_not_on_gr_net_set.size(),
-             ", obstacle_overlap_nets=", _obstacle_overlap_net_set.size(), ", fallback_nets=", _fallback_net_set.size(),
-             ", no_free_track_edges=", _no_free_track_count, ".");
 }
 
 TARouter::TANet TARouter::buildTANet(Net& net)
@@ -136,31 +113,17 @@ TARouter::TANet TARouter::buildTANet(Net& net)
     return ta_net;
   }
 
-  // Normalize the GR tree before track assignment:
-  // 1. split overlapping / crossing segments at key points;
-  // 2. merge collinear degree-2 nodes into one macro edge;
-  // 3. keep pins as key nodes so a pin in the middle of a segment is not merged away.
   std::vector<Segment<LayerCoord>> segment_list = global_result_list;
   std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> key_coord_pin_map;
   std::vector<LayerCoord> candidate_root_coord_list;
   std::set<LayerCoord, CmpLayerCoordByXASC> root_key_set;
   for (Pin& pin : net.get_pin_list()) {
     AccessPoint& access_point = pin.get_access_point();
-    if (access_point.get_real_coord() == PlanarCoord(-1, -1)) {
-      continue;
-    }
     LayerCoord key(access_point.get_grid_coord(), access_point.get_layer_idx());
-    if (!isCoordCoveredBySegments(key, segment_list)) {
-      _pin_not_on_gr_net_set.insert(ta_net.net_idx);
-      continue;
-    }
     key_coord_pin_map[key].insert(pin.get_pin_idx());
     if (root_key_set.insert(key).second) {
       candidate_root_coord_list.push_back(key);
     }
-  }
-  if (candidate_root_coord_list.empty()) {
-    candidate_root_coord_list.push_back(segment_list.front().get_first());
   }
 
   MTree<LayerCoord> coord_tree = RTUTIL.getTreeByFullFlow(candidate_root_coord_list, segment_list, key_coord_pin_map);
@@ -175,48 +138,6 @@ TARouter::TANet TARouter::buildTANet(Net& net)
   buildTANetFromSegments(ta_net, normalized_segment_list, node_map);
   attachPins(ta_net, node_map);
   return ta_net;
-}
-
-bool TARouter::isCoordCoveredBySegments(const LayerCoord& key, const std::vector<Segment<LayerCoord>>& segment_list) const
-{
-  for (const Segment<LayerCoord>& segment : segment_list) {
-    const LayerCoord& first_coord = segment.get_first();
-    const LayerCoord& second_coord = segment.get_second();
-    int32_t first_layer_idx = first_coord.get_layer_idx();
-    int32_t second_layer_idx = second_coord.get_layer_idx();
-    if (first_layer_idx == second_layer_idx) {
-      if (key.get_layer_idx() != first_layer_idx) {
-        continue;
-      }
-      const PlanarCoord& key_coord = key.get_planar_coord();
-      const PlanarCoord& first_planar_coord = first_coord.get_planar_coord();
-      const PlanarCoord& second_planar_coord = second_coord.get_planar_coord();
-      if (key_coord == first_planar_coord || key_coord == second_planar_coord) {
-        return true;
-      }
-      if (first_coord.get_y() == second_coord.get_y() && key.get_y() == first_coord.get_y()
-          && std::min(first_coord.get_x(), second_coord.get_x()) <= key.get_x()
-          && key.get_x() <= std::max(first_coord.get_x(), second_coord.get_x())) {
-        return true;
-      }
-      if (first_coord.get_x() == second_coord.get_x() && key.get_x() == first_coord.get_x()
-          && std::min(first_coord.get_y(), second_coord.get_y()) <= key.get_y()
-          && key.get_y() <= std::max(first_coord.get_y(), second_coord.get_y())) {
-        return true;
-      }
-      continue;
-    }
-
-    int32_t bottom_layer_idx = std::min(first_layer_idx, second_layer_idx);
-    int32_t top_layer_idx = std::max(first_layer_idx, second_layer_idx);
-    if (key.get_layer_idx() < bottom_layer_idx || key.get_layer_idx() > top_layer_idx) {
-      continue;
-    }
-    if (key.get_planar_coord() == first_coord.get_planar_coord() && key.get_planar_coord() == second_coord.get_planar_coord()) {
-      return true;
-    }
-  }
-  return false;
 }
 
 void TARouter::buildTANetFromSegments(TANet& ta_net, const std::vector<Segment<LayerCoord>>& segment_list, NodeMap& node_map)
@@ -294,29 +215,164 @@ void TARouter::addEdge(TANet& ta_net, int32_t first_node_idx, int32_t second_nod
 void TARouter::attachPins(TANet& ta_net, NodeMap& node_map)
 {
   for (Pin& pin : ta_net.origin_net->get_pin_list()) {
-    attachPin(ta_net, node_map, pin);
+    AccessPoint& access_point = pin.get_access_point();
+    PlanarCoord ap_grid_coord = access_point.get_grid_coord();
+    int32_t ap_layer_idx = access_point.get_layer_idx();
+    std::tuple<int32_t, int32_t, int32_t> key(ap_grid_coord.get_x(), ap_grid_coord.get_y(), ap_layer_idx);
+    int32_t node_idx = node_map.at(key);
+    // Pin is a gcell terminal. TA stops just inside the gcell boundary; DR connects the AP.
+    ta_net.node_list[node_idx].is_pin = true;
+    ta_net.node_list[node_idx].pin_ap_list.push_back(access_point.get_real_coord());
   }
 }
 
-void TARouter::attachPin(TANet& ta_net, NodeMap& node_map, Pin& pin)
+void TARouter::assignTracks(TANet& ta_net)
 {
-  AccessPoint& access_point = pin.get_access_point();
-  if (access_point.get_real_coord() == PlanarCoord(-1, -1)) {
-    return;
+  for (TAEdge& edge : ta_net.edge_list) {
+    if (edge.is_via) {
+      continue;
+    }
+    assignWireTrack(ta_net, edge);
   }
-  PlanarCoord ap_grid_coord = access_point.get_grid_coord();
-  int32_t ap_layer_idx = access_point.get_layer_idx();
-  std::tuple<int32_t, int32_t, int32_t> key(ap_grid_coord.get_x(), ap_grid_coord.get_y(), ap_layer_idx);
-  auto iter = node_map.find(key);
-  if (iter == node_map.end()) {
-    return;
-  }
-  // Pin is a gcell terminal. TA stops just inside the gcell boundary; DR connects the AP.
-  ta_net.node_list[iter->second].is_pin = true;
-  ta_net.node_list[iter->second].pin_ap_list.push_back(access_point.get_real_coord());
+  updateNodeAndViaCoords(ta_net);
+  commitNetUsage(ta_net);
 }
 
-int32_t TARouter::getPinTerminalScale(const TANet& ta_net, int32_t node_idx, int32_t other_node_idx, bool is_horizontal) const
+void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
+{
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+
+  RoutingLayer& routing_layer = routing_layer_list[edge.layer_idx];
+  TANode& first_node = ta_net.node_list[edge.first_node_idx];
+  TANode& second_node = ta_net.node_list[edge.second_node_idx];
+
+  Direction direction = getEdgeDirection(ta_net, edge);
+  if (direction != Direction::kHorizontal && direction != Direction::kVertical) {
+    return;
+  }
+  bool is_horizontal = (direction == Direction::kHorizontal);
+
+  // A pin edge should aim at the AP track; a normal edge stays near the guide center.
+  std::vector<int32_t> candidate_track_list;
+  int32_t desired_coord = 0;
+  if (is_horizontal) {
+    desired_coord = edge.guide_rect.getMidPoint().get_y();
+    candidate_track_list = RTUTIL.getScaleList(edge.guide_rect.get_ll_y(), edge.guide_rect.get_ur_y(), routing_layer.getYTrackGridList());
+  } else {
+    desired_coord = edge.guide_rect.getMidPoint().get_x();
+    candidate_track_list = RTUTIL.getScaleList(edge.guide_rect.get_ll_x(), edge.guide_rect.get_ur_x(), routing_layer.getXTrackGridList());
+  }
+  int32_t pin_track_target = getPinTrackTarget(ta_net, edge, is_horizontal);
+  if (pin_track_target != -1) {
+    desired_coord = pin_track_target;
+  }
+  if (candidate_track_list.empty()) {
+    candidate_track_list.push_back(desired_coord);
+  }
+
+  int32_t first_scale = is_horizontal ? first_node.real_coord.get_x() : first_node.real_coord.get_y();
+  int32_t second_scale = is_horizontal ? second_node.real_coord.get_x() : second_node.real_coord.get_y();
+  if (first_node.is_pin) {
+    first_scale = getPinTerminalTarget(ta_net, edge.first_node_idx, edge.second_node_idx, is_horizontal);
+  }
+  if (second_node.is_pin) {
+    second_scale = getPinTerminalTarget(ta_net, edge.second_node_idx, edge.first_node_idx, is_horizontal);
+  }
+  auto [begin_scale, end_scale] = std::minmax(first_scale, second_scale);
+  edge.candidate_track_list = candidate_track_list;
+  edge.begin_scale = begin_scale;
+  edge.end_scale = end_scale;
+
+  std::vector<std::pair<int32_t, PlanarRect>> fixed_rect_list;
+  {
+    EXTLayerRect query_rect;
+    query_rect.set_real_rect(edge.guide_rect);
+    query_rect.set_layer_idx(edge.layer_idx);
+    std::map<int32_t, std::set<EXTLayerRect*>> fixed_rect_map = RTDM.getNetFixedRectMap(true, query_rect);
+    for (auto& [net_idx, rect_set] : fixed_rect_map) {
+      if (net_idx == ta_net.net_idx) {
+        continue;
+      }
+      for (EXTLayerRect* fixed_rect : rect_set) {
+        PlanarRect fixed_shape = fixed_rect->get_real_rect();
+        int32_t prl_spacing = routing_layer.getPRLSpacing(fixed_shape);
+        PlanarRect enlarged_fixed_shape = RTUTIL.getEnlargedRect(fixed_shape, prl_spacing);
+        fixed_rect_list.emplace_back(net_idx, enlarged_fixed_shape);
+      }
+    }
+  }
+
+  int32_t half_width = routing_layer.get_min_width() / 2;
+
+  int32_t best_track_coord = candidate_track_list.front();
+  int32_t best_valid_track_coord = -1;
+  double best_cost = std::numeric_limits<double>::max();
+  double best_valid_cost = std::numeric_limits<double>::max();
+  for (int32_t track_coord : candidate_track_list) {
+    double overlap = getTrackOverlap(edge.layer_idx, track_coord, begin_scale, end_scale, ta_net.net_idx);
+    double fixed_cost = 0.0;
+    double obstacle_area = 0.0;
+    PlanarRect check_rect;
+    if (is_horizontal) {
+      check_rect.set_ll(edge.guide_rect.get_ll_x(), track_coord - half_width);
+      check_rect.set_ur(edge.guide_rect.get_ur_x(), track_coord + half_width);
+    } else {
+      check_rect.set_ll(track_coord - half_width, edge.guide_rect.get_ll_y());
+      check_rect.set_ur(track_coord + half_width, edge.guide_rect.get_ur_y());
+    }
+    for (const auto& [fixed_net_idx, fixed_rect] : fixed_rect_list) {
+      if (!RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
+        continue;
+      }
+      double overlap_area = RTUTIL.getOverlap(check_rect, fixed_rect).getArea();
+      if (fixed_net_idx < 0) {
+        // net = -1 is a hard obstacle, not a soft foreign-net shape.
+        obstacle_area += overlap_area;
+      } else {
+        fixed_cost += 1000.0 + overlap_area / 100.0;
+      }
+    }
+    double cost = std::abs(track_coord - desired_coord) + overlap * 20.0 + fixed_cost + getTrackHistory(edge.layer_idx, track_coord);
+    if (obstacle_area <= 0.0) {
+      if (cost < best_valid_cost) {
+        best_valid_cost = cost;
+        best_valid_track_coord = track_coord;
+      }
+    }
+    // If every track is blocked, keep the least-bad one instead of dropping the net.
+    cost += obstacle_area * 1.0e9;
+    if (cost < best_cost) {
+      best_cost = cost;
+      best_track_coord = track_coord;
+    }
+  }
+  if (best_valid_track_coord != -1) {
+    best_track_coord = best_valid_track_coord;
+  }
+  edge.track_coord = best_track_coord;
+}
+
+int32_t TARouter::getPinTrackTarget(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const
+{
+  int64_t scale_sum = 0;
+  int32_t ap_num = 0;
+  for (int32_t node_idx : {edge.first_node_idx, edge.second_node_idx}) {
+    const TANode& ta_node = ta_net.node_list[node_idx];
+    if (!ta_node.is_pin) {
+      continue;
+    }
+    for (const PlanarCoord& ap_coord : ta_node.pin_ap_list) {
+      scale_sum += is_horizontal ? ap_coord.get_y() : ap_coord.get_x();
+      ap_num++;
+    }
+  }
+  if (ap_num == 0) {
+    return -1;
+  }
+  return static_cast<int32_t>(scale_sum / ap_num);
+}
+
+int32_t TARouter::getPinTerminalTarget(const TANet& ta_net, int32_t node_idx, int32_t other_node_idx, bool is_horizontal) const
 {
   const TANode& ta_node = ta_net.node_list[node_idx];
   const TANode& other_node = ta_net.node_list[other_node_idx];
@@ -346,27 +402,7 @@ int32_t TARouter::getPinTerminalScale(const TANet& ta_net, int32_t node_idx, int
   return toward_high ? high - margin : low + margin;
 }
 
-int32_t TARouter::getPinTrackTarget(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const
-{
-  int64_t scale_sum = 0;
-  int32_t ap_num = 0;
-  for (int32_t node_idx : {edge.first_node_idx, edge.second_node_idx}) {
-    const TANode& ta_node = ta_net.node_list[node_idx];
-    if (!ta_node.is_pin) {
-      continue;
-    }
-    for (const PlanarCoord& ap_coord : ta_node.pin_ap_list) {
-      scale_sum += is_horizontal ? ap_coord.get_y() : ap_coord.get_x();
-      ap_num++;
-    }
-  }
-  if (ap_num == 0) {
-    return -1;
-  }
-  return static_cast<int32_t>(scale_sum / ap_num);
-}
-
-void TARouter::resolveNodeAndViaCoords(TANet& ta_net)
+void TARouter::updateNodeAndViaCoords(TANet& ta_net)
 {
   ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
 
@@ -383,12 +419,15 @@ void TARouter::resolveNodeAndViaCoords(TANet& ta_net)
         continue;
       }
       int32_t other_node_idx = (edge.first_node_idx == node_idx) ? edge.second_node_idx : edge.first_node_idx;
-      if (isHorizontalEdge(ta_net, edge)) {
-        ta_node.real_coord = LayerCoord(getPinTerminalScale(ta_net, node_idx, other_node_idx, true), edge.track_coord, ta_node.layer_idx);
-      } else {
-        ta_node.real_coord = LayerCoord(edge.track_coord, getPinTerminalScale(ta_net, node_idx, other_node_idx, false), ta_node.layer_idx);
+      Direction direction = getEdgeDirection(ta_net, edge);
+      if (direction == Direction::kHorizontal) {
+        ta_node.real_coord = LayerCoord(getPinTerminalTarget(ta_net, node_idx, other_node_idx, true), edge.track_coord, ta_node.layer_idx);
+        break;
       }
-      break;
+      if (direction == Direction::kVertical) {
+        ta_node.real_coord = LayerCoord(edge.track_coord, getPinTerminalTarget(ta_net, node_idx, other_node_idx, false), ta_node.layer_idx);
+        break;
+      }
     }
   }
 
@@ -406,9 +445,10 @@ void TARouter::resolveNodeAndViaCoords(TANet& ta_net)
       if (edge.is_via) {
         continue;
       }
-      if (isHorizontalEdge(ta_net, edge)) {
+      Direction direction = getEdgeDirection(ta_net, edge);
+      if (direction == Direction::kHorizontal) {
         h_track = edge.track_coord;
-      } else {
+      } else if (direction == Direction::kVertical) {
         v_track = edge.track_coord;
       }
     }
@@ -465,7 +505,7 @@ void TARouter::resolveNodeAndViaCoords(TANet& ta_net)
           if (h_track == -1) {
             h_track = wire_edge.track_coord;
           }
-        } else {
+        } else if (isVerticalEdge(ta_net, wire_edge)) {
           if (v_track == -1) {
             v_track = wire_edge.track_coord;
           }
@@ -483,226 +523,32 @@ void TARouter::resolveNodeAndViaCoords(TANet& ta_net)
   }
 }
 
-void TARouter::assignTracks(TANet& ta_net)
-{
-  for (TAEdge& edge : ta_net.edge_list) {
-    if (edge.is_via) {
-      continue;
-    }
-    assignWireTrack(ta_net, edge);
-  }
-  resolveNodeAndViaCoords(ta_net);
-  commitNetUsage(ta_net);
-  int32_t obstacle_overlap_num = countObstacleOverlap(ta_net);
-  if (obstacle_overlap_num > 0) {
-    _obstacle_overlap_net_set.insert(ta_net.net_idx);
-  }
-}
-
-int32_t TARouter::countObstacleOverlap(const TANet& ta_net) const
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  int32_t overlap_num = 0;
-  for (const TAEdge& edge : ta_net.edge_list) {
-    if (edge.is_via) {
-      continue;
-    }
-    const TANode& first_node = ta_net.node_list[edge.first_node_idx];
-    const TANode& second_node = ta_net.node_list[edge.second_node_idx];
-    bool is_horizontal = first_node.grid_coord.get_y() == second_node.grid_coord.get_y() && first_node.grid_coord.get_x() != second_node.grid_coord.get_x();
-    bool is_vertical = first_node.grid_coord.get_x() == second_node.grid_coord.get_x() && first_node.grid_coord.get_y() != second_node.grid_coord.get_y();
-    if (!is_horizontal && !is_vertical) {
-      continue;
-    }
-    if (edge.layer_idx < 0 || edge.layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
-      continue;
-    }
-    int32_t half_width = routing_layer_list[edge.layer_idx].get_min_width() / 2;
-    int32_t begin_scale = is_horizontal ? std::min(first_node.real_coord.get_x(), second_node.real_coord.get_x())
-                                        : std::min(first_node.real_coord.get_y(), second_node.real_coord.get_y());
-    int32_t end_scale = is_horizontal ? std::max(first_node.real_coord.get_x(), second_node.real_coord.get_x())
-                                      : std::max(first_node.real_coord.get_y(), second_node.real_coord.get_y());
-    PlanarRect wire_rect;
-    if (is_horizontal) {
-      wire_rect.set_ll(begin_scale, edge.track_coord - half_width);
-      wire_rect.set_ur(end_scale, edge.track_coord + half_width);
-    } else {
-      wire_rect.set_ll(edge.track_coord - half_width, begin_scale);
-      wire_rect.set_ur(edge.track_coord + half_width, end_scale);
-    }
-    EXTLayerRect query_rect;
-    query_rect.set_real_rect(edge.guide_rect);
-    query_rect.set_layer_idx(edge.layer_idx);
-    std::map<int32_t, std::set<EXTLayerRect*>> fixed_rect_map = RTDM.getNetFixedRectMap(true, query_rect);
-    bool has_obstacle = false;
-    auto obstacle_iter = fixed_rect_map.find(-1);
-    if (obstacle_iter != fixed_rect_map.end()) {
-      for (EXTLayerRect* fixed_rect : obstacle_iter->second) {
-        if (RTUTIL.isOpenOverlap(wire_rect, fixed_rect->get_real_rect())) {
-          has_obstacle = true;
-          break;
-        }
-      }
-    }
-    if (has_obstacle) {
-      overlap_num++;
-    }
-  }
-  return overlap_num;
-}
-
 void TARouter::commitNetUsage(TANet& ta_net)
 {
   for (const TAEdge& edge : ta_net.edge_list) {
     if (edge.is_via) {
       continue;
     }
-    TANode& first_node = ta_net.node_list[edge.first_node_idx];
-    TANode& second_node = ta_net.node_list[edge.second_node_idx];
-    bool is_horizontal = first_node.grid_coord.get_y() == second_node.grid_coord.get_y() && first_node.grid_coord.get_x() != second_node.grid_coord.get_x();
-    bool is_vertical = first_node.grid_coord.get_x() == second_node.grid_coord.get_x() && first_node.grid_coord.get_y() != second_node.grid_coord.get_y();
-    if (!is_horizontal && !is_vertical) {
+    Direction direction = getEdgeDirection(ta_net, edge);
+    if (direction != Direction::kHorizontal && direction != Direction::kVertical) {
       continue;
     }
-    int32_t begin_scale = is_horizontal ? std::min(first_node.real_coord.get_x(), second_node.real_coord.get_x())
-                                        : std::min(first_node.real_coord.get_y(), second_node.real_coord.get_y());
-    int32_t end_scale = is_horizontal ? std::max(first_node.real_coord.get_x(), second_node.real_coord.get_x())
-                                      : std::max(first_node.real_coord.get_y(), second_node.real_coord.get_y());
+    bool is_horizontal = (direction == Direction::kHorizontal);
+    auto [begin_scale, end_scale] = getEdgeScaleRange(ta_net, edge, is_horizontal);
     addTrackUsage(edge.layer_idx, edge.track_coord, begin_scale, end_scale, ta_net.net_idx);
   }
   for (const TAEdge& edge : ta_net.edge_list) {
     if (!edge.is_via) {
       continue;
     }
-    reserveViaFootprint(ta_net, edge);
+    addViaUsage(ta_net, edge);
   }
 }
 
-void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
-{
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-  if (edge.layer_idx < 0 || edge.layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
-    return;
-  }
-  RoutingLayer& routing_layer = routing_layer_list[edge.layer_idx];
-  TANode& first_node = ta_net.node_list[edge.first_node_idx];
-  TANode& second_node = ta_net.node_list[edge.second_node_idx];
-
-  bool is_horizontal = first_node.grid_coord.get_y() == second_node.grid_coord.get_y();
-  bool is_vertical = first_node.grid_coord.get_x() == second_node.grid_coord.get_x();
-  if (is_horizontal == is_vertical) {
-    return;
-  }
-
-  // A pin edge should aim at the AP track; a normal edge stays near the guide center.
-  std::vector<int32_t> candidate_track_list;
-  int32_t desired_coord = 0;
-  if (is_horizontal) {
-    desired_coord = edge.guide_rect.getMidPoint().get_y();
-    candidate_track_list = RTUTIL.getScaleList(edge.guide_rect.get_ll_y(), edge.guide_rect.get_ur_y(), routing_layer.getYTrackGridList());
-  } else {
-    desired_coord = edge.guide_rect.getMidPoint().get_x();
-    candidate_track_list = RTUTIL.getScaleList(edge.guide_rect.get_ll_x(), edge.guide_rect.get_ur_x(), routing_layer.getXTrackGridList());
-  }
-  int32_t pin_track_target = getPinTrackTarget(ta_net, edge, is_horizontal);
-  if (pin_track_target != -1) {
-    desired_coord = pin_track_target;
-  }
-  if (candidate_track_list.empty()) {
-    candidate_track_list.push_back(desired_coord);
-  }
-
-  int32_t first_scale = is_horizontal ? first_node.real_coord.get_x() : first_node.real_coord.get_y();
-  int32_t second_scale = is_horizontal ? second_node.real_coord.get_x() : second_node.real_coord.get_y();
-  if (first_node.is_pin) {
-    first_scale = getPinTerminalScale(ta_net, edge.first_node_idx, edge.second_node_idx, is_horizontal);
-  }
-  if (second_node.is_pin) {
-    second_scale = getPinTerminalScale(ta_net, edge.second_node_idx, edge.first_node_idx, is_horizontal);
-  }
-  int32_t begin_scale = std::min(first_scale, second_scale);
-  int32_t end_scale = std::max(first_scale, second_scale);
-  edge.candidate_track_list = candidate_track_list;
-  edge.begin_scale = begin_scale;
-  edge.end_scale = end_scale;
-
-  std::vector<std::pair<int32_t, PlanarRect>> fixed_rect_list;
-  {
-    EXTLayerRect query_rect;
-    query_rect.set_real_rect(edge.guide_rect);
-    query_rect.set_layer_idx(edge.layer_idx);
-    std::map<int32_t, std::set<EXTLayerRect*>> fixed_rect_map = RTDM.getNetFixedRectMap(true, query_rect);
-    for (auto& [net_idx, rect_set] : fixed_rect_map) {
-      if (net_idx == ta_net.net_idx) {
-        continue;
-      }
-      for (EXTLayerRect* fixed_rect : rect_set) {
-        fixed_rect_list.emplace_back(net_idx, fixed_rect->get_real_rect());
-      }
-    }
-  }
-
-  int32_t half_width = routing_layer.get_min_width() / 2;
-
-  int32_t best_track_coord = candidate_track_list.front();
-  int32_t best_valid_track_coord = -1;
-  double best_cost = std::numeric_limits<double>::max();
-  double best_valid_cost = std::numeric_limits<double>::max();
-  for (int32_t track_coord : candidate_track_list) {
-    double overlap = getTrackOverlap(edge.layer_idx, track_coord, begin_scale, end_scale, ta_net.net_idx);
-    double fixed_cost = 0.0;
-    double obstacle_area = 0.0;
-    PlanarRect check_rect;
-    if (is_horizontal) {
-      check_rect.set_ll(edge.guide_rect.get_ll_x(), track_coord - half_width);
-      check_rect.set_ur(edge.guide_rect.get_ur_x(), track_coord + half_width);
-    } else {
-      check_rect.set_ll(track_coord - half_width, edge.guide_rect.get_ll_y());
-      check_rect.set_ur(track_coord + half_width, edge.guide_rect.get_ur_y());
-    }
-    for (const auto& [fixed_net_idx, fixed_rect] : fixed_rect_list) {
-      if (!RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
-        continue;
-      }
-      double overlap_area = RTUTIL.getOverlap(check_rect, fixed_rect).getArea();
-      if (fixed_net_idx < 0) {
-        // net = -1 is a hard obstacle, not a soft foreign-net shape.
-        obstacle_area += overlap_area;
-      } else {
-        fixed_cost += 1000.0 + overlap_area / 100.0;
-      }
-    }
-    double cost = std::abs(track_coord - desired_coord) + overlap * 20.0 + fixed_cost + getTrackHistory(edge.layer_idx, track_coord);
-    if (obstacle_area <= 0.0) {
-      if (cost < best_valid_cost) {
-        best_valid_cost = cost;
-        best_valid_track_coord = track_coord;
-      }
-    }
-    // If every track is blocked, keep the least-bad one instead of dropping the net.
-    cost += obstacle_area * 1.0e9;
-    if (cost < best_cost) {
-      best_cost = cost;
-      best_track_coord = track_coord;
-    }
-  }
-  if (best_valid_track_coord != -1) {
-    best_track_coord = best_valid_track_coord;
-  } else {
-    _no_free_track_count++;
-  }
-  edge.track_coord = best_track_coord;
-}
-
-void TARouter::reserveViaFootprint(TANet& ta_net, const TAEdge& edge)
+void TARouter::addViaUsage(TANet& ta_net, const TAEdge& edge)
 {
   std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
-  if (edge.layer_idx < 0 || edge.layer_idx >= static_cast<int32_t>(layer_via_master_list.size())) {
-    return;
-  }
-  if (layer_via_master_list[edge.layer_idx].empty()) {
-    return;
-  }
+
   ViaMaster& via_master = layer_via_master_list[edge.layer_idx].front();
   LayerCoord point = ta_net.node_list[edge.first_node_idx].real_coord;
 
@@ -714,9 +560,6 @@ void TARouter::reserveViaFootprint(TANet& ta_net, const TAEdge& edge)
 
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   for (auto& [layer_idx, enclosure_rect] : layer_enclosure_list) {
-    if (layer_idx < 0 || layer_idx >= static_cast<int32_t>(routing_layer_list.size())) {
-      continue;
-    }
     RoutingLayer& routing_layer = routing_layer_list[layer_idx];
     if (routing_layer.isPreferH()) {
       std::vector<int32_t> track_list = RTUTIL.getScaleList(enclosure_rect.get_ll_y(), enclosure_rect.get_ur_y(), routing_layer.getYTrackGridList());
@@ -736,7 +579,7 @@ void TARouter::rerouteOverflowNets()
 {
   constexpr int32_t kMaxIteration = 4;
   for (int32_t iteration = 0; iteration < kMaxIteration; iteration++) {
-    std::set<int32_t> overflow_net_set = collectOverflowNetSet();
+    std::set<int32_t> overflow_net_set = getOverflowNets();
     if (overflow_net_set.empty()) {
       RTLOG.info(Loc::current(), "No track overflow after TA iteration ", iteration);
       return;
@@ -753,7 +596,7 @@ void TARouter::rerouteOverflowNets()
   }
 }
 
-std::set<int32_t> TARouter::collectOverflowNetSet() const
+std::set<int32_t> TARouter::getOverflowNets() const
 {
   std::set<int32_t> overflow_net_set;
   for (const auto& [layer_idx, track_map] : _track_usage) {
@@ -777,6 +620,7 @@ std::set<int32_t> TARouter::collectOverflowNetSet() const
   return overflow_net_set;
 }
 
+// TODO: 惩罚整条track，不按冲突长度、次数加权，没有decay
 void TARouter::updateTrackHistory()
 {
   for (const auto& [layer_idx, track_map] : _track_usage) {
@@ -838,11 +682,32 @@ void TARouter::ripupNet(const TANet& ta_net)
   }
 }
 
-bool TARouter::isHorizontalEdge(const TANet& ta_net, const TAEdge& edge) const
+Direction TARouter::getEdgeDirection(const TANet& ta_net, const TAEdge& edge) const
 {
   const TANode& first_node = ta_net.node_list[edge.first_node_idx];
   const TANode& second_node = ta_net.node_list[edge.second_node_idx];
-  return first_node.grid_coord.get_y() == second_node.grid_coord.get_y() && first_node.grid_coord.get_x() != second_node.grid_coord.get_x();
+  return RTUTIL.getDirection(first_node.grid_coord, second_node.grid_coord);
+}
+
+bool TARouter::isHorizontalEdge(const TANet& ta_net, const TAEdge& edge) const
+{
+  return getEdgeDirection(ta_net, edge) == Direction::kHorizontal;
+}
+
+bool TARouter::isVerticalEdge(const TANet& ta_net, const TAEdge& edge) const
+{
+  return getEdgeDirection(ta_net, edge) == Direction::kVertical;
+}
+
+std::pair<int32_t, int32_t> TARouter::getEdgeScaleRange(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const
+{
+  const TANode& first_node = ta_net.node_list[edge.first_node_idx];
+  const TANode& second_node = ta_net.node_list[edge.second_node_idx];
+  PlanarRect range_rect = RTUTIL.getRect(first_node.real_coord.get_planar_coord(), second_node.real_coord.get_planar_coord());
+  if (is_horizontal) {
+    return std::make_pair(range_rect.get_ll_x(), range_rect.get_ur_x());
+  }
+  return std::make_pair(range_rect.get_ll_y(), range_rect.get_ur_y());
 }
 
 double TARouter::getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const
@@ -884,22 +749,35 @@ void TARouter::addTrackUsage(int32_t layer_idx, int32_t track_coord, int32_t beg
 void TARouter::outputNet(TANet& ta_net)
 {
   std::vector<Segment<LayerCoord>> segment_list;
+  int32_t wire_edge_num = 0;
+  int32_t via_edge_num = 0;
+  int32_t skipped_wire_num = 0;
+  int32_t skipped_via_num = 0;
+  int32_t invalid_direction_num = 0;
+
   for (const TAEdge& edge : ta_net.edge_list) {
     if (edge.is_via) {
+      via_edge_num++;
       LayerCoord point = ta_net.node_list[edge.first_node_idx].real_coord;
+      size_t segment_num = segment_list.size();
       addViaSegment(segment_list, point, edge.layer_idx);
+      if (segment_list.size() == segment_num) {
+        skipped_via_num++;
+      }
       continue;
     }
 
+    wire_edge_num++;
     TANode& first_node = ta_net.node_list[edge.first_node_idx];
     TANode& second_node = ta_net.node_list[edge.second_node_idx];
     LayerCoord first_coord = first_node.real_coord;
     LayerCoord second_coord = second_node.real_coord;
-    bool is_horizontal = first_node.grid_coord.get_y() == second_node.grid_coord.get_y() && first_node.grid_coord.get_x() != second_node.grid_coord.get_x();
-    bool is_vertical = first_node.grid_coord.get_x() == second_node.grid_coord.get_x() && first_node.grid_coord.get_y() != second_node.grid_coord.get_y();
-    if (!is_horizontal && !is_vertical) {
+    Direction direction = getEdgeDirection(ta_net, edge);
+    if (direction != Direction::kHorizontal && direction != Direction::kVertical) {
+      invalid_direction_num++;
       continue;
     }
+    bool is_horizontal = (direction == Direction::kHorizontal);
     int32_t layer_idx = edge.layer_idx;
 
     LayerCoord main_first;
@@ -911,37 +789,104 @@ void TARouter::outputNet(TANet& ta_net)
       main_first = LayerCoord(edge.track_coord, first_coord.get_y(), layer_idx);
       main_second = LayerCoord(edge.track_coord, second_coord.get_y(), layer_idx);
     }
+    size_t segment_num = segment_list.size();
     addWireSegment(segment_list, main_first, main_second);
+    if (segment_list.size() == segment_num) {
+      skipped_wire_num++;
+    }
   }
 
   if (segment_list.empty()) {
-    buildFallbackResult(ta_net, segment_list);
-    _fallback_net_set.insert(ta_net.net_idx);
+    RTLOG.error(Loc::current(), "TA net ", ta_net.origin_net->get_net_name(), " produced no segment: edges=",
+                ta_net.edge_list.size(), ", wire_edges=", wire_edge_num, ", via_edges=", via_edge_num,
+                ", skipped_wire=", skipped_wire_num, ", skipped_via=", skipped_via_num,
+                ", invalid_direction=", invalid_direction_num, ".");
+    return;
   }
-  if (!segment_list.empty()) {
-    RTDM.getDatabase().get_net_detailed_result_map()[ta_net.net_idx] = std::move(segment_list);
+  RTDM.getDatabase().get_net_detailed_result_map()[ta_net.net_idx] = std::move(segment_list);
+}
+
+void TARouter::updateSummary()
+{
+  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
+  Summary& summary = RTDM.getDatabase().get_summary();
+
+  std::map<int32_t, double>& routing_wire_length_map = summary.ta_summary.routing_wire_length_map;
+  double& total_wire_length = summary.ta_summary.total_wire_length;
+  std::map<int32_t, int32_t>& cut_via_num_map = summary.ta_summary.cut_via_num_map;
+  int32_t& total_via_num = summary.ta_summary.total_via_num;
+
+  routing_wire_length_map.clear();
+  total_wire_length = 0;
+  cut_via_num_map.clear();
+  total_via_num = 0;
+
+  std::map<int32_t, std::vector<Segment<LayerCoord>>>& detailed_result_map = RTDM.getDatabase().get_net_detailed_result_map();
+  std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
+  for (auto& [net_idx, segment_list] : detailed_result_map) {
+    for (const Segment<LayerCoord>& segment : segment_list) {
+      const LayerCoord& first_coord = segment.get_first();
+      const LayerCoord& second_coord = segment.get_second();
+      if (first_coord.get_layer_idx() == second_coord.get_layer_idx()) {
+        double wire_length = RTUTIL.getManhattanDistance(first_coord, second_coord) / 1.0 / micron_dbu;
+        routing_wire_length_map[first_coord.get_layer_idx()] += wire_length;
+        total_wire_length += wire_length;
+        continue;
+      }
+
+      if (!segment.hasValidViaMaster()) {
+        continue;
+      }
+      const ViaMasterIdx& via_master_idx = segment.get_via_master_idx();
+      int32_t below_layer_idx = via_master_idx.get_below_layer_idx();
+      int32_t via_idx = via_master_idx.get_via_idx();
+      if (below_layer_idx < 0 || below_layer_idx >= static_cast<int32_t>(layer_via_master_list.size())) {
+        continue;
+      }
+      if (via_idx < 0 || via_idx >= static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
+        continue;
+      }
+      int32_t cut_layer_idx = layer_via_master_list[below_layer_idx][via_idx].get_cut_layer_idx();
+      cut_via_num_map[cut_layer_idx]++;
+      total_via_num++;
+    }
   }
 }
 
-void TARouter::buildFallbackResult(TANet& ta_net, std::vector<Segment<LayerCoord>>& segment_list)
+void TARouter::printSummary()
 {
-  ScaleAxis& gcell_axis = RTDM.getDatabase().get_gcell_axis();
-  std::vector<Segment<LayerCoord>>& global_result_list = RTDM.getDatabase().get_net_global_result_map()[ta_net.net_idx];
-  for (Segment<LayerCoord>& segment : global_result_list) {
-    LayerCoord& first_coord = segment.get_first();
-    LayerCoord& second_coord = segment.get_second();
-    PlanarCoord first_real = RTUTIL.getRealRectByGCell(first_coord, gcell_axis).getMidPoint();
-    PlanarCoord second_real = RTUTIL.getRealRectByGCell(second_coord, gcell_axis).getMidPoint();
-    if (first_coord.get_layer_idx() == second_coord.get_layer_idx()) {
-      addWireSegment(segment_list, LayerCoord(first_real, first_coord.get_layer_idx()), LayerCoord(second_real, first_coord.get_layer_idx()));
-      continue;
-    }
-    int32_t bottom_layer_idx = std::min(first_coord.get_layer_idx(), second_coord.get_layer_idx());
-    int32_t top_layer_idx = std::max(first_coord.get_layer_idx(), second_coord.get_layer_idx());
-    for (int32_t layer_idx = bottom_layer_idx; layer_idx < top_layer_idx; layer_idx++) {
-      addViaSegment(segment_list, LayerCoord(first_real, layer_idx), layer_idx);
-    }
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  std::vector<CutLayer>& cut_layer_list = RTDM.getDatabase().get_cut_layer_list();
+  Summary& summary = RTDM.getDatabase().get_summary();
+
+  std::map<int32_t, double>& routing_wire_length_map = summary.ta_summary.routing_wire_length_map;
+  double total_wire_length = summary.ta_summary.total_wire_length;
+  std::map<int32_t, int32_t>& cut_via_num_map = summary.ta_summary.cut_via_num_map;
+  int32_t total_via_num = summary.ta_summary.total_via_num;
+
+  fort::char_table wire_length_table;
+  wire_length_table.set_cell_text_align(fort::text_align::right);
+  wire_length_table << fort::header << "routing"
+                    << "wire_length"
+                    << "prop" << fort::endr;
+  for (RoutingLayer& routing_layer : routing_layer_list) {
+    wire_length_table << routing_layer.get_layer_name() << routing_wire_length_map[routing_layer.get_layer_idx()]
+                      << RTUTIL.getPercentage(routing_wire_length_map[routing_layer.get_layer_idx()], total_wire_length) << fort::endr;
   }
+  wire_length_table << fort::header << "Total" << total_wire_length << RTUTIL.getPercentage(total_wire_length, total_wire_length) << fort::endr;
+
+  fort::char_table via_num_table;
+  via_num_table.set_cell_text_align(fort::text_align::right);
+  via_num_table << fort::header << "cut"
+                << "#via"
+                << "prop" << fort::endr;
+  for (CutLayer& cut_layer : cut_layer_list) {
+    via_num_table << cut_layer.get_layer_name() << cut_via_num_map[cut_layer.get_layer_idx()]
+                  << RTUTIL.getPercentage(cut_via_num_map[cut_layer.get_layer_idx()], total_via_num) << fort::endr;
+  }
+  via_num_table << fort::header << "Total" << total_via_num << RTUTIL.getPercentage(total_via_num, total_via_num) << fort::endr;
+
+  RTUTIL.printTableList({wire_length_table, via_num_table});
 }
 
 void TARouter::addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& first_coord, const LayerCoord& second_coord)
@@ -952,7 +897,7 @@ void TARouter::addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, co
   if (first_coord.get_layer_idx() != second_coord.get_layer_idx()) {
     return;
   }
-  if (first_coord.get_x() != second_coord.get_x() && first_coord.get_y() != second_coord.get_y()) {
+  if (RTUTIL.getDirection(first_coord.get_planar_coord(), second_coord.get_planar_coord()) == Direction::kOblique) {
     return;
   }
   segment_list.emplace_back(first_coord, second_coord);
