@@ -125,7 +125,6 @@ class TARouter
   void updateSummary();
   void printSummary();
   void addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& first_coord, const LayerCoord& second_coord);
-  void addViaSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& coord, int32_t below_layer_idx);
 
   // resource
   std::map<int32_t, std::map<int32_t, std::vector<TrackInterval>>> _track_usage;

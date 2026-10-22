@@ -577,7 +577,7 @@ void TARouter::addViaUsage(TANet& ta_net, const TAEdge& edge)
 
 void TARouter::rerouteOverflowNets()
 {
-  constexpr int32_t kMaxIteration = 4;
+  constexpr int32_t kMaxIteration = 5;
   for (int32_t iteration = 0; iteration < kMaxIteration; iteration++) {
     std::set<int32_t> overflow_net_set = getOverflowNets();
     if (overflow_net_set.empty()) {
@@ -620,7 +620,6 @@ std::set<int32_t> TARouter::getOverflowNets() const
   return overflow_net_set;
 }
 
-// TODO: 惩罚整条track，不按冲突长度、次数加权，没有decay
 void TARouter::updateTrackHistory()
 {
   for (const auto& [layer_idx, track_map] : _track_usage) {
@@ -752,18 +751,11 @@ void TARouter::outputNet(TANet& ta_net)
   int32_t wire_edge_num = 0;
   int32_t via_edge_num = 0;
   int32_t skipped_wire_num = 0;
-  int32_t skipped_via_num = 0;
   int32_t invalid_direction_num = 0;
 
   for (const TAEdge& edge : ta_net.edge_list) {
     if (edge.is_via) {
       via_edge_num++;
-      LayerCoord point = ta_net.node_list[edge.first_node_idx].real_coord;
-      size_t segment_num = segment_list.size();
-      addViaSegment(segment_list, point, edge.layer_idx);
-      if (segment_list.size() == segment_num) {
-        skipped_via_num++;
-      }
       continue;
     }
 
@@ -797,10 +789,9 @@ void TARouter::outputNet(TANet& ta_net)
   }
 
   if (segment_list.empty()) {
-    RTLOG.error(Loc::current(), "TA net ", ta_net.origin_net->get_net_name(), " produced no segment: edges=",
+    RTLOG.error(Loc::current(), "TA net ", ta_net.origin_net->get_net_name(), " produced no wire segment: edges=",
                 ta_net.edge_list.size(), ", wire_edges=", wire_edge_num, ", via_edges=", via_edge_num,
-                ", skipped_wire=", skipped_wire_num, ", skipped_via=", skipped_via_num,
-                ", invalid_direction=", invalid_direction_num, ".");
+                ", skipped_wire=", skipped_wire_num, ", invalid_direction=", invalid_direction_num, ".");
     return;
   }
   RTDM.getDatabase().get_net_detailed_result_map()[ta_net.net_idx] = std::move(segment_list);
@@ -822,31 +813,29 @@ void TARouter::updateSummary()
   total_via_num = 0;
 
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& detailed_result_map = RTDM.getDatabase().get_net_detailed_result_map();
-  std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
   for (auto& [net_idx, segment_list] : detailed_result_map) {
     for (const Segment<LayerCoord>& segment : segment_list) {
       const LayerCoord& first_coord = segment.get_first();
-      const LayerCoord& second_coord = segment.get_second();
-      if (first_coord.get_layer_idx() == second_coord.get_layer_idx()) {
-        double wire_length = RTUTIL.getManhattanDistance(first_coord, second_coord) / 1.0 / micron_dbu;
-        routing_wire_length_map[first_coord.get_layer_idx()] += wire_length;
-        total_wire_length += wire_length;
-        continue;
-      }
+      double wire_length = RTUTIL.getManhattanDistance(first_coord, segment.get_second()) / 1.0 / micron_dbu;
+      routing_wire_length_map[first_coord.get_layer_idx()] += wire_length;
+      total_wire_length += wire_length;
+    }
+  }
 
-      if (!segment.hasValidViaMaster()) {
+  // TA output is wire-only. Count the planned unit vias from TA edges for reference.
+  std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
+  for (const TANet& ta_net : _ta_net_list) {
+    for (const TAEdge& edge : ta_net.edge_list) {
+      if (!edge.is_via) {
         continue;
       }
-      const ViaMasterIdx& via_master_idx = segment.get_via_master_idx();
-      int32_t below_layer_idx = via_master_idx.get_below_layer_idx();
-      int32_t via_idx = via_master_idx.get_via_idx();
-      if (below_layer_idx < 0 || below_layer_idx >= static_cast<int32_t>(layer_via_master_list.size())) {
-        continue;
+      int32_t below_layer_idx = edge.layer_idx;
+      if (below_layer_idx < 0 || below_layer_idx >= static_cast<int32_t>(layer_via_master_list.size())
+          || layer_via_master_list[below_layer_idx].empty()) {
+        RTLOG.error(Loc::current(), "TA via edge has an invalid below layer! net_idx: ", ta_net.net_idx,
+                    ", below_layer_idx: ", below_layer_idx, ".");
       }
-      if (via_idx < 0 || via_idx >= static_cast<int32_t>(layer_via_master_list[below_layer_idx].size())) {
-        continue;
-      }
-      int32_t cut_layer_idx = layer_via_master_list[below_layer_idx][via_idx].get_cut_layer_idx();
+      int32_t cut_layer_idx = layer_via_master_list[below_layer_idx].front().get_cut_layer_idx();
       cut_via_num_map[cut_layer_idx]++;
       total_via_num++;
     }
@@ -878,7 +867,7 @@ void TARouter::printSummary()
   fort::char_table via_num_table;
   via_num_table.set_cell_text_align(fort::text_align::right);
   via_num_table << fort::header << "cut"
-                << "#via"
+                << "#via(ref)"
                 << "prop" << fort::endr;
   for (CutLayer& cut_layer : cut_layer_list) {
     via_num_table << cut_layer.get_layer_name() << cut_via_num_map[cut_layer.get_layer_idx()]
@@ -901,21 +890,6 @@ void TARouter::addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, co
     return;
   }
   segment_list.emplace_back(first_coord, second_coord);
-}
-
-void TARouter::addViaSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& coord, int32_t below_layer_idx)
-{
-  std::vector<std::vector<ViaMaster>>& layer_via_master_list = RTDM.getDatabase().get_layer_via_master_list();
-  if (below_layer_idx < 0 || below_layer_idx + 1 >= static_cast<int32_t>(layer_via_master_list.size())) {
-    return;
-  }
-  if (layer_via_master_list[below_layer_idx].empty()) {
-    return;
-  }
-  ViaMasterIdx via_master_idx = layer_via_master_list[below_layer_idx].front().get_via_master_idx();
-  LayerCoord below_coord(coord.get_x(), coord.get_y(), below_layer_idx);
-  LayerCoord above_coord(coord.get_x(), coord.get_y(), below_layer_idx + 1);
-  segment_list.emplace_back(below_coord, above_coord, via_master_idx);
 }
 
 }  // namespace irt
