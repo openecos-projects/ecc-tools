@@ -40,9 +40,9 @@ struct PGRingConfig
 
 struct PGIOCoreConnectConfig
 {
-  // IO-core routes are always same-layer, single-segment Manhattan wires.
-  // The configuration selects nets and redundancy policy; it cannot enable
-  // bent or cross-layer fallbacks.
+  // IO-core routes stay on the target stripe layer. Normal IO cells use
+  // direct extensions and straight bridges; Manhattan forms are restricted
+  // to cells whose outermost rail has no legal core-range access point.
   bool enabled = false;
   // Empty means the resolved core POWER/GROUND nets.
   std::vector<std::string> nets;
@@ -93,6 +93,7 @@ class Config
   std::string input_io_cell_path;                          // optional
   std::string input_io_cell_definition_path;               // required when mode is io_cell
   double io_cell_power_group_spacing_micron;               // required when mode is io_cell
+  double io_cell_power_corner_clearance_micron;            // optional; keeps power groups away from corners
   bool io_cell_power_enabled;                              // optional
   bool io_cell_filler_enabled;                             // optional
   bool io_cell_filler_require_exact;                       // optional

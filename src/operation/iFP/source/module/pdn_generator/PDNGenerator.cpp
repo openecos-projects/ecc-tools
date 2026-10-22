@@ -14,6 +14,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PDNGenerator.hpp"
+#include <array>
 #include <cmath>
 #include <fnmatch.h>
 #include <queue>
@@ -136,6 +137,17 @@ class PGGeometryIndex
 PlanarRect segmentRect(const PGSegment& segment)
 {
   return {segment.get_ll_x(), segment.get_ll_y(), segment.get_ur_x(), segment.get_ur_y()};
+}
+
+struct ManhattanPathCandidate
+{
+  PlanarCoord bend;
+  bool horizontal_first = true;
+};
+
+std::array<ManhattanPathCandidate, 2> makeManhattanPathCandidates(const PlanarCoord& start, const PlanarCoord& end)
+{
+  return {{{PlanarCoord(end.get_x(), start.get_y()), true}, {PlanarCoord(start.get_x(), end.get_y()), false}}};
 }
 
 }  // namespace
@@ -1443,6 +1455,46 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     const int32_t width = target_width;
     return width >= layer->get_min_width() ? width : 0;
   };
+  auto outermost_rail_outside_core = [&](Side side, const std::map<std::string, std::vector<InstancePinShape>>& rails,
+                                         const StripeMap& targets) {
+    const auto& core = database.get_core();
+    const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+    const int32_t core_low = normal_x ? core.get_ll_y() : core.get_ll_x();
+    const int32_t core_high = normal_x ? core.get_ur_y() : core.get_ur_x();
+    for (const auto& [layer_name, layer_rails] : rails) {
+      const auto target_it = targets.find(layer_name);
+      if (target_it == targets.end() || target_it->second.empty()) {
+        continue;
+      }
+      const auto* layer = findRoutingLayer(layer_name);
+      if (layer == nullptr) {
+        continue;
+      }
+      for (const auto& rail : layer_rails) {
+        const int32_t rail_low = normal_x ? rail.get_ll_y() : rail.get_ll_x();
+        const int32_t rail_high = normal_x ? rail.get_ur_y() : rail.get_ur_x();
+        bool has_core_access = false;
+        for (const auto& target : target_it->second) {
+          const int32_t width = target.segment.get_width();
+          if (width < layer->get_min_width() || width > std::min(rail.get_width(), rail.get_height())) {
+            continue;
+          }
+          const int32_t first = FPUTIL.alignUp(rail_low + width / 2, grid);
+          const int32_t last = FPUTIL.alignDown(rail_high - width / 2, grid);
+          const int32_t overlap_low = std::max(first, core_low);
+          const int32_t overlap_high = std::min(last, core_high);
+          if (overlap_low <= overlap_high && FPUTIL.alignUp(overlap_low, grid) <= FPUTIL.alignDown(overlap_high, grid)) {
+            has_core_access = true;
+            break;
+          }
+        }
+        if (!has_core_access) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
   auto make_line = [&](const std::string& net, const std::string& layer, int32_t width, const PlanarCoord& start,
                        const PlanarCoord& end) {
     PGSegment line;
@@ -1465,19 +1517,27 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   int32_t connected_ports = 0;
   int32_t direct_connections = 0;
   int32_t bridge_connections = 0;
+  int32_t bend_connections = 0;
+  int32_t detour_connections = 0;
+  int32_t layer_change_connections = 0;
+  int32_t manhattan_direct_connections = 0;
+  int32_t manhattan_bridge_connections = 0;
   int32_t pin_cross_section_failures = 0;
   int32_t stripe_cross_section_failures = 0;
   int32_t io_inner_boundary_failures = 0;
   int32_t stripe_inner_boundary_failures = 0;
+  int32_t detour_endpoint_failures = 0;
   int32_t non_straight_failures = 0;
 
   struct LayerContacts {
     int32_t direct = 0;
     int32_t bridge = 0;
+    int32_t bend = 0;
+    int32_t detour = 0;
     int32_t candidates = 0;
     std::set<size_t> stripes;
     std::map<std::string, int32_t> rejected;
-    int32_t count() const { return direct + bridge; }
+    int32_t count() const { return direct + bridge + detour; }
   };
   struct AccessPoint { int32_t tangent; int32_t width; int32_t separation; };
   struct PortTask {
@@ -1491,6 +1551,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     std::map<size_t, int32_t> routes_per_stripe;
     int32_t contacts = 0;
     std::map<std::string, std::vector<AccessPoint>> access_points;
+    bool requires_manhattan = false;
   };
   std::vector<PortTask> tasks;
   // Separate IO paths must remain distinct outside the source pin/stripe.
@@ -1648,13 +1709,52 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         continue;
       }
 
-      tasks.push_back({&instance, port, net_idx, side, &target_it->second, std::move(rails), {}, {}, 0});
+      bool requires_manhattan = outermost_rail_outside_core(side, rails, target_it->second);
+      for (const auto& task : tasks) {
+        if (task.instance == &instance && task.requires_manhattan) {
+          requires_manhattan = true;
+          break;
+        }
+      }
+      tasks.push_back({&instance, port, net_idx, side, &target_it->second, std::move(rails), {}, {}, 0, {}, requires_manhattan});
+      if (requires_manhattan) {
+        for (auto& task : tasks) {
+          if (task.instance == &instance) task.requires_manhattan = true;
+        }
+      }
     }
   }
 
-  enum class RouteMode { kDirectExtension, kStraightBridge };
-  const auto is_direct = [](RouteMode mode) { return mode == RouteMode::kDirectExtension; };
-  const auto route_name = [&](RouteMode mode) { return is_direct(mode) ? "direct_extension" : "straight_bridge"; };
+  enum class RouteMode {
+    kDirectExtension,
+    kStraightBridge,
+    kManhattanDirectExtension,
+    kManhattanBridge,
+    kDetourEndOn,
+    kDetourLayerChange
+  };
+  const auto is_direct = [](RouteMode mode) {
+    return mode == RouteMode::kDirectExtension || mode == RouteMode::kManhattanDirectExtension
+           || mode == RouteMode::kDetourEndOn || mode == RouteMode::kDetourLayerChange;
+  };
+  const auto is_bend = [](RouteMode mode) {
+    return mode == RouteMode::kManhattanDirectExtension || mode == RouteMode::kManhattanBridge;
+  };
+  const auto is_detour = [](RouteMode mode) {
+    return mode == RouteMode::kDetourEndOn || mode == RouteMode::kDetourLayerChange;
+  };
+  const auto is_layer_change = [](RouteMode mode) { return mode == RouteMode::kDetourLayerChange; };
+  const auto route_name = [](RouteMode mode) {
+    switch (mode) {
+      case RouteMode::kDirectExtension: return "direct_extension";
+      case RouteMode::kStraightBridge: return "straight_bridge";
+      case RouteMode::kManhattanDirectExtension: return "manhattan_direct_extension";
+      case RouteMode::kManhattanBridge: return "manhattan_bridge";
+      case RouteMode::kDetourEndOn: return "detour_end_on";
+      case RouteMode::kDetourLayerChange: return "detour_layer_change";
+    }
+    return "unknown";
+  };
 
   auto snap_tangent_inside = [&](int32_t value, int32_t low, int32_t high, int32_t width) {
     const int32_t min_center = low + width / 2;
@@ -1723,6 +1823,47 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     return PlanarCoord(INT32_MIN, INT32_MIN);
   };
 
+  auto snap_clamped = [&](int32_t value, int32_t low, int32_t high) {
+    if (low > high) {
+      return INT32_MIN;
+    }
+    int32_t result = snap(std::clamp(value, low, high));
+    if (result < low) result = FPUTIL.alignUp(low, grid);
+    if (result > high) result = FPUTIL.alignDown(high, grid);
+    return result >= low && result <= high ? result : INT32_MIN;
+  };
+
+  auto manhattan_target_inner_boundary = [&](Side side, const PGSegment& target, const PlanarCoord& start) {
+    const int32_t half_width = target.get_width() / 2;
+    if (target.is_horizontal()) {
+      if (side.value == Side::kBottom || side.value == Side::kTop) {
+        const int32_t tangent = snap_clamped(start.get_x(), target.get_ll_x() + half_width, target.get_ur_x() - half_width);
+        if (tangent == INT32_MIN) return PlanarCoord(INT32_MIN, INT32_MIN);
+        const int32_t normal = side.value == Side::kBottom ? target.get_ur_y() : target.get_ll_y();
+        return PlanarCoord(tangent, normal);
+      }
+      const int32_t tangent = snap_clamped((target.get_ll_y() + target.get_ur_y()) / 2,
+                                           target.get_ll_y() + half_width, target.get_ur_y() - half_width);
+      if (tangent == INT32_MIN) return PlanarCoord(INT32_MIN, INT32_MIN);
+      const int32_t normal = side.value == Side::kLeft ? target.get_start_x() : target.get_end_x();
+      return PlanarCoord(normal, tangent);
+    }
+    if (target.is_vertical()) {
+      if (side.value == Side::kLeft || side.value == Side::kRight) {
+        const int32_t tangent = snap_clamped(start.get_y(), target.get_ll_y() + half_width, target.get_ur_y() - half_width);
+        if (tangent == INT32_MIN) return PlanarCoord(INT32_MIN, INT32_MIN);
+        const int32_t normal = side.value == Side::kLeft ? target.get_ur_x() : target.get_ll_x();
+        return PlanarCoord(normal, tangent);
+      }
+      const int32_t tangent = snap_clamped((target.get_ll_x() + target.get_ur_x()) / 2,
+                                           target.get_ll_x() + half_width, target.get_ur_x() - half_width);
+      if (tangent == INT32_MIN) return PlanarCoord(INT32_MIN, INT32_MIN);
+      const int32_t normal = side.value == Side::kBottom ? target.get_start_y() : target.get_end_y();
+      return PlanarCoord(tangent, normal);
+    }
+    return PlanarCoord(INT32_MIN, INT32_MIN);
+  };
+
   auto direct_extension_target_point = [](Side side, const PGSegment& target, const PlanarCoord& start) {
     // Continue the stripe from the end nearest the IO edge.  The pin tangent
     // only needs to be in the stripe cross-section.
@@ -1736,6 +1877,63 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     return PlanarCoord(INT32_MIN, INT32_MIN);
   };
 
+  auto manhattan_direct_extension_target_point = [](Side side, const PGSegment& target) {
+    const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+    if (target.is_horizontal() && normal_x) {
+      return PlanarCoord(side.value == Side::kLeft ? target.get_start_x() : target.get_end_x(), target.get_start_y());
+    }
+    if (target.is_vertical() && !normal_x) {
+      return PlanarCoord(target.get_start_x(), side.value == Side::kBottom ? target.get_start_y() : target.get_end_y());
+    }
+    return PlanarCoord(INT32_MIN, INT32_MIN);
+  };
+
+  auto stripe_end_on_point = [](Side side, const PGSegment& target) {
+    // Endpoint of a stripe on the side facing the IO edge.  A detour enters
+    // this endpoint from the routing margin instead of crossing the stripe.
+    if (target.is_vertical()) {
+      return PlanarCoord(target.get_start_x(),
+                         side.value == Side::kBottom ? target.get_start_y() : target.get_end_y());
+    }
+    if (target.is_horizontal()) {
+      return PlanarCoord(side.value == Side::kLeft ? target.get_start_x() : target.get_end_x(),
+                         target.get_start_y());
+    }
+    return PlanarCoord(INT32_MIN, INT32_MIN);
+  };
+
+  auto detour_corridor = [&](Side side, int32_t width) {
+    // Keep the lateral leg just outside the core.  All stripes start at the
+    // core boundary, so moving laterally in this corridor cannot cross a
+    // stripe of either net.
+    const auto& core = database.get_core();
+    // Keep one full wire width between the corridor and the core boundary so
+    // a detour cannot touch an existing route running along the boundary.
+    const int32_t margin = std::max(2 * width, 4 * grid);
+    switch (side.value) {
+      case Side::kBottom: return core.get_ll_y() - margin;
+      case Side::kTop: return core.get_ur_y() + margin;
+      case Side::kLeft: return core.get_ll_x() - margin;
+      case Side::kRight: return core.get_ur_x() + margin;
+    }
+    return INT32_MIN;
+  };
+
+  auto detour_lateral_layer = [&](const std::string& target_layer) -> std::string {
+    auto* target = findRoutingLayer(target_layer);
+    if (target == nullptr) {
+      return {};
+    }
+    const RoutingLayer* best = nullptr;
+    for (const auto& layer : database.get_routing_layer_list()) {
+      if (layer.get_order() < target->get_order()
+          && (best == nullptr || layer.get_order() > best->get_order())) {
+        best = &layer;
+      }
+    }
+    return best == nullptr ? std::string() : best->get_name();
+  };
+
   auto access_separation = [&](const RoutingLayer& layer, int32_t width, const PlanarCoord& start, const PlanarCoord& end) {
     int32_t separation = std::max(grid, layer.get_io_spacing());
     const int32_t gap = (std::abs(end.get_x() - start.get_x()) + std::abs(end.get_y() - start.get_y())) - width;
@@ -1745,12 +1943,14 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     return std::max(separation, configured_bridge_spacing);
   };
 
-  // Route direct extensions before bridges so a bridge cannot occupy a direct
-  // extension corridor.  Each route is still a single straight line, but it
-  // may contain collinear boundary points so the exported geometry records the
-  // IO and stripe inner-boundary contacts explicitly.
-  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge}) {
+  // Normal cells use direct extensions and straight bridges.  A cell whose
+  // outermost rail has no legal access point in the core range uses the
+  // corresponding Manhattan form for every connection.
+  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge,
+                               RouteMode::kManhattanDirectExtension, RouteMode::kManhattanBridge,
+                               RouteMode::kDetourEndOn, RouteMode::kDetourLayerChange}) {
     const bool direct = is_direct(mode);
+    const bool detour = is_detour(mode);
     for (auto& task : tasks) {
       auto& instance = *task.instance;
       const auto& net_name = instance.get_io_cell_net_name();
@@ -1758,6 +1958,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       const int32_t port = task.port;
       const Side side = task.side;
       const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
+      if ((is_bend(mode) || detour) != task.requires_manhattan) continue;
       auto can_add = [&](const std::string& layer, size_t stripe_id) {
         const auto& options = config.pg_io_core_connect;
         if (options.max_routes_per_stripe > 0 && task.routes_per_stripe[stripe_id] >= options.max_routes_per_stripe) return false;
@@ -1771,7 +1972,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
                || (options.require_each_pin_layer && task.layers[layer].count() == 0);
       };
       auto try_path = [&](const InstancePinShape& pin, const StripeTarget& target, int32_t width,
-                          std::vector<PlanarCoord> points, RouteMode route_mode) {
+                          std::vector<PlanarCoord> points, RouteMode route_mode, const std::string& lateral_layer) {
         const auto& layer_name = target.segment.get_layer_name();
         auto& stats = task.layers[layer_name];
         if (!can_add(layer_name, target.database_index)) return false;
@@ -1785,47 +1986,106 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         if (width % (2 * grid) != 0) return reject("OFF_GRID_WIDTH");
         points.erase(std::unique(points.begin(), points.end()), points.end());
         if (points.size() < 2) return reject("ALREADY_TOUCHING");
+        const bool bent = is_bend(route_mode);
+        const bool detour = is_detour(route_mode);
+        const bool layer_change = is_layer_change(route_mode) && !lateral_layer.empty();
         const int32_t tangent = normal_x ? points.front().get_y() : points.front().get_x();
-        const auto has_point = [&](const PlanarCoord& expected) {
-          return std::any_of(points.begin(), points.end(), [&](const auto& point) {
-            return point.get_x() == expected.get_x() && point.get_y() == expected.get_y();
-          });
+        const auto point_on_segment = [](const PlanarCoord& point, const PlanarCoord& first, const PlanarCoord& second) {
+          if (first.get_x() == second.get_x()) {
+            return point.get_x() == first.get_x() && point.get_y() >= std::min(first.get_y(), second.get_y())
+                   && point.get_y() <= std::max(first.get_y(), second.get_y());
+          }
+          if (first.get_y() == second.get_y()) {
+            return point.get_y() == first.get_y() && point.get_x() >= std::min(first.get_x(), second.get_x())
+                   && point.get_x() <= std::max(first.get_x(), second.get_x());
+          }
+          return false;
+        };
+        const auto point_on_path = [&](const PlanarCoord& expected) {
+          for (size_t index = 1; index < points.size(); ++index) {
+            if (point_on_segment(expected, points[index - 1], points[index])) return true;
+          }
+          return false;
         };
         const auto expected_io_inner = inner_boundary_point(side, pin, tangent);
-        if (!has_point(expected_io_inner)) {
+        if (!point_on_path(expected_io_inner)) {
           ++io_inner_boundary_failures;
           return reject("IO_INNER_BOUNDARY_NOT_REACHED");
         }
-        if (!is_direct(route_mode)) {
-          const auto expected_stripe_inner = inner_boundary_point(side, segmentRect(target.segment), tangent);
+        if (detour) {
+          if (points.size() != 4) return reject("INVALID_DETOUR_PATH");
+          const auto expected_end = stripe_end_on_point(side, target.segment);
+          if (expected_end.get_x() == INT32_MIN || expected_end.get_y() == INT32_MIN
+              || points.back().get_x() != expected_end.get_x() || points.back().get_y() != expected_end.get_y()) {
+            ++detour_endpoint_failures;
+            return reject("DETOUR_ENDPOINT_NOT_REACHED");
+          }
+        } else if (!is_direct(route_mode)) {
+          const auto expected_stripe_inner = bent ? manhattan_target_inner_boundary(side, target.segment, points.front())
+                                                  : inner_boundary_point(side, segmentRect(target.segment), tangent);
+          if (expected_stripe_inner.get_x() == INT32_MIN || expected_stripe_inner.get_y() == INT32_MIN) {
+            ++stripe_inner_boundary_failures;
+            return reject("STRIPE_INNER_BOUNDARY_NOT_REACHED");
+          }
           if (points.back().get_x() != expected_stripe_inner.get_x()
               || points.back().get_y() != expected_stripe_inner.get_y()) {
             ++stripe_inner_boundary_failures;
             return reject("STRIPE_INNER_BOUNDARY_NOT_REACHED");
           }
         }
-        const bool horizontal = points.front().get_y() == points.back().get_y();
-        const bool vertical = points.front().get_x() == points.back().get_x();
-        if (!horizontal && !vertical) {
-          ++non_straight_failures;
-          return reject("NON_STRAIGHT_PATH");
-        }
-        const int32_t first_axis = horizontal ? points.front().get_x() : points.front().get_y();
-        const int32_t last_axis = horizontal ? points.back().get_x() : points.back().get_y();
-        const int32_t direction = last_axis > first_axis ? 1 : (last_axis < first_axis ? -1 : 0);
-        if (direction == 0) return reject("ALREADY_TOUCHING");
-        for (size_t i = 1; i < points.size(); ++i) {
-          const auto& previous = points[i - 1];
-          const auto& current = points[i];
-          if ((horizontal && current.get_y() != previous.get_y())
-              || (vertical && current.get_x() != previous.get_x())) {
+        if (detour) {
+          for (size_t i = 1; i < points.size(); ++i) {
+            if (points[i - 1] == points[i]) return reject("INVALID_DETOUR_PATH");
+            if (points[i - 1].get_x() != points[i].get_x() && points[i - 1].get_y() != points[i].get_y()) {
+              ++non_straight_failures;
+              return reject("NON_STRAIGHT_PATH");
+            }
+          }
+          const bool first_horizontal = points[0].get_y() == points[1].get_y();
+          const bool second_horizontal = points[1].get_y() == points[2].get_y();
+          const bool third_horizontal = points[2].get_y() == points[3].get_y();
+          if (first_horizontal == second_horizontal || second_horizontal == third_horizontal) {
             ++non_straight_failures;
             return reject("NON_STRAIGHT_PATH");
           }
-          const int32_t previous_axis = horizontal ? previous.get_x() : previous.get_y();
-          const int32_t current_axis = horizontal ? current.get_x() : current.get_y();
-          if ((direction > 0 && current_axis <= previous_axis) || (direction < 0 && current_axis >= previous_axis)) {
-            return reject("BACKTRACKING_PATH");
+        } else if (bent) {
+          if (points.size() != 3) return reject("INVALID_MANHATTAN_PATH");
+          const auto& first = points[0];
+          const auto& bend = points[1];
+          const auto& last = points[2];
+          const bool first_horizontal = first.get_y() == bend.get_y();
+          const bool first_vertical = first.get_x() == bend.get_x();
+          const bool second_horizontal = bend.get_y() == last.get_y();
+          const bool second_vertical = bend.get_x() == last.get_x();
+          if ((first_horizontal == first_vertical) || (second_horizontal == second_vertical)
+              || first_horizontal == second_horizontal || (first == bend) || (bend == last)) {
+            ++non_straight_failures;
+            return reject("NON_STRAIGHT_PATH");
+          }
+        } else {
+          const bool horizontal = points.front().get_y() == points.back().get_y();
+          const bool vertical = points.front().get_x() == points.back().get_x();
+          if (!horizontal && !vertical) {
+            ++non_straight_failures;
+            return reject("NON_STRAIGHT_PATH");
+          }
+          const int32_t first_axis = horizontal ? points.front().get_x() : points.front().get_y();
+          const int32_t last_axis = horizontal ? points.back().get_x() : points.back().get_y();
+          const int32_t direction = last_axis > first_axis ? 1 : (last_axis < first_axis ? -1 : 0);
+          if (direction == 0) return reject("ALREADY_TOUCHING");
+          for (size_t i = 1; i < points.size(); ++i) {
+            const auto& previous = points[i - 1];
+            const auto& current = points[i];
+            if ((horizontal && current.get_y() != previous.get_y())
+                || (vertical && current.get_x() != previous.get_x())) {
+              ++non_straight_failures;
+              return reject("NON_STRAIGHT_PATH");
+            }
+            const int32_t previous_axis = horizontal ? previous.get_x() : previous.get_y();
+            const int32_t current_axis = horizontal ? current.get_x() : current.get_y();
+            if ((direction > 0 && current_axis <= previous_axis) || (direction < 0 && current_axis >= previous_axis)) {
+              return reject("BACKTRACKING_PATH");
+            }
           }
         }
         const int32_t separation = access_separation(*layer, width, points.front(), points.back());
@@ -1835,21 +2095,29 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           }
         }
         const auto& die = database.get_die();
+        auto* lateral_layer_ptr = layer_change ? findRoutingLayer(lateral_layer) : layer;
+        if (lateral_layer_ptr == nullptr) return reject("DETOUR_VIA_FAILED");
         std::vector<PGSegment> path;
         for (size_t i = 1; i < points.size(); ++i) {
+          const bool use_lateral = layer_change && i >= 2;
+          const std::string& seg_layer_name = use_lateral ? lateral_layer : layer_name;
+          auto* seg_layer = use_lateral ? lateral_layer_ptr : layer;
           const auto& a = points[i - 1];
           const auto& b = points[i];
           if ((a.get_x() != b.get_x() && a.get_y() != b.get_y())
               || a.get_x() % grid || a.get_y() % grid || b.get_x() % grid || b.get_y() % grid) return reject("OFF_GRID_PATH");
-          auto line = make_line(net_name, layer_name, width, a, b);
+          auto line = make_line(net_name, seg_layer_name, width, a, b);
           const auto box = segmentRect(line);
           if (box.get_ll_x() < die.get_ll_x() || box.get_ll_y() < die.get_ll_y()
               || box.get_ur_x() > die.get_ur_x() || box.get_ur_y() > die.get_ur_y()) return reject("OUTSIDE_DIE");
           const int64_t area = int64_t(width) * (std::abs(b.get_x() - a.get_x()) + std::abs(b.get_y() - a.get_y()) + width);
-          if (area < layer->get_min_area()) return reject("MIN_AREA");
-          if (!geometry.clear(layer_name, box, net_idx, separation)) return reject("FOREIGN_METAL_OR_OBS");
+          if (area < seg_layer->get_min_area()) return reject("MIN_AREA");
+          if (!geometry.clear(seg_layer_name, box, net_idx, separation)) return reject("FOREIGN_METAL_OR_OBS");
           const auto target_box = segmentRect(target.segment);
-          if (!io_paths.clear(layer_name, box, -2, separation, &target_box)) return reject("BRIDGE_BLOCKED_SPACING");
+          // Only the final target-layer leg may share the target stripe metal.
+          if (!io_paths.clear(seg_layer_name, box, -2, separation, use_lateral ? nullptr : &target_box)) {
+            return reject("BRIDGE_BLOCKED_SPACING");
+          }
           path.push_back(line);
         }
         const auto pin_contact_box = segmentRect(path.front());
@@ -1858,21 +2126,89 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           return reject("PIN_CROSS_SECTION_NOT_COVERED");
         }
         const auto stripe_contact_box = segmentRect(path.back());
-        if (!covers_stripe_cross_section(stripe_contact_box, target.segment)) {
+        const auto target_box = segmentRect(target.segment);
+        if (detour) {
+          if (!positive_overlap(stripe_contact_box, target_box)) {
+            ++stripe_cross_section_failures;
+            return reject("DETOUR_ENDPOINT_NOT_REACHED");
+          }
+        } else if (!covers_stripe_cross_section(stripe_contact_box, target.segment)) {
           ++stripe_cross_section_failures;
           return reject("STRIPE_CROSS_SECTION_NOT_COVERED");
+        }
+        std::string via_bottom;
+        std::string via_top;
+        if (layer_change) {
+          if (layer->get_order() < lateral_layer_ptr->get_order()) {
+            via_bottom = layer_name;
+            via_top = lateral_layer;
+          } else {
+            via_bottom = lateral_layer;
+            via_top = layer_name;
+          }
+          auto make_via = [&](const PlanarCoord& coord) {
+            PGSegment via;
+            via.set_net_name(net_name);
+            via.set_type(PGSegmentType::kVia);
+            via.set_bottom_layer_name(via_bottom);
+            via.set_top_layer_name(via_top);
+            via.set_start_coord(coord.get_x(), coord.get_y());
+            via.set_via_width(width);
+            via.set_via_height(width);
+            via.set_generated(true);
+            return via;
+          };
+          auto escape_via = make_via(points[1]);
+          auto end_via = make_via(points.back());
+          if (FPI.getPGViaStack(escape_via).empty() || FPI.getPGViaStack(end_via).empty()) {
+            return reject("DETOUR_VIA_FAILED");
+          }
+          for (auto* via : {&escape_via, &end_via}) {
+            for (const auto& shape : FPI.getPGViaShapes(*via)) {
+              auto* via_layer = findRoutingLayer(shape.get_layer_name());
+              if (via_layer == nullptr
+                  || !geometry.clear(shape.get_layer_name(), shape, net_idx, std::max(0, via_layer->get_spacing()))) {
+                return reject("DETOUR_VIA_FAILED");
+              }
+            }
+          }
+          if (!addViaSegment(pg_model, net_name, via_bottom, via_top, "", points[1].get_x(), points[1].get_y(), width, width)
+              || !addViaSegment(pg_model, net_name, via_bottom, via_top, "", points.back().get_x(), points.back().get_y(), width, width)) {
+            return reject("DETOUR_VIA_FAILED");
+          }
         }
         for (auto& segment : path) {
           database.get_pg_segment_list().push_back(segment);
           add_segment_geometry(segment);
-          io_paths.add(layer_name, segmentRect(segment), -1);
+          io_paths.add(segment.get_layer_name(), segmentRect(segment), -1);
         }
         task.access_points[layer_name].push_back({tangent, width, separation});
         ++task.contacts;
         ++task.routes_per_stripe[target.database_index];
         stats.stripes.insert(target.database_index);
-        if (is_direct(route_mode)) { ++stats.direct; ++direct_connections; }
-        else { ++stats.bridge; ++bridge_connections; }
+        if (detour) {
+          ++stats.detour;
+          ++detour_connections;
+          if (layer_change) {
+            ++layer_change_connections;
+          }
+        } else if (is_direct(route_mode)) {
+          ++stats.direct;
+          ++direct_connections;
+          if (is_bend(route_mode)) {
+            ++stats.bend;
+            ++bend_connections;
+            ++manhattan_direct_connections;
+          }
+        } else {
+          ++stats.bridge;
+          ++bridge_connections;
+          if (is_bend(route_mode)) {
+            ++stats.bend;
+            ++bend_connections;
+            ++manhattan_bridge_connections;
+          }
+        }
         const auto& start = points.front();
         const auto& end = points.back();
         const auto& pin_box = pin_contact_box;
@@ -1880,10 +2216,11 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         contact_details.push_back(FPUTIL.getString(instance.get_name(), "/", instance.get_io_cell_pin_name(), " PORT ", port,
                                                    " net=", net_name, " mode=", route_name(route_mode), " pin_layer=", pin.get_layer_name(),
                                                    " route_layer=", layer_name, " target_layer=", layer_name,
+                                                   " lateral_layer=", layer_change ? lateral_layer : std::string("NA"),
                                                    " stripe_id=", target.database_index, " width=", width,
                                                    " segments=", path.size(), " spacing=", separation,
                                                    " start=(", start.get_x(), ",", start.get_y(), ") end=(", end.get_x(), ",", end.get_y(), ")",
-                                                   " io_inner=(", points[1].get_x(), ",", points[1].get_y(), ")",
+                                                   " io_inner=(", expected_io_inner.get_x(), ",", expected_io_inner.get_y(), ")",
                                                    " stripe_inner=", is_direct(route_mode) ? std::string("NA") : FPUTIL.getString("(", end.get_x(), ",", end.get_y(), ")"),
                                                    " pin_box=", pin_box.get_ll_x(), ",", pin_box.get_ll_y(), ",", pin_box.get_ur_x(), ",", pin_box.get_ur_y(),
                                                    " stripe_box=", stripe_box.get_ll_x(), ",", stripe_box.get_ll_y(), ",", stripe_box.get_ur_x(), ",", stripe_box.get_ur_y()));
@@ -1893,22 +2230,35 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       for (const auto& [layer_name, rails] : task.rails) {
         auto found = task.targets->find(layer_name);
         if (found == task.targets->end()) continue;
+        // A detour is only needed when the regular direct/bridge forms failed
+        // to produce any contact on this pin layer.
+        if (detour && task.layers[layer_name].count() > 0) continue;
         auto targets = found->second;
         const auto& first_pin = rails.front();
         const PlanarCoord center((first_pin.get_ll_x() + first_pin.get_ur_x()) / 2, (first_pin.get_ll_y() + first_pin.get_ur_y()) / 2);
         auto distance = [&](const StripeTarget& target) {
           const auto point = bridge_target_inner_boundary(side, target.segment, center);
-          if (point.get_x() == INT32_MIN || point.get_y() == INT32_MIN) return int64_t(INT64_MAX);
-          return int64_t(std::abs(point.get_x() - center.get_x())) + std::abs(point.get_y() - center.get_y());
+          if (point.get_x() != INT32_MIN && point.get_y() != INT32_MIN) {
+            return int64_t(std::abs(point.get_x() - center.get_x())) + std::abs(point.get_y() - center.get_y());
+          }
+          const auto bent_point = manhattan_target_inner_boundary(side, target.segment, center);
+          if (bent_point.get_x() == INT32_MIN || bent_point.get_y() == INT32_MIN) return int64_t(INT64_MAX);
+          return int64_t(std::abs(bent_point.get_x() - center.get_x())) + std::abs(bent_point.get_y() - center.get_y());
         };
         std::stable_sort(targets.begin(), targets.end(), [&](const auto& a, const auto& b) { return distance(a) < distance(b); });
         auto* layer = findRoutingLayer(layer_name);
         for (const auto& target : targets) {
+          if (detour && task.layers[layer_name].count() > 0) break;
           if (!can_add(layer_name, target.database_index)) continue;
           const bool perpendicular = normal_x ? target.segment.is_horizontal() : target.segment.is_vertical();
           if (direct && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
-          if (!direct && (perpendicular || !config.pg_io_core_connect.allow_bridge)) continue;
+          if (!config.pg_io_core_connect.allow_bridge && !direct) continue;
+          // Bridges are reserved for stripes parallel to the IO edge.  The
+          // Manhattan variant changes only the path geometry; it does not
+          // change the direct-vs-bridge route intent.
+          if (!direct && perpendicular) continue;
           for (const auto& pin : rails) {
+            if (detour && task.layers[layer_name].count() > 0) break;
             const int32_t width = pin_width(pin, layer, target.segment.get_width());
             if (width == 0) { ++task.layers[layer_name].rejected["PIN_NARROWER_THAN_STRIPE"]; continue; }
             const int32_t low = normal_x ? pin.get_ll_y() : pin.get_ll_x();
@@ -1918,7 +2268,18 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
             const int32_t last = FPUTIL.alignDown(high - width / 2, grid);
             if (direct) {
               const int32_t coordinate = normal_x ? target.segment.get_start_y() : target.segment.get_start_x();
-              if (coordinate >= first && coordinate <= last) tangents.insert(coordinate);
+              if (is_bend(mode) || detour) {
+                // Preserve the direct-extension intent even when the stripe
+                // tangent is outside the IO rail.  The detour/Manhattan leg
+                // moves from the nearest legal pin access point to that stripe.
+                if (first <= last) {
+                  const int32_t clamped = std::clamp(coordinate, first, last);
+                  const int32_t access = snap_clamped(clamped, first, last);
+                  if (access != INT32_MIN) tangents.insert(access);
+                }
+              } else if (coordinate >= first && coordinate <= last) {
+                tangents.insert(coordinate);
+              }
             } else {
               const auto start = start_at(side, pin, width, first);
               if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
@@ -1932,18 +2293,55 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
               const auto start = start_at(side, pin, width, tangent);
               if (start.get_x() == INT32_MIN || start.get_y() == INT32_MIN) continue;
               const auto io_inner = inner_boundary_point(side, pin, normal_x ? start.get_y() : start.get_x());
-              const auto end = direct ? direct_extension_target_point(side, target.segment, start)
-                                      : bridge_target_inner_boundary(side, target.segment, start);
+              const auto end = detour ? stripe_end_on_point(side, target.segment)
+                                      : (direct ? (is_bend(mode) ? manhattan_direct_extension_target_point(side, target.segment)
+                                                                 : direct_extension_target_point(side, target.segment, start))
+                                                : (is_bend(mode) ? manhattan_target_inner_boundary(side, target.segment, start)
+                                                                 : bridge_target_inner_boundary(side, target.segment, start)));
               if (end.get_x() == INT32_MIN || end.get_y() == INT32_MIN) {
-                ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_STRIPE_NOT_ALIGNED" : "NO_STRAIGHT_PATH"];
+                ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_STRIPE_NOT_ALIGNED"
+                                                         : (is_bend(mode) ? "NO_MANHATTAN_PATH" : "NO_STRAIGHT_PATH")];
                 continue;
               }
-              if ((start.get_x() != io_inner.get_x() && start.get_y() != io_inner.get_y())
-                  || (io_inner.get_x() != end.get_x() && io_inner.get_y() != end.get_y())) {
+              if (!is_bend(mode) && !detour
+                  && ((start.get_x() != io_inner.get_x() && start.get_y() != io_inner.get_y())
+                      || (io_inner.get_x() != end.get_x() && io_inner.get_y() != end.get_y()))) {
                 ++task.layers[layer_name].rejected[direct ? "DIRECT_EXTENSION_NOT_COLLINEAR" : "NO_STRAIGHT_PATH"];
                 continue;
               }
-              try_path(pin, target, width, std::vector<PlanarCoord>{start, io_inner, end}, mode);
+              if (detour) {
+                const int32_t corridor = detour_corridor(side, width);
+                if (corridor == INT32_MIN) continue;
+                std::vector<PlanarCoord> points;
+                if (normal_x) {
+                  points = {start, PlanarCoord(corridor, start.get_y()), PlanarCoord(corridor, end.get_y()), end};
+                } else {
+                  points = {start, PlanarCoord(start.get_x(), corridor), PlanarCoord(end.get_x(), corridor), end};
+                }
+                std::vector<std::string> lateral_layers;
+                if (is_layer_change(mode)) {
+                  const std::string first = detour_lateral_layer(layer_name);
+                  if (!first.empty()) lateral_layers.push_back(first);
+                  const std::string second = detour_lateral_layer(first);
+                  if (!second.empty()) lateral_layers.push_back(second);
+                } else {
+                  lateral_layers.emplace_back();
+                }
+                bool added = false;
+                for (const auto& lateral_layer : lateral_layers) {
+                  if (try_path(pin, target, width, points, mode, lateral_layer)) {
+                    added = true;
+                    break;
+                  }
+                }
+                if (added) break;
+              } else if (is_bend(mode)) {
+                for (const auto& candidate : makeManhattanPathCandidates(start, end)) {
+                  if (try_path(pin, target, width, std::vector<PlanarCoord>{start, candidate.bend, end}, mode, std::string())) break;
+                }
+              } else {
+                try_path(pin, target, width, std::vector<PlanarCoord>{start, io_inner, end}, mode, std::string());
+              }
             }
           }
         }
@@ -1951,6 +2349,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     }
   }
   std::vector<std::string> layer_details;
+  int32_t ports_with_any_contact = 0;
   for (auto& task : tasks) {
     const std::string terminal = task.instance->get_name() + "/" + task.instance->get_io_cell_pin_name() + " PORT " + std::to_string(task.port);
     bool complete = true;
@@ -1960,8 +2359,10 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         failures.push_back({terminal, "NO_LEGAL_PATH_" + layer});
         complete = false;
       }
-      std::string detail = FPUTIL.getString(terminal, " layer=", layer, " rails=", rails.size(), " routes=", stats.count(),
+      std::string detail = FPUTIL.getString(terminal, " policy=", task.requires_manhattan ? "manhattan" : "straight",
+                                            " layer=", layer, " rails=", rails.size(), " routes=", stats.count(),
                                             " stripes=", stats.stripes.size(), " direct=", stats.direct, " bridge=", stats.bridge,
+                                            " bend=", stats.bend, " detour=", stats.detour,
                                             " candidates=", stats.candidates);
       for (const auto& [reason, count] : stats.rejected) detail += FPUTIL.getString(" ", reason, "=", count);
       layer_details.push_back(std::move(detail));
@@ -1970,21 +2371,36 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       failures.push_back({terminal, "INSUFFICIENT_CONTACTS"});
       complete = false;
     }
+    if (task.contacts > 0) ++ports_with_any_contact;
     if (complete) ++connected_ports;
   }
   std::set<std::string> unresolved;
   for (const auto& failure : failures) unresolved.insert(failure.terminal);
+  std::set<std::string> manhattan_instances;
+  for (const auto& task : tasks) {
+    if (task.requires_manhattan) manhattan_instances.insert(task.instance->get_name());
+  }
 
   FPLOG.info(Loc::current(), "IO core PG: ", connected_ports, " connected ports, ", unresolved.size(),
-             " unresolved ports (direct=", direct_connections, ", bridge=", bridge_connections, ").");
+             " unresolved ports, ", ports_with_any_contact, " ports with any contact (direct=", direct_connections,
+             ", bridge=", bridge_connections, ", bend=", bend_connections, ", detour=", detour_connections,
+             ", layer_change=", layer_change_connections, ", manhattan_cells=", manhattan_instances.size(), ").");
   if (!config.pg_temp_directory_path.empty()) {
     std::ofstream report(config.pg_temp_directory_path + "/io_core_connect.rpt");
-    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size() << "\nDirect connections: "
+    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size()
+           << "\nPorts with any contact: " << ports_with_any_contact << "\nDirect connections: "
            << direct_connections << "\nBridge connections: " << bridge_connections << "\n"
+           << "Manhattan connections: " << bend_connections << "\n"
+           << "Detour connections: " << detour_connections << "\n"
+           << "Detour layer-change connections: " << layer_change_connections << "\n"
+           << "Manhattan direct-extension connections: " << manhattan_direct_connections << "\n"
+           << "Manhattan bridge connections: " << manhattan_bridge_connections << "\n"
+           << "Manhattan policy IO cells: " << manhattan_instances.size() << "\n"
            << "Pin cross-section failures: " << pin_cross_section_failures << "\n"
            << "Stripe cross-section failures: " << stripe_cross_section_failures << "\n"
            << "IO inner-boundary failures: " << io_inner_boundary_failures << "\n"
            << "Stripe inner-boundary failures: " << stripe_inner_boundary_failures << "\n"
+           << "Detour endpoint failures: " << detour_endpoint_failures << "\n"
            << "Non-straight path failures: " << non_straight_failures << "\n";
     for (const auto& failure : failures) report << failure.terminal << " " << failure.reason << "\n";
     report << "[layers]\n";
@@ -2213,9 +2629,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
         }
         for (const auto& layer : access_layers) {
           const int32_t route_width = std::max(candidate->width, FPUTIL.alignUp(findRoutingLayer(layer)->get_min_width(), 2 * grid));
-          for (bool horizontal_first : {true, false}) {
-            const PlanarCoord bend(horizontal_first ? candidate->end.get_x() : candidate->start.get_x(),
-                                   horizontal_first ? candidate->start.get_y() : candidate->end.get_y());
+          for (const auto& manhattan : makeManhattanPathCandidates(candidate->start, candidate->end)) {
+            const PlanarCoord& bend = manhattan.bend;
             std::vector<PGSegment> path;
             for (auto [a, b] : {std::pair{candidate->start, bend}, std::pair{bend, candidate->end}}) {
               if (a.get_x() == b.get_x() && a.get_y() == b.get_y()) {

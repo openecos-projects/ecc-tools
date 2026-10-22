@@ -94,7 +94,9 @@ class IOCellPlacer
   std::string edgeName(IOEdgeType edge) const;
   void resetExistingPlacement(const IOCellDefinition& definition);
 
-  std::vector<Instance*> _power_instances;
+  // Indices stay valid when createPhysicalInstance grows the instance vector;
+  // raw pointers would dangle after the next reallocation.
+  std::vector<int32_t> _power_instance_indices;
   std::set<std::string> _used_instance_names;
   int32_t _next_power_temp_id = 0;
   // Keep the instance and its terminal together; a net may also connect internal macros.

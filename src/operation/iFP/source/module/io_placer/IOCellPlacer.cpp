@@ -299,6 +299,61 @@ bool IOCellPlacer::normalizePowerInstanceNames(const IOCellDefinition& definitio
     }
   }
 
+  // A re-run can leave power cells that are no longer needed after the die
+  // size changes (for example die_size -> die_util).  They are unplaced but
+  // keep their previously normalized names, which can collide with the new
+  // target names.  Move them to unique temporary names and mark them deleted
+  // so the IDB output removes them as well.
+  int32_t stale_power_index = 0;
+  const int32_t instance_count = static_cast<int32_t>(database.get_instance_list().size());
+  for (int32_t index = 0; index < instance_count; ++index) {
+    Instance& instance = database.get_instance_list()[index];
+    if (!isPowerMaster(definition, instance.get_master_name()) || instance.get_placed() || instance.is_delete_instance()) {
+      continue;
+    }
+    // Only clean up instances that carry a name produced by an earlier
+    // normalization pass or by createPhysicalInstance; leave user-named
+    // supply pads alone.
+    bool generated_name = instance.get_name().rfind("IO_POWER_", 0) == 0;
+    for (const auto& [prefix, master] : prefix_to_master) {
+      if (instance.get_name().rfind(prefix + "_", 0) == 0) {
+        generated_name = true;
+        break;
+      }
+    }
+    if (!generated_name) {
+      continue;
+    }
+    std::string temporary;
+    do {
+      temporary = "__IFP_UNUSED_POWER_" + std::to_string(stale_power_index++);
+    } while (database.get_instance_name_to_idx_map().contains(temporary));
+    const std::string old_name = instance.get_name();
+    auto old_iter = database.get_instance_name_to_idx_map().find(old_name);
+    if (old_iter == database.get_instance_name_to_idx_map().end()) {
+      continue;
+    }
+    database.get_instance_name_to_idx_map().erase(old_iter);
+    instance.set_name(temporary);
+    database.get_instance_name_to_idx_map()[temporary] = index;
+    instance.set_delete_instance(true);
+    for (Net& net : database.get_net_list()) {
+      for (NetPin& pin : net.get_net_pin_list()) {
+        if (!pin.get_io() && pin.get_instance_name() == old_name) {
+          pin.set_instance_name(temporary);
+        }
+      }
+    }
+    for (IOPin& io_pin : database.get_io_pin_list()) {
+      if (io_pin.get_instance_name() == old_name) {
+        io_pin.set_instance_name(temporary);
+      }
+    }
+    if (!instance.is_new_instance()) {
+      database.get_instance_rename_map()[old_name] = temporary;
+    }
+  }
+
   using PowerByRole = std::map<std::string, std::vector<Instance*>>;
   std::map<IOEdgeType, PowerByRole> power_by_edge;
   const Die& die = database.get_die();
@@ -494,11 +549,13 @@ bool IOCellPlacer::normalizePowerInstanceNames(const IOCellDefinition& definitio
 void IOCellPlacer::resetExistingPlacement(const IOCellDefinition& definition)
 {
   Database& database = FPDM.getDatabase();
-  _power_instances.clear();
+  _power_instance_indices.clear();
   _used_instance_names.clear();
   _next_power_temp_id = 0;
   database.get_instance_list().reserve(database.get_instance_list().size() + 1024);
-  for (Instance& instance : database.get_instance_list()) {
+  const int32_t instance_count = static_cast<int32_t>(database.get_instance_list().size());
+  for (int32_t index = 0; index < instance_count; ++index) {
+    Instance& instance = database.get_instance_list()[index];
     _used_instance_names.insert(instance.get_name());
     bool generated_ring_cell
         = instance.get_name().rfind("IO_CORNER_", 0) == 0 || instance.get_name().rfind("IO_FILL_", 0) == 0 || instance.get_name().rfind("IO_POWER_", 0) == 0;
@@ -515,7 +572,7 @@ void IOCellPlacer::resetExistingPlacement(const IOCellDefinition& definition)
       instance.set_fixed(false);
       instance.set_placement_updated(false);
       if (isPowerMaster(definition, instance.get_master_name())) {
-        _power_instances.push_back(&instance);
+        _power_instance_indices.push_back(index);
       }
     }
   }
@@ -957,12 +1014,27 @@ bool IOCellPlacer::placeSide(IOEdgeType edge, const IOCellDefinition& definition
     return false;
   }
 
+  // Keep the first/last power group away from the corner cells.  A single
+  // group is centered; multiple groups are distributed over the reduced
+  // usable span instead of starting/ending flush against the corners.
+  int32_t corner_clearance = micronToDbu(FPDM.getConfig().io_cell_power_corner_clearance_micron);
+  if (corner_clearance < 0) {
+    corner_clearance = 0;
+  }
+  const int32_t max_clearance = (line_length - group_count * package_span) / 2;
+  if (corner_clearance > max_clearance) {
+    corner_clearance = max_clearance;
+  }
+  const int32_t usable_length = line_length - 2 * corner_clearance - package_span;
+
   std::vector<Segment> free_segments;
   int32_t previous = line_begin;
   for (int32_t group_idx = 0; group_idx < group_count; ++group_idx) {
-    int32_t anchor = line_begin;
-    if (group_count > 1) {
-      anchor += static_cast<int32_t>((static_cast<int64_t>(line_length - package_span) * group_idx) / (group_count - 1));
+    int32_t anchor = line_begin + corner_clearance;
+    if (group_count == 1) {
+      anchor += usable_length / 2;
+    } else {
+      anchor += static_cast<int32_t>((static_cast<int64_t>(usable_length) * group_idx) / (group_count - 1));
     }
     if (anchor < previous) {
       anchor = previous;
@@ -1059,11 +1131,13 @@ bool IOCellPlacer::placeCell(Instance& instance, IOEdgeType edge, int32_t along,
 
 Instance* IOCellPlacer::findOrCreatePowerInstance(const IOCellPowerMember& member)
 {
-  for (Instance* instance : _power_instances) {
-    if (instance->get_master_name() == member.master_name && !instance->get_placed()) {
-      instance->set_io_cell_net_name(resolvePowerNet(FPDM.getDatabase(), member.net_patterns));
-      instance->set_io_cell_pin_name(member.pin_name);
-      return instance;
+  Database& database = FPDM.getDatabase();
+  for (int32_t index : _power_instance_indices) {
+    Instance& instance = database.get_instance_list()[index];
+    if (instance.get_master_name() == member.master_name && !instance.get_placed()) {
+      instance.set_io_cell_net_name(resolvePowerNet(database, member.net_patterns));
+      instance.set_io_cell_pin_name(member.pin_name);
+      return &instance;
     }
   }
   std::string name;
@@ -1071,7 +1145,7 @@ Instance* IOCellPlacer::findOrCreatePowerInstance(const IOCellPowerMember& membe
     name = "IO_POWER_TMP_" + std::to_string(_next_power_temp_id++);
   } while (_used_instance_names.contains(name));
   Instance* instance = createPhysicalInstance(name, member.master_name);
-  instance->set_io_cell_net_name(resolvePowerNet(FPDM.getDatabase(), member.net_patterns));
+  instance->set_io_cell_net_name(resolvePowerNet(database, member.net_patterns));
   instance->set_io_cell_pin_name(member.pin_name);
   return instance;
 }

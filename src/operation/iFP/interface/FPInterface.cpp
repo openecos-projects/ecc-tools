@@ -409,6 +409,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.input_io_cell_path.clear();
   config.input_io_cell_definition_path.clear();
   config.io_cell_power_group_spacing_micron = 1000.0;
+  config.io_cell_power_corner_clearance_micron = 260.0;
   config.io_cell_power_enabled = true;
   config.io_cell_filler_enabled = true;
   config.io_cell_filler_require_exact = true;
@@ -500,6 +501,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     nlohmann::json power_json = io_cell_json.value("power", nlohmann::json::object());
     config.io_cell_power_enabled = power_json.value("enable", true);
     config.io_cell_power_group_spacing_micron = power_json.value("target_group_spacing", 1000.0);
+    config.io_cell_power_corner_clearance_micron = power_json.value("corner_clearance_micron", 260.0);
     nlohmann::json filler_json = io_cell_json.value("filler", nlohmann::json::object());
     config.io_cell_filler_enabled = filler_json.value("enable", true);
     config.io_cell_filler_require_exact = filler_json.value("require_exact_fill", true);
@@ -658,6 +660,14 @@ void FPInterface::wrapCellArea()
   int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
   for (idb::IdbInstance* idb_instance : dmInst->get_idb_design()->get_instance_list()->get_instance_list()) {
     idb::IdbCellMaster* idb_cell_master = idb_instance->get_cell_master();
+    // The die utilization target describes core logic, not the IO ring.  IO
+    // pads, fillers and corners are placed around the die edge and would
+    // otherwise inflate the area used by die_util, especially across repeated
+    // runs where the generated ring cells are already present in the IDB.
+    const bool corner_master = idb_cell_master->get_site() != nullptr && idb_cell_master->get_site()->is_corner_site();
+    if (idb_cell_master->is_pad() || idb_cell_master->is_pad_filler() || idb_cell_master->is_spacer() || corner_master) {
+      continue;
+    }
     double width_micron = idb_cell_master->get_width() / 1.0 / micron_dbu;
     double height_micron = idb_cell_master->get_height() / 1.0 / micron_dbu;
     cell_area += width_micron * height_micron;
@@ -1433,7 +1443,7 @@ void FPInterface::outputMacroRouteHalo()
 void FPInterface::outputNewInstanceList()
 {
   for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-    if (!instance.is_new_instance()) {
+    if (!instance.is_new_instance() || instance.is_delete_instance()) {
       continue;
     }
     idb::IdbOrient orient = unwrapPlacementOrientation(instance.get_orient());
