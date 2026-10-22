@@ -77,6 +77,7 @@ void FPInterface::destroyInst()
 
 void FPInterface::initFP(std::map<std::string, std::any> config_map)
 {
+  _run_failed = false;
   Logger::initInst();
   // clang-format off
   FPLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
@@ -110,6 +111,12 @@ void FPInterface::runFP()
   DieBuilder::destroyInst();
 
   IOPlacer::initInst();
+  if (FPDM.getConfig().io_placer_mode == IOPlacerMode::kIOCell && !FPIP.ensureIOCapacity()) {
+    FPLOG.error(Loc::current(), "IO cell capacity check failed; stopping floorplan.");
+    _run_failed = true;
+    IOPlacer::destroyInst();
+    return;
+  }
   FPIP.place();
   IOPlacer::destroyInst();
 
@@ -138,6 +145,12 @@ void FPInterface::runSimpleFP()
   DieBuilder::destroyInst();
 
   IOPlacer::initInst();
+  if (FPDM.getConfig().io_placer_mode == IOPlacerMode::kIOCell && !FPIP.ensureIOCapacity()) {
+    FPLOG.error(Loc::current(), "IO cell capacity check failed; stopping simple floorplan.");
+    _run_failed = true;
+    IOPlacer::destroyInst();
+    return;
+  }
   FPIP.placeAuto();
   IOPlacer::destroyInst();
 
@@ -152,7 +165,11 @@ void FPInterface::destroyFP()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
-  FPDM.output();
+  if (_run_failed) {
+    FPLOG.error(Loc::current(), "Skipping floorplan output because the run failed.");
+  } else {
+    FPDM.output();
+  }
   DataManager::destroyInst();
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -405,14 +422,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.io_pin_placement_mode = PlacementMode::kAuto;
   config.io_pin_layer_name_list.clear();
   config.input_io_pin_path.clear();
-  config.io_cell_placement_mode = PlacementMode::kAuto;
-  config.input_io_cell_path.clear();
-  config.input_io_cell_definition_path.clear();
-  config.io_cell_power_group_spacing_micron = 1000.0;
-  config.io_cell_power_corner_clearance_micron = 260.0;
-  config.io_cell_power_enabled = true;
-  config.io_cell_filler_enabled = true;
-  config.io_cell_filler_require_exact = true;
   config.pg_connect_list.clear();
   config.core_power_net.clear();
   config.core_ground_net.clear();
@@ -493,18 +502,16 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
   if (io_placer_json.contains("io_cell")) {
     nlohmann::json& io_cell_json = io_placer_json["io_cell"];
-    config.io_cell_placement_mode = GetPlacementModeByName()(io_cell_json.value("mode", "auto"));
+    config.io_cell_mode = GetPlacementModeByName()(io_cell_json.value("mode", "auto"));
     std::string io_cell_file_path = io_cell_json.value("file_path", "");
     std::string definition_file_path = io_cell_json.value("definition_file_path", "");
-    config.input_io_cell_path = io_cell_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, io_cell_file_path);
-    config.input_io_cell_definition_path = definition_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, definition_file_path);
+    config.io_cell_file = io_cell_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, io_cell_file_path);
+    config.io_cell_definition_file = definition_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, definition_file_path);
     nlohmann::json power_json = io_cell_json.value("power", nlohmann::json::object());
-    config.io_cell_power_enabled = power_json.value("enable", true);
-    config.io_cell_power_group_spacing_micron = power_json.value("target_group_spacing", 1000.0);
-    config.io_cell_power_corner_clearance_micron = power_json.value("corner_clearance_micron", 260.0);
-    nlohmann::json filler_json = io_cell_json.value("filler", nlohmann::json::object());
-    config.io_cell_filler_enabled = filler_json.value("enable", true);
-    config.io_cell_filler_require_exact = filler_json.value("require_exact_fill", true);
+    config.io_cell_power_spacing_micron = power_json.value("target_group_spacing", 1000.0);
+    config.io_cell_corner_clearance_micron = power_json.value("corner_clearance_micron", 260.0);
+    nlohmann::json auto_resize_json = io_cell_json.value("auto_resize", nlohmann::json::object());
+    config.io_cell_auto_resize = auto_resize_json.value("enable", true);
   }
 
   nlohmann::json& phy_placer_json = config_json["phy_placer"];

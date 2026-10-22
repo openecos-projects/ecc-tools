@@ -26,6 +26,8 @@
 
 namespace ifp {
 
+struct IOCapacityReport;
+
 #define FPIP (ifp::IOPlacer::getInst())
 
 class IOPlacer
@@ -37,8 +39,10 @@ class IOPlacer
   // function
   void place();
   void placeAuto();
+  bool ensureIOCapacity();
 
  private:
+  bool growDieForIoCapacity(const IOCapacityReport& report, double initial_die_width_micron, double initial_die_height_micron);
   // self
   static IOPlacer* _ip_instance;
 

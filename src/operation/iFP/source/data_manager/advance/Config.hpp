@@ -89,14 +89,12 @@ class Config
   PlacementMode io_pin_placement_mode;                     // required
   std::vector<std::string> io_pin_layer_name_list;         // optional
   std::string input_io_pin_path;                           // optional
-  PlacementMode io_cell_placement_mode;                    // required when mode is io_cell
-  std::string input_io_cell_path;                          // optional
-  std::string input_io_cell_definition_path;               // required when mode is io_cell
-  double io_cell_power_group_spacing_micron;               // required when mode is io_cell
-  double io_cell_power_corner_clearance_micron;            // optional; keeps power groups away from corners
-  bool io_cell_power_enabled;                              // optional
-  bool io_cell_filler_enabled;                             // optional
-  bool io_cell_filler_require_exact;                       // optional
+  PlacementMode io_cell_mode = PlacementMode::kAuto;       // io_cell.mode
+  std::string io_cell_file;                                // io_cell.file_path
+  std::string io_cell_definition_file;                     // io_cell.definition_file_path
+  double io_cell_power_spacing_micron = 1000.0;            // io_cell.power.target_group_spacing
+  double io_cell_corner_clearance_micron = 260.0;          // io_cell.power.corner_clearance_micron
+  bool io_cell_auto_resize = true;                         // io_cell.auto_resize.enable
   std::vector<PGGlobalConnect> pg_connect_list;            // optional
   std::string core_power_net;
   std::string core_ground_net;

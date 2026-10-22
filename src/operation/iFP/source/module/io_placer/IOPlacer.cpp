@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "DataManager.hpp"
+#include "DieBuilder.hpp"
 #include "IOCellPlacer.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
@@ -36,6 +37,10 @@
 namespace ifp {
 
 namespace {
+
+constexpr double kIoCellResizeMaxRatio = 2.0;
+constexpr int32_t kIoCellResizeMaxIterations = 10;
+constexpr double kIoCellResizeMinUtilization = 0.1;
 
 struct PinSlot
 {
@@ -141,9 +146,163 @@ void IOPlacer::placeAuto()
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+bool IOPlacer::ensureIOCapacity()
+{
+  Config& config = FPDM.getConfig();
+  if (config.io_cell_mode != PlacementMode::kAuto) {
+    FPLOG.info(Loc::current(), "IO capacity auto-resize applies to io_cell.mode=auto only; skipping.");
+    return true;
+  }
+  Database& database = FPDM.getDatabase();
+  if (database.get_micron_dbu() <= 0) {
+    FPLOG.error(Loc::current(), "Cannot check IO capacity with an invalid micron DBU.");
+    return false;
+  }
+  const double dbu = database.get_micron_dbu();
+  const double initial_die_width = (database.get_die().get_ur_x() - database.get_die().get_ll_x()) / dbu;
+  const double initial_die_height = (database.get_die().get_ur_y() - database.get_die().get_ll_y()) / dbu;
+
+  std::ofstream report_file;
+  if (!config.ip_temp_directory_path.empty()) {
+    report_file.open(config.ip_temp_directory_path + "io_capacity.rpt");
+  }
+
+  const int32_t max_iterations = kIoCellResizeMaxIterations;
+  for (int32_t iteration = 0; iteration <= max_iterations; ++iteration) {
+    IOCellPlacer placer(config);
+    const IOCapacityReport report = placer.checkCapacity();
+    const double die_width = (database.get_die().get_ur_x() - database.get_die().get_ll_x()) / dbu;
+    const double die_height = (database.get_die().get_ur_y() - database.get_die().get_ll_y()) / dbu;
+
+    if (report_file.is_open()) {
+      report_file << "IO capacity check, iteration " << iteration << "\n";
+      report_file << "die " << die_width << " x " << die_height << " um\n";
+      for (const auto& side : report.sides) {
+        report_file << side.edge_name << " (DBU): line=" << side.line_length << " power=" << side.power_length
+                    << " signal=" << side.signal_length << " free=" << side.free_length << " deficit=" << side.deficit;
+        if (!side.error.empty()) {
+          report_file << " error=" << side.error;
+        }
+        report_file << "\n";
+      }
+      report_file << "capacity: " << (report.fits ? "PASS" : "FAIL") << "\n\n";
+      report_file.flush();
+    }
+
+    FPLOG.info(Loc::current(), "IO capacity check ", iteration, ": ", report.fits ? "PASS" : "FAIL",
+               " (die ", die_width, " x ", die_height, " um).");
+    if (report.fits) {
+      return true;
+    }
+    if (!report.error.empty()) {
+      FPLOG.error(Loc::current(), report.error);
+      return false;
+    }
+    for (const auto& side : report.sides) {
+      if (side.deficit > 0 || !side.error.empty()) {
+        const std::string error_suffix = side.error.empty() ? std::string() : ", error=" + side.error;
+        FPLOG.warn(Loc::current(), "  ", side.edge_name, ": line=", side.line_length, " power=", side.power_length,
+                   " signal=", side.signal_length, " free=", side.free_length, " deficit=", side.deficit, error_suffix);
+      }
+    }
+    if (!config.io_cell_auto_resize) {
+      FPLOG.error(Loc::current(), "IO cell capacity is insufficient and auto resize is disabled.");
+      return false;
+    }
+    if (iteration == max_iterations) {
+      FPLOG.error(Loc::current(), "IO cell capacity is still insufficient after ", max_iterations, " resize iteration(s).");
+      return false;
+    }
+    if (!growDieForIoCapacity(report, initial_die_width, initial_die_height)) {
+      FPLOG.error(Loc::current(), "IO cell capacity is insufficient and the die expansion limit has been reached.");
+      return false;
+    }
+
+    DieBuilder::initInst();
+    FPDB.build();
+    DieBuilder::destroyInst();
+    const double new_width = (database.get_die().get_ur_x() - database.get_die().get_ll_x()) / dbu;
+    const double new_height = (database.get_die().get_ur_y() - database.get_die().get_ll_y()) / dbu;
+    if (config.die_mode == DieMode::kDieUtil) {
+      FPLOG.info(Loc::current(), "Resized die for IO capacity: ", new_width, " x ", new_height, " um (utilization ",
+                 config.die_utilization, ").");
+    } else {
+      FPLOG.info(Loc::current(), "Resized die for IO capacity: ", new_width, " x ", new_height, " um (die_size).");
+    }
+  }
+  return false;
+}
+
+bool IOPlacer::growDieForIoCapacity(const IOCapacityReport& report, double initial_die_width, double initial_die_height)
+{
+  Config& config = FPDM.getConfig();
+  Database& database = FPDM.getDatabase();
+  const double dbu = database.get_micron_dbu();
+  if (dbu <= 0) {
+    return false;
+  }
+  const auto& die = database.get_die();
+  const auto& core = database.get_core();
+  const double current_die_width = (die.get_ur_x() - die.get_ll_x()) / dbu;
+  const double current_die_height = (die.get_ur_y() - die.get_ll_y()) / dbu;
+  const double required_die_width = report.required_die_width_dbu > 0 ? report.required_die_width_dbu / dbu : current_die_width;
+  const double required_die_height = report.required_die_height_dbu > 0 ? report.required_die_height_dbu / dbu : current_die_height;
+  const double max_die_width = initial_die_width * kIoCellResizeMaxRatio;
+  const double max_die_height = initial_die_height * kIoCellResizeMaxRatio;
+
+  double scale = std::max({1.0, required_die_width / current_die_width, required_die_height / current_die_height});
+  if (scale <= 1.0 + 1e-9) {
+    // Capacity can still fail because of free-segment fragmentation even when
+    // the total length is sufficient; use a small step in that case.
+    scale = 1.05;
+  }
+
+  if (config.die_mode == DieMode::kDieSize) {
+    const double allowed_scale = std::min(max_die_width / current_die_width, max_die_height / current_die_height);
+    scale = std::min(scale, allowed_scale);
+    if (scale <= 1.0 + 1e-9) {
+      return false;
+    }
+    config.die_width_micron = current_die_width * scale;
+    config.die_height_micron = current_die_height * scale;
+    FPLOG.info(Loc::current(), "Growing die_size by ", scale, " for IO capacity.");
+    return true;
+  }
+
+  if (config.die_mode == DieMode::kDieUtil) {
+    const double current_core_width = (core.get_ur_x() - core.get_ll_x()) / dbu;
+    const double current_core_height = (core.get_ur_y() - core.get_ll_y()) / dbu;
+    const double margin_width = std::max(0.0, current_die_width - current_core_width);
+    const double margin_height = std::max(0.0, current_die_height - current_core_height);
+    const double required_core_width = std::max(current_core_width, required_die_width - margin_width);
+    const double required_core_height = std::max(current_core_height, required_die_height - margin_height);
+    double core_scale = std::max({1.0, required_core_width / current_core_width, required_core_height / current_core_height});
+    if (core_scale <= 1.0 + 1e-9) {
+      core_scale = 1.05;
+    }
+    const double max_core_width = std::max(current_core_width, max_die_width - margin_width);
+    const double max_core_height = std::max(current_core_height, max_die_height - margin_height);
+    core_scale = std::min(core_scale, std::min(max_core_width / current_core_width, max_core_height / current_core_height));
+    if (core_scale <= 1.0 + 1e-9) {
+      return false;
+    }
+    const double new_utilization = config.die_utilization / (core_scale * core_scale);
+    if (new_utilization < kIoCellResizeMinUtilization) {
+      FPLOG.error(Loc::current(), "IO capacity requires utilization below the minimum (", new_utilization,
+                  " < ", kIoCellResizeMinUtilization, ").");
+      return false;
+    }
+    config.die_utilization = new_utilization;
+    FPLOG.info(Loc::current(), "Growing die_util core by ", core_scale, "; utilization ", new_utilization, ".");
+    return true;
+  }
+
+  return false;
+}
+
 void IOPlacer::placeIOCell()
 {
-  IOCellPlacer placer;
+  IOCellPlacer placer(FPDM.getConfig());
   if (!placer.place()) {
     FPLOG.error(Loc::current(), "IO Cell placement failed.");
   }

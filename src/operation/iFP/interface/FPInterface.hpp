@@ -130,6 +130,7 @@ class FPInterface
 
  private:
   static FPInterface* _fp_interface_instance;
+  bool _run_failed = false;
 
   FPInterface() = default;
   FPInterface(const FPInterface& other) = delete;

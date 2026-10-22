@@ -21,31 +21,50 @@
 #include "Instance.hpp"
 #include "PlacementOrientation.hpp"
 
+#include <array>
+
 namespace ifp {
+
+class Config;
+
+struct IOSideCapacity
+{
+  IOEdgeType edge = IOEdgeType::kNone;
+  std::string edge_name;
+  int32_t line_length = 0;
+  int32_t package_span = 0;
+  int32_t group_count = 0;
+  int32_t power_length = 0;
+  int32_t clearance = 0;
+  int32_t signal_length = 0;
+  int32_t free_length = 0;
+  int32_t deficit = 0;
+  std::string error;
+};
+
+struct IOCapacityReport
+{
+  bool fits = true;
+  std::string error;
+  std::array<IOSideCapacity, 4> sides;
+  int32_t required_die_width_dbu = -1;
+  int32_t required_die_height_dbu = -1;
+};
 
 class IOCellPlacer
 {
  public:
+  explicit IOCellPlacer(const Config& config) : _config(config) {}
   bool place();
+  IOCapacityReport checkCapacity();
 
  private:
+  const Config& _config;
   struct IOCellPowerMember
   {
-    // Logical role used to derive a stable instance-name prefix.  The role is
-    // technology data (for example VDD1/VSSIO3), while the electrical net is
-    // still taken from net_patterns below.
-    std::string role;
     std::string master_name;
     std::string pin_name;
     std::vector<std::string> net_patterns;
-  };
-
-  struct IOCellPowerGroup
-  {
-    std::string name;
-    std::vector<IOCellPowerMember> members;
-    int32_t min_groups_per_side = 1;
-    double max_spacing_micron = 1000.0;
   };
 
   struct IOCellFillerMaster
@@ -58,7 +77,7 @@ class IOCellPlacer
   {
     std::string corner_master_name;
     std::vector<std::string> signal_master_names;
-    std::vector<IOCellPowerGroup> power_groups;
+    std::vector<IOCellPowerMember> power_members;
     std::vector<IOCellFillerMaster> filler_masters;
   };
 
@@ -66,6 +85,24 @@ class IOCellPlacer
   {
     int32_t begin = 0;
     int32_t end = 0;
+  };
+
+  struct SideLayout
+  {
+    int32_t corner_span = 0;
+    int32_t line_begin = 0;
+    int32_t line_end = 0;
+    int32_t line_length = 0;
+    int32_t package_span = 0;
+    int32_t group_count = 0;
+    int32_t clearance = 0;
+    int32_t usable_length = 0;
+    int32_t dbu_spacing = 0;
+    std::vector<const IOCellPowerMember*> package;
+    std::vector<int32_t> filler_widths;
+    std::vector<int32_t> anchors;
+    std::vector<Segment> free_segments;
+    std::string error;
   };
 
   static bool isPowerMaster(const IOCellDefinition& definition, const std::string& master);
@@ -76,6 +113,11 @@ class IOCellPlacer
   bool placeFromFile(const IOCellDefinition& definition);
   bool placeCorners(const IOCellDefinition& definition);
   bool placeSide(IOEdgeType edge, const IOCellDefinition& definition, const std::vector<int32_t>& signal_indices);
+  std::array<std::vector<int32_t>, 4> buildSignalSideIndices(const IOCellDefinition& definition) const;
+  bool buildSideLayout(IOEdgeType edge, const IOCellDefinition& definition, SideLayout& layout) const;
+  bool packSignalsDryRun(const std::vector<int32_t>& signal_indices, const SideLayout& layout, int32_t& deficit) const;
+  bool canFillGap(int32_t gap, const std::vector<int32_t>& filler_widths) const;
+  int32_t requiredLineLength(int32_t signal_length, int32_t package_span, int32_t spacing) const;
   bool normalizePowerInstanceNames(const IOCellDefinition& definition);
   bool bindIOPins(const IOCellDefinition& definition);
   bool updateIOPinPorts();
