@@ -82,6 +82,12 @@ class TARouter
     int32_t net_idx = -1;
   };
 
+  struct TrackOverlap
+  {
+    int32_t interval_num = 0;
+    double length = 0.0;
+  };
+
   using NodeMap = std::map<std::tuple<int32_t, int32_t, int32_t>, int32_t>;
 
   // self
@@ -118,7 +124,7 @@ class TARouter
   bool isHorizontalEdge(const TANet& ta_net, const TAEdge& edge) const;
   bool isVerticalEdge(const TANet& ta_net, const TAEdge& edge) const;
   std::pair<int32_t, int32_t> getEdgeScaleRange(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const;
-  double getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const;
+  TrackOverlap getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const;
   void addTrackUsage(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx);
   // output
   void outputNet(TANet& ta_net);

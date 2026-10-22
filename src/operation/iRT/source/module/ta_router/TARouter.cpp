@@ -304,14 +304,18 @@ void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
 
   int32_t half_width = routing_layer.get_min_width() / 2;
 
+  // Each overlapping interval pays a fixed cost plus a length-proportional cost.
+  constexpr double kOverlapFixedCost = 1000.0;
+  constexpr double kOverlapLengthCost = 20.0;
+
   int32_t best_track_coord = candidate_track_list.front();
   int32_t best_valid_track_coord = -1;
   double best_cost = std::numeric_limits<double>::max();
   double best_valid_cost = std::numeric_limits<double>::max();
   for (int32_t track_coord : candidate_track_list) {
-    double overlap = getTrackOverlap(edge.layer_idx, track_coord, begin_scale, end_scale, ta_net.net_idx);
+    TrackOverlap overlap = getTrackOverlap(edge.layer_idx, track_coord, begin_scale, end_scale, ta_net.net_idx);
     double fixed_cost = 0.0;
-    double obstacle_area = 0.0;
+    double obstacle_length = 0.0;
     PlanarRect check_rect;
     if (is_horizontal) {
       check_rect.set_ll(edge.guide_rect.get_ll_x(), track_coord - half_width);
@@ -324,23 +328,26 @@ void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
       if (!RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
         continue;
       }
-      double overlap_area = RTUTIL.getOverlap(check_rect, fixed_rect).getArea();
+      // Use blocked track length, not overlap area, so fixed shapes and wires share one cost model.
+      PlanarRect overlap_rect = RTUTIL.getOverlap(check_rect, fixed_rect);
+      int32_t blocked_length = is_horizontal ? overlap_rect.getXSpan() : overlap_rect.getYSpan();
       if (fixed_net_idx < 0) {
         // net = -1 is a hard obstacle, not a soft foreign-net shape.
-        obstacle_area += overlap_area;
+        obstacle_length += blocked_length;
       } else {
-        fixed_cost += 1000.0 + overlap_area / 100.0;
+        fixed_cost += kOverlapFixedCost + kOverlapLengthCost * blocked_length;
       }
     }
-    double cost = std::abs(track_coord - desired_coord) + overlap * 20.0 + fixed_cost + getTrackHistory(edge.layer_idx, track_coord);
-    if (obstacle_area <= 0.0) {
+    double overlap_cost = overlap.interval_num * kOverlapFixedCost + overlap.length * kOverlapLengthCost;
+    double cost = std::abs(track_coord - desired_coord) + overlap_cost + fixed_cost * 2 + getTrackHistory(edge.layer_idx, track_coord);
+    if (obstacle_length <= 0.0) {
       if (cost < best_valid_cost) {
         best_valid_cost = cost;
         best_valid_track_coord = track_coord;
       }
     }
     // If every track is blocked, keep the least-bad one instead of dropping the net.
-    cost += obstacle_area * 1.0e9;
+    cost += obstacle_length * 1.0e9;
     if (cost < best_cost) {
       best_cost = cost;
       best_track_coord = track_coord;
@@ -709,17 +716,17 @@ std::pair<int32_t, int32_t> TARouter::getEdgeScaleRange(const TANet& ta_net, con
   return std::make_pair(range_rect.get_ll_y(), range_rect.get_ur_y());
 }
 
-double TARouter::getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const
+TARouter::TrackOverlap TARouter::getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const
 {
+  TrackOverlap overlap;
   auto layer_iter = _track_usage.find(layer_idx);
   if (layer_iter == _track_usage.end()) {
-    return 0.0;
+    return overlap;
   }
   auto track_iter = layer_iter->second.find(track_coord);
   if (track_iter == layer_iter->second.end()) {
-    return 0.0;
+    return overlap;
   }
-  double overlap = 0.0;
   for (const TrackInterval& interval : track_iter->second) {
     if (interval.net_idx == net_idx) {
       continue;
@@ -727,7 +734,8 @@ double TARouter::getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t
     int32_t overlap_begin = std::max(begin, interval.begin);
     int32_t overlap_end = std::min(end, interval.end);
     if (overlap_begin < overlap_end) {
-      overlap += static_cast<double>(overlap_end - overlap_begin);
+      overlap.interval_num++;
+      overlap.length += static_cast<double>(overlap_end - overlap_begin);
     }
   }
   return overlap;
