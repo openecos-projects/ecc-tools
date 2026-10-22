@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <set>
 #include <vector>
 
 #include "GridMap.hpp"
@@ -47,6 +48,8 @@ struct GRWireEdge
   double supply = 0.0;
   double fixed_demand = 0.0;
   double routing_demand = 0.0;
+  std::set<int32_t> routing_demand_net_set;
+  std::set<int32_t> fixed_demand_net_set;
 
   // fixed_demand is already removed from usable supply, so demand only counts routing demand.
   double getDemand() const { return routing_demand; }

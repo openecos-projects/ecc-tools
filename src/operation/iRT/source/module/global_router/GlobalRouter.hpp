@@ -48,9 +48,11 @@ class GlobalRouter
   static constexpr double kUnitWireCost = 1.0;
   static constexpr double kCostWeight = 20.0;
   static constexpr double kCongestionKneeRatio = 0.8;
-  static constexpr double kViaBaseCost = 2.0;
-  static constexpr double kViaDemand = 0.3;
+  static constexpr double kViaBaseCost = 3.0;
+  static constexpr double kViaDemand = 0.5;
   static constexpr double kEpsilon = 1e-6;
+
+  double _cost_weight = kCostWeight;
 
   struct GRDpState
   {
@@ -105,6 +107,7 @@ class GlobalRouter
   bool buildMazePathList(const GRNet& net, std::vector<std::vector<PlanarCoord>>& path_list);
   bool buildMazeTopoTree(GRNet& net, const std::vector<std::vector<PlanarCoord>>& path_list);
   double getMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal) const;
+  double getDirectionCost() const;
   std::vector<GRNet*> getOverflowNetList();
   bool isNetOverflowing(const GRNet& net) const;
   double getTotalOverflow() const;
@@ -135,11 +138,12 @@ class GlobalRouter
   // commit
   void ripupRoute(GRNet& net, const GRTree& routing_tree);
   void commitRoute(GRNet& net, const GRTree& routing_tree);
-  void addWireDemand(const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta);
+  void addWireDemand(const GRNet& net, const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta);
   void addViaDemand(const GRNet& net, const GRViaStack& via_stack, std::set<GRWireEdgeId>& used_edge_set, double delta);
   void outputGlobalResult();
   void printSummary();
   bool isLayerInRange(int32_t layer_idx) const;
+  std::string getNetIdxList(const std::set<int32_t>& net_idx_set) const;
   void debugPlotGRModel(const std::string& flag);
 
   // environment

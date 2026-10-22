@@ -73,6 +73,7 @@ void GlobalRouter::route()
   RTLOG.info(Loc::current(), "Starting...");
 
   RTDM.getDatabase().get_net_global_result_map().clear();
+  _cost_weight = kCostWeight;
   initGRGridGraph();
 
   analyzeSupply();
@@ -123,19 +124,26 @@ void GlobalRouter::analyzeSupply()
         LayerCoord second_coord = is_horizontal ? LayerCoord(x + 1, y, layer_idx) : LayerCoord(x, y + 1, layer_idx);
         EXTLayerRect search_rect = getSearchRect(first_coord, second_coord);
         std::vector<LayerRect> wire_list = getCrossingWireList(search_rect);
-        std::vector<PlanarRect> enlarged_obs_rect_list;
+        std::vector<std::pair<int32_t, PlanarRect>> enlarged_obs_rect_list;
         for (auto& [net_idx, fixed_rect_set] : RTDM.getNetFixedRectMap(true, search_rect)) {
           for (EXTLayerRect* fixed_rect : fixed_rect_set) {
             PlanarRect fixed_shape = fixed_rect->get_real_rect();
-            enlarged_obs_rect_list.push_back(RTUTIL.getEnlargedRect(fixed_shape, routing_layer.getPRLSpacing(fixed_shape)));
+            enlarged_obs_rect_list.emplace_back(net_idx, RTUTIL.getEnlargedRect(fixed_shape, routing_layer.getPRLSpacing(fixed_shape)));
           }
         }
+        std::set<int32_t> fixed_demand_net_set;
         int32_t blocked_wire_num = 0;
         for (const LayerRect& wire : wire_list) {
-          for (const PlanarRect& enlarged_obs_rect : enlarged_obs_rect_list) {
+          bool is_blocked = false;
+          for (const auto& [fixed_net_idx, enlarged_obs_rect] : enlarged_obs_rect_list) {
             if (RTUTIL.isOpenOverlap(enlarged_obs_rect, wire)) {
-              blocked_wire_num++;
-              break;
+              if (!is_blocked) {
+                blocked_wire_num++;
+                is_blocked = true;
+              }
+              if (fixed_net_idx >= 0) {
+                fixed_demand_net_set.insert(fixed_net_idx);
+              }
             }
           }
         }
@@ -147,6 +155,7 @@ void GlobalRouter::analyzeSupply()
         GRWireEdge& wire_edge = _grid_graph.getWireEdge(GRWireEdgeId{x, y, layer_idx});
         wire_edge.supply = static_cast<double>(supply_num);
         wire_edge.fixed_demand = static_cast<double>(supply_num - usable_num);
+        wire_edge.fixed_demand_net_set = std::move(fixed_demand_net_set);
       }
     }
 
@@ -345,7 +354,7 @@ void GlobalRouter::patternRouteGRNetList()
 
 void GlobalRouter::mazeRouteGRNetList()
 {
-  constexpr int32_t kMaxIteration = 3;
+  constexpr int32_t kMaxIteration = 5;
   for (int32_t iteration = 0; iteration < kMaxIteration; iteration++) {
     std::vector<GRNet*> net_list = getOverflowNetList();
     if (net_list.empty()) {
@@ -371,7 +380,7 @@ void GlobalRouter::mazeRouteGRNetList()
     // Overflow is the primary reroute objective; cost only breaks ties when overflow is unchanged.
     bool accepted = after_overflow < before_overflow - kEpsilon || (after_overflow <= before_overflow + kEpsilon && after_cost < before_cost - kEpsilon);
     RTLOG.info(Loc::current(), "Maze reroute iteration ", iteration, ": nets ", net_list.size(), ", overflow ", before_overflow, " -> ", after_overflow,
-               ", cost ", before_cost, " -> ", after_cost, accepted ? " (accepted)" : " (rolled back)");
+               ", cost ", before_cost, " -> ", after_cost, ", cost_weight ", _cost_weight, accepted ? " (accepted)" : " (rolled back)");
     if (!accepted) {
       for (auto& [net, old_tree] : snapshot_list) {
         ripupRoute(*net, net->routing_tree);
@@ -379,6 +388,7 @@ void GlobalRouter::mazeRouteGRNetList()
       }
       break;
     }
+    _cost_weight *= 2.0;
   }
 }
 
@@ -572,7 +582,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
         }
       }
       int32_t next_state = state ^ 1;
-      double next_cost = current_cost + kViaBaseCost;
+      double next_cost = current_cost + getDirectionCost();
       if (next_cost < g[next_state]) {
         g[next_state] = next_cost;
         parent[next_state] = state;
@@ -709,7 +719,12 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
   if (!has_edge || total_supply <= kEpsilon) {
     return kInf;
   }
-  return kUnitWireCost + kCostWeight * getCongestionCost(total_supply, total_demand, 1.0);
+  return kUnitWireCost + _cost_weight * getCongestionCost(total_supply, total_demand, 1.0);
+}
+
+double GlobalRouter::getDirectionCost() const
+{
+  return kViaBaseCost * (_cost_weight / kCostWeight);
 }
 
 std::vector<GRNet*> GlobalRouter::getOverflowNetList()
@@ -744,6 +759,9 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
         if (!_grid_graph.hasWireEdge(edge_id)) {
           continue;
         }
+        if (isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
         if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
           return true;
         }
@@ -758,6 +776,9 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
       for (int32_t y = begin_y; y < end_y; y++) {
         GRWireEdgeId edge_id{x, y, layer_idx};
         if (!_grid_graph.hasWireEdge(edge_id)) {
+          continue;
+        }
+        if (isExemptWireEdge(net, edge_id)) {
           continue;
         }
         if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
@@ -783,6 +804,12 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
             if (!_grid_graph.hasWireEdge(edge_id)) {
               continue;
             }
+            if (isExemptWireEdge(net, edge_id)) {
+              continue;
+            }
+            if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
+              continue;
+            }
             if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
               return true;
             }
@@ -791,6 +818,12 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
           for (int32_t edge_y : {via_stack.coord.get_y() - 1, via_stack.coord.get_y()}) {
             GRWireEdgeId edge_id{via_stack.coord.get_x(), edge_y, side_layer_idx};
             if (!_grid_graph.hasWireEdge(edge_id)) {
+              continue;
+            }
+            if (isExemptWireEdge(net, edge_id)) {
+              continue;
+            }
+            if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
               continue;
             }
             if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
@@ -1404,7 +1437,7 @@ double GlobalRouter::getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_
   if (usable_supply <= kEpsilon) {
     return kInf;
   }
-  return amount * (kUnitWireCost + kCostWeight * getCongestionCost(usable_supply, edge.routing_demand, amount));
+  return amount * (kUnitWireCost + _cost_weight * getCongestionCost(usable_supply, edge.routing_demand, amount));
 }
 
 double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const
@@ -1479,7 +1512,7 @@ bool GlobalRouter::isAPViaSide(const GRNet& net, const PlanarCoord& coord, int32
 void GlobalRouter::ripupRoute(GRNet& net, const GRTree& routing_tree)
 {
   std::set<GRWireEdgeId> used_edge_set;
-  addWireDemand(routing_tree, used_edge_set, -1.0);
+  addWireDemand(net, routing_tree, used_edge_set, -1.0);
   for (const GRViaStack& via_stack : routing_tree.via_list) {
     addViaDemand(net, via_stack, used_edge_set, -kViaDemand);
   }
@@ -1488,15 +1521,16 @@ void GlobalRouter::ripupRoute(GRNet& net, const GRTree& routing_tree)
 void GlobalRouter::commitRoute(GRNet& net, const GRTree& routing_tree)
 {
   std::set<GRWireEdgeId> used_edge_set;
-  addWireDemand(routing_tree, used_edge_set, 1.0);
+  addWireDemand(net, routing_tree, used_edge_set, 1.0);
   for (const GRViaStack& via_stack : routing_tree.via_list) {
     addViaDemand(net, via_stack, used_edge_set, kViaDemand);
   }
   net.routing_tree = routing_tree;
 }
 
-void GlobalRouter::addWireDemand(const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta)
+void GlobalRouter::addWireDemand(const GRNet& net, const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta)
 {
+  int32_t net_idx = net.origin_net->get_net_idx();
   for (const GRWireSegment& wire_segment : routing_tree.wire_list) {
     int32_t layer_idx = wire_segment.first.get_layer_idx();
     if (layer_idx != wire_segment.second.get_layer_idx()) {
@@ -1512,6 +1546,9 @@ void GlobalRouter::addWireDemand(const GRTree& routing_tree, std::set<GRWireEdge
       int32_t end_x = std::max(wire_segment.first.get_x(), wire_segment.second.get_x());
       for (int32_t x = begin_x; x < end_x; x++) {
         GRWireEdgeId edge_id{x, y, layer_idx};
+        if (isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
         if (!used_edge_set.insert(edge_id).second) {
           continue;
         }
@@ -1522,6 +1559,11 @@ void GlobalRouter::addWireDemand(const GRTree& routing_tree, std::set<GRWireEdge
         }
         if (edge.routing_demand < 0.0) {
           edge.routing_demand = 0.0;
+        }
+        if (delta > 0.0) {
+          edge.routing_demand_net_set.insert(net_idx);
+        } else if (delta < 0.0) {
+          edge.routing_demand_net_set.erase(net_idx);
         }
       }
     } else if (wire_segment.first.get_x() == wire_segment.second.get_x()) {
@@ -1533,6 +1575,9 @@ void GlobalRouter::addWireDemand(const GRTree& routing_tree, std::set<GRWireEdge
       int32_t end_y = std::max(wire_segment.first.get_y(), wire_segment.second.get_y());
       for (int32_t y = begin_y; y < end_y; y++) {
         GRWireEdgeId edge_id{x, y, layer_idx};
+        if (isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
         if (!used_edge_set.insert(edge_id).second) {
           continue;
         }
@@ -1543,6 +1588,11 @@ void GlobalRouter::addWireDemand(const GRTree& routing_tree, std::set<GRWireEdge
         }
         if (edge.routing_demand < 0.0) {
           edge.routing_demand = 0.0;
+        }
+        if (delta > 0.0) {
+          edge.routing_demand_net_set.insert(net_idx);
+        } else if (delta < 0.0) {
+          edge.routing_demand_net_set.erase(net_idx);
         }
       }
     }
@@ -1555,6 +1605,7 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
       || via_stack.bottom_layer_idx >= via_stack.top_layer_idx) {
     return;
   }
+  int32_t net_idx = net.origin_net->get_net_idx();
   for (int32_t below_layer_idx = via_stack.bottom_layer_idx; below_layer_idx < via_stack.top_layer_idx; below_layer_idx++) {
     for (int32_t side_layer_idx : {below_layer_idx, below_layer_idx + 1}) {
       if (isAPViaSide(net, via_stack.coord, side_layer_idx)) {
@@ -1568,6 +1619,9 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
           if (!_grid_graph.hasWireEdge(edge_id)) {
             continue;
           }
+          if (isExemptWireEdge(net, edge_id)) {
+            continue;
+          }
           if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
             continue;
           }
@@ -1581,6 +1635,11 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
           }
           if (edge.routing_demand < 0.0) {
             edge.routing_demand = 0.0;
+          }
+          if (delta > 0.0) {
+            edge.routing_demand_net_set.insert(net_idx);
+          } else if (delta < 0.0) {
+            edge.routing_demand_net_set.erase(net_idx);
           }
         }
       } else {
@@ -1590,6 +1649,9 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
           if (!_grid_graph.hasWireEdge(edge_id)) {
             continue;
           }
+          if (isExemptWireEdge(net, edge_id)) {
+            continue;
+          }
           if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
             continue;
           }
@@ -1603,6 +1665,11 @@ void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, s
           }
           if (edge.routing_demand < 0.0) {
             edge.routing_demand = 0.0;
+          }
+          if (delta > 0.0) {
+            edge.routing_demand_net_set.insert(net_idx);
+          } else if (delta < 0.0) {
+            edge.routing_demand_net_set.erase(net_idx);
           }
         }
       }
@@ -1686,6 +1753,21 @@ void GlobalRouter::printSummary()
 bool GlobalRouter::isLayerInRange(int32_t layer_idx) const
 {
   return layer_idx >= _grid_graph.getBottomLayerIdx() && layer_idx <= _grid_graph.getTopLayerIdx();
+}
+
+std::string GlobalRouter::getNetIdxList(const std::set<int32_t>& net_idx_set) const
+{
+  std::string net_idx_list;
+  for (int32_t net_idx : net_idx_set) {
+    if (net_idx < 0) {
+      continue;
+    }
+    if (!net_idx_list.empty()) {
+      net_idx_list += ",";
+    }
+    net_idx_list += std::to_string(net_idx);
+  }
+  return net_idx_list;
 }
 
 void GlobalRouter::debugPlotGRModel(const std::string& flag)
@@ -1835,7 +1917,8 @@ void GlobalRouter::debugPlotGRModel(const std::string& flag)
           if (edge.getOverflow() <= kEpsilon) {
             continue;
           }
-          PlanarCoord first_coord = RTUTIL.getRealRectByGCell(PlanarCoord(x, y), gcell_axis).getMidPoint();
+          PlanarRect first_gcell_rect = RTUTIL.getRealRectByGCell(PlanarCoord(x, y), gcell_axis);
+          PlanarCoord first_coord = first_gcell_rect.getMidPoint();
           PlanarCoord second_grid_coord = is_horizontal ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
           PlanarCoord second_coord = RTUTIL.getRealRectByGCell(second_grid_coord, gcell_axis).getMidPoint();
 
@@ -1846,14 +1929,25 @@ void GlobalRouter::debugPlotGRModel(const std::string& flag)
           gp_path.set_segment(first_coord, second_coord);
           overflow_struct.push(gp_path);
 
-          GPText gp_text;
-          gp_text.set_coord(first_coord.get_x(), first_coord.get_y() + point_size);
-          gp_text.set_text_type(static_cast<int32_t>(GPDataType::kInfo));
-          gp_text.set_message(
-              RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(), ", demand: ", edge.getDemand()));
-          gp_text.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
-          gp_text.set_presentation(GPTextPresentation::kLeftMiddle);
-          overflow_struct.push(gp_text);
+          std::string demand_net_idx_list = getNetIdxList(edge.routing_demand_net_set);
+          std::string fixed_demand_net_idx_list = getNetIdxList(edge.fixed_demand_net_set);
+          std::vector<std::string> info_line_list;
+          info_line_list.push_back(RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(),
+                                                    ", demand: ", edge.getDemand()));
+          info_line_list.push_back(RTUTIL.getString("demand_nets: ", demand_net_idx_list.empty() ? "-" : demand_net_idx_list));
+          info_line_list.push_back(RTUTIL.getString("fixed_nets: ", fixed_demand_net_idx_list.empty() ? "-" : fixed_demand_net_idx_list));
+          int32_t line_spacing = std::max(1, first_gcell_rect.getYSpan() / 12);
+          int32_t text_y = first_coord.get_y() + line_spacing;
+          for (const std::string& info_line : info_line_list) {
+            GPText gp_text;
+            gp_text.set_coord(first_coord.get_x(), text_y);
+            gp_text.set_text_type(static_cast<int32_t>(GPDataType::kInfo));
+            gp_text.set_message(info_line);
+            gp_text.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
+            gp_text.set_presentation(GPTextPresentation::kLeftMiddle);
+            overflow_struct.push(gp_text);
+            text_y -= line_spacing;
+          }
         }
       }
     }
