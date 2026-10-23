@@ -50,8 +50,8 @@ unsigned TclCreateGeneratedClock::exec()
   std::vector<std::string> sources;
   std::vector<std::string> targets;
   try {
-    sources = findClockSources(database, getOptionOrArg("-source")->getStringList());
-    targets = findClockSources(database, getOptionOrArg("objects")->getStringList());
+    sources = findClockSources(database, getOptionObjectNames("-source"));
+    targets = findClockSources(database, getOptionObjectNames("objects"));
   } catch (const std::exception& error) {
     setTclError(error.what());
     return 0;
@@ -211,11 +211,16 @@ unsigned TclCreateGeneratedClock::exec()
   definition.master_clock = master_name;
   definition.master_source = sources.front();
   definition.targets = targets;
-  if (getOptionOrArg("-divide_by")->is_set_val()) definition.divide_by = getOptionOrArg("-divide_by")->getDoubleVal();
-  if (getOptionOrArg("-multiply_by")->is_set_val()) definition.multiply_by = getOptionOrArg("-multiply_by")->getDoubleVal();
-  if (getOptionOrArg("-duty_cycle")->is_set_val()) definition.duty_cycle = getOptionOrArg("-duty_cycle")->getDoubleVal();
-  if (getOptionOrArg("-edges")->is_set_val()) definition.edges = getOptionOrArg("-edges")->getDoubleList();
-  if (getOptionOrArg("-edge_shift")->is_set_val()) definition.edge_shifts = getOptionOrArg("-edge_shift")->getDoubleList();
+  if (getOptionOrArg("-divide_by")->is_set_val())
+    definition.divide_by = getOptionOrArg("-divide_by")->getDoubleVal();
+  if (getOptionOrArg("-multiply_by")->is_set_val())
+    definition.multiply_by = getOptionOrArg("-multiply_by")->getDoubleVal();
+  if (getOptionOrArg("-duty_cycle")->is_set_val())
+    definition.duty_cycle = getOptionOrArg("-duty_cycle")->getDoubleVal();
+  if (getOptionOrArg("-edges")->is_set_val())
+    definition.edges = getOptionOrArg("-edges")->getDoubleList();
+  if (getOptionOrArg("-edge_shift")->is_set_val())
+    definition.edge_shifts = getOptionOrArg("-edge_shift")->getDoubleList();
   definition.invert = getOptionOrArg("-invert")->is_set_val();
   definition.preinvert = getOptionOrArg("-preinvert")->is_set_val();
   definition.combinational = combinational;

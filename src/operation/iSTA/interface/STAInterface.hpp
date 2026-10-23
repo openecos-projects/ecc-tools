@@ -97,6 +97,7 @@ class STAInterface
 #if 1  // iSTA
   void initSTA(std::map<std::string, std::any> config_map);
   void runSTA();
+  void outputSDC(const std::string& file_path);
   void extractLib();
   void destroySTA();
   bool isInitialized() const { return _initialized; }

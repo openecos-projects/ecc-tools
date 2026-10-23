@@ -16,17 +16,20 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
+
 #include <tcl_util.h>
 
 namespace python_interface {
 
-bool initMJ(std::string& config, std::map<std::string, std::string>& config_dict);
-bool insertFiller(std::string& config, std::map<std::string, std::string>& config_dict);
-bool checkAntenna(std::string& config, std::map<std::string, std::string>& config_dict);
-bool insertMetal(std::string& config, std::map<std::string, std::string>& config_dict);
-bool defFlatten(std::string& config, std::map<std::string, std::string>& config_dict);
+bool initMJ(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool insertFiller(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool checkAntenna(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool insertMetal(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool defFlatten(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool analyzeDriver();
-bool cutDEF(std::string& config, std::map<std::string, std::string>& config_dict);
+bool cutDEF(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool destroyMJ();
 
 }  // namespace python_interface

@@ -33,15 +33,15 @@
 namespace icts {
 namespace {
 
-auto elapsedSeconds(const std::string& stats) -> int
-{
-  const std::regex pattern(R"(elapsed = ([0-9]{2}):([0-9]{2}):([0-9]{2}))");
-  std::smatch match;
-  if (!std::regex_search(stats, match, pattern)) {
-    return -1;
-  }
-  return std::stoi(match[1].str()) * 3600 + std::stoi(match[2].str()) * 60 + std::stoi(match[3].str());
-}
+// The reported string carries whole seconds, so proving "this call rebased the baseline"
+// needs only a gap far below one second when the double-precision accessors are read
+// instead. Keeping the gap at a few milliseconds is what makes these three tests cheap:
+// what they assert is WHICH call rebases the baseline, not how long real time took.
+constexpr auto kBaselineGap = std::chrono::milliseconds(5);
+constexpr double kBaselineGapSeconds = 0.005;
+// A measured gap is always at least the sleep and never much more, so compare against a
+// margin rather than the exact sleep: the assertion is "time passed", not a stopwatch.
+constexpr double kOneAndAHalfGaps = 1.5 * kBaselineGapSeconds;
 
 TEST(MonitorTest, StatsInfoUsesIRTRuntimeFormat)
 {
@@ -54,35 +54,35 @@ TEST(MonitorTest, StatsInfoUsesIRTRuntimeFormat)
 TEST(MonitorTest, IndividualGettersDoNotAdvanceTheBaseline)
 {
   Monitor monitor;
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  std::this_thread::sleep_for(kBaselineGap);
   (void) monitor.getElapsedTime();
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-  EXPECT_GE(elapsedSeconds(monitor.getStatsInfo()), 2);
+  (void) monitor.getCPUTime();
+  std::this_thread::sleep_for(kBaselineGap);
+  // Two gaps have passed and neither plain getter touched the baseline, so the elapse
+  // still covers both of them.
+  EXPECT_GE(monitor.getElapsedSeconds(), kOneAndAHalfGaps);
 }
 
 TEST(MonitorTest, StatsInfoAdvancesTheLapBaseline)
 {
   Monitor monitor;
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-  EXPECT_GE(elapsedSeconds(monitor.getStatsInfo()), 1);
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
-  const auto lap_seconds = elapsedSeconds(monitor.getStatsInfo());
-  EXPECT_GE(lap_seconds, 1);
-  EXPECT_LE(lap_seconds, 2);
+  std::this_thread::sleep_for(kBaselineGap);
+  (void) monitor.getStatsInfo();
+  // The call that produced the string rebased the baseline, so nothing has elapsed yet.
+  EXPECT_LT(monitor.getElapsedSeconds(), kBaselineGapSeconds);
 }
 
 TEST(MonitorTest, NestedMonitorsKeepIndependentBaselines)
 {
   Monitor outer;
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  std::this_thread::sleep_for(kBaselineGap);
   Monitor inner;
-  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  std::this_thread::sleep_for(kBaselineGap);
 
-  EXPECT_GE(elapsedSeconds(outer.getStatsInfo()), 2);
-  const auto inner_seconds = elapsedSeconds(inner.getStatsInfo());
-  EXPECT_GE(inner_seconds, 1);
-  EXPECT_LE(inner_seconds, 2);
+  // The inner monitor started one gap later, so the outer one has seen both gaps and the
+  // inner one only the second: the two baselines do not interfere.
+  EXPECT_GE(outer.getElapsedSeconds(), kOneAndAHalfGaps);
+  EXPECT_LT(inner.getElapsedSeconds(), kOneAndAHalfGaps);
 }
-
 }  // namespace
 }  // namespace icts

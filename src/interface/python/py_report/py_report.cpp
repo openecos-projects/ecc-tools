@@ -18,28 +18,30 @@
 
 #include <report_manager.h>
 
+#include "py_path_utils.h"
+
 namespace python_interface {
-bool reportDbSummary(const std::string& path)
+bool reportDbSummary(const std::optional<std::filesystem::path>& path)
 {
-  return rptInst->reportDBSummary(path);
+  return rptInst->reportDBSummary(path_or_empty(path));
 }
-bool reportWireLength(const std::string& path)
+bool reportWireLength(const std::optional<std::filesystem::path>& path)
 {
-  return rptInst->reportWL(path);
-}
-
-bool reportCong(const std::string& path)
-{
-  return rptInst->reportCongestion(path);
-}
-bool reportDanglingNet(const std::string& path)
-{
-  return rptInst->reportDanglingNet(path);
+  return rptInst->reportWL(path_or_empty(path));
 }
 
-bool reportRoute(const std::string& path, const std::string& netname, bool summary)
+bool reportCong(const std::optional<std::filesystem::path>& path)
 {
-  return rptInst->reportRoute(path, netname, summary);
+  return rptInst->reportCongestion(path_or_empty(path));
+}
+bool reportDanglingNet(const std::optional<std::filesystem::path>& path)
+{
+  return rptInst->reportDanglingNet(path_or_empty(path));
+}
+
+bool reportRoute(const std::optional<std::filesystem::path>& path, const std::string& netname, bool summary)
+{
+  return rptInst->reportRoute(path_or_empty(path), netname, summary);
 }
 
 bool reportPlaceDistribution(const std::vector<std::string>& prefixes)
@@ -51,7 +53,7 @@ bool reportPrefixedInst(const std::string& prefix, int level, int num_threshold)
   return rptInst->reportInstLevel(prefix, level,  num_threshold);
 }
 
-bool reportDRC(const std::string& filename){
-  return rptInst->reportDRC(filename);
+bool reportDRC(const std::filesystem::path& filename){
+  return rptInst->reportDRC(filename.string());
 }
 }  // namespace python_interface

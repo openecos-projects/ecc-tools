@@ -16,6 +16,9 @@
 // ***************************************************************************************
 #pragma once
 
+#include <map>
+#include <tuple>
+
 #include "Database.hpp"
 #include "ERModel.hpp"
 #include "PowerGraph.hpp"
@@ -24,6 +27,26 @@
 namespace iemir {
 
 #define EMIRER (iemir::EMIRReporter::getInst())
+
+struct EMReportRow
+{
+  bool is_via = false;
+  std::size_t order = 0;
+  std::string object_name;
+  double first_x = 0.0;
+  double first_y = 0.0;
+  double second_x = 0.0;
+  double second_y = 0.0;
+  double em_ratio_percent = 0.0;
+  double em_limit = 0.0;
+  bool has_em_limit = false;
+  double current = 0.0;
+  std::string net_name;
+  double width = 0.0;
+  std::string cut_box;
+  std::string direction;
+  double blech_length = 0.0;
+};
 
 class EMIRReporter
 {
@@ -45,6 +68,9 @@ class EMIRReporter
   EMIRReporter& operator=(const EMIRReporter& other) = delete;
   EMIRReporter& operator=(EMIRReporter&& other) = delete;
   // function
+  using ViaGeometryKey = std::tuple<int32_t, int32_t, int32_t, int32_t, int32_t, int32_t>;
+  std::map<std::string, std::map<ViaGeometryKey, PowerVia*>> _via_geometry_index;
+  void buildViaGeometryIndex();
   ERModel initERModel();
   void buildIRReportFilePath(ERModel& er_model);
   void buildEMReportFilePath(ERModel& er_model);
@@ -61,9 +87,9 @@ class EMIRReporter
   double getAverageIRDrop(PowerGraph& power_graph);
   double getPercentageDrop(PowerGraph& power_graph);
   void outputEMReport(ERModel& er_model);
-  void outputEMReportFile(const std::string& report_file_path, bool worst_only);
+  std::vector<EMReportRow> buildEMReportRows();
+  void outputEMEvaluation();
   void outputEMReportHeader(std::ofstream* em_report_file, bool worst_only);
-  void outputEMReportRows(std::ofstream* em_report_file, bool worst_only);
   void outputResNetworkReport();
   void outputResNetworkReportFile(const std::string& report_file_path);
   void outputResNetworkReportHeader(std::ofstream* res_network_report_file);

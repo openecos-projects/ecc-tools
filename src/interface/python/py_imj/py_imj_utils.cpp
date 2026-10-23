@@ -77,6 +77,10 @@ bool initAntennaConfigMapByJSON(const std::string& config, std::map<std::string,
   if (!value.empty()) {
     config_map["-report_dir"] = value;
   }
+  value = ecc::getJsonData(json, {"MJ", "-step_json"});
+  if (!value.empty()) {
+    config_map["-step_json"] = value;
+  }
   return true;
 }
 
@@ -84,6 +88,9 @@ void initAntennaConfigMapByDict(std::map<std::string, std::string>& config_dict,
 {
   if (config_dict.count("-report_dir") > 0 && !config_dict["-report_dir"].empty()) {
     config_map["-report_dir"] = config_dict["-report_dir"];
+  }
+  if (config_dict.count("-step_json") > 0 && !config_dict["-step_json"].empty()) {
+    config_map["-step_json"] = config_dict["-step_json"];
   }
 }
 

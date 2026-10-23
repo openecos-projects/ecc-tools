@@ -22,6 +22,7 @@ namespace tcl {
 
 TclCheckAntenna::TclCheckAntenna(const char* cmd_name) : TclCmd(cmd_name)
 {
+  _config_list.push_back(std::make_pair("-step_json", ValueType::kString));
   TclUtil::addOption(this, _config_list);
 }
 

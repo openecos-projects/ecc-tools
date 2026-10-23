@@ -9,7 +9,6 @@
 
 namespace {
 
-constexpr const char* kFormatMarker = "# iEMIR_INSTANCE_POWER_V1";
 constexpr const char* kHeader
     = "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\ttotal_power_w\taverage_current_a";
 
@@ -72,16 +71,11 @@ std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& fi
   std::unordered_set<std::string> instance_names;
   std::string line;
   std::size_t line_number = 0;
-  bool saw_marker = false;
   bool saw_header = false;
   while (std::getline(input, line)) {
     line_number++;
     if (!line.empty() && line.back() == '\r') {
       line.pop_back();
-    }
-    if (!saw_header && line == kFormatMarker) {
-      saw_marker = true;
-      continue;
     }
     if (!saw_header && line == kHeader) {
       saw_header = true;
@@ -124,9 +118,6 @@ std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& fi
       throw std::runtime_error("voltage_v * average_current_a does not match total_power_w at line " + std::to_string(line_number));
     }
     records.push_back(std::move(record));
-  }
-  if (!saw_marker) {
-    throw std::runtime_error("Missing instance-power format marker: " + std::string(kFormatMarker));
   }
   if (!saw_header) {
     throw std::runtime_error("Missing instance-power column header in " + file_path);

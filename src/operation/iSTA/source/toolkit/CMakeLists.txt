@@ -3,6 +3,8 @@ add_subdirectory(${ISTA_TOOLKIT}/monitor)
 add_subdirectory(${ISTA_TOOLKIT}/utility)
 add_subdirectory(${ISTA_TOOLKIT}/path_exception)
 
+add_subdirectory(${ISTA_TOOLKIT}/output_sdc)
+
 add_library(ista_toolkit INTERFACE)
 
 target_link_libraries(ista_toolkit

@@ -1,5 +1,6 @@
 add_library(tcl_ista
     ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_init_sta.cpp
+    ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_output_sdc.cpp
     ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_run_sta.cpp
     ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_extract_lib.cpp
     ${HOME_INTERFACE}/tcl/tcl_ista/src/tcl_destroy_sta.cpp

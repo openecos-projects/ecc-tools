@@ -18,6 +18,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_ipw.h"
 
@@ -26,7 +27,7 @@ namespace py = pybind11;
 
 void register_ipw(py::module& m)
 {
-  m.def("init_pw", initPW, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("init_pw", initPW, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
   m.def("run_pw", runPW, py::arg("is_peak") = false, py::arg("is_avg") = false);
   m.def("destroy_pw", destroyPW);
 }

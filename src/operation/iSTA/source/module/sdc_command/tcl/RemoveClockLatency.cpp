@@ -8,6 +8,7 @@
 #include "DataManager.hpp"
 #include "clock/ClockCommands.hpp"
 #include "object/ObjectQuery.hpp"
+#include "tcl/ToolCommands.hpp"
 
 namespace ista::sdc {
 

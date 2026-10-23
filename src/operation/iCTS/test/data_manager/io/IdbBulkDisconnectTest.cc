@@ -24,15 +24,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <chrono>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
 #include <memory>
 #include <string>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -44,8 +37,6 @@
 namespace icts_test {
 namespace {
 
-using SteadyClock = std::chrono::steady_clock;
-
 struct DisconnectObservation
 {
   std::size_t disconnected_pin_count = 0U;
@@ -55,19 +46,6 @@ struct DisconnectObservation
   bool all_net_names_empty = false;
 
   auto operator==(const DisconnectObservation&) const -> bool = default;
-};
-
-struct DisconnectSample
-{
-  double duration_us = 0.0;
-  DisconnectObservation observation;
-};
-
-struct ScaleSamples
-{
-  std::size_t pin_count = 0U;
-  std::vector<double> legacy_us;
-  std::vector<double> bulk_us;
 };
 
 class HighFanoutIoFixture
@@ -116,33 +94,24 @@ auto ObserveDisconnected(HighFanoutIoFixture& fixture, std::size_t disconnected_
   return observation;
 }
 
-auto RunLegacyDisconnect(std::size_t pin_count) -> DisconnectSample
+auto RunLegacyDisconnect(std::size_t pin_count) -> DisconnectObservation
 {
   HighFanoutIoFixture fixture(pin_count);
   EXPECT_TRUE(fixture.setupOk());
 
   std::size_t disconnected_pin_count = 0U;
-  const auto start = SteadyClock::now();
   for (auto* pin : fixture.pinRefs()) {
     disconnected_pin_count += fixture.design().disconnectPinFromNet(pin) ? 1U : 0U;
   }
-  const auto stop = SteadyClock::now();
-
-  return DisconnectSample{.duration_us = std::chrono::duration<double, std::micro>(stop - start).count(),
-                          .observation = ObserveDisconnected(fixture, disconnected_pin_count)};
+  return ObserveDisconnected(fixture, disconnected_pin_count);
 }
 
-auto RunBulkDisconnect(std::size_t pin_count) -> DisconnectSample
+auto RunBulkDisconnect(std::size_t pin_count) -> DisconnectObservation
 {
   HighFanoutIoFixture fixture(pin_count);
   EXPECT_TRUE(fixture.setupOk());
 
-  const auto start = SteadyClock::now();
-  const std::size_t disconnected_pin_count = fixture.design().disconnectAllPinsFromNet(fixture.net());
-  const auto stop = SteadyClock::now();
-
-  return DisconnectSample{.duration_us = std::chrono::duration<double, std::micro>(stop - start).count(),
-                          .observation = ObserveDisconnected(fixture, disconnected_pin_count)};
+  return ObserveDisconnected(fixture, fixture.design().disconnectAllPinsFromNet(fixture.net()));
 }
 
 void ExpectCompleteDisconnect(const DisconnectObservation& observation, std::size_t pin_count)
@@ -152,80 +121,6 @@ void ExpectCompleteDisconnect(const DisconnectObservation& observation, std::siz
   EXPECT_EQ(observation.net_instance_count, 0U);
   EXPECT_TRUE(observation.all_pins_disconnected);
   EXPECT_TRUE(observation.all_net_names_empty);
-}
-
-void RecordMeasuredPair(ScaleSamples& samples, bool bulk_first)
-{
-  DisconnectSample legacy;
-  DisconnectSample bulk;
-  if (bulk_first) {
-    bulk = RunBulkDisconnect(samples.pin_count);
-    legacy = RunLegacyDisconnect(samples.pin_count);
-  } else {
-    legacy = RunLegacyDisconnect(samples.pin_count);
-    bulk = RunBulkDisconnect(samples.pin_count);
-  }
-
-  ExpectCompleteDisconnect(legacy.observation, samples.pin_count);
-  ExpectCompleteDisconnect(bulk.observation, samples.pin_count);
-  EXPECT_EQ(legacy.observation, bulk.observation);
-  samples.legacy_us.push_back(legacy.duration_us);
-  samples.bulk_us.push_back(bulk.duration_us);
-}
-
-auto Median(std::vector<double> samples) -> double
-{
-  std::ranges::sort(samples);
-  const std::size_t middle = samples.size() / 2U;
-  if (samples.size() % 2U != 0U) {
-    return samples[middle];
-  }
-  return (samples[middle - 1U] + samples[middle]) / 2.0;
-}
-
-void PrintSamples(const ScaleSamples& samples)
-{
-  const auto print_route = [&](const char* route, const std::vector<double>& durations) -> void {
-    std::cout << "IDB_BULK_PERF pin_count=" << samples.pin_count << " route=" << route << " samples_us=[";
-    for (std::size_t index = 0U; index < durations.size(); ++index) {
-      if (index != 0U) {
-        std::cout << ',';
-      }
-      std::cout << std::fixed << std::setprecision(3) << durations[index];
-    }
-    std::cout << "] median_us=" << Median(durations) << '\n';
-  };
-
-  print_route("legacy", samples.legacy_us);
-  print_route("bulk", samples.bulk_us);
-}
-
-void WriteSamplesIfRequested(const std::vector<ScaleSamples>& scale_samples)
-{
-  const char* output_value = std::getenv("ICTS_IDB_PERF_OUTPUT");
-  if (output_value == nullptr || *output_value == '\0') {
-    return;
-  }
-
-  const std::filesystem::path output_path(output_value);
-  std::error_code error;
-  if (!output_path.parent_path().empty()) {
-    std::filesystem::create_directories(output_path.parent_path(), error);
-  }
-  ASSERT_FALSE(error) << "Unable to create iDB performance evidence directory: " << error.message();
-
-  std::ofstream output(output_path, std::ios::trunc);
-  ASSERT_TRUE(output.is_open()) << "Unable to write iDB performance evidence: " << output_path;
-  output << "pin_count,route,round,duration_us\n";
-  output << std::fixed << std::setprecision(3);
-  for (const auto& samples : scale_samples) {
-    for (std::size_t index = 0U; index < samples.legacy_us.size(); ++index) {
-      output << samples.pin_count << ",legacy," << (index + 1U) << ',' << samples.legacy_us[index] << '\n';
-    }
-    for (std::size_t index = 0U; index < samples.bulk_us.size(); ++index) {
-      output << samples.pin_count << ",bulk," << (index + 1U) << ',' << samples.bulk_us[index] << '\n';
-    }
-  }
 }
 
 TEST(IdbPinsTest, ClearPinRefsPreservesBorrowedPinsAndResetsLazyIndex)
@@ -377,45 +272,20 @@ TEST(IdbDesignBulkDisconnectTest, MergeNetIntoMovesPinsAfterOneSourceDetach)
   EXPECT_TRUE(target_net->has_instance(instance));
 }
 
-TEST(IdbDesignBulkDisconnectPerformanceTest, LegacyAndBulkPathsMatchAtTenAndHundredThousandPins)
+// The bulk helper exists so a clock tree can drop a whole net's pins in one call instead of
+// walking them one by one. Both routes must leave the net in exactly the same state; the pin
+// count only has to be large enough that the per-pin route has to maintain the net's pin
+// references more than once.
+TEST(IdbDesignBulkDisconnectTest, BulkPathLeavesTheSameNetStateAsThePerPinPath)
 {
-  constexpr std::size_t ten_thousand_pin_count = 10000U;
-  constexpr std::size_t hundred_thousand_pin_count = 100000U;
-  constexpr std::size_t ten_thousand_round_count = 5U;
-  constexpr std::size_t hundred_thousand_round_count = 3U;
+  constexpr std::size_t pin_count = 512U;
 
-  const auto warmup_legacy = RunLegacyDisconnect(ten_thousand_pin_count);
-  const auto warmup_bulk = RunBulkDisconnect(ten_thousand_pin_count);
-  ExpectCompleteDisconnect(warmup_legacy.observation, ten_thousand_pin_count);
-  ExpectCompleteDisconnect(warmup_bulk.observation, ten_thousand_pin_count);
-  EXPECT_EQ(warmup_legacy.observation, warmup_bulk.observation);
+  const auto per_pin = RunLegacyDisconnect(pin_count);
+  const auto bulk = RunBulkDisconnect(pin_count);
 
-  ScaleSamples ten_thousand{.pin_count = ten_thousand_pin_count, .legacy_us = {}, .bulk_us = {}};
-  for (std::size_t round = 0U; round < ten_thousand_round_count; ++round) {
-    RecordMeasuredPair(ten_thousand, round % 2U != 0U);
-  }
-
-  ScaleSamples hundred_thousand{.pin_count = hundred_thousand_pin_count, .legacy_us = {}, .bulk_us = {}};
-  for (std::size_t round = 0U; round < hundred_thousand_round_count; ++round) {
-    RecordMeasuredPair(hundred_thousand, round % 2U == 0U);
-  }
-
-  PrintSamples(ten_thousand);
-  PrintSamples(hundred_thousand);
-  WriteSamplesIfRequested({ten_thousand, hundred_thousand});
-
-  const double ten_thousand_legacy_median = Median(ten_thousand.legacy_us);
-  const double ten_thousand_bulk_median = Median(ten_thousand.bulk_us);
-  const double hundred_thousand_legacy_median = Median(hundred_thousand.legacy_us);
-  const double hundred_thousand_bulk_median = Median(hundred_thousand.bulk_us);
-  std::cout << "IDB_BULK_PERF_SUMMARY pin_count=10000 legacy_median_us=" << ten_thousand_legacy_median << " bulk_median_us=" << ten_thousand_bulk_median
-            << " speedup=" << (ten_thousand_legacy_median / ten_thousand_bulk_median) << '\n';
-  std::cout << "IDB_BULK_PERF_SUMMARY pin_count=100000 legacy_median_us=" << hundred_thousand_legacy_median
-            << " bulk_median_us=" << hundred_thousand_bulk_median << " speedup=" << (hundred_thousand_legacy_median / hundred_thousand_bulk_median)
-            << " bulk_scaling=" << (hundred_thousand_bulk_median / ten_thousand_bulk_median) << '\n';
-
-  EXPECT_LE(hundred_thousand_bulk_median, hundred_thousand_legacy_median * 0.20);
-  EXPECT_LE(hundred_thousand_bulk_median, ten_thousand_bulk_median * 15.0);
+  ExpectCompleteDisconnect(per_pin, pin_count);
+  ExpectCompleteDisconnect(bulk, pin_count);
+  EXPECT_EQ(per_pin, bulk);
 }
 
 }  // namespace

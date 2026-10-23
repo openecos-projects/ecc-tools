@@ -14,24 +14,25 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "DataManager.hpp"
-#include "exception/PathExceptionCommand.hpp"
+#pragma once
 
-namespace ista::sdc {
+#include <filesystem>
+#include <optional>
+#include <string>
 
-TclResetPath::TclResetPath(const char* cmd_name, ClientData client_data) : TclPathException(cmd_name, client_data, false)
+namespace python_interface {
+
+// Canonicalize an optional path parameter: std::nullopt and an empty path
+// both map to "", a non-empty path maps to its .string(). This preserves the
+// empty-string unset sentinel the interface internals check with .empty(),
+// so an omitted/None argument and an explicitly passed "" stay
+// indistinguishable after canonicalization.
+inline std::string path_or_empty(const std::optional<std::filesystem::path>& path)
 {
-  addOption(new ecc::TclSwitchOption("-setup"));
-  addOption(new ecc::TclSwitchOption("-hold"));
+  if (not path.has_value() || path->empty()) {
+    return "";
+  }
+  return path->string();
 }
 
-unsigned TclResetPath::exec()
-{
-  Database& database = STADM.getDatabase();
-  TimingException filter = parsePathSelector(database, true);
-  applyAnalysisQualifiers(filter);
-  resetPathExceptions(database, filter);
-  return 1;
-}
-
-}  // namespace ista::sdc
+}  // namespace python_interface

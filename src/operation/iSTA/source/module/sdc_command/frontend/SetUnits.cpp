@@ -14,16 +14,15 @@ TclSetUnits::TclSetUnits(const char* cmd_name, ClientData client_data) : SdcTclC
 
 unsigned TclSetUnits::exec()
 {
-  std::map<std::string, std::string> suffix_map = {{"-time", "s"},    {"-capacitance", "f"}, {"-resistance", "ohm"}, {"-voltage", "v"},
-                                                {"-current", "a"}, {"-power", "w"},       {"-distance", "m"}};
+  std::map<std::string, std::string> suffix_map
+      = {{"-time", "s"}, {"-capacitance", "f"}, {"-resistance", "ohm"}, {"-voltage", "v"}, {"-current", "a"}, {"-power", "w"}, {"-distance", "m"}};
   for (const auto& [option, value] : getOptionValueList()) {
     double declared_scale = parseUnitScale(value, suffix_map[option]);
     double active_scale = getUnitScale(option);
-    // Like OpenSTA, this is an assertion of units, not a change of units.
+    // This asserts the expected units; it does not rescale stored values.
     if (std::abs(declared_scale - active_scale) > 1e-6 * std::max(declared_scale, active_scale)) {
       std::ostringstream message;
-      message << "set_units " << option << " " << value << " differs from the active iSTA unit scale " << active_scale
-              << " (SI); units are unchanged";
+      message << "set_units " << option << " " << value << " differs from the active iSTA unit scale " << active_scale << " (SI); units are unchanged";
       warn(message.str());
     }
   }
@@ -44,8 +43,7 @@ double TclSetUnits::parseUnitScale(const std::string& value, const std::string& 
   if (actual_suffix != suffix || !std::regex_match(prefix, match, std::regex("^(10*\\.?0*)?([Mkmunpf])?$"))) {
     throw std::invalid_argument("invalid unit: " + value);
   }
-  std::map<std::string, double> prefix_scale_map = {{"", 1.0}, {"M", 1e6}, {"k", 1e3}, {"m", 1e-3},
-                                                {"u", 1e-6}, {"n", 1e-9}, {"p", 1e-12}, {"f", 1e-15}};
+  std::map<std::string, double> prefix_scale_map = {{"", 1.0}, {"M", 1e6}, {"k", 1e3}, {"m", 1e-3}, {"u", 1e-6}, {"n", 1e-9}, {"p", 1e-12}, {"f", 1e-15}};
   double multiplier = match[1].matched ? std::stod(match[1].str()) : 1.0;
   double scale = multiplier * prefix_scale_map[match[2].str()];
   if (!std::isfinite(scale) || scale <= 0.0) {

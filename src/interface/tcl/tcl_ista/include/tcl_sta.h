@@ -36,6 +36,14 @@ class TclInitSTA : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
+class TclOutputSDC : public TclCmd
+{
+ public:
+  explicit TclOutputSDC(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclRunSTA : public TclCmd
 {
  public:

@@ -19,14 +19,6 @@ class TclCurrentDesign : public SdcTclCmd
   unsigned exec() override;
 };
 
-class TclRemoveFromCollection : public SdcTclCmd
-{
- public:
-  TclRemoveFromCollection(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
 class TclGetPins : public SdcTclCmd
 {
  public:
@@ -75,14 +67,6 @@ class TclAllClocks : public SdcTclCmd
   unsigned exec() override;
 };
 
-class TclGetFullName : public SdcTclCmd
-{
- public:
-  TclGetFullName(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
 class TclGetPorts : public SdcTclCmd
 {
  public:
@@ -96,13 +80,6 @@ class TclGetClocks : public SdcTclCmd
  public:
   TclGetClocks(const char* cmd_name, ClientData client_data);
   unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclGetGeneratedClocks : public TclGetClocks
-{
- public:
-  TclGetGeneratedClocks(const char* cmd_name, ClientData client_data);
   unsigned exec() override;
 };
 
