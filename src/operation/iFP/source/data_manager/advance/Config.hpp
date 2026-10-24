@@ -48,11 +48,13 @@ struct PGIOCoreConnectConfig
   std::vector<std::string> nets;
   // Empty means the layers declared by the core stripe definitions.
   std::vector<std::string> pin_layers;
+  bool fail_on_unresolved = false;
+  // Electrical requirement; configurable.
+  int32_t min_contacts_per_port = 1;
+  // Internal routing policy; not part of the JSON schema.
   bool select_outermost_pin = true;
   bool connect_all_legal_stripes = true;
-  bool fail_on_unresolved = false;
-  bool require_each_pin_layer = true;
-  int32_t min_contacts_per_port = 1;
+  bool require_each_pin_layer = false;
   int32_t max_contacts_per_port = 0;
   // Limits are per PORT; zero means no artificial cap.
   int32_t max_routes_per_stripe = 0;

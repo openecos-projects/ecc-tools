@@ -110,6 +110,8 @@ class FPInterface
   void adjustPGLineSegmentListByViaEnclosure();
   idb::IdbVia* getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
   std::vector<idb::IdbVia*> getPGViaStack(PGSegment& pg_segment);
+  // Minimum square span that satisfies every cut rule between two layers.
+  int32_t getPGViaMinSpan(const std::string& bottom_layer_name, const std::string& top_layer_name);
   std::vector<InstancePinShape> getPGViaShapes(PGSegment& pg_segment);
   idb::IdbVia* buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
   std::pair<int32_t, int32_t> getIDBViaRowCol(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);

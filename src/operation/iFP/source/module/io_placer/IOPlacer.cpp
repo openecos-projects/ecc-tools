@@ -250,22 +250,16 @@ bool IOPlacer::growDieForIoCapacity(const IOCapacityReport& report, double initi
   const double max_die_width = initial_die_width * kIoCellResizeMaxRatio;
   const double max_die_height = initial_die_height * kIoCellResizeMaxRatio;
 
-  double scale = std::max({1.0, required_die_width / current_die_width, required_die_height / current_die_height});
-  if (scale <= 1.0 + 1e-9) {
-    // Capacity can still fail because of free-segment fragmentation even when
-    // the total length is sufficient; use a small step in that case.
-    scale = 1.05;
-  }
-
   if (config.die_mode == DieMode::kDieSize) {
-    const double allowed_scale = std::min(max_die_width / current_die_width, max_die_height / current_die_height);
-    scale = std::min(scale, allowed_scale);
-    if (scale <= 1.0 + 1e-9) {
+    // Grow each axis only as much as its own sides require.
+    const double new_width = std::min(std::max(current_die_width, required_die_width), max_die_width);
+    const double new_height = std::min(std::max(current_die_height, required_die_height), max_die_height);
+    if (new_width <= current_die_width + 1e-9 && new_height <= current_die_height + 1e-9) {
       return false;
     }
-    config.die_width_micron = current_die_width * scale;
-    config.die_height_micron = current_die_height * scale;
-    FPLOG.info(Loc::current(), "Growing die_size by ", scale, " for IO capacity.");
+    config.die_width_micron = new_width;
+    config.die_height_micron = new_height;
+    FPLOG.info(Loc::current(), "Resized die_size for IO capacity: ", new_width, " x ", new_height, " um.");
     return true;
   }
 

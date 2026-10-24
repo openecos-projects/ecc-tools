@@ -39,6 +39,7 @@ struct IOSideCapacity
   int32_t signal_length = 0;
   int32_t free_length = 0;
   int32_t deficit = 0;
+  int32_t required_line = 0;
   std::string error;
 };
 
@@ -96,7 +97,6 @@ class IOCellPlacer
     int32_t package_span = 0;
     int32_t group_count = 0;
     int32_t clearance = 0;
-    int32_t usable_length = 0;
     int32_t dbu_spacing = 0;
     std::vector<const IOCellPowerMember*> package;
     std::vector<int32_t> filler_widths;
@@ -115,9 +115,11 @@ class IOCellPlacer
   bool placeSide(IOEdgeType edge, const IOCellDefinition& definition, const std::vector<int32_t>& signal_indices);
   std::array<std::vector<int32_t>, 4> buildSignalSideIndices(const IOCellDefinition& definition) const;
   bool buildSideLayout(IOEdgeType edge, const IOCellDefinition& definition, SideLayout& layout) const;
-  bool packSignalsDryRun(const std::vector<int32_t>& signal_indices, const SideLayout& layout, int32_t& deficit) const;
+  bool packSignalsDryRun(IOEdgeType edge, const std::vector<int32_t>& signal_indices, const SideLayout& layout, int32_t& deficit) const;
   bool canFillGap(int32_t gap, const std::vector<int32_t>& filler_widths) const;
-  int32_t requiredLineLength(int32_t signal_length, int32_t package_span, int32_t spacing) const;
+  int32_t requiredLineLength(int32_t signal_length, int32_t package_span, int32_t spacing, int32_t clearance, int32_t filler_gcd) const;
+  int32_t fillerWidth(const IOCellFillerMaster& filler) const;
+  int32_t fillerGcd(const IOCellDefinition& definition) const;
   bool normalizePowerInstanceNames(const IOCellDefinition& definition);
   bool bindIOPins(const IOCellDefinition& definition);
   bool updateIOPinPorts();
@@ -126,7 +128,7 @@ class IOCellPlacer
   Instance* createPhysicalInstance(const std::string& name, const std::string& master_name);
   bool fillSegment(IOEdgeType edge, const Segment& segment, const IOCellDefinition& definition, int32_t& filler_index);
   std::vector<int32_t> solveFiller(int32_t gap, const std::vector<int32_t>& widths) const;
-  int32_t getCellSpan(const Instance& instance) const;
+  int32_t getCellSpan(const Instance& instance, IOEdgeType edge, PlacementOrientation orient) const;
   int32_t getOrientedWidth(const Instance& instance, PlacementOrientation orient) const;
   int32_t getOrientedHeight(const Instance& instance, PlacementOrientation orient) const;
   int32_t micronToDbu(double micron) const;

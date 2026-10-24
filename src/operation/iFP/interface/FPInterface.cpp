@@ -49,6 +49,25 @@ struct MacroPlacement
   PlacementOrientation orient = PlacementOrientation::kNone;
 };
 
+void checkKeys(const nlohmann::json& json, std::initializer_list<const char*> allowed, const std::string& path)
+{
+  if (!json.is_object()) {
+    return;
+  }
+  for (const auto& item : json.items()) {
+    bool known = false;
+    for (const char* key : allowed) {
+      if (item.key() == key) {
+        known = true;
+        break;
+      }
+    }
+    if (!known) {
+      FPLOG.error(Loc::current(), "Unknown config key '", path, ".", item.key(), "'.");
+    }
+  }
+}
+
 }  // namespace
 
 FPInterface* FPInterface::_fp_interface_instance = nullptr;
@@ -457,40 +476,52 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
   nlohmann::json& ifp_json = config_json["ifp"];
+  checkKeys(ifp_json, {"temp_directory_path", "thread_number"}, "ifp");
   config.temp_directory_path = FPUTIL.getAbsolutePath(config_directory_path, ifp_json["temp_directory_path"].get<std::string>());
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
+  checkKeys(macro_placer_json, {"file_path", "macro_placement_halo", "macro_routing_halo"}, "macro_placer");
   std::string macro_file_path = macro_placer_json.value("file_path", "");
   config.input_macro_path = macro_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, macro_file_path);
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
 
   nlohmann::json& die_builder_json = config_json["die_builder"];
+  checkKeys(die_builder_json, {"mode", "site_name", "margin", "die_util", "die_size"}, "die_builder");
   config.die_mode = GetDieModeByName()(die_builder_json["mode"].get<std::string>());
   config.die_site_name = die_builder_json["site_name"].get<std::string>();
   nlohmann::json& die_margin_json = die_builder_json["margin"];
+  checkKeys(die_margin_json, {"left_micron", "right_micron", "top_micron", "bottom_micron"}, "die_builder.margin");
   config.die_margin_left_micron = die_margin_json["left_micron"].get<double>();
   config.die_margin_right_micron = die_margin_json["right_micron"].get<double>();
   config.die_margin_top_micron = die_margin_json["top_micron"].get<double>();
   config.die_margin_bottom_micron = die_margin_json["bottom_micron"].get<double>();
   if (config.die_mode == DieMode::kDieUtil) {
     nlohmann::json& die_util_json = die_builder_json["die_util"];
+    checkKeys(die_util_json, {"aspect_ratio", "utilization"}, "die_builder.die_util");
     config.die_aspect_ratio = die_util_json["aspect_ratio"].get<double>();
     config.die_utilization = die_util_json["utilization"].get<double>();
   } else if (config.die_mode == DieMode::kDieSize) {
     nlohmann::json& die_size_json = die_builder_json["die_size"];
+    checkKeys(die_size_json, {"width_micron", "height_micron"}, "die_builder.die_size");
     config.die_width_micron = die_size_json["width_micron"].get<double>();
     config.die_height_micron = die_size_json["height_micron"].get<double>();
   }
 
   nlohmann::json& io_placer_json = config_json["io_placer"];
+  checkKeys(io_placer_json, {"mode", "file_path", "io_layer_list", "io_pin", "io_cell"}, "io_placer");
+  if (io_placer_json.contains("io_pin")) {
+    checkKeys(io_placer_json["io_pin"], {"mode", "file_path", "io_layer_list"}, "io_placer.io_pin");
+  }
   const std::string io_mode = io_placer_json.value("mode", "io_pin");
   const bool legacy_io_pin_schema = io_mode == "auto" || io_mode == "file";
   config.io_placer_mode = legacy_io_pin_schema ? IOPlacerMode::kIOPin : GetIOPlacerModeByName()(io_mode);
 
   // Keep the old flat schema working while accepting the independent io_pin/io_cell schema.
-  nlohmann::json io_pin_json = io_placer_json.contains("io_pin") ? io_placer_json["io_pin"] : io_placer_json;
+  nlohmann::json io_pin_json = io_placer_json.contains("io_pin")
+                                   ? io_placer_json["io_pin"]
+                                   : (legacy_io_pin_schema ? io_placer_json : nlohmann::json::object());
   config.io_pin_placement_mode = GetPlacementModeByName()(io_pin_json.value("mode", "auto"));
   std::string io_pin_file_path = io_pin_json.value("file_path", "");
   config.input_io_pin_path = io_pin_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, io_pin_file_path);
@@ -502,6 +533,13 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
   if (io_placer_json.contains("io_cell")) {
     nlohmann::json& io_cell_json = io_placer_json["io_cell"];
+    checkKeys(io_cell_json, {"mode", "file_path", "definition_file_path", "power", "auto_resize"}, "io_placer.io_cell");
+    if (io_cell_json.contains("power")) {
+      checkKeys(io_cell_json["power"], {"target_group_spacing", "corner_clearance_micron"}, "io_placer.io_cell.power");
+    }
+    if (io_cell_json.contains("auto_resize")) {
+      checkKeys(io_cell_json["auto_resize"], {"enable"}, "io_placer.io_cell.auto_resize");
+    }
     config.io_cell_mode = GetPlacementModeByName()(io_cell_json.value("mode", "auto"));
     std::string io_cell_file_path = io_cell_json.value("file_path", "");
     std::string definition_file_path = io_cell_json.value("definition_file_path", "");
@@ -515,6 +553,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   }
 
   nlohmann::json& phy_placer_json = config_json["phy_placer"];
+  checkKeys(phy_placer_json, {"orientations", "corner_cells", "well_tap", "side_endcap", "edge_endcap", "boundary_tap"}, "phy_placer");
   const auto orientations = phy_placer_json.value("orientations", nlohmann::json::object());
   for (const auto& [role, mappings] : orientations.items()) {
     for (const auto& [row, orient] : mappings.items()) {
@@ -528,12 +567,15 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   }
   config.corner_cell_names = phy_placer_json.value("corner_cells", std::map<std::string, std::string>{});
   nlohmann::json& well_tap_json = phy_placer_json["well_tap"];
+  checkKeys(well_tap_json, {"cell_name", "distance_micron"}, "phy_placer.well_tap");
   config.tapcell_name = well_tap_json["cell_name"].get<std::string>();
   config.tap_distance_micron = well_tap_json["distance_micron"].get<double>();
   nlohmann::json& side_endcap_json = phy_placer_json["side_endcap"];
+  checkKeys(side_endcap_json, {"left_cell_name", "right_cell_name"}, "phy_placer.side_endcap");
   config.left_endcap_name = side_endcap_json["left_cell_name"].get<std::string>();
   config.right_endcap_name = side_endcap_json["right_cell_name"].get<std::string>();
   nlohmann::json& edge_endcap_json = phy_placer_json["edge_endcap"];
+  checkKeys(edge_endcap_json, {"top_cell_name_list", "bottom_cell_name_list"}, "phy_placer.edge_endcap");
   for (nlohmann::json& cell_name_json : edge_endcap_json["top_cell_name_list"]) {
     config.top_endcap_name_list.push_back(cell_name_json.get<std::string>());
   }
@@ -541,6 +583,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.bottom_endcap_name_list.push_back(cell_name_json.get<std::string>());
   }
   nlohmann::json& boundary_tap_json = phy_placer_json["boundary_tap"];
+  checkKeys(boundary_tap_json, {"top_cell_name_list", "bottom_cell_name_list", "rule_micron"}, "phy_placer.boundary_tap");
   for (nlohmann::json& cell_name_json : boundary_tap_json["top_cell_name_list"]) {
     config.top_boundary_tap_name_list.push_back(cell_name_json.get<std::string>());
   }
@@ -550,6 +593,10 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.boundary_tap_rule_micron = boundary_tap_json["rule_micron"].get<double>();
 
   nlohmann::json& pdn_generator_json = config_json["pdn_generator"];
+  checkKeys(pdn_generator_json,
+            {"global_connect", "rail", "stripe", "connect_layers", "core_power_net", "core_ground_net", "ring",
+             "io_core_connect", "required_nets", "connect_pads", "require_connected_pins", "access_layers"},
+            "pdn_generator");
   config.core_power_net = pdn_generator_json.value("core_power_net", "");
   config.core_ground_net = pdn_generator_json.value("core_ground_net", "");
   config.pg_required_net_list = pdn_generator_json.value("required_nets", std::vector<std::string>{});
@@ -558,6 +605,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.pg_access_layer_list = pdn_generator_json.value("access_layers", std::vector<std::string>{});
   if (pdn_generator_json.contains("ring")) {
     const auto& ring = pdn_generator_json["ring"];
+    checkKeys(ring, {"nets", "horizontal_layer", "vertical_layer", "width_micron", "spacing_micron", "offset_micron"}, "pdn_generator.ring");
     config.pg_ring.nets = ring.at("nets").get<std::vector<std::string>>();
     config.pg_ring.horizontal_layer = ring.at("horizontal_layer").get<std::string>();
     config.pg_ring.vertical_layer = ring.at("vertical_layer").get<std::string>();
@@ -567,26 +615,18 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   }
   if (pdn_generator_json.contains("io_core_connect")) {
     const auto& io_core = pdn_generator_json["io_core_connect"];
+    checkKeys(io_core, {"enable", "nets", "pin_layers", "min_contacts_per_port", "bridge_min_spacing_micron", "fail_on_unresolved"},
+              "pdn_generator.io_core_connect");
     config.pg_io_core_connect.enabled = io_core.value("enable", true);
     config.pg_io_core_connect.nets = io_core.value("nets", std::vector<std::string>{});
     config.pg_io_core_connect.pin_layers = io_core.value("pin_layers", std::vector<std::string>{});
-    config.pg_io_core_connect.select_outermost_pin = io_core.value("select_outermost_pin", true);
-    config.pg_io_core_connect.connect_all_legal_stripes = io_core.value("connect_all_legal_stripes", true);
     config.pg_io_core_connect.fail_on_unresolved = io_core.value("fail_on_unresolved", false);
-    config.pg_io_core_connect.require_each_pin_layer = io_core.value("require_each_pin_layer", true);
     config.pg_io_core_connect.min_contacts_per_port = io_core.value("min_contacts_per_port", 1);
-    config.pg_io_core_connect.max_contacts_per_port = io_core.value("max_contacts_per_port", 0);
-    config.pg_io_core_connect.max_routes_per_stripe = io_core.value("max_routes_per_stripe", 0);
-    config.pg_io_core_connect.allow_direct_extension = io_core.value("allow_direct_extension", true);
-    config.pg_io_core_connect.allow_bridge = io_core.value("allow_bridge", true);
     config.pg_io_core_connect.bridge_min_spacing_micron = io_core.value("bridge_min_spacing_micron", 0.0);
   }
   if (config.pg_io_core_connect.enabled) {
-    if (config.pg_io_core_connect.min_contacts_per_port < 1 || config.pg_io_core_connect.max_contacts_per_port < 0
-        || config.pg_io_core_connect.max_routes_per_stripe < 0
-        || (config.pg_io_core_connect.max_contacts_per_port > 0
-            && config.pg_io_core_connect.max_contacts_per_port < config.pg_io_core_connect.min_contacts_per_port)) {
-      FPLOG.error(Loc::current(), "Invalid io_core_connect contact limits.");
+    if (config.pg_io_core_connect.min_contacts_per_port < 1) {
+      FPLOG.error(Loc::current(), "io_core_connect.min_contacts_per_port must be at least 1.");
     }
     if (!std::isfinite(config.pg_io_core_connect.bridge_min_spacing_micron)
         || config.pg_io_core_connect.bridge_min_spacing_micron < 0.0) {
@@ -598,6 +638,8 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     }
   }
   for (nlohmann::json& pg_connect_json : pdn_generator_json["global_connect"]) {
+    checkKeys(pg_connect_json, {"net_name", "instance_pin_name", "is_power", "instance_pattern", "master_pattern"},
+              "pdn_generator.global_connect[]");
     PGGlobalConnect pg_connect;
     pg_connect.set_net_name(pg_connect_json["net_name"].get<std::string>());
     pg_connect.set_pin_name(pg_connect_json["instance_pin_name"].get<std::string>());
@@ -607,12 +649,14 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.pg_connect_list.push_back(pg_connect);
   }
   for (nlohmann::json& pg_rail_json : pdn_generator_json["rail"]) {
+    checkKeys(pg_rail_json, {"routing_layer_name", "width_micron"}, "pdn_generator.rail[]");
     PGRail pg_rail;
     pg_rail.set_layer_name(pg_rail_json["routing_layer_name"].get<std::string>());
     pg_rail.set_width_micron(pg_rail_json["width_micron"].get<double>());
     config.pg_rail_list.push_back(pg_rail);
   }
   for (nlohmann::json& pg_stripe_json : pdn_generator_json["stripe"]) {
+    checkKeys(pg_stripe_json, {"routing_layer_name", "width_micron", "pitch_micron", "offset_micron"}, "pdn_generator.stripe[]");
     PGStripe pg_stripe;
     pg_stripe.set_layer_name(pg_stripe_json["routing_layer_name"].get<std::string>());
     pg_stripe.set_width_micron(pg_stripe_json["width_micron"].get<double>());
@@ -621,6 +665,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.pg_stripe_list.push_back(pg_stripe);
   }
   for (nlohmann::json& layer_connect_json : pdn_generator_json["connect_layers"]) {
+    checkKeys(layer_connect_json, {"bottom_routing_layer_name", "top_routing_layer_name"}, "pdn_generator.connect_layers[]");
     PGLayerPair pg_layer_pair;
     pg_layer_pair.set_first_layer_name(layer_connect_json["bottom_routing_layer_name"].get<std::string>());
     pg_layer_pair.set_second_layer_name(layer_connect_json["top_routing_layer_name"].get<std::string>());
@@ -733,6 +778,10 @@ void FPInterface::wrapCellMasterMap()
         ++port_idx;
       }
     }
+    // LEF OBS rectangles are raw macro coordinates; pin shapes are already
+    // normalized by IDB.  Add ORIGIN so both live in the same placement frame.
+    const int32_t origin_x = static_cast<int32_t>(idb_cell_master->get_origin_x());
+    const int32_t origin_y = static_cast<int32_t>(idb_cell_master->get_origin_y());
     for (auto* obs : idb_cell_master->get_obs_list()) {
       for (auto* obs_layer : obs->get_obs_layer_list()) {
         auto* shape = obs_layer->get_shape();
@@ -742,7 +791,8 @@ void FPInterface::wrapCellMasterMap()
         for (auto* rect : shape->get_rect_list()) {
           InstancePinShape obstruction;
           obstruction.set_layer_name(shape->get_layer()->get_name());
-          obstruction.set_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+          obstruction.set_rect(rect->get_low_x() + origin_x, rect->get_low_y() + origin_y, rect->get_high_x() + origin_x,
+                               rect->get_high_y() + origin_y);
           cell_master.get_obstruction_shapes().push_back(obstruction);
         }
       }
@@ -826,6 +876,7 @@ void FPInterface::wrapInstanceList()
     Instance instance;
     instance.set_name(idb_instance->get_name());
     instance.set_master_name(idb_instance->get_cell_master()->get_name());
+    instance.set_from_netlist(true);
     instance.set_width(idb_instance->get_cell_master()->get_width());
     instance.set_height(idb_instance->get_cell_master()->get_height());
     instance.set_macro(idb_instance->get_cell_master()->is_block());
@@ -1311,6 +1362,7 @@ void FPInterface::outputIOPinList()
 void FPInterface::outputIOInstancePlacement()
 {
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
+  idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
   for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
     if (instance.is_delete_instance()) {
       idb_design->removeInstanceSafe(instance.get_name());
@@ -1318,6 +1370,27 @@ void FPInterface::outputIOInstancePlacement()
     }
     if (!instance.is_placement_updated() || instance.get_macro()) {
       continue;
+    }
+    // Reused ring cells may have been re-mastered in the local model (for
+    // example a filler index that now resolves to a narrower master).  The
+    // IDB instance still holds the previous master, which would make the DEF
+    // footprint disagree with the computed coordinates.
+    // Fillers are generated by iFP and never connected to nets, so it is safe
+    // to rebuild their pin list when the master changes.  Other instances are
+    // synced only when they have no pins at all.
+    const bool filler = instance.get_name().rfind("IO_FILL_", 0) == 0;
+    idb::IdbInstance* idb_instance = idb_design->get_instance_list()->find_instance(instance.get_name());
+    if (idb_instance != nullptr && (filler || idb_instance->get_pin_list()->get_pin_list().empty())
+        && (idb_instance->get_cell_master() == nullptr
+            || idb_instance->get_cell_master()->get_name() != instance.get_master_name())) {
+      idb::IdbCellMaster* master = idb_layout->get_cell_master_list()->find_cell_master(instance.get_master_name());
+      if (master == nullptr) {
+        FPLOG.error(Loc::current(), "Cannot find cell master '", instance.get_master_name(), "' for IO instance '",
+                    instance.get_name(), "'.");
+        continue;
+      }
+      idb_instance->get_pin_list()->reset();
+      idb_instance->set_cell_master(master);
     }
     idb::IdbOrient orient = unwrapPlacementOrientation(instance.get_orient());
     if (orient == idb::IdbOrient::kNone) {
@@ -1636,6 +1709,33 @@ std::vector<idb::IdbVia*> FPInterface::getPGViaStack(PGSegment& pg_segment)
     current = rule->get_layer_top();
   }
   return current == top ? stack : std::vector<idb::IdbVia*>{};
+}
+
+int32_t FPInterface::getPGViaMinSpan(const std::string& bottom_layer_name, const std::string& top_layer_name)
+{
+  auto* layers = dmInst->get_idb_layout()->get_layers();
+  auto* bottom = layers->find_layer(bottom_layer_name);
+  auto* top = layers->find_layer(top_layer_name);
+  if (bottom == nullptr || top == nullptr || !bottom->is_routing() || !top->is_routing() || bottom == top) {
+    return 0;
+  }
+  if (bottom->get_order() > top->get_order()) {
+    std::swap(bottom, top);
+  }
+  int32_t span = 0;
+  for (auto* cut : layers->find_cut_layer_list(bottom->get_name(), top->get_name())) {
+    auto* rule = cut->get_via_rule();
+    if (rule == nullptr || rule->get_cut_rect() == nullptr || rule->get_enclosure_bottom() == nullptr
+        || rule->get_enclosure_top() == nullptr) {
+      return 0;
+    }
+    const int32_t cut_x = rule->get_cut_rect()->get_width();
+    const int32_t cut_y = rule->get_cut_rect()->get_height();
+    const int32_t overhang = std::max({rule->get_enclosure_bottom()->get_overhang_1(), rule->get_enclosure_bottom()->get_overhang_2(),
+                                       rule->get_enclosure_top()->get_overhang_1(), rule->get_enclosure_top()->get_overhang_2(), 0});
+    span = std::max({span, cut_x + 2 * overhang, cut_y + 2 * overhang});
+  }
+  return span;
 }
 
 idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)

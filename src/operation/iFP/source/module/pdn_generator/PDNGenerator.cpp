@@ -35,9 +35,9 @@ class PGGeometryIndex
  public:
   explicit PGGeometryIndex(int32_t bin_size) : _bin_size(std::max(1, bin_size)) {}
 
-  void add(const std::string& layer, const PlanarRect& rect, int32_t net)
+  void add(const std::string& layer, const PlanarRect& rect, int32_t net, int32_t owner = -1)
   {
-    visit(rect, [&](int32_t x, int32_t y) { _layers[layer][key(x, y)].push_back({rect, net}); });
+    visit(rect, [&](int32_t x, int32_t y) { _layers[layer][key(x, y)].push_back({rect, net, owner}); });
   }
 
   std::set<int32_t> touching(const std::string& layer, const PlanarRect& rect) const
@@ -65,7 +65,7 @@ class PGGeometryIndex
   }
 
   bool clear(const std::string& layer, const PlanarRect& rect, int32_t net, int32_t spacing,
-             const PlanarRect* shared_contact = nullptr) const
+             const PlanarRect* shared_contact = nullptr, int32_t ignore_owner = -1) const
   {
     auto layer_it = _layers.find(layer);
     if (layer_it == _layers.end()) {
@@ -83,7 +83,11 @@ class PGGeometryIndex
       }
       for (const auto& obstacle : bin->second) {
         const auto& box = obstacle.rect;
-        if (obstacle.net != net && query.get_ll_x() < box.get_ur_x() && box.get_ll_x() < query.get_ur_x()
+        // Only the owning macro's OBS is ignored (the pin is the landing
+        // metal); its foreign-net pins still block.  owner == -1 means "no
+        // owner", so it must never match the default ignore_owner == -1.
+        const bool ignored_obstruction = ignore_owner >= 0 && obstacle.owner == ignore_owner && obstacle.net < 0;
+        if (obstacle.net != net && !ignored_obstruction && query.get_ll_x() < box.get_ur_x() && box.get_ll_x() < query.get_ur_x()
             && query.get_ll_y() < box.get_ur_y() && box.get_ll_y() < query.get_ur_y()) {
           // Independent IO paths may meet inside their destination stripe.
           // An overlapping trunk outside that stripe is still rejected.
@@ -119,7 +123,7 @@ class PGGeometryIndex
   }
 
  private:
-  struct Obstacle { PlanarRect rect; int32_t net; };
+  struct Obstacle { PlanarRect rect; int32_t net; int32_t owner = -1; };
   static uint64_t key(int32_t x, int32_t y) { return (uint64_t(uint32_t(x)) << 32) | uint32_t(y); }
   int32_t bin(int32_t coord) const { return coord >= 0 ? coord / _bin_size : (coord + 1) / _bin_size - 1; }
   template <typename Fn> void visit(const PlanarRect& rect, Fn fn) const
@@ -1292,7 +1296,14 @@ PlanarRect PDNGenerator::getOverlapRect(PlanarRect first_rect, PlanarRect second
 bool PDNGenerator::addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name,
                                  int32_t x, int32_t y, int32_t width, int32_t height)
 {
-  std::string via_key = FPUTIL.getString(net_name, "|", bottom_layer_name, "|", top_layer_name, "|", cut_layer_name, "|", x, "|", y, "|", width, "|", height);
+  // The overlap of a narrow rail and a stripe is often smaller than the
+  // minimum via array.  Grow the via (its own enclosure becomes the landing
+  // metal) instead of rejecting the connection.
+  const int32_t min_via = FPI.getPGViaMinSpan(bottom_layer_name, top_layer_name);
+  const int32_t via_width = std::max({width, 1, min_via});
+  const int32_t via_height = std::max({height, 1, min_via});
+  std::string via_key = FPUTIL.getString(net_name, "|", bottom_layer_name, "|", top_layer_name, "|", cut_layer_name, "|", x, "|", y, "|", via_width, "|",
+                                         via_height);
   if (pg_model.get_via_key_set().contains(via_key)) {
     return true;
   }
@@ -1304,10 +1315,12 @@ bool PDNGenerator::addViaSegment(PGModel& pg_model, std::string net_name, std::s
   pg_segment.set_top_layer_name(top_layer_name);
   pg_segment.set_cut_layer_name(cut_layer_name);
   pg_segment.set_start_coord(x, y);
-  pg_segment.set_via_width(std::max(width, 1));
-  pg_segment.set_via_height(std::max(height, 1));
+  pg_segment.set_via_width(via_width);
+  pg_segment.set_via_height(via_height);
   pg_segment.set_generated(true);
   if (FPI.getPGViaStack(pg_segment).empty()) {
+    FPLOG.warn(Loc::current(), "Rejected PG via ", bottom_layer_name, " -> ", top_layer_name, " net=", net_name, " at (", x, ",", y,
+               ") size ", via_width, "x", via_height, ".");
     ++_rejected_via_count;
     return false;
   }
@@ -1558,6 +1571,26 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
   // Treat accepted paths as obstacles even for the same net: this prevents
   // overlapping trunks from inflating the redundant-contact count.
   PGGeometryIndex io_paths(bin_size);
+  // IO cell blockages are not PG metal.  Keep routes out of the pad body so
+  // the T4M2 access cannot cross the cell's own OBS near the core boundary.
+  for (const auto& instance : database.get_instance_list()) {
+    if (!instance.get_placed() || instance.is_delete_instance()) {
+      continue;
+    }
+    const auto master_it = database.get_cell_master_map().find(instance.get_master_name());
+    if (master_it == database.get_cell_master_map().end()) {
+      continue;
+    }
+    const auto& master = master_it->second;
+    if (!master.get_pad() && !master.get_pad_filler() && !master.get_corner()) {
+      continue;
+    }
+    for (const auto& shape : FPI.getPlacedShapes(instance, master.get_obstruction_shapes())) {
+      if (shape.get_layer_name() == "T4M2") {
+        io_paths.add(shape.get_layer_name(), shape, -1);
+      }
+    }
+  }
 
   auto positive_overlap = [](const PlanarRect& first, const PlanarRect& second) {
     return first.get_ll_x() < second.get_ur_x() && second.get_ll_x() < first.get_ur_x()
@@ -2438,6 +2471,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   }
   std::map<std::string, Instance*> instances;
   std::map<std::string, std::vector<InstancePinShape>> placed_shapes;
+  std::map<std::string, int32_t> instance_owner;
+  int32_t next_owner = 0;
   for (auto& instance : database.get_instance_list()) {
     if (!instance.get_placed() || instance.is_delete_instance()) {
       continue;
@@ -2447,14 +2482,16 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
       continue;
     }
     instances[instance.get_name()] = &instance;
+    const int32_t owner = next_owner++;
+    instance_owner[instance.get_name()] = owner;
     auto& shapes = placed_shapes[instance.get_name()];
     shapes = FPI.getPlacedShapes(instance, master.get_pg_pin_shapes());
     for (const auto& shape : shapes) {
       auto binding = bindings.find({instance.get_name(), shape.get_pin_name()});
-      geometry.add(shape.get_layer_name(), shape, binding == bindings.end() ? -1 : binding->second);
+      geometry.add(shape.get_layer_name(), shape, binding == bindings.end() ? -1 : binding->second, owner);
     }
     for (const auto& shape : FPI.getPlacedShapes(instance, master.get_obstruction_shapes())) {
-      geometry.add(shape.get_layer_name(), shape, -1);
+      geometry.add(shape.get_layer_name(), shape, -1, owner);
     }
   }
   std::map<int32_t, std::vector<PGSegment>> targets;
@@ -2520,6 +2557,98 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   };
   const int32_t grid = std::max(1, database.get_manufacture_grid());
   auto snap = [&](int32_t value) { return FPUTIL.alignDown(value, grid); };
+  std::map<std::pair<std::string, std::string>, int32_t> min_via_cache;
+  auto minVia = [&](const std::string& bottom, const std::string& top) {
+    const auto key = std::make_pair(bottom, top);
+    auto it = min_via_cache.find(key);
+    if (it != min_via_cache.end()) {
+      return it->second;
+    }
+    const int32_t span = FPI.getPGViaMinSpan(bottom, top);
+    min_via_cache[key] = span;
+    return span;
+  };
+  // Innovus-style block-pin connection: when an upper-layer stripe crosses a
+  // macro PG pin, drop a via at the crossing instead of routing around the
+  // macro.  The pin itself is the landing metal, so its own OBS is ignored.
+  std::set<std::string> crossing_via_keys;
+  int32_t crossing_via_count = 0;
+  auto tryCrossingVias = [&](const std::vector<const InstancePinShape*>& shapes, int32_t net_idx, int32_t owner) {
+    const std::string& net = database.get_pg_net_list()[net_idx].get_name();
+    bool added = false;
+    for (const auto* pin : shapes) {
+      auto* pin_layer = findRoutingLayer(pin->get_layer_name());
+      if (pin_layer == nullptr) {
+        continue;
+      }
+      const PlanarRect pin_rect(pin->get_ll_x(), pin->get_ll_y(), pin->get_ur_x(), pin->get_ur_y());
+      std::vector<std::pair<int32_t, size_t>> hits;
+      for (size_t t = 0; t < targets[net_idx].size(); ++t) {
+        const auto& target = targets[net_idx][t];
+        auto* target_layer = findRoutingLayer(target.get_layer_name());
+        if (target_layer == nullptr || target_layer->get_order() <= pin_layer->get_order()) {
+          continue;
+        }
+        const PlanarRect overlap = getOverlapRect(pin_rect, segmentRect(target));
+        if (overlap.get_width() <= 0 || overlap.get_height() <= 0) {
+          continue;
+        }
+        hits.emplace_back(target_layer->get_order(), t);
+      }
+      std::sort(hits.begin(), hits.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+      for (const auto& hit : hits) {
+        const auto& target = targets[net_idx][hit.second];
+        const std::string& target_layer = target.get_layer_name();
+        const int32_t min_span = minVia(pin->get_layer_name(), target_layer);
+        if (min_span <= 0) {
+          continue;
+        }
+        const PlanarRect overlap = getOverlapRect(pin_rect, segmentRect(target));
+        const int32_t pin_span = std::min(pin->get_width(), pin->get_height());
+        int32_t span = FPUTIL.alignDown(std::min({overlap.get_width(), overlap.get_height(), pin_span - 2 * grid}), 2 * grid);
+        if (span < min_span) {
+          continue;
+        }
+        const int32_t x = FPUTIL.alignDown((overlap.get_ll_x() + overlap.get_ur_x()) / 2, grid);
+        const int32_t y = FPUTIL.alignDown((overlap.get_ll_y() + overlap.get_ur_y()) / 2, grid);
+        PGSegment via;
+        via.set_net_name(net);
+        via.set_type(PGSegmentType::kVia);
+        via.set_bottom_layer_name(pin->get_layer_name());
+        via.set_top_layer_name(target_layer);
+        via.set_start_coord(x, y);
+        via.set_end_coord(x, y);
+        via.set_via_width(span);
+        via.set_via_height(span);
+        via.set_generated(true);
+        const auto via_shapes = FPI.getPGViaShapes(via);
+        if (via_shapes.empty()) {
+          continue;
+        }
+        bool legal = true;
+        for (const auto& shape : via_shapes) {
+          auto* layer = findRoutingLayer(shape.get_layer_name());
+          if (layer == nullptr
+              || !geometry.clear(shape.get_layer_name(), shape, net_idx, std::max(0, layer->get_spacing()), nullptr, owner)) {
+            legal = false;
+            break;
+          }
+        }
+        if (!legal) {
+          continue;
+        }
+        const std::string key = FPUTIL.getString(net, "|", pin->get_layer_name(), "|", target_layer, "|", x, "|", y, "|", span);
+        if (crossing_via_keys.insert(key).second) {
+          database.get_pg_segment_list().push_back(via);
+          index_segment(via);
+          ++crossing_via_count;
+        }
+        added = true;
+        break;
+      }
+    }
+    return added;
+  };
   int32_t connected = 0;
   struct Pending {
     int32_t component;
@@ -2569,21 +2698,40 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
         ++connected;
         continue;
       }
-      std::priority_queue<Candidate> candidates;
+      auto owner_it = instance_owner.find(terminal.first);
+      if (owner_it != instance_owner.end() && tryCrossingVias(shapes, net_idx, owner_it->second)) {
+        connected_components.insert(component);
+        ++connected;
+        continue;
+      }
+      // Keep the nearest candidates per target layer.  A single layer (for
+      // example a T4M2 stripe crossing the macro) must not crowd out reachable
+      // MET4/MET5 targets with larger via rules.
+      constexpr int32_t kCandidatesPerLayer = 64;
+      std::map<std::string, std::priority_queue<Candidate>> candidates_by_layer;
       for (const auto* pin : shapes) {
         auto* pin_layer = findRoutingLayer(pin->get_layer_name());
         if (pin_layer == nullptr) {
           continue;
         }
+        const int32_t pin_span = std::min(pin->get_width(), pin->get_height());
         for (size_t t = 0; t < targets[net_idx].size(); ++t) {
           const auto& target = targets[net_idx][t];
-          const int32_t pin_span = std::min(pin->get_width(), pin->get_height());
           // Narrow access metal inside a pin aperture instead of expanding it into adjacent OBS.
           const int32_t aperture = pin_span - 2 * std::max(0, pin_layer->get_spacing());
           int32_t width = FPUTIL.alignDown(std::min(aperture >= pin_layer->get_min_width() ? aperture : pin_span, target.get_width()), 2 * grid);
           if (width < pin_layer->get_min_width() || width <= 0) {
             continue;
           }
+          // A macro pin cannot host a via landing outside its own metal; skip
+          // target layers whose minimum via does not fit the pin aperture.
+          if (instance.get_macro()) {
+            const int32_t min_via = minVia(pin->get_layer_name(), target.get_layer_name());
+            if (min_via > 0 && pin_span < min_via) {
+              continue;
+            }
+          }
+          auto& candidates = candidates_by_layer[target.get_layer_name()];
           // Sample both edges as well as the center: the center can be blocked by an OBS.
           for (int32_t px : {pin->get_ll_x() + width / 2, (pin->get_ll_x() + pin->get_ur_x()) / 2, pin->get_ur_x() - width / 2}) {
             for (int32_t py : {pin->get_ll_y() + width / 2, (pin->get_ll_y() + pin->get_ur_y()) / 2, pin->get_ur_y() - width / 2}) {
@@ -2598,7 +2746,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
                                         std::max(target.get_start_y(), target.get_end_y())));
               Candidate candidate{int64_t(std::abs(tx - px)) + std::abs(ty - py), t, width, {px, py}, {tx, ty}, pin};
               candidates.push(candidate);
-              if (candidates.size() > 256) {
+              if (candidates.size() > kCandidatesPerLayer) {
                 candidates.pop();
               }
             }
@@ -2606,14 +2754,20 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
         }
       }
       std::vector<Candidate> ordered;
-      while (!candidates.empty()) {
-        ordered.push_back(candidates.top());
-        candidates.pop();
+      for (auto& [layer, candidates] : candidates_by_layer) {
+        while (!candidates.empty()) {
+          ordered.push_back(candidates.top());
+          candidates.pop();
+        }
       }
+      std::sort(ordered.begin(), ordered.end(), [](const Candidate& lhs, const Candidate& rhs) { return lhs.distance < rhs.distance; });
       bool success = false;
-      for (auto candidate = ordered.rbegin(); candidate != ordered.rend() && !success; ++candidate) {
-        const auto target = targets[net_idx][candidate->target];
-        const auto& pin_layer = candidate->pin->get_layer_name();
+      for (const Candidate& candidate : ordered) {
+        if (success) {
+          break;
+        }
+        const auto target = targets[net_idx][candidate.target];
+        const auto& pin_layer = candidate.pin->get_layer_name();
         const auto& net = database.get_pg_net_list()[net_idx].get_name();
         std::vector<std::string> access_layers{pin_layer};
         for (const auto& name : config.pg_access_layer_list) {
@@ -2628,11 +2782,11 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
           access_layers.push_back(target.get_layer_name());
         }
         for (const auto& layer : access_layers) {
-          const int32_t route_width = std::max(candidate->width, FPUTIL.alignUp(findRoutingLayer(layer)->get_min_width(), 2 * grid));
-          for (const auto& manhattan : makeManhattanPathCandidates(candidate->start, candidate->end)) {
+          const int32_t route_width = std::max(candidate.width, FPUTIL.alignUp(findRoutingLayer(layer)->get_min_width(), 2 * grid));
+          for (const auto& manhattan : makeManhattanPathCandidates(candidate.start, candidate.end)) {
             const PlanarCoord& bend = manhattan.bend;
             std::vector<PGSegment> path;
-            for (auto [a, b] : {std::pair{candidate->start, bend}, std::pair{bend, candidate->end}}) {
+            for (auto [a, b] : {std::pair{candidate.start, bend}, std::pair{bend, candidate.end}}) {
               if (a.get_x() == b.get_x() && a.get_y() == b.get_y()) {
                 continue;
               }
@@ -2657,6 +2811,11 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
               if (from == to) {
                 return true;
               }
+              const int32_t min_via = minVia(from, to);
+              if (min_via <= 0) {
+                return false;
+              }
+              const int32_t via_span = std::max(route_width, min_via);
               PGSegment via;
               via.set_net_name(net);
               via.set_type(PGSegmentType::kVia);
@@ -2664,8 +2823,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
               via.set_top_layer_name(to);
               via.set_start_coord(coord.get_x(), coord.get_y());
               via.set_end_coord(coord.get_x(), coord.get_y());
-              via.set_via_width(route_width);
-              via.set_via_height(route_width);
+              via.set_via_width(via_span);
+              via.set_via_height(via_span);
               via.set_generated(true);
               const auto via_shapes = FPI.getPGViaShapes(via);
               if (via_shapes.empty()) {
@@ -2680,7 +2839,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
               path.push_back(via);
               return true;
             };
-            legal = legal && append_via(pin_layer, layer, candidate->start) && append_via(layer, target.get_layer_name(), candidate->end);
+            legal = legal && append_via(pin_layer, layer, candidate.start) && append_via(layer, target.get_layer_name(), candidate.end);
             if (!legal) {
               continue;
             }
@@ -2713,7 +2872,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
     }
   }
   FPLOG.info(Loc::current(), "PG access: ", connected, " connected ports, ", unresolved.size(), " required unresolved ports, ",
-             optional_unresolved.size(), " optional unresolved ports.");
+             optional_unresolved.size(), " optional unresolved ports; crossing vias: ", crossing_via_count, ".");
   if (!config.pg_temp_directory_path.empty()) {
     std::ofstream report(config.pg_temp_directory_path + "/pg_connectivity.rpt");
     report << "Connected ports: " << connected << "\nUnresolved ports: " << unresolved.size()

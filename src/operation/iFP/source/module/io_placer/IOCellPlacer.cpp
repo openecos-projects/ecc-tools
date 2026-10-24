@@ -30,14 +30,54 @@ namespace {
 
 bool matchPattern(const std::string& value, const std::string& pattern)
 {
-  const size_t star = pattern.find('*');
-  if (star == std::string::npos) {
-    return value == pattern;
+  size_t value_idx = 0;
+  size_t pattern_idx = 0;
+  size_t star_idx = std::string::npos;
+  size_t retry_idx = 0;
+  while (value_idx < value.size()) {
+    if (pattern_idx < pattern.size() && (pattern[pattern_idx] == '?' || pattern[pattern_idx] == value[value_idx])) {
+      ++value_idx;
+      ++pattern_idx;
+    } else if (pattern_idx < pattern.size() && pattern[pattern_idx] == '*') {
+      star_idx = pattern_idx++;
+      retry_idx = value_idx;
+    } else if (star_idx != std::string::npos) {
+      pattern_idx = star_idx + 1;
+      value_idx = ++retry_idx;
+    } else {
+      return false;
+    }
   }
-  const std::string prefix = pattern.substr(0, star);
-  const std::string suffix = pattern.substr(star + 1);
-  return value.size() >= prefix.size() + suffix.size() && value.compare(0, prefix.size(), prefix) == 0
-         && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+  while (pattern_idx < pattern.size() && pattern[pattern_idx] == '*') {
+    ++pattern_idx;
+  }
+  return pattern_idx == pattern.size();
+}
+
+int32_t alignUp(int32_t value, int32_t step)
+{
+  return step <= 1 ? value : ((value + step - 1) / step) * step;
+}
+
+// Minimum number of identical power packages on a line of line_length.
+// Returns -1 when target_group_spacing cannot be met.
+int32_t packageCount(int32_t line_length, int32_t package_span, int32_t spacing)
+{
+  if (package_span <= 0) {
+    return 0;
+  }
+  if (line_length < package_span) {
+    return -1;
+  }
+  if (line_length < 2 * package_span) {
+    return 1;
+  }
+  const int64_t l = line_length;
+  const int64_t p = package_span;
+  const int64_t s = std::max<int64_t>(1, spacing);
+  // n >= ceil((L + S) / (P + S)) <=> (L - nP) / (n - 1) <= S
+  const int64_t n = (l + s + p + s - 1) / (p + s);
+  return n * p > l ? -1 : static_cast<int32_t>(n);
 }
 
 bool hasMatchingNet(const Database& database, const std::vector<std::string>& patterns)
@@ -247,9 +287,28 @@ bool IOCellPlacer::validateDefinition(const IOCellDefinition& definition)
       return false;
     }
   }
+  const CellMaster& corner_master = database.get_cell_master_map().at(definition.corner_master_name);
+  if (corner_master.get_width() != corner_master.get_height()) {
+    FPLOG.error(Loc::current(), "IO Cell corner master '", definition.corner_master_name, "' must be square (width ",
+                corner_master.get_width(), " != height ", corner_master.get_height(), ").");
+    return false;
+  }
   for (const IOCellFillerMaster& filler : definition.filler_masters) {
-    if (database.get_cell_master_map().find(filler.master_name) == database.get_cell_master_map().end()) {
+    auto filler_iter = database.get_cell_master_map().find(filler.master_name);
+    if (filler_iter == database.get_cell_master_map().end()) {
       FPLOG.error(Loc::current(), "IO Cell filler master '", filler.master_name, "' is not present in LEF/database.");
+      return false;
+    }
+    const int32_t width = filler_iter->second.get_width();
+    if (width <= 0) {
+      FPLOG.error(Loc::current(), "IO Cell filler master '", filler.master_name, "' has invalid width ", width, ".");
+      return false;
+    }
+    // Widths come from LEF only; a conflicting width_micron would silently shift
+    // every following cell and overlap the ring.
+    if (filler.width_micron > 0.0 && micronToDbu(filler.width_micron) != width) {
+      FPLOG.error(Loc::current(), "IO Cell filler '", filler.master_name, "' width_micron=", filler.width_micron, " um (",
+                  micronToDbu(filler.width_micron), " DBU) does not match LEF width ", width, " DBU.");
       return false;
     }
   }
@@ -258,6 +317,20 @@ bool IOCellPlacer::validateDefinition(const IOCellDefinition& definition)
     return false;
   }
   return true;
+}
+
+int32_t IOCellPlacer::fillerWidth(const IOCellFillerMaster& filler) const
+{
+  return FPDM.getDatabase().get_cell_master_map().at(filler.master_name).get_width();
+}
+
+int32_t IOCellPlacer::fillerGcd(const IOCellDefinition& definition) const
+{
+  int32_t gcd = 0;
+  for (const IOCellFillerMaster& filler : definition.filler_masters) {
+    gcd = std::gcd(gcd, fillerWidth(filler));
+  }
+  return gcd;
 }
 
 bool IOCellPlacer::normalizePowerInstanceNames(const IOCellDefinition& definition)
@@ -291,25 +364,19 @@ bool IOCellPlacer::normalizePowerInstanceNames(const IOCellDefinition& definitio
   // size changes (for example die_size -> die_util).  They are unplaced but
   // keep their previously normalized names, which can collide with the new
   // target names.  Move them to unique temporary names and mark them deleted
-  // so the IDB output removes them as well.
+  // so the IDB output removes them as well.  Deleted records are included:
+  // resetExistingPlacement marks old ring cells for removal but they still own
+  // their names until this pass moves them away.
+  // Only cells generated by iFP carry the IO_POWER_ prefix; a user supply pad
+  // (even one named "vdd_*") must never be removed.
   int32_t stale_power_index = 0;
   const int32_t instance_count = static_cast<int32_t>(database.get_instance_list().size());
   for (int32_t index = 0; index < instance_count; ++index) {
     Instance& instance = database.get_instance_list()[index];
-    if (!isPowerMaster(definition, instance.get_master_name()) || instance.get_placed() || instance.is_delete_instance()) {
+    if (!isPowerMaster(definition, instance.get_master_name()) || instance.get_placed()) {
       continue;
     }
-    // Only clean up instances that carry a name produced by an earlier
-    // normalization pass or by createPhysicalInstance; leave user-named
-    // supply pads alone.
-    bool generated_name = instance.get_name().rfind("IO_POWER_", 0) == 0;
-    for (const auto& [prefix, master] : prefix_to_master) {
-      if (instance.get_name().rfind(prefix + "_", 0) == 0) {
-        generated_name = true;
-        break;
-      }
-    }
-    if (!generated_name) {
+    if (instance.get_name().rfind("IO_POWER_", 0) != 0) {
       continue;
     }
     std::string temporary;
@@ -449,7 +516,11 @@ bool IOCellPlacer::normalizePowerInstanceNames(const IOCellDefinition& definitio
         return lhs->get_name() < rhs->get_name();
       });
       for (size_t index = 0; index < instances.size(); ++index) {
-        const std::string target = prefix + "_" + edge_names[edge_index] + "_" + std::to_string(index);
+        // Keep the IO_POWER_ prefix on cells generated by iFP so later runs can
+        // tell them apart from supply pads that came from the netlist.
+        const bool generated = !instances[index]->is_from_netlist() || instances[index]->get_name().rfind("IO_POWER_", 0) == 0;
+        const std::string target = (generated ? "IO_POWER_" : "") + prefix + "_" + edge_names[edge_index] + "_"
+                                   + std::to_string(index);
         const auto existing = database.get_instance_name_to_idx_map().find(target);
         const int32_t instance_index = static_cast<int32_t>(instances[index] - database.get_instance_list().data());
         if (existing != database.get_instance_name_to_idx_map().end() && existing->second != instance_index) {
@@ -596,6 +667,13 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
     FPLOG.error(Loc::current(), "Failed to open IO Cell placement file '", path, "'.");
     return false;
   }
+  std::set<std::string> required_signals;
+  for (const Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (isSignalMaster(definition, instance.get_master_name()) && !instance.is_delete_instance()) {
+      required_signals.insert(instance.get_name());
+    }
+  }
+  std::set<std::string> placed_signals;
   std::string line;
   int32_t line_number = 0;
   std::vector<Segment> occupied[4];
@@ -615,6 +693,10 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
       return false;
     }
     input >> master_name >> orient_name;
+    if (!std::isfinite(offset) || offset < 0.0) {
+      FPLOG.error(Loc::current(), "Invalid IO Cell offset at line ", line_number, ".");
+      return false;
+    }
     IOEdgeType edge = IOEdgeType::kNone;
     if (edge_name == "bottom") {
       edge = IOEdgeType::kBottom;
@@ -654,10 +736,14 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
     }
     PlacementOrientation orient = orient_name.empty() ? edgeOrientation(edge) : GetPlacementOrientationByName()(orient_name);
     if (!placeCell(*instance, edge, sideStart(edge) + micronToDbu(offset), orient)) {
+      FPLOG.error(Loc::current(), "IO Cell '", instance_name, "' does not fit on ", edgeName(edge), " at line ", line_number, ".");
       return false;
     }
     int32_t side_index = static_cast<int32_t>(std::find(std::begin(edges), std::end(edges), edge) - std::begin(edges));
     int32_t begin = sideStart(edge) + micronToDbu(offset);
+    if (isSignalMaster(definition, instance->get_master_name())) {
+      placed_signals.insert(instance->get_name());
+    }
     if (isPowerMaster(definition, instance->get_master_name())) {
       side_power_masters[side_index].push_back(instance->get_master_name());
       for (const IOCellPowerMember& member : definition.power_members) {
@@ -670,7 +756,7 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
     if (!definition.power_members.empty() && instance->get_master_name() == definition.power_members.front().master_name) {
       side_group_starts[side_index].push_back(begin);
     }
-    occupied[side_index].push_back({begin, begin + getCellSpan(*instance)});
+    occupied[side_index].push_back({begin, begin + getCellSpan(*instance, edge, orient)});
   }
   const CellMaster& corner_master = FPDM.getDatabase().get_cell_master_map().at(definition.corner_master_name);
   for (int32_t side_index = 0; side_index < 4; ++side_index) {
@@ -685,10 +771,23 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
       FPLOG.error(Loc::current(), "IO Cell placement file does not exactly cover ", edgeName(edge), " edge.");
       return false;
     }
-    for (const IOCellPowerMember& member : definition.power_members) {
-      if (std::find(side_power_masters[side_index].begin(), side_power_masters[side_index].end(), member.master_name)
-          == side_power_masters[side_index].end()) {
-        FPLOG.error(Loc::current(), "IO Cell placement file has no complete power package on ", edgeName(edge), ".");
+    const size_t member_count = definition.power_members.size();
+    std::vector<std::string>& masters = side_power_masters[side_index];
+    if (member_count == 0 || masters.empty() || masters.size() % member_count != 0) {
+      FPLOG.error(Loc::current(), "IO Cell placement file has an incomplete power package on ", edgeName(edge), ".");
+      return false;
+    }
+    size_t rotation = 0;
+    while (rotation < member_count && masters[rotation] != definition.power_members[0].master_name) {
+      ++rotation;
+    }
+    if (rotation == member_count) {
+      FPLOG.error(Loc::current(), "IO Cell placement file has no complete power package on ", edgeName(edge), ".");
+      return false;
+    }
+    for (size_t i = 0; i < masters.size(); ++i) {
+      if (masters[i] != definition.power_members[(rotation + i) % member_count].master_name) {
+        FPLOG.error(Loc::current(), "IO Cell power groups are not complete or ordered on ", edgeName(edge), ".");
         return false;
       }
     }
@@ -707,6 +806,19 @@ bool IOCellPlacer::placeFromFile(const IOCellDefinition& definition)
       }
     }
   }
+  if (placed_signals != required_signals) {
+    std::string missing;
+    for (const std::string& name : required_signals) {
+      if (placed_signals.count(name) == 0) {
+        if (!missing.empty()) {
+          missing += ", ";
+        }
+        missing += name;
+      }
+    }
+    FPLOG.error(Loc::current(), "IO Cell placement file is missing signal PADs: ", missing, ".");
+    return false;
+  }
   return true;
 }
 
@@ -714,6 +826,22 @@ bool IOCellPlacer::bindIOPins(const IOCellDefinition& definition)
 {
   const Database& database = FPDM.getDatabase();
   _port_bindings.clear();
+
+  std::string unplaced_signals;
+  for (const Instance& instance : database.get_instance_list()) {
+    if (!instance.get_placed() && !instance.is_delete_instance() && isSignalMaster(definition, instance.get_master_name())) {
+      if (!unplaced_signals.empty()) {
+        unplaced_signals += ", ";
+      }
+      unplaced_signals += instance.get_name();
+    }
+  }
+  if (!unplaced_signals.empty()) {
+    FPLOG.error(Loc::current(), "These signal PADs are not placed: ", unplaced_signals,
+                ". Add them to io_cell.file_path or use io_cell.mode=auto.");
+    return false;
+  }
+
   for (const Net& net : database.get_net_list()) {
     std::vector<std::string> io_names;
     for (const NetPin& pin : net.get_net_pin_list()) {
@@ -738,7 +866,7 @@ bool IOCellPlacer::bindIOPins(const IOCellDefinition& definition)
       }
       const Instance& instance = database.get_instance_list()[iter->second];
       const auto master = database.get_cell_master_map().find(instance.get_master_name());
-      if (instance.get_macro() || master == database.get_cell_master_map().end() || !master->second.get_pad()) {
+      if (!instance.get_placed() || instance.get_macro() || master == database.get_cell_master_map().end() || !master->second.get_pad()) {
         continue;
       }
       const bool power = isPowerMaster(definition, instance.get_master_name());
@@ -800,11 +928,9 @@ bool IOCellPlacer::updateIOPinPorts()
           continue;
         }
         const RoutingLayer* layer = nullptr;
-        for (const RoutingLayer& candidate : database.get_routing_layer_list()) {
-          if (candidate.get_name() == shape.get_layer_name()) {
-            layer = &candidate;
-            break;
-          }
+        auto layer_iter = database.get_routing_layer_name_to_idx_map().find(shape.get_layer_name());
+        if (layer_iter != database.get_routing_layer_name_to_idx_map().end()) {
+          layer = &database.get_routing_layer_list()[layer_iter->second];
         }
         if (layer == nullptr) {
           continue;
@@ -953,7 +1079,7 @@ bool IOCellPlacer::placeSide(IOEdgeType edge, const IOCellDefinition& definition
       if (instance == nullptr || !placeCell(*instance, edge, offset, edgeOrientation(edge))) {
         return false;
       }
-      offset += getCellSpan(*instance);
+      offset += getCellSpan(*instance, edge, edgeOrientation(edge));
     }
   }
 
@@ -964,7 +1090,7 @@ bool IOCellPlacer::placeSide(IOEdgeType edge, const IOCellDefinition& definition
     int32_t cursor_coord = segment.begin;
     while (signal_cursor < signal_indices.size()) {
       Instance& signal = database.get_instance_list()[signal_indices[signal_cursor]];
-      const int32_t span = getCellSpan(signal);
+      const int32_t span = getCellSpan(signal, edge, edgeOrientation(edge));
       if (cursor_coord + span > segment.end) {
         break;
       }
@@ -1033,52 +1159,75 @@ bool IOCellPlacer::buildSideLayout(IOEdgeType edge, const IOCellDefinition& defi
     layout.error = "IO Cell power package does not fit on " + edgeName(edge) + ".";
     return false;
   }
-  layout.group_count = std::max<int32_t>(1, (layout.line_length - layout.package_span + layout.dbu_spacing - 1) / layout.dbu_spacing + 1);
-  if (layout.group_count * layout.package_span > layout.line_length) {
-    layout.error = "IO Cell power packages do not fit on " + edgeName(edge) + ".";
+  const int32_t group_count = packageCount(layout.line_length, layout.package_span, layout.dbu_spacing);
+  if (group_count < 0) {
+    layout.error = "IO Cell power packages cannot meet target_group_spacing on " + edgeName(edge) + ".";
+    return false;
+  }
+  layout.group_count = group_count;
+
+  for (const IOCellFillerMaster& filler : definition.filler_masters) {
+    layout.filler_widths.push_back(fillerWidth(filler));
+  }
+  const int32_t filler_gcd = std::max<int32_t>(1, fillerGcd(definition));
+
+  // Keep the first/last power group away from the corner cells.
+  int32_t corner_clearance = micronToDbu(_config.io_cell_corner_clearance_micron);
+  corner_clearance = std::max(0, corner_clearance);
+  const int32_t total_free = layout.line_length - layout.group_count * layout.package_span;
+  const int32_t max_clearance = total_free / 2;
+  corner_clearance = std::min(corner_clearance, max_clearance);
+  // Snap the clearance to the filler grid so both end gaps stay fillable.
+  corner_clearance = (corner_clearance / filler_gcd) * filler_gcd;
+  layout.clearance = corner_clearance;
+
+  if (total_free % filler_gcd != 0) {
+    layout.error = "IO Cell free length on " + edgeName(edge) + " is not representable by filler widths (gcd "
+                   + std::to_string(filler_gcd) + ").";
     return false;
   }
 
-  // Keep the first/last power group away from the corner cells.  A single
-  // group is centered; multiple groups are distributed over the reduced
-  // usable span instead of starting/ending flush against the corners.
-  int32_t corner_clearance = micronToDbu(_config.io_cell_corner_clearance_micron);
-  if (corner_clearance < 0) {
-    corner_clearance = 0;
-  }
-  const int32_t max_clearance = (layout.line_length - layout.group_count * layout.package_span) / 2;
-  if (corner_clearance > max_clearance) {
-    corner_clearance = max_clearance;
-  }
-  layout.clearance = corner_clearance;
-  layout.usable_length = layout.line_length - 2 * layout.clearance - layout.package_span;
-
-  int32_t previous = layout.line_begin;
-  for (int32_t group_idx = 0; group_idx < layout.group_count; ++group_idx) {
-    int32_t anchor = layout.line_begin + layout.clearance;
-    if (layout.group_count == 1) {
-      anchor += layout.usable_length / 2;
-    } else {
-      anchor += static_cast<int32_t>((static_cast<int64_t>(layout.usable_length) * group_idx) / (layout.group_count - 1));
+  if (layout.group_count == 1) {
+    const int32_t left = layout.line_begin + layout.clearance;
+    const int32_t right = layout.line_end - layout.clearance - layout.package_span;
+    if (right < left) {
+      layout.error = "IO Cell power package does not fit on " + edgeName(edge) + ".";
+      return false;
     }
-    if (anchor < previous) {
-      anchor = previous;
-    }
-    if (anchor > layout.line_end - layout.package_span) {
-      anchor = layout.line_end - layout.package_span;
-    }
-    if (anchor > previous) {
-      layout.free_segments.push_back({previous, anchor});
-    }
+    const int32_t anchor = left + ((right - left) / 2 / filler_gcd) * filler_gcd;
     layout.anchors.push_back(anchor);
-    previous = anchor + layout.package_span;
-  }
-  if (previous < layout.line_end) {
-    layout.free_segments.push_back({previous, layout.line_end});
+    if (anchor > layout.line_begin) {
+      layout.free_segments.push_back({layout.line_begin, anchor});
+    }
+    if (anchor + layout.package_span < layout.line_end) {
+      layout.free_segments.push_back({anchor + layout.package_span, layout.line_end});
+    }
+    return true;
   }
 
-  for (const IOCellFillerMaster& filler : definition.filler_masters) {
-    layout.filler_widths.push_back(micronToDbu(filler.width_micron));
+  // Distribute the internal free length into gaps that are multiples of the
+  // filler gcd; the leftover (also a multiple) widens the leading gaps.
+  const int32_t gap_count = layout.group_count - 1;
+  const int32_t internal_free = total_free - 2 * layout.clearance;
+  const int32_t base_gap = (internal_free / gap_count) / filler_gcd * filler_gcd;
+  const int32_t wide_gaps = (internal_free - base_gap * gap_count) / filler_gcd;
+  int32_t anchor = layout.line_begin + layout.clearance;
+  if (layout.clearance > 0) {
+    layout.free_segments.push_back({layout.line_begin, anchor});
+  }
+  for (int32_t group_idx = 0; group_idx < layout.group_count; ++group_idx) {
+    layout.anchors.push_back(anchor);
+    if (group_idx + 1 == layout.group_count) {
+      break;
+    }
+    const int32_t gap = base_gap + (group_idx < wide_gaps ? filler_gcd : 0);
+    if (gap > 0) {
+      layout.free_segments.push_back({anchor + layout.package_span, anchor + layout.package_span + gap});
+    }
+    anchor += layout.package_span + gap;
+  }
+  if (layout.clearance > 0) {
+    layout.free_segments.push_back({anchor + layout.package_span, layout.line_end});
   }
   return true;
 }
@@ -1108,7 +1257,8 @@ bool IOCellPlacer::canFillGap(int32_t gap, const std::vector<int32_t>& filler_wi
   return min_width == gcd || !solveFiller(gap, filler_widths).empty();
 }
 
-bool IOCellPlacer::packSignalsDryRun(const std::vector<int32_t>& signal_indices, const SideLayout& layout, int32_t& deficit) const
+bool IOCellPlacer::packSignalsDryRun(IOEdgeType edge, const std::vector<int32_t>& signal_indices, const SideLayout& layout,
+                                     int32_t& deficit) const
 {
   const Database& database = FPDM.getDatabase();
   deficit = 0;
@@ -1118,7 +1268,7 @@ bool IOCellPlacer::packSignalsDryRun(const std::vector<int32_t>& signal_indices,
     int32_t cursor_coord = segment.begin;
     while (signal_cursor < signal_indices.size()) {
       const Instance& signal = database.get_instance_list()[signal_indices[signal_cursor]];
-      const int32_t span = getCellSpan(signal);
+      const int32_t span = getCellSpan(signal, edge, edgeOrientation(edge));
       if (cursor_coord + span > segment.end) {
         break;
       }
@@ -1133,7 +1283,7 @@ bool IOCellPlacer::packSignalsDryRun(const std::vector<int32_t>& signal_indices,
   if (signal_cursor != signal_indices.size()) {
     int32_t remaining = 0;
     for (size_t index = signal_cursor; index < signal_indices.size(); ++index) {
-      remaining += getCellSpan(database.get_instance_list()[signal_indices[index]]);
+      remaining += getCellSpan(database.get_instance_list()[signal_indices[index]], edge, edgeOrientation(edge));
     }
     deficit = std::max(remaining, filler_deficit);
     return false;
@@ -1145,22 +1295,44 @@ bool IOCellPlacer::packSignalsDryRun(const std::vector<int32_t>& signal_indices,
   return true;
 }
 
-int32_t IOCellPlacer::requiredLineLength(int32_t signal_length, int32_t package_span, int32_t spacing) const
+int32_t IOCellPlacer::requiredLineLength(int32_t signal_length, int32_t package_span, int32_t spacing, int32_t clearance,
+                                         int32_t filler_gcd) const
 {
   if (package_span <= 0) {
     return 0;
   }
-  spacing = std::max<int32_t>(1, spacing);
-  int32_t line = signal_length + package_span;
-  for (int32_t iter = 0; iter < 16; ++iter) {
-    const int32_t groups = std::max<int32_t>(1, (line - package_span + spacing - 1) / spacing + 1);
-    const int32_t need = groups * package_span + signal_length;
-    if (need <= line) {
-      return line;
+  const int32_t g = std::max<int32_t>(1, filler_gcd);
+  const int32_t sm = std::max<int32_t>(1, spacing);
+  const int64_t base = static_cast<int64_t>(signal_length) + 2 * clearance;
+  const int64_t two_p = 2LL * package_span;
+
+  // Free length must satisfy (L - nP) % gcd == 0 so every gap stays fillable.
+  auto aligned_for = [&](int64_t low, int64_t n) {
+    int32_t value = alignUp(static_cast<int32_t>(low), g);
+    if (g > 1) {
+      const int32_t residue = static_cast<int32_t>((n * package_span) % g);
+      value += (residue - value % g + g) % g;
     }
-    line = need;
+    return value;
+  };
+
+  // One centered package: only possible while the line stays below 2P.
+  if (package_span + base < two_p) {
+    return aligned_for(package_span + base, 1);
   }
-  return line;
+
+  for (int64_t n = 2; n <= 4096; ++n) {
+    const int64_t lo = std::max(n * package_span + base, two_p);
+    const int64_t hi = n * (package_span + sm) - sm + 2LL * clearance;
+    if (lo > hi) {
+      continue;
+    }
+    const int32_t value = aligned_for(lo, n);
+    if (value <= hi) {
+      return value;
+    }
+  }
+  return -1;
 }
 
 IOCapacityReport IOCellPlacer::checkCapacity()
@@ -1179,6 +1351,7 @@ IOCapacityReport IOCellPlacer::checkCapacity()
   const CellMaster& corner_master = database.get_cell_master_map().at(definition.corner_master_name);
   int32_t required_width = 0;
   int32_t required_height = 0;
+  const int32_t filler_gcd = std::max<int32_t>(1, fillerGcd(definition));
 
   for (int32_t side_idx = 0; side_idx < 4; ++side_idx) {
     const IOEdgeType edge = edges[side_idx];
@@ -1186,51 +1359,43 @@ IOCapacityReport IOCellPlacer::checkCapacity()
     side.edge = edge;
     side.edge_name = edgeName(edge);
 
+    const PlacementOrientation orient = edgeOrientation(edge);
     int32_t signal_length = 0;
     for (int32_t instance_idx : signal_indices[side_idx]) {
-      signal_length += getCellSpan(database.get_instance_list()[instance_idx]);
+      signal_length += getCellSpan(database.get_instance_list()[instance_idx], edge, orient);
     }
     side.signal_length = signal_length;
 
     SideLayout layout;
-    if (!buildSideLayout(edge, definition, layout)) {
-      side.error = layout.error;
-      side.line_length = layout.line_length;
-      side.package_span = layout.package_span;
-      side.group_count = layout.group_count;
-      side.clearance = layout.clearance;
-      side.power_length = layout.group_count * layout.package_span;
-      side.free_length = std::max<int32_t>(0, layout.line_length - side.power_length);
-      side.deficit = std::max<int32_t>(signal_length + side.power_length - layout.line_length, 0);
-      report.fits = false;
-      const int32_t required_line = requiredLineLength(signal_length, layout.package_span, layout.dbu_spacing);
-      if (edge == IOEdgeType::kBottom || edge == IOEdgeType::kTop) {
-        required_width = std::max(required_width, required_line + 2 * corner_master.get_width());
-      } else {
-        required_height = std::max(required_height, required_line + 2 * corner_master.get_height());
-      }
-      continue;
-    }
-
+    const bool layout_ok = buildSideLayout(edge, definition, layout);
     side.line_length = layout.line_length;
     side.package_span = layout.package_span;
     side.group_count = layout.group_count;
-    side.power_length = layout.group_count * layout.package_span;
     side.clearance = layout.clearance;
-    side.free_length = layout.line_length - side.power_length;
+    side.power_length = layout.group_count * layout.package_span;
+    side.free_length = std::max<int32_t>(0, layout.line_length - side.power_length);
 
-    int32_t deficit = 0;
-    const bool fits = packSignalsDryRun(signal_indices[side_idx], layout, deficit);
-    side.deficit = fits ? 0 : std::max<int32_t>(deficit, side.signal_length + side.power_length - layout.line_length);
+    bool fits = false;
+    if (layout_ok) {
+      int32_t deficit = 0;
+      fits = packSignalsDryRun(edge, signal_indices[side_idx], layout, deficit);
+      side.deficit = fits ? 0 : std::max<int32_t>(deficit, 1);
+    } else {
+      side.error = layout.error;
+      side.deficit = std::max<int32_t>(signal_length + side.power_length - layout.line_length, 1);
+    }
     if (!fits) {
       report.fits = false;
-    }
-
-    const int32_t required_line = requiredLineLength(signal_length, layout.package_span, layout.dbu_spacing);
-    if (edge == IOEdgeType::kBottom || edge == IOEdgeType::kTop) {
-      required_width = std::max(required_width, required_line + 2 * corner_master.get_width());
-    } else {
-      required_height = std::max(required_height, required_line + 2 * corner_master.get_height());
+      const int32_t constructive = requiredLineLength(signal_length, layout.package_span, layout.dbu_spacing, layout.clearance, filler_gcd);
+      // Prefer the constructive size; only fall back to the dry-run shortfall
+      // when no feasible length exists (e.g. an unrepresentable filler gap).
+      const int32_t fallback = layout.line_length + std::max<int32_t>(side.deficit, 1);
+      side.required_line = alignUp(constructive > 0 ? constructive : fallback, filler_gcd);
+      if (edge == IOEdgeType::kBottom || edge == IOEdgeType::kTop) {
+        required_width = std::max(required_width, side.required_line + 2 * corner_master.get_width());
+      } else {
+        required_height = std::max(required_height, side.required_line + 2 * corner_master.get_height());
+      }
     }
   }
 
@@ -1305,6 +1470,35 @@ Instance* IOCellPlacer::findOrCreatePowerInstance(const IOCellPowerMember& membe
 Instance* IOCellPlacer::createPhysicalInstance(const std::string& name, const std::string& master_name)
 {
   Database& database = FPDM.getDatabase();
+  auto existing = database.get_instance_name_to_idx_map().find(name);
+  if (existing != database.get_instance_name_to_idx_map().end()) {
+    Instance& instance = database.get_instance_list()[existing->second];
+    // Filler/corner cells are identified by name; the filler solver may pick a
+    // different master for the same index when the die or definition changes.
+    const bool generated = name.rfind("IO_FILL_", 0) == 0 || name.rfind("IO_CORNER_", 0) == 0 || name.rfind("IO_POWER_", 0) == 0;
+    if (!instance.is_delete_instance() || (!generated && instance.get_master_name() != master_name)) {
+      FPLOG.error(Loc::current(), "Instance name '", name, "' is already used by master '", instance.get_master_name(),
+                  "' (requested '", master_name, "').");
+      return nullptr;
+    }
+    if (instance.get_master_name() != master_name) {
+      const CellMaster& master = database.get_cell_master_map().at(master_name);
+      instance.set_master_name(master_name);
+      instance.set_width(master.get_width());
+      instance.set_height(master.get_height());
+    }
+    // Reuse the record from a previous run instead of adding a duplicate name.
+    instance.set_delete_instance(false);
+    instance.set_new_instance(!instance.is_from_netlist());
+    instance.set_placed(false);
+    instance.set_placement_updated(false);
+    instance.set_fixed(true);
+    instance.set_coord(-1, -1);
+    instance.set_bounding_rect(-1, -1, -1, -1);
+    instance.set_io_cell_net_name("");
+    instance.set_io_cell_pin_name("");
+    return &instance;
+  }
   Instance instance;
   instance.set_name(name);
   instance.set_master_name(master_name);
@@ -1326,7 +1520,7 @@ bool IOCellPlacer::fillSegment(IOEdgeType edge, const Segment& segment, const IO
   }
   std::vector<int32_t> widths;
   for (const IOCellFillerMaster& filler : definition.filler_masters) {
-    widths.push_back(micronToDbu(filler.width_micron));
+    widths.push_back(fillerWidth(filler));
   }
   std::vector<int32_t> solution = solveFiller(segment.end - segment.begin, widths);
   if (solution.empty()) {
@@ -1385,11 +1579,11 @@ std::vector<int32_t> IOCellPlacer::solveFiller(int32_t gap, const std::vector<in
   return result;
 }
 
-int32_t IOCellPlacer::getCellSpan(const Instance& instance) const
+int32_t IOCellPlacer::getCellSpan(const Instance& instance, IOEdgeType edge, PlacementOrientation orient) const
 {
-  // IO edge cells are placed with N/E/S/W. Their tangent dimension is the
-  // unrotated master width (65um for the CX55 sample), including on left/right.
-  return instance.get_width();
+  // Tangent dimension along the edge: x for horizontal edges, y for vertical.
+  return (edge == IOEdgeType::kBottom || edge == IOEdgeType::kTop) ? getOrientedWidth(instance, orient)
+                                                                   : getOrientedHeight(instance, orient);
 }
 
 int32_t IOCellPlacer::getOrientedWidth(const Instance& instance, PlacementOrientation orient) const

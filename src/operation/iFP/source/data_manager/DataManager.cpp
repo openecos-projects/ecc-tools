@@ -239,12 +239,8 @@ void DataManager::printConfig()
       return result + "}";
     };
     FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "io_core_connect: nets=", join_names(_config.pg_io_core_connect.nets),
-               ", pin_layers=", join_names(_config.pg_io_core_connect.pin_layers), ", outermost_pin=", _config.pg_io_core_connect.select_outermost_pin,
-               ", connect_all=", _config.pg_io_core_connect.connect_all_legal_stripes,
+               ", pin_layers=", join_names(_config.pg_io_core_connect.pin_layers),
                ", min_contacts=", _config.pg_io_core_connect.min_contacts_per_port,
-               ", max_contacts=", _config.pg_io_core_connect.max_contacts_per_port,
-               ", max_routes_per_stripe=", _config.pg_io_core_connect.max_routes_per_stripe, ", direct_extension=",
-               _config.pg_io_core_connect.allow_direct_extension, ", bridge=", _config.pg_io_core_connect.allow_bridge,
                ", bridge_min_spacing_micron=", _config.pg_io_core_connect.bridge_min_spacing_micron,
                ", fail_on_unresolved=", _config.pg_io_core_connect.fail_on_unresolved);
   }
