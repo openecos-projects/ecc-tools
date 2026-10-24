@@ -196,6 +196,7 @@ struct PyPlaceDB
   pybind11::list pin_2_libpin_offset;
   pybind11::list flat_lib_pin_offset_x;
   pybind11::list flat_lib_pin_offset_y;
+  pybind11::list flat_lib_pin_names;
   pybind11::list flat_lib_pin_cap;
   pybind11::list flat_lib_pin_rcap;
   pybind11::list flat_lib_pin_fcap;

@@ -303,6 +303,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
   for (const LibertyCellData& cell : snapshot.lib_cells) {
     auto* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
     for (const LibertyPortData& port : cell.ports) {
+      flat_lib_pin_names.append(port.name);
       auto* term = master == nullptr ? nullptr : master->findTerm(port.name);
       auto* box = term == nullptr || term->get_port_number() == 0 ? nullptr : term->get_bounding_box();
       flat_lib_pin_offset_x.append(box == nullptr ? 0 : (box->get_low_x() + box->get_high_x()) / 2);
