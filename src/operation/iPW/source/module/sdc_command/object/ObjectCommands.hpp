@@ -43,6 +43,14 @@ class TclAllClocks : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclAllDelayCorners : public SdcTclCmd
+{
+ public:
+  TclAllDelayCorners(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclGetObjectName : public SdcTclCmd
 {
  public:
