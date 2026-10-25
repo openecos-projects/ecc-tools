@@ -52,6 +52,33 @@ bool isInvailidNet(IdbNet* net, bool with_sta)
          || net->get_instance_pin_list()->get_pin_list().size() == 0;
 }
 
+bool getConnectedPadCoordinate(IdbPin* io_pin, int32_t& x, int32_t& y)
+{
+  if (io_pin == nullptr || io_pin->get_net() == nullptr) {
+    return false;
+  }
+
+  for (IdbPin* instance_pin : io_pin->get_net()->get_instance_pin_list()->get_pin_list()) {
+    if (instance_pin == nullptr || instance_pin->get_instance() == nullptr || instance_pin->get_pin_name() != "PAD") {
+      continue;
+    }
+    IdbInstance* io_cell = instance_pin->get_instance();
+    if (io_cell->get_cell_master() == nullptr || !io_cell->get_cell_master()->is_io_cell()) {
+      continue;
+    }
+    IdbCoordinate<int32_t>* coordinate = instance_pin->get_average_coordinate();
+    if (coordinate == nullptr || coordinate->is_negative()) {
+      continue;
+    }
+
+    x = coordinate->get_x();
+    y = coordinate->get_y();
+    return true;
+  }
+
+  return false;
+}
+
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
                     bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density)
 {
@@ -357,16 +384,26 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   for (auto io_pin : db_deisgn->get_io_pin_list()->get_pin_list()) {
     int lx = 0;
     int ly = 0;
+    bool has_coordinate = false;
     IdbTerm* term = io_pin->get_term();
-    if (term->is_port_exist()) {
-      for (auto port : term->get_port_list()) {
-        lx = port->get_io_average_coordinate()->get_x();
-        ly = port->get_io_average_coordinate()->get_y();
+    if (term != nullptr && term->is_port_exist()) {
+      for (IdbPort* port : term->get_port_list()) {
+        IdbCoordinate<int32_t>* coordinate = port == nullptr ? nullptr : port->get_io_average_coordinate();
+        if (coordinate != nullptr && !coordinate->is_negative()) {
+          lx = coordinate->get_x();
+          ly = coordinate->get_y();
+          has_coordinate = true;
+        }
         break;
       }
-    } else {
+    }
+    if (!has_coordinate) {
       lx = io_pin->get_location()->get_x();
       ly = io_pin->get_location()->get_y();
+      has_coordinate = !io_pin->get_location()->is_negative();
+    }
+    if (!has_coordinate) {
+      getConnectedPadCoordinate(io_pin, lx, ly);
     }
     Box box_tmp(lx, ly, lx + 1, ly + 1);
     addNode("R0", io_pin->get_pin_name(), box_tmp, false, false, false, nullptr);
