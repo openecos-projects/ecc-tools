@@ -189,66 +189,43 @@ void addMetalShortFixedOverlapRect(GTLPolySetInt& overlap_polyset, std::vector<G
 void collectMetalShortFixedOverlapRects(const RVLayerData& rv_layer_data, const MetalShortNetPair& net_pair, std::vector<GTLRectInt>& overlap_rects)
 {
   overlap_rects.clear();
+  // Only pin-vs-obs takes part in filtering, so a pair without net -1 has no coverage.
+  if (net_pair.first != -1 && net_pair.second != -1) {
+    return;
+  }
+  int32_t fixed_net_idx = (net_pair.first == -1) ? net_pair.second : net_pair.first;
+  auto fixed_rect_it = rv_layer_data.metal_short_fixed_rects.find(fixed_net_idx);
+  if (fixed_rect_it == rv_layer_data.metal_short_fixed_rects.end()) {
+    return;
+  }
   GTLPolySetInt overlap_polyset;
   std::vector<GTLRectInt> zero_area_overlap_rects;
-  if (net_pair.first == -1 || net_pair.second == -1) {
-    // net -1 is the obstruction side, so the fixed shape can only touch its boundary.
-    int32_t fixed_net_idx = (net_pair.first == -1) ? net_pair.second : net_pair.first;
-    auto fixed_rect_it = rv_layer_data.metal_short_fixed_rects.find(fixed_net_idx);
-    if (fixed_rect_it == rv_layer_data.metal_short_fixed_rects.end()) {
-      return;
-    }
-    std::vector<GTLRectInt> overlap_obs_rects;
-    std::vector<std::pair<GTLRectInt, int32_t>> overlap_metal_rects;
-    for (const GTLRectInt& fixed_gtl_rect : fixed_rect_it->second) {
-      PlanarRect fixed_rect = DRCUTIL.convertToPlanarRect(fixed_gtl_rect);
-      // Obstructions are kept in the obs index by the full-chip flow.
-      overlap_obs_rects.clear();
-      rv_layer_data.queryMetalShortObsRects(fixed_gtl_rect, std::back_inserter(overlap_obs_rects));
-      for (const GTLRectInt& obs_gtl_rect : overlap_obs_rects) {
-        PlanarRect obs_rect = DRCUTIL.convertToPlanarRect(obs_gtl_rect);
-        if (!DRCUTIL.isClosedOverlap(fixed_rect, obs_rect)) {
-          continue;
-        }
-        addMetalShortFixedOverlapRect(overlap_polyset, zero_area_overlap_rects, DRCUTIL.getOverlap(fixed_rect, obs_rect));
-      }
-      // The routing flow passes obstructions as net -1 metal shapes.
-      overlap_metal_rects.clear();
-      rv_layer_data.queryMetalShortMetalRects(fixed_gtl_rect, std::back_inserter(overlap_metal_rects));
-      for (const auto& [metal_gtl_rect, metal_net_idx] : overlap_metal_rects) {
-        if (metal_net_idx != -1) {
-          continue;
-        }
-        PlanarRect metal_rect = DRCUTIL.convertToPlanarRect(metal_gtl_rect);
-        if (!DRCUTIL.isClosedOverlap(fixed_rect, metal_rect)) {
-          continue;
-        }
-        addMetalShortFixedOverlapRect(overlap_polyset, zero_area_overlap_rects, DRCUTIL.getOverlap(fixed_rect, metal_rect));
-      }
-    }
-  } else {
-    std::vector<std::pair<GTLRectInt, int32_t>> overlap_metal_rects;
-    for (int32_t fixed_net_idx : {net_pair.first, net_pair.second}) {
-      int32_t other_net_idx = (fixed_net_idx == net_pair.first) ? net_pair.second : net_pair.first;
-      auto fixed_rect_it = rv_layer_data.metal_short_fixed_rects.find(fixed_net_idx);
-      if (fixed_rect_it == rv_layer_data.metal_short_fixed_rects.end()) {
+  std::vector<GTLRectInt> overlap_obs_rects;
+  std::vector<std::pair<GTLRectInt, int32_t>> overlap_metal_rects;
+  for (const GTLRectInt& fixed_gtl_rect : fixed_rect_it->second) {
+    PlanarRect fixed_rect = DRCUTIL.convertToPlanarRect(fixed_gtl_rect);
+    // Full-chip flow keeps obstructions in the obs index.
+    overlap_obs_rects.clear();
+    rv_layer_data.queryMetalShortObsRects(fixed_gtl_rect, std::back_inserter(overlap_obs_rects));
+    for (const GTLRectInt& obs_gtl_rect : overlap_obs_rects) {
+      PlanarRect obs_rect = DRCUTIL.convertToPlanarRect(obs_gtl_rect);
+      if (!DRCUTIL.isClosedOverlap(fixed_rect, obs_rect)) {
         continue;
       }
-      for (const GTLRectInt& fixed_gtl_rect : fixed_rect_it->second) {
-        overlap_metal_rects.clear();
-        rv_layer_data.queryMetalShortMetalRects(fixed_gtl_rect, std::back_inserter(overlap_metal_rects));
-        PlanarRect fixed_rect = DRCUTIL.convertToPlanarRect(fixed_gtl_rect);
-        for (const auto& [metal_gtl_rect, metal_net_idx] : overlap_metal_rects) {
-          if (metal_net_idx != other_net_idx) {
-            continue;
-          }
-          PlanarRect metal_rect = DRCUTIL.convertToPlanarRect(metal_gtl_rect);
-          if (!DRCUTIL.isClosedOverlap(fixed_rect, metal_rect)) {
-            continue;
-          }
-          addMetalShortFixedOverlapRect(overlap_polyset, zero_area_overlap_rects, DRCUTIL.getOverlap(fixed_rect, metal_rect));
-        }
+      addMetalShortFixedOverlapRect(overlap_polyset, zero_area_overlap_rects, DRCUTIL.getOverlap(fixed_rect, obs_rect));
+    }
+    // Routing flow passes obstructions as net -1 metal shapes.
+    overlap_metal_rects.clear();
+    rv_layer_data.queryMetalShortMetalRects(fixed_gtl_rect, std::back_inserter(overlap_metal_rects));
+    for (const auto& [metal_gtl_rect, metal_net_idx] : overlap_metal_rects) {
+      if (metal_net_idx != -1) {
+        continue;
       }
+      PlanarRect metal_rect = DRCUTIL.convertToPlanarRect(metal_gtl_rect);
+      if (!DRCUTIL.isClosedOverlap(fixed_rect, metal_rect)) {
+        continue;
+      }
+      addMetalShortFixedOverlapRect(overlap_polyset, zero_area_overlap_rects, DRCUTIL.getOverlap(fixed_rect, metal_rect));
     }
   }
   if (!gtl::empty(overlap_polyset)) {
@@ -268,6 +245,10 @@ void removeMetalShortViolationsCoveredByFixed(const RVLayerData& rv_layer_data, 
     auto net_it = net_set.begin();
     int32_t first_net_idx = *net_it;
     int32_t second_net_idx = *(++net_it);
+    // Only pin-vs-obs violations are used as coverage.
+    if (first_net_idx != -1 && second_net_idx != -1) {
+      continue;
+    }
     MetalShortNetPair net_pair = makeMetalShortNetPair(first_net_idx, second_net_idx);
     if (fixed_overlap_rects.find(net_pair) != fixed_overlap_rects.end()) {
       continue;
