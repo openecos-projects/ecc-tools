@@ -51,6 +51,7 @@ class GlobalRouter
   // runtime state
   bool _last_detour_shifted = false;
   std::vector<GRNet*> _pattern_failed_net_list;
+  std::vector<GRNet*> _unrouted_net_list;
   GridMap<int32_t> _horizontal_congestion_prefix;
   GridMap<int32_t> _vertical_congestion_prefix;
 
@@ -93,6 +94,8 @@ class GlobalRouter
   void initGRGridGraph();
   void initGRNetList();
   void buildExemptEdgeSet(GRNet& net);
+  void addPinEscapeCorridor(GRNet& net, const GRPin& gr_pin, bool is_horizontal, int32_t direction);
+  GRWireEdgeId getEscapeEdgeId(int32_t x, int32_t y, bool is_horizontal, int32_t direction, int32_t layer_idx) const;
 
   // supply
   void analyzeSupply();
@@ -103,12 +106,13 @@ class GlobalRouter
   void patternRouteGRNetList();
   void detourRouteGRNetList();
   void mazeRouteGRNetList();
+  void routeUnroutedNetList();
   void updateCongestionCost();
-  bool routeGRNetByMaze(GRNet& net);
-  bool buildMazeRoutingTree(GRNet& net, GRTree& routing_tree);
-  bool buildMazePathList(const GRNet& net, std::vector<std::vector<PlanarCoord>>& path_list);
+  bool routeGRNetByMaze(GRNet& net, bool allow_blocked_edge);
+  bool buildMazeRoutingTree(GRNet& net, GRTree& routing_tree, bool allow_blocked_edge);
+  bool buildMazePathList(const GRNet& net, std::vector<std::vector<PlanarCoord>>& path_list, bool allow_blocked_edge);
   bool buildMazeTopoTree(GRNet& net, const std::vector<std::vector<PlanarCoord>>& path_list);
-  double getMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal) const;
+  double getMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal, bool allow_blocked_edge) const;
   double getDirectionCost() const;
   std::vector<GRNet*> getOverflowNetList();
   bool isNetOverflowing(const GRNet& net) const;
@@ -131,8 +135,8 @@ class GlobalRouter
   int32_t getPathCongestionNum(const std::vector<PlanarCoord>& path) const;
   double getPathLength(const std::vector<PlanarCoord>& path) const;
   bool isStraightSkeletonChain(const GRSkeletonTree& skeleton, const std::vector<int32_t>& chain) const;
-  bool runDP(const GRNet& net, GRTree& routing_tree);
-  void computeNodeDP(const GRNet& net, GRDpState& state, int32_t node_idx);
+  bool runDP(const GRNet& net, GRTree& routing_tree, bool allow_blocked_edge);
+  void computeNodeDP(const GRNet& net, GRDpState& state, int32_t node_idx, bool allow_blocked_edge);
   void getPostorder(int32_t node_idx, const GRTopoTree& topo_tree, std::vector<int32_t>& postorder);
   int32_t getOrCreateTopoNode(GRTopoTree& topo_tree, std::map<PlanarCoord, int32_t, CmpPlanarCoordByXASC>& coord_node_map, const PlanarCoord& coord);
   int32_t addBendNode(GRTopoTree& topo_tree, int32_t parent_idx, int32_t child_idx, const PlanarCoord& coord);
@@ -143,9 +147,10 @@ class GlobalRouter
                        const std::vector<std::vector<std::vector<int32_t>>>& best_child_bend, int32_t node_idx, int32_t layer_idx, GRTree& routing_tree);
 
   // cost
-  double getWireSegmentCost(const GRNet& net, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord) const;
-  double getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount = 1.0) const;
-  double getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const;
+  double getWireSegmentCost(const GRNet& net, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord,
+                            bool allow_blocked_edge) const;
+  double getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount, bool allow_blocked_edge) const;
+  double getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx, bool allow_blocked_edge) const;
   double getCongestionCost(double supply, double demand, double amount) const;
   double addCost(double first, double second) const;
   bool isExemptWireEdge(const GRNet& net, const GRWireEdgeId& edge_id) const;

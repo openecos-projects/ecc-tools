@@ -28,6 +28,8 @@ class GRParams
 
   static constexpr double kInf = 1e18;
   static constexpr double kEpsilon = 1e-6;
+  // 兜底布线时穿过没有可用 supply 的边的代价, 仍为有限值
+  static constexpr double kBlockedEdgeCost = 1e6;
 
   // getter
   double get_unit_wire_cost() const { return _unit_wire_cost; }
