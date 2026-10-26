@@ -16,9 +16,11 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -116,8 +118,7 @@ class TARouter
   void commitNetUsage(TANet& ta_net);
   void addViaUsage(TANet& ta_net, const TAEdge& edge);
   void rerouteOverflowNets();
-  std::set<int32_t> getOverflowNets() const;
-  void updateTrackHistory();
+  std::set<int32_t> updateOverflowNetSet();
   double getTrackHistory(int32_t layer_idx, int32_t track_coord) const;
   void ripupNet(const TANet& ta_net);
   Direction getEdgeDirection(const TANet& ta_net, const TAEdge& edge) const;
@@ -133,8 +134,11 @@ class TARouter
   void addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& first_coord, const LayerCoord& second_coord);
 
   // resource
-  std::map<int32_t, std::map<int32_t, std::vector<TrackInterval>>> _track_usage;
-  std::map<int32_t, std::map<int32_t, double>> _track_history;
+  // key = (layer_idx << 32) | track_coord, 用扁平 key 避免双层 std::map 的指针追逐
+  std::unordered_map<int64_t, std::vector<TrackInterval>> _track_usage;
+  std::unordered_map<int64_t, double> _track_history;
+  // net_idx -> 该 net 占用过的 track key, 用于 ripup 时只访问自己的 track
+  std::unordered_map<int32_t, std::vector<int64_t>> _net_track_index;
   std::vector<TANet> _ta_net_list;
 };
 

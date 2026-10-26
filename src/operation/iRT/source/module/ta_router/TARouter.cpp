@@ -18,7 +18,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <functional>
 #include <limits>
+#include <queue>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 #include "Logger.hpp"
 #include "Monitor.hpp"
@@ -27,6 +33,15 @@
 #include "ViaMaster.hpp"
 
 namespace irt {
+
+namespace {
+
+int64_t getTrackKey(int32_t layer_idx, int32_t track_coord)
+{
+  return (static_cast<int64_t>(layer_idx) << 32) | static_cast<int64_t>(static_cast<uint32_t>(track_coord));
+}
+
+}  // namespace
 
 TARouter* TARouter::_ta_router_instance = nullptr;
 
@@ -59,6 +74,7 @@ void TARouter::route()
   RTLOG.info(Loc::current(), "Starting...");
 
   _track_usage.clear();
+  _net_track_index.clear();
   RTDM.getDatabase().get_net_detailed_result_map().clear();
 
   initTANetList();
@@ -85,9 +101,15 @@ void TARouter::initTANetList()
   std::vector<Net>& net_list = database.get_net_list();
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& global_result_map = database.get_net_global_result_map();
 
-  _ta_net_list.clear();
-  int32_t local_net_num = 0;
-  for (Net& net : net_list) {
+  // net 之间互相独立, 并行构建后按 net 顺序压缩, 保证 _ta_net_list 与串行实现完全一致
+  constexpr char kSkipNet = 0;
+  constexpr char kLocalNet = 1;
+  constexpr char kTANet = 2;
+  std::vector<char> net_status_list(net_list.size(), kSkipNet);
+  std::vector<TANet> ta_net_list(net_list.size());
+#pragma omp parallel for schedule(dynamic, 1)
+  for (int32_t net_pos = 0; net_pos < static_cast<int32_t>(net_list.size()); net_pos++) {
+    Net& net = net_list[net_pos];
     if (net.get_pin_list().size() < 2) {
       continue;
     }
@@ -109,10 +131,22 @@ void TARouter::initTANetList()
     // A local net (all pins inside one gcell) needs no wire, so TA has nothing to
     // assign or output; DR connects its pin APs inside the gcell.
     if (!has_wire_edge) {
-      local_net_num++;
+      net_status_list[net_pos] = kLocalNet;
       continue;
     }
-    _ta_net_list.push_back(std::move(ta_net));
+    ta_net_list[net_pos] = std::move(ta_net);
+    net_status_list[net_pos] = kTANet;
+  }
+
+  _ta_net_list.clear();
+  _ta_net_list.reserve(net_list.size());
+  int32_t local_net_num = 0;
+  for (size_t net_pos = 0; net_pos < net_list.size(); net_pos++) {
+    if (net_status_list[net_pos] == kLocalNet) {
+      local_net_num++;
+    } else if (net_status_list[net_pos] == kTANet) {
+      _ta_net_list.push_back(std::move(ta_net_list[net_pos]));
+    }
   }
   RTLOG.info(Loc::current(), "TA net num: ", _ta_net_list.size(), ", local net num: ", local_net_num, " (routed by DR)");
 }
@@ -123,7 +157,8 @@ TARouter::TANet TARouter::buildTANet(Net& net)
   ta_net.origin_net = &net;
   ta_net.net_idx = net.get_net_idx();
 
-  std::vector<Segment<LayerCoord>>& global_result_list = RTDM.getDatabase().get_net_global_result_map()[net.get_net_idx()];
+  // 只读访问全局结果, 并行构建时不能用会插入的 operator[]
+  std::vector<Segment<LayerCoord>>& global_result_list = RTDM.getDatabase().get_net_global_result_map().at(net.get_net_idx());
   if (global_result_list.empty()) {
     return ta_net;
   }
@@ -601,13 +636,12 @@ void TARouter::rerouteOverflowNets()
 {
   constexpr int32_t kMaxIteration = 5;
   for (int32_t iteration = 0; iteration < kMaxIteration; iteration++) {
-    std::set<int32_t> overflow_net_set = getOverflowNets();
+    std::set<int32_t> overflow_net_set = updateOverflowNetSet();
     if (overflow_net_set.empty()) {
       RTLOG.info(Loc::current(), "No track overflow after TA iteration ", iteration);
       return;
     }
     RTLOG.info(Loc::current(), "TA reroute iteration ", iteration, ": ", overflow_net_set.size(), " overflow nets");
-    updateTrackHistory();
     for (TANet& ta_net : _ta_net_list) {
       if (!overflow_net_set.contains(ta_net.net_idx)) {
         continue;
@@ -618,89 +652,104 @@ void TARouter::rerouteOverflowNets()
   }
 }
 
-std::set<int32_t> TARouter::getOverflowNets() const
+std::set<int32_t> TARouter::updateOverflowNetSet()
 {
   std::set<int32_t> overflow_net_set;
-  for (const auto& [layer_idx, track_map] : _track_usage) {
-    for (const auto& [track_coord, interval_list] : track_map) {
-      if (interval_list.size() < 2) {
-        continue;
+  for (auto& [track_key, interval_list] : _track_usage) {
+    if (interval_list.size() < 2) {
+      continue;
+    }
+    // 按 begin/end 排序后单次扫描: 维护仍在当前 begin 之后存活的区间, 取代原来的两两比较
+    std::sort(interval_list.begin(), interval_list.end(), [](const TrackInterval& a, const TrackInterval& b) {
+      return a.begin != b.begin ? a.begin < b.begin : a.end < b.end;
+    });
+    std::set<int32_t> track_net_set;
+    for (const TrackInterval& interval : interval_list) {
+      track_net_set.insert(interval.net_idx);
+    }
+    if (track_net_set.size() < 2) {
+      continue;
+    }
+
+    std::set<int32_t> marked_net_set;
+    std::unordered_map<int32_t, int32_t> active_net_count;
+    std::unordered_set<int32_t> active_unmarked_net_set;
+    std::priority_queue<std::pair<int32_t, int32_t>, std::vector<std::pair<int32_t, int32_t>>, std::greater<>> active_end_queue;
+    int32_t active_net_num = 0;
+    for (const TrackInterval& interval : interval_list) {
+      while (!active_end_queue.empty() && active_end_queue.top().first <= interval.begin) {
+        int32_t end_net_idx = active_end_queue.top().second;
+        active_end_queue.pop();
+        auto count_iter = active_net_count.find(end_net_idx);
+        if (--(count_iter->second) != 0) {
+          continue;
+        }
+        active_net_count.erase(count_iter);
+        active_net_num--;
+        active_unmarked_net_set.erase(end_net_idx);
       }
-      std::vector<TrackInterval> sorted_list = interval_list;
-      std::sort(sorted_list.begin(), sorted_list.end(), [](const TrackInterval& a, const TrackInterval& b) { return a.begin < b.begin; });
-      for (size_t i = 0; i < sorted_list.size(); i++) {
-        for (size_t j = i + 1; j < sorted_list.size() && sorted_list[j].begin < sorted_list[i].end; j++) {
-          if (sorted_list[i].net_idx == sorted_list[j].net_idx) {
-            continue;
-          }
-          overflow_net_set.insert(sorted_list[i].net_idx);
-          overflow_net_set.insert(sorted_list[j].net_idx);
+      bool has_other_active_net
+          = active_net_num > 0 && (active_net_count.find(interval.net_idx) == active_net_count.end() || active_net_num > 1);
+      if (has_other_active_net) {
+        marked_net_set.insert(interval.net_idx);
+        active_unmarked_net_set.erase(interval.net_idx);
+        for (int32_t active_net_idx : active_unmarked_net_set) {
+          marked_net_set.insert(active_net_idx);
+        }
+        active_unmarked_net_set.clear();
+        if (marked_net_set.size() == track_net_set.size()) {
+          break;
         }
       }
+      if (active_net_count[interval.net_idx]++ == 0) {
+        active_net_num++;
+        if (marked_net_set.find(interval.net_idx) == marked_net_set.end()) {
+          active_unmarked_net_set.insert(interval.net_idx);
+        }
+      }
+      active_end_queue.emplace(interval.end, interval.net_idx);
+    }
+    if (marked_net_set.empty()) {
+      continue;
+    }
+    _track_history[track_key] += 50.0;
+    for (int32_t net_idx : marked_net_set) {
+      overflow_net_set.insert(net_idx);
     }
   }
   return overflow_net_set;
 }
 
-void TARouter::updateTrackHistory()
-{
-  for (const auto& [layer_idx, track_map] : _track_usage) {
-    for (const auto& [track_coord, interval_list] : track_map) {
-      if (interval_list.size() < 2) {
-        continue;
-      }
-      std::vector<TrackInterval> sorted_list = interval_list;
-      std::sort(sorted_list.begin(), sorted_list.end(), [](const TrackInterval& a, const TrackInterval& b) { return a.begin < b.begin; });
-      bool has_overflow = false;
-      for (size_t i = 0; i < sorted_list.size() && !has_overflow; i++) {
-        for (size_t j = i + 1; j < sorted_list.size() && sorted_list[j].begin < sorted_list[i].end; j++) {
-          if (sorted_list[i].net_idx != sorted_list[j].net_idx) {
-            has_overflow = true;
-            break;
-          }
-        }
-      }
-      if (has_overflow) {
-        _track_history[layer_idx][track_coord] += 50.0;
-      }
-    }
-  }
-}
-
 double TARouter::getTrackHistory(int32_t layer_idx, int32_t track_coord) const
 {
-  auto layer_iter = _track_history.find(layer_idx);
-  if (layer_iter == _track_history.end()) {
+  auto history_iter = _track_history.find(getTrackKey(layer_idx, track_coord));
+  if (history_iter == _track_history.end()) {
     return 0.0;
   }
-  auto track_iter = layer_iter->second.find(track_coord);
-  if (track_iter == layer_iter->second.end()) {
-    return 0.0;
-  }
-  return track_iter->second;
+  return history_iter->second;
 }
 
 void TARouter::ripupNet(const TANet& ta_net)
 {
-  for (auto layer_iter = _track_usage.begin(); layer_iter != _track_usage.end();) {
-    auto& track_map = layer_iter->second;
-    for (auto track_iter = track_map.begin(); track_iter != track_map.end();) {
-      std::vector<TrackInterval>& interval_list = track_iter->second;
-      interval_list.erase(std::remove_if(interval_list.begin(), interval_list.end(),
-                                         [&ta_net](const TrackInterval& interval) { return interval.net_idx == ta_net.net_idx; }),
-                          interval_list.end());
-      if (interval_list.empty()) {
-        track_iter = track_map.erase(track_iter);
-      } else {
-        ++track_iter;
-      }
+  auto index_iter = _net_track_index.find(ta_net.net_idx);
+  if (index_iter == _net_track_index.end()) {
+    return;
+  }
+  for (int64_t track_key : index_iter->second) {
+    auto usage_iter = _track_usage.find(track_key);
+    if (usage_iter == _track_usage.end()) {
+      continue;
     }
-    if (track_map.empty()) {
-      layer_iter = _track_usage.erase(layer_iter);
-    } else {
-      ++layer_iter;
+    std::vector<TrackInterval>& interval_list = usage_iter->second;
+    const int32_t net_idx = ta_net.net_idx;
+    interval_list.erase(std::remove_if(interval_list.begin(), interval_list.end(),
+                                       [net_idx](const TrackInterval& interval) { return interval.net_idx == net_idx; }),
+                        interval_list.end());
+    if (interval_list.empty()) {
+      _track_usage.erase(usage_iter);
     }
   }
+  _net_track_index.erase(index_iter);
 }
 
 Direction TARouter::getEdgeDirection(const TANet& ta_net, const TAEdge& edge) const
@@ -734,15 +783,11 @@ std::pair<int32_t, int32_t> TARouter::getEdgeScaleRange(const TANet& ta_net, con
 TARouter::TrackOverlap TARouter::getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const
 {
   TrackOverlap overlap;
-  auto layer_iter = _track_usage.find(layer_idx);
-  if (layer_iter == _track_usage.end()) {
+  auto usage_iter = _track_usage.find(getTrackKey(layer_idx, track_coord));
+  if (usage_iter == _track_usage.end()) {
     return overlap;
   }
-  auto track_iter = layer_iter->second.find(track_coord);
-  if (track_iter == layer_iter->second.end()) {
-    return overlap;
-  }
-  for (const TrackInterval& interval : track_iter->second) {
+  for (const TrackInterval& interval : usage_iter->second) {
     if (interval.net_idx == net_idx) {
       continue;
     }
@@ -765,7 +810,9 @@ void TARouter::addTrackUsage(int32_t layer_idx, int32_t track_coord, int32_t beg
   interval.begin = begin;
   interval.end = end;
   interval.net_idx = net_idx;
-  _track_usage[layer_idx][track_coord].push_back(interval);
+  int64_t track_key = getTrackKey(layer_idx, track_coord);
+  _track_usage[track_key].push_back(interval);
+  _net_track_index[net_idx].push_back(track_key);
 }
 
 void TARouter::outputNet(TANet& ta_net)
