@@ -275,12 +275,13 @@ using MetalShortNetPolysetMap = std::map<int32_t, std::map<int32_t, GTLPolySetIn
 using MetalShortObsPolysetMap = std::map<int32_t, GTLPolySetInt>;
 
 void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* drc_shape, bool is_env_shape);
-void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape);
+void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets,
+                              DRCShape* drc_shape, bool is_env_shape);
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
                        std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only);
 void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
-                                   MetalShortObsPolysetMap& obs_polysets);
+                                   MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets);
 
 }  // namespace
 
@@ -293,16 +294,17 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   layer_data.clear();
   MetalShortNetPolysetMap metal_short_metal_polysets;
   MetalShortObsPolysetMap metal_short_obs_polysets;
+  MetalShortNetPolysetMap metal_short_fixed_polysets;
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, true);
     if (need_metal_short) {
-      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, metal_short_fixed_polysets, drc_shape, true);
     }
   }
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, false);
     if (need_metal_short) {
-      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, metal_short_fixed_polysets, drc_shape, false);
     }
   }
 
@@ -323,7 +325,7 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
       buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
     }
     if (need_metal_short) {
-      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets);
+      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets, metal_short_fixed_polysets);
     }
   }
 }
@@ -560,7 +562,8 @@ void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* d
   }
 }
 
-void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape)
+void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets,
+                              DRCShape* drc_shape, bool is_env_shape)
 {
   if (!drc_shape->get_is_routing()) {
     return;
@@ -568,8 +571,11 @@ void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShor
   GTLRectInt rect = DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
   if (drc_shape->get_is_obs()) {
     obs_polysets[drc_shape->get_layer_idx()] += rect;
-  } else {
-    metal_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
+    return;
+  }
+  metal_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
+  if (is_env_shape && drc_shape->get_net_idx() != -1) {
+    fixed_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
   }
 }
 
@@ -700,7 +706,7 @@ void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std:
 }
 
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
-                                   MetalShortObsPolysetMap& obs_polysets)
+                                   MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets)
 {
   std::vector<IndexedRect> metal_rtree_inputs;
   auto layer_metal_it = metal_polysets.find(layer_idx);
@@ -721,6 +727,16 @@ void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data
     gtl::get_max_rectangles(obs_rtree_inputs, layer_obs_it->second);
   }
   rv_layer_data.metal_short_obs_rtree = decltype(rv_layer_data.metal_short_obs_rtree)(obs_rtree_inputs);
+
+  auto layer_fixed_it = fixed_polysets.find(layer_idx);
+  if (layer_fixed_it != fixed_polysets.end()) {
+    for (auto& [net_idx, polyset] : layer_fixed_it->second) {
+      std::vector<GTLRectInt> max_rect_list;
+      gtl::get_max_rectangles(max_rect_list, polyset);
+      std::vector<GTLRectInt>& fixed_rect_list = rv_layer_data.metal_short_fixed_rects[net_idx];
+      fixed_rect_list.insert(fixed_rect_list.end(), max_rect_list.begin(), max_rect_list.end());
+    }
+  }
 }
 
 }  // namespace
