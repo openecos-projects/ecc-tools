@@ -68,6 +68,16 @@ class GlobalRouter
     std::vector<std::vector<std::vector<int32_t>>> best_child_bend;
     std::vector<bool> computed;
 
+    // 单个节点的临时空间, 所有节点复用同一份, 下标统一用 (child_pos * layer_num + layer_idx) 展开
+    std::vector<double> via_cost;
+    std::vector<double> phi;
+    std::vector<int32_t> blocked_prefix;
+    std::vector<double> child_g;
+    std::vector<int32_t> child_bend;
+    std::vector<double> child_range_min;
+    std::vector<int32_t> child_range_argmin;
+    std::vector<double> sum_min;
+
     GRDpState(const GRTopoTree& tree, int32_t node_num_, int32_t layer_num_, int32_t bottom_, int32_t top_)
         : topo_tree(tree),
           layer_num(layer_num_),
@@ -81,6 +91,36 @@ class GlobalRouter
           computed(node_num_, false)
     {
     }
+  };
+
+  // buildMazePathList 的工作区: 让一次搜索的代价正比于实际访问到的 state 数, 而不是整张网格
+  struct GRMazeField
+  {
+    int32_t x_size = 0;
+    int32_t y_size = 0;
+
+    // A* 状态. 初值恒为 g=kInf / parent=-1 / closed=false: 只记录被写过的 state, 搜索结束时按记录回滚
+    std::vector<double> g;
+    std::vector<int32_t> parent;
+    std::vector<char> closed;
+    std::vector<int32_t> touched;
+
+    // 当前 steiner 树已覆盖的网格点, 用 stamp 代替 std::set
+    std::vector<int32_t> tree_stamp;
+    int32_t tree_stamp_id = 0;
+
+    // 单条 wire edge 的 maze 代价缓存, 下标与 A* 的 state 一致, 用 stamp 表示有效
+    std::vector<double> edge_cost;
+    std::vector<int32_t> edge_cost_stamp;
+    int32_t edge_cost_id = 0;
+
+    void init(int32_t x_size_, int32_t y_size_);
+    void clearSearch();
+    void setCost(int32_t state, double cost, int32_t parent_state);
+    void setClosed(int32_t state);
+    int32_t getCoordIdx(const PlanarCoord& coord) const { return coord.get_y() * x_size + coord.get_x(); }
+    bool isTreeCoord(const PlanarCoord& coord) const { return tree_stamp[getCoordIdx(coord)] == tree_stamp_id; }
+    bool markTreeCoord(const PlanarCoord& coord);
   };
 
   GlobalRouter() = default;
@@ -107,12 +147,15 @@ class GlobalRouter
   void detourRouteGRNetList();
   void mazeRouteGRNetList();
   void routeUnroutedNetList();
+  void buildDirectConnectTree(const GRNet& net, GRTree& routing_tree);
+  void addDirectConnectVia(GRTree& routing_tree, const PlanarCoord& coord, int32_t first_layer_idx, int32_t second_layer_idx) const;
   void updateCongestionCost();
-  bool routeGRNetByMaze(GRNet& net, bool allow_blocked_edge);
-  bool buildMazeRoutingTree(GRNet& net, GRTree& routing_tree, bool allow_blocked_edge);
-  bool buildMazePathList(const GRNet& net, std::vector<std::vector<PlanarCoord>>& path_list, bool allow_blocked_edge);
+  bool routeGRNetByMaze(GRNet& net);
+  bool buildMazeRoutingTree(GRNet& net, GRTree& routing_tree);
+  bool buildMazePathList(const GRNet& net, std::vector<std::vector<PlanarCoord>>& path_list);
   bool buildMazeTopoTree(GRNet& net, const std::vector<std::vector<PlanarCoord>>& path_list);
-  double getMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal, bool allow_blocked_edge) const;
+  double getMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal) const;
+  double computeMazeWireCost(const GRNet& net, int32_t x, int32_t y, bool is_horizontal) const;
   double getDirectionCost() const;
   std::vector<GRNet*> getOverflowNetList();
   bool isNetOverflowing(const GRNet& net) const;
@@ -135,8 +178,8 @@ class GlobalRouter
   int32_t getPathCongestionNum(const std::vector<PlanarCoord>& path) const;
   double getPathLength(const std::vector<PlanarCoord>& path) const;
   bool isStraightSkeletonChain(const GRSkeletonTree& skeleton, const std::vector<int32_t>& chain) const;
-  bool runDP(const GRNet& net, GRTree& routing_tree, bool allow_blocked_edge);
-  void computeNodeDP(const GRNet& net, GRDpState& state, int32_t node_idx, bool allow_blocked_edge);
+  bool runDP(const GRNet& net, GRTree& routing_tree);
+  void computeNodeDP(const GRNet& net, GRDpState& state, int32_t node_idx);
   void getPostorder(int32_t node_idx, const GRTopoTree& topo_tree, std::vector<int32_t>& postorder);
   int32_t getOrCreateTopoNode(GRTopoTree& topo_tree, std::map<PlanarCoord, int32_t, CmpPlanarCoordByXASC>& coord_node_map, const PlanarCoord& coord);
   int32_t addBendNode(GRTopoTree& topo_tree, int32_t parent_idx, int32_t child_idx, const PlanarCoord& coord);
@@ -147,10 +190,9 @@ class GlobalRouter
                        const std::vector<std::vector<std::vector<int32_t>>>& best_child_bend, int32_t node_idx, int32_t layer_idx, GRTree& routing_tree);
 
   // cost
-  double getWireSegmentCost(const GRNet& net, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord,
-                            bool allow_blocked_edge) const;
-  double getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount, bool allow_blocked_edge) const;
-  double getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx, bool allow_blocked_edge) const;
+  double getWireSegmentCost(const GRNet& net, int32_t layer_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord) const;
+  double getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount = 1.0) const;
+  double getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const;
   double getCongestionCost(double supply, double demand, double amount) const;
   double addCost(double first, double second) const;
   bool isExemptWireEdge(const GRNet& net, const GRWireEdgeId& edge_id) const;
@@ -168,11 +210,12 @@ class GlobalRouter
   void outputGlobalResult();
   void printSummary();
   bool isLayerInRange(int32_t layer_idx) const;
-  std::string getNetIdxList(const std::set<int32_t>& net_idx_set) const;
   void debugPlotGRModel(const std::string& flag);
 
   // environment
   GRGridGraph _grid_graph;
+  // 纯缓存, 不参与路由语义, 因此可以在 const 的代价函数里更新
+  mutable GRMazeField _maze_field;
   std::vector<GRNet> _gr_net_list;
 };
 

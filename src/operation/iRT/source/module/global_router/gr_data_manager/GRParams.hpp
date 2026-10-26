@@ -28,8 +28,6 @@ class GRParams
 
   static constexpr double kInf = 1e18;
   static constexpr double kEpsilon = 1e-6;
-  // 兜底布线时穿过没有可用 supply 的边的代价, 仍为有限值
-  static constexpr double kBlockedEdgeCost = 1e6;
 
   // getter
   double get_unit_wire_cost() const { return _unit_wire_cost; }
@@ -56,7 +54,7 @@ class GRParams
   double _cost_weight = _initial_cost_weight;
   double _congestion_saturation_ratio = 0.8;
   double _congestion_hotspot_ratio = 0.9;
-  double _via_base_cost = 3.0;
+  double _via_base_cost = 2.0;
   double _via_demand = 0.5;
   int32_t _congestion_radius = 1;
   double _congestion_decay = 0.5;
