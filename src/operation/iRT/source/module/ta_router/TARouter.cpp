@@ -86,6 +86,7 @@ void TARouter::initTANetList()
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& global_result_map = database.get_net_global_result_map();
 
   _ta_net_list.clear();
+  int32_t local_net_num = 0;
   for (Net& net : net_list) {
     if (net.get_pin_list().size() < 2) {
       continue;
@@ -98,8 +99,22 @@ void TARouter::initTANetList()
     if (ta_net.edge_list.empty()) {
       continue;
     }
+    bool has_wire_edge = false;
+    for (const TAEdge& edge : ta_net.edge_list) {
+      if (!edge.is_via) {
+        has_wire_edge = true;
+        break;
+      }
+    }
+    // A local net (all pins inside one gcell) needs no wire, so TA has nothing to
+    // assign or output; DR connects its pin APs inside the gcell.
+    if (!has_wire_edge) {
+      local_net_num++;
+      continue;
+    }
     _ta_net_list.push_back(std::move(ta_net));
   }
+  RTLOG.info(Loc::current(), "TA net num: ", _ta_net_list.size(), ", local net num: ", local_net_num, " (routed by DR)");
 }
 
 TARouter::TANet TARouter::buildTANet(Net& net)

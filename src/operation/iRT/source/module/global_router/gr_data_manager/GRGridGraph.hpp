@@ -48,6 +48,7 @@ struct GRWireEdge
   double supply = 0.0;
   double fixed_demand = 0.0;
   double routing_demand = 0.0;
+  double congestion_cost = 0.0;
   std::set<int32_t> routing_demand_net_set;
   std::set<int32_t> fixed_demand_net_set;
 
@@ -62,26 +63,6 @@ class GRGridGraph
  public:
   GRGridGraph() = default;
   ~GRGridGraph() = default;
-
-  void init(int32_t x_size, int32_t y_size, int32_t layer_num, int32_t bottom_layer_idx, int32_t top_layer_idx,
-            const std::vector<bool>& is_horizontal_layer)
-  {
-    _x_size = x_size;
-    _y_size = y_size;
-    _layer_num = layer_num;
-    _bottom_layer_idx = bottom_layer_idx;
-    _top_layer_idx = top_layer_idx;
-    _is_horizontal_layer = is_horizontal_layer;
-
-    _edge_map.resize(_layer_num);
-    for (int32_t layer_idx = 0; layer_idx < _layer_num; layer_idx++) {
-      if (_is_horizontal_layer[layer_idx]) {
-        _edge_map[layer_idx].init(std::max(0, _x_size - 1), _y_size);
-      } else {
-        _edge_map[layer_idx].init(_x_size, std::max(0, _y_size - 1));
-      }
-    }
-  }
 
   int32_t getXSize() const { return _x_size; }
   int32_t getYSize() const { return _y_size; }
@@ -104,6 +85,8 @@ class GRGridGraph
   const GridMap<GRWireEdge>& getEdgeMap(int32_t layer_idx) const { return _edge_map[layer_idx]; }
 
  private:
+  friend class GlobalRouter;
+
   int32_t _x_size = 0;
   int32_t _y_size = 0;
   int32_t _layer_num = 0;

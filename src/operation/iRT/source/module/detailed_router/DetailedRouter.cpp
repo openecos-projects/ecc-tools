@@ -115,25 +115,29 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
   // clang-format off
 
   // initial routing
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 0, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 18, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10, false, true);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 3, 10);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 6, 3, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10, false, true);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 18, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 0, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 18, 9, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10, false, true);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 6, 3, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10, false, true);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10, false, true);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 6, 3, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10, false, true);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 6, 3, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, false, true);
+
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10);
+  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10);
   dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, false, true);
   // clang-format on
 
   std::vector<DRIterParam> repair_iter_param_list;
   // clang-format off
-  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 18, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
   // repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 36, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
   // repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 54, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
   // clang-format on
@@ -3181,7 +3185,7 @@ void DetailedRouter::selectBestResult(DRModel& dr_model)
 
 void DetailedRouter::repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list)
 {
-  constexpr int32_t max_repair_box_size = 100;
+  constexpr int32_t max_repair_box_size = 50;
   int32_t repair_iter_num = static_cast<int32_t>(repair_iter_param_list.size());
   for (int32_t i = 0, repair_iter = 1; i < repair_iter_num; i++, repair_iter++) {
     updateViolation(dr_model);

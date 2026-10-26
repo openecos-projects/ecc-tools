@@ -54,6 +54,21 @@ struct GRTopoTree
   int32_t root_idx = -1;
 };
 
+struct GRSkeletonNode
+{
+  PlanarCoord coord;
+  int32_t fixed_low = INT_MAX;
+  int32_t fixed_high = INT_MIN;
+  int32_t parent = -1;
+  std::vector<int32_t> child_list;
+};
+
+struct GRSkeletonTree
+{
+  std::vector<GRSkeletonNode> node_list;
+  int32_t root_idx = -1;
+};
+
 struct GRWireSegment
 {
   LayerCoord first;

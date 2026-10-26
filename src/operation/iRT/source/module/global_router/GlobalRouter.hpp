@@ -25,6 +25,7 @@
 #include "EXTLayerRect.hpp"
 #include "GRGridGraph.hpp"
 #include "GRNet.hpp"
+#include "GRParams.hpp"
 #include "LayerRect.hpp"
 
 namespace irt {
@@ -44,15 +45,14 @@ class GlobalRouter
   // self
   static GlobalRouter* _gr_instance;
 
-  static constexpr double kInf = 1e18;
-  static constexpr double kUnitWireCost = 1.0;
-  static constexpr double kCostWeight = 20.0;
-  static constexpr double kCongestionKneeRatio = 0.8;
-  static constexpr double kViaBaseCost = 3.0;
-  static constexpr double kViaDemand = 0.5;
-  static constexpr double kEpsilon = 1e-6;
+  // parameter
+  GRParams _gr_params;
 
-  double _cost_weight = kCostWeight;
+  // runtime state
+  bool _last_detour_shifted = false;
+  std::vector<GRNet*> _pattern_failed_net_list;
+  GridMap<int32_t> _horizontal_congestion_prefix;
+  GridMap<int32_t> _vertical_congestion_prefix;
 
   struct GRDpState
   {
@@ -72,7 +72,7 @@ class GlobalRouter
           layer_num(layer_num_),
           bottom_layer_idx(bottom_),
           top_layer_idx(top_),
-          d(node_num_, std::vector<double>(layer_num_, kInf)),
+          d(node_num_, std::vector<double>(layer_num_, GRParams::kInf)),
           best_b(node_num_, std::vector<int32_t>(layer_num_, -1)),
           best_t(node_num_, std::vector<int32_t>(layer_num_, -1)),
           best_child_layer(node_num_, std::vector<std::vector<int32_t>>(layer_num_)),
@@ -101,7 +101,9 @@ class GlobalRouter
 
   // route
   void patternRouteGRNetList();
+  void detourRouteGRNetList();
   void mazeRouteGRNetList();
+  void updateCongestionCost();
   bool routeGRNetByMaze(GRNet& net);
   bool buildMazeRoutingTree(GRNet& net, GRTree& routing_tree);
   bool buildMazePathList(const GRNet& net, std::vector<std::vector<PlanarCoord>>& path_list);
@@ -113,8 +115,22 @@ class GlobalRouter
   double getTotalOverflow() const;
   double getTotalRoutingCost() const;
   double getRoutingTreeCost(const GRNet& net, const GRTree& tree) const;
+  double getRoutingTreeOverflow(const GRNet& net, const GRTree& tree) const;
   bool buildRoutingTree(GRNet& net, GRTree& routing_tree);
-  bool buildTopoTree(GRNet& net);
+  bool buildDetourRoutingTree(GRNet& net, GRTree& routing_tree);
+  bool buildSkeletonTree(GRNet& net, GRSkeletonTree& skeleton);
+  bool buildTopoTree(GRNet& net, const GRSkeletonTree& skeleton, bool with_detour);
+  bool buildDetourSkeleton(const GRSkeletonTree& skeleton, GRSkeletonTree& detour_skeleton) const;
+  void buildPatternPathList(const PlanarCoord& parent_coord, const PlanarCoord& child_coord, bool with_detour,
+                            std::vector<std::vector<PlanarCoord>>& path_list);
+  void addPatternPathCandidate(std::vector<std::vector<PlanarCoord>>& path_list, const std::vector<PlanarCoord>& path) const;
+  void addUDetourPathList(const PlanarCoord& parent_coord, const PlanarCoord& child_coord, std::vector<std::vector<PlanarCoord>>& path_list);
+  void initDetourCongestionView();
+  int32_t getCongestionPrefixSum(const GridMap<int32_t>& prefix_map, int32_t begin_x, int32_t begin_y, int32_t end_x, int32_t end_y) const;
+  int32_t getSegmentCongestionNum(const PlanarCoord& first_coord, const PlanarCoord& second_coord) const;
+  int32_t getPathCongestionNum(const std::vector<PlanarCoord>& path) const;
+  double getPathLength(const std::vector<PlanarCoord>& path) const;
+  bool isStraightSkeletonChain(const GRSkeletonTree& skeleton, const std::vector<int32_t>& chain) const;
   bool runDP(const GRNet& net, GRTree& routing_tree);
   void computeNodeDP(const GRNet& net, GRDpState& state, int32_t node_idx);
   void getPostorder(int32_t node_idx, const GRTopoTree& topo_tree, std::vector<int32_t>& postorder);
@@ -138,8 +154,12 @@ class GlobalRouter
   // commit
   void ripupRoute(GRNet& net, const GRTree& routing_tree);
   void commitRoute(GRNet& net, const GRTree& routing_tree);
+  void buildWireEdgeSet(const GRTree& routing_tree, std::set<GRWireEdgeId>& wire_edge_set) const;
+  bool hasPlanarEdgeOrAP(const GRNet& net, const std::set<GRWireEdgeId>& wire_edge_set, const PlanarCoord& coord,
+                         int32_t layer_idx) const;
   void addWireDemand(const GRNet& net, const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta);
-  void addViaDemand(const GRNet& net, const GRViaStack& via_stack, std::set<GRWireEdgeId>& used_edge_set, double delta);
+  void addViaDemand(const GRNet& net, const GRViaStack& via_stack, const std::set<GRWireEdgeId>& wire_edge_set,
+                    std::set<GRWireEdgeId>& used_edge_set, double delta);
   void outputGlobalResult();
   void printSummary();
   bool isLayerInRange(int32_t layer_idx) const;

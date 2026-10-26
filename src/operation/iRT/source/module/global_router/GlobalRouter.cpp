@@ -73,18 +73,19 @@ void GlobalRouter::route()
   RTLOG.info(Loc::current(), "Starting...");
 
   RTDM.getDatabase().get_net_global_result_map().clear();
-  _cost_weight = kCostWeight;
+  _gr_params.reset_cost_weight();
   initGRGridGraph();
 
   analyzeSupply();
   initGRNetList();
-  
+
   patternRouteGRNetList();
+  detourRouteGRNetList();
   mazeRouteGRNetList();
+  debugPlotGRModel("after_route");
 
   outputGlobalResult();
   RTDM.rebuildGlobalResultRTree();
-  // debugPlotGRModel("after_route");
   printSummary();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -95,15 +96,32 @@ void GlobalRouter::route()
 void GlobalRouter::initGRGridGraph()
 {
   Database& database = RTDM.getDatabase();
+  int32_t x_size = database.get_gcell_map().get_x_size();
+  int32_t y_size = database.get_gcell_map().get_y_size();
   int32_t layer_num = static_cast<int32_t>(database.get_routing_layer_list().size());
+  int32_t bottom_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
+  int32_t top_layer_idx = RTDM.getConfig().top_routing_layer_idx;
 
   std::vector<bool> is_horizontal_layer(layer_num, false);
   for (int32_t layer_idx = 0; layer_idx < layer_num; layer_idx++) {
     is_horizontal_layer[layer_idx] = database.get_routing_layer_list()[layer_idx].isPreferH();
   }
 
-  _grid_graph.init(database.get_gcell_map().get_x_size(), database.get_gcell_map().get_y_size(), layer_num,
-                   RTDM.getConfig().bottom_routing_layer_idx, RTDM.getConfig().top_routing_layer_idx, is_horizontal_layer);
+  _grid_graph._x_size = x_size;
+  _grid_graph._y_size = y_size;
+  _grid_graph._layer_num = layer_num;
+  _grid_graph._bottom_layer_idx = bottom_layer_idx;
+  _grid_graph._top_layer_idx = top_layer_idx;
+  _grid_graph._is_horizontal_layer = is_horizontal_layer;
+
+  _grid_graph._edge_map.resize(layer_num);
+  for (int32_t layer_idx = 0; layer_idx < layer_num; layer_idx++) {
+    if (is_horizontal_layer[layer_idx]) {
+      _grid_graph._edge_map[layer_idx].init(std::max(0, x_size - 1), y_size);
+    } else {
+      _grid_graph._edge_map[layer_idx].init(x_size, std::max(0, y_size - 1));
+    }
+  }
 }
 
 void GlobalRouter::analyzeSupply()
@@ -327,6 +345,7 @@ void GlobalRouter::buildExemptEdgeSet(GRNet& net)
 
 void GlobalRouter::patternRouteGRNetList()
 {
+  _pattern_failed_net_list.clear();
   if (_gr_net_list.empty()) {
     return;
   }
@@ -339,6 +358,7 @@ void GlobalRouter::patternRouteGRNetList()
     GRTree new_tree;
     if (!buildRoutingTree(net, new_tree)) {
       commitRoute(net, old_tree);
+      _pattern_failed_net_list.push_back(&net);
       RTLOG.warn(Loc::current(), "Failed to route net ", net.origin_net->get_net_name());
     } else {
       commitRoute(net, new_tree);
@@ -352,8 +372,92 @@ void GlobalRouter::patternRouteGRNetList()
   }
 }
 
+void GlobalRouter::detourRouteGRNetList()
+{
+  std::vector<std::pair<double, GRNet*>> net_list;
+  for (GRNet* net : getOverflowNetList()) {
+    double overflow = getRoutingTreeOverflow(*net, net->routing_tree);
+    if (overflow > GRParams::kEpsilon) {
+      net_list.emplace_back(overflow, net);
+    }
+  }
+  if (net_list.empty()) {
+    RTLOG.info(Loc::current(), "Pattern detour: no overflow net");
+    return;
+  }
+  initDetourCongestionView();
+  std::sort(net_list.begin(), net_list.end(), [](const std::pair<double, GRNet*>& first, const std::pair<double, GRNet*>& second) {
+    return first.first > second.first;
+  });
+  double before_overflow = getTotalOverflow();
+  int32_t accepted_num = 0;
+  int32_t rolled_back_num = 0;
+  int32_t scaffold_num = 0;
+  size_t next_percent = 10;
+  for (size_t i = 0; i < net_list.size(); i++) {
+    GRNet& net = *(net_list[i].second);
+    GRTree old_tree = net.routing_tree;
+    double old_overflow = getRoutingTreeOverflow(net, old_tree);
+    double old_cost = getRoutingTreeCost(net, old_tree);
+    if (old_overflow <= GRParams::kEpsilon) {
+      continue;
+    }
+    _last_detour_shifted = false;
+    ripupRoute(net, old_tree);
+
+    GRTree new_tree;
+    bool built = buildDetourRoutingTree(net, new_tree);
+    if (built && _last_detour_shifted) {
+      scaffold_num++;
+    }
+    if (!built) {
+      commitRoute(net, old_tree);
+      rolled_back_num++;
+    } else {
+      commitRoute(net, new_tree);
+      double new_overflow = getRoutingTreeOverflow(net, new_tree);
+      double new_cost = getRoutingTreeCost(net, new_tree);
+      bool accepted = new_overflow < old_overflow - GRParams::kEpsilon || (new_overflow <= old_overflow + GRParams::kEpsilon && new_cost < old_cost - GRParams::kEpsilon);
+      if (accepted) {
+        accepted_num++;
+      } else {
+        ripupRoute(net, new_tree);
+        commitRoute(net, old_tree);
+        rolled_back_num++;
+      }
+    }
+
+    size_t percent = ((i + 1) * 100) / net_list.size();
+    if (percent >= next_percent || i + 1 == net_list.size()) {
+      RTLOG.info(Loc::current(), "Pattern detoured ", i + 1, "/", net_list.size(), "(", percent, "%)");
+      next_percent += 10;
+    }
+  }
+  double after_overflow = getTotalOverflow();
+  RTLOG.info(Loc::current(), "Pattern detour: nets ", net_list.size(), ", overflow ", before_overflow, " -> ", after_overflow, ", overflow_net ",
+             getOverflowNetList().size(), ", accepted ", accepted_num, ", rolled back ", rolled_back_num, ", scaffold ", scaffold_num);
+}
+
 void GlobalRouter::mazeRouteGRNetList()
 {
+  if (!_pattern_failed_net_list.empty()) {
+    std::vector<GRNet*> failed_net_list = std::move(_pattern_failed_net_list);
+    _pattern_failed_net_list.clear();
+    RTLOG.info(Loc::current(), "Maze routing pattern-failed nets: ", failed_net_list.size());
+    size_t next_percent = 10;
+    for (size_t i = 0; i < failed_net_list.size(); i++) {
+      if (!routeGRNetByMaze(*failed_net_list[i])) {
+        _pattern_failed_net_list.push_back(failed_net_list[i]);
+      }
+      size_t percent = ((i + 1) * 100) / failed_net_list.size();
+      if (percent >= next_percent || i + 1 == failed_net_list.size()) {
+        RTLOG.info(Loc::current(), "Maze routed pattern-failed nets ", i + 1, "/", failed_net_list.size(), "(", percent, "%)");
+        next_percent += 10;
+      }
+    }
+    RTLOG.info(Loc::current(), "Pattern-failed nets remaining: ", _pattern_failed_net_list.size());
+  }
+
   constexpr int32_t kMaxIteration = 5;
   for (int32_t iteration = 0; iteration < kMaxIteration; iteration++) {
     std::vector<GRNet*> net_list = getOverflowNetList();
@@ -378,9 +482,9 @@ void GlobalRouter::mazeRouteGRNetList()
     double after_overflow = getTotalOverflow();
     double after_cost = getTotalRoutingCost();
     // Overflow is the primary reroute objective; cost only breaks ties when overflow is unchanged.
-    bool accepted = after_overflow < before_overflow - kEpsilon || (after_overflow <= before_overflow + kEpsilon && after_cost < before_cost - kEpsilon);
+    bool accepted = after_overflow < before_overflow - GRParams::kEpsilon || (after_overflow <= before_overflow + GRParams::kEpsilon && after_cost < before_cost - GRParams::kEpsilon);
     RTLOG.info(Loc::current(), "Maze reroute iteration ", iteration, ": nets ", net_list.size(), ", overflow ", before_overflow, " -> ", after_overflow,
-               ", cost ", before_cost, " -> ", after_cost, ", cost_weight ", _cost_weight, accepted ? " (accepted)" : " (rolled back)");
+               ", cost ", before_cost, " -> ", after_cost, ", cost_weight ", _gr_params.get_cost_weight(), accepted ? " (accepted)" : " (rolled back)");
     if (!accepted) {
       for (auto& [net, old_tree] : snapshot_list) {
         ripupRoute(*net, net->routing_tree);
@@ -388,7 +492,47 @@ void GlobalRouter::mazeRouteGRNetList()
       }
       break;
     }
-    _cost_weight *= 2.0;
+    _gr_params.set_cost_weight(_gr_params.get_cost_weight() * 2.0);
+    updateCongestionCost();
+  }
+}
+
+void GlobalRouter::updateCongestionCost()
+{
+  for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
+    const GridMap<GRWireEdge>& edge_map = _grid_graph.getEdgeMap(layer_idx);
+#pragma omp parallel for collapse(2)
+    for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+      for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
+        double total_usage_ratio = 0.0;
+        int32_t neighbor_num = 0;
+        for (int32_t neighbor_x = std::max(0, x - _gr_params.get_congestion_radius()); neighbor_x <= std::min(edge_map.get_x_size() - 1, x + _gr_params.get_congestion_radius());
+             neighbor_x++) {
+          for (int32_t neighbor_y = std::max(0, y - _gr_params.get_congestion_radius()); neighbor_y <= std::min(edge_map.get_y_size() - 1, y + _gr_params.get_congestion_radius());
+               neighbor_y++) {
+            GRWireEdgeId neighbor_id{neighbor_x, neighbor_y, layer_idx};
+            if (!_grid_graph.hasWireEdge(neighbor_id)) {
+              continue;
+            }
+            const GRWireEdge& neighbor_edge = _grid_graph.getWireEdge(neighbor_id);
+            double neighbor_supply = neighbor_edge.getUsableSupply();
+            if (neighbor_supply <= GRParams::kEpsilon) {
+              continue;
+            }
+            total_usage_ratio += neighbor_edge.getDemand() / neighbor_supply;
+            neighbor_num++;
+          }
+        }
+        GRWireEdge& edge = _grid_graph.getWireEdge(GRWireEdgeId{x, y, layer_idx});
+        double supply = edge.getUsableSupply();
+        double usage_ratio = supply <= GRParams::kEpsilon ? 0.0 : edge.getDemand() / supply;
+        usage_ratio = std::max(0.0, usage_ratio - _gr_params.get_congestion_threshold());
+        double average_usage_ratio = neighbor_num == 0 ? 0.0 : total_usage_ratio / neighbor_num;
+        double congestion_ratio = average_usage_ratio + usage_ratio;
+        double new_congestion_cost = _gr_params.get_congestion_cost_scale() * _gr_params.get_cost_weight() * congestion_ratio * congestion_ratio;
+        edge.congestion_cost = edge.congestion_cost * _gr_params.get_congestion_decay() + new_congestion_cost;
+      }
+    }
   }
 }
 
@@ -446,7 +590,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
   int32_t x_size = _grid_graph.getXSize();
   int32_t y_size = _grid_graph.getYSize();
   int32_t state_num = 2 * x_size * y_size;
-  std::vector<double> g(state_num, kInf);
+  std::vector<double> g(state_num, GRParams::kInf);
   std::vector<int32_t> parent(state_num, -1);
   std::vector<bool> closed(state_num, false);
 
@@ -494,7 +638,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
     }
     const PlanarCoord target = terminal_list[target_idx];
 
-    std::fill(g.begin(), g.end(), kInf);
+    std::fill(g.begin(), g.end(), GRParams::kInf);
     std::fill(parent.begin(), parent.end(), -1);
     std::fill(closed.begin(), closed.end(), false);
     std::priority_queue<MazeQueueNode> queue;
@@ -529,7 +673,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
       if (dir == 0) {
         if (x + 1 < x_size) {
           double wire_cost = getMazeWireCost(net, x, y, true);
-          if (wire_cost < kInf) {
+          if (wire_cost < GRParams::kInf) {
             int32_t next_state = (y * x_size + x + 1) * 2;
             double next_cost = current_cost + wire_cost;
             if (next_cost < g[next_state]) {
@@ -542,7 +686,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
         }
         if (x > 0) {
           double wire_cost = getMazeWireCost(net, x - 1, y, true);
-          if (wire_cost < kInf) {
+          if (wire_cost < GRParams::kInf) {
             int32_t next_state = (y * x_size + x - 1) * 2;
             double next_cost = current_cost + wire_cost;
             if (next_cost < g[next_state]) {
@@ -556,7 +700,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
       } else {
         if (y + 1 < y_size) {
           double wire_cost = getMazeWireCost(net, x, y, false);
-          if (wire_cost < kInf) {
+          if (wire_cost < GRParams::kInf) {
             int32_t next_state = ((y + 1) * x_size + x) * 2 + 1;
             double next_cost = current_cost + wire_cost;
             if (next_cost < g[next_state]) {
@@ -569,7 +713,7 @@ bool GlobalRouter::buildMazePathList(const GRNet& net, std::vector<std::vector<P
         }
         if (y > 0) {
           double wire_cost = getMazeWireCost(net, x, y - 1, false);
-          if (wire_cost < kInf) {
+          if (wire_cost < GRParams::kInf) {
             int32_t next_state = ((y - 1) * x_size + x) * 2 + 1;
             double next_cost = current_cost + wire_cost;
             if (next_cost < g[next_state]) {
@@ -699,6 +843,8 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
 {
   double total_supply = 0.0;
   double total_demand = 0.0;
+  double total_congestion_cost = 0.0;
+  int32_t congestion_layer_num = 0;
   bool has_edge = false;
   for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
     if (_grid_graph.isHorizontalLayer(layer_idx) != is_horizontal) {
@@ -709,22 +855,25 @@ double GlobalRouter::getMazeWireCost(const GRNet& net, int32_t x, int32_t y, boo
       continue;
     }
     if (isExemptWireEdge(net, edge_id)) {
-      return kUnitWireCost;
+      return _gr_params.get_unit_wire_cost();
     }
     const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
     has_edge = true;
     total_supply += edge.getUsableSupply();
     total_demand += edge.routing_demand;
+    total_congestion_cost += edge.congestion_cost;
+    congestion_layer_num++;
   }
-  if (!has_edge || total_supply <= kEpsilon) {
-    return kInf;
+  if (!has_edge || total_supply <= GRParams::kEpsilon) {
+    return GRParams::kInf;
   }
-  return kUnitWireCost + _cost_weight * getCongestionCost(total_supply, total_demand, 1.0);
+  double average_congestion_cost = congestion_layer_num == 0 ? 0.0 : total_congestion_cost / congestion_layer_num;
+  return _gr_params.get_unit_wire_cost() + _gr_params.get_cost_weight() * getCongestionCost(total_supply, total_demand, 1.0) + average_congestion_cost;
 }
 
 double GlobalRouter::getDirectionCost() const
 {
-  return kViaBaseCost * (_cost_weight / kCostWeight);
+  return _gr_params.get_via_base_cost() * (_gr_params.get_cost_weight() / _gr_params.get_initial_cost_weight());
 }
 
 std::vector<GRNet*> GlobalRouter::getOverflowNetList()
@@ -741,6 +890,7 @@ std::vector<GRNet*> GlobalRouter::getOverflowNetList()
 bool GlobalRouter::isNetOverflowing(const GRNet& net) const
 {
   std::set<GRWireEdgeId> edge_set;
+  std::set<GRWireEdgeId> wire_edge_set;
   for (const GRWireSegment& wire_segment : net.routing_tree.wire_list) {
     int32_t layer_idx = wire_segment.first.get_layer_idx();
     if (layer_idx != wire_segment.second.get_layer_idx()) {
@@ -759,10 +909,11 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
         if (!_grid_graph.hasWireEdge(edge_id)) {
           continue;
         }
+        wire_edge_set.insert(edge_id);
         if (isExemptWireEdge(net, edge_id)) {
           continue;
         }
-        if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
+        if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > GRParams::kEpsilon) {
           return true;
         }
       }
@@ -778,10 +929,11 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
         if (!_grid_graph.hasWireEdge(edge_id)) {
           continue;
         }
+        wire_edge_set.insert(edge_id);
         if (isExemptWireEdge(net, edge_id)) {
           continue;
         }
-        if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
+        if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > GRParams::kEpsilon) {
           return true;
         }
       }
@@ -792,43 +944,41 @@ bool GlobalRouter::isNetOverflowing(const GRNet& net) const
         || via_stack.bottom_layer_idx >= via_stack.top_layer_idx) {
       continue;
     }
-    for (int32_t below_layer_idx = via_stack.bottom_layer_idx; below_layer_idx < via_stack.top_layer_idx; below_layer_idx++) {
-      for (int32_t side_layer_idx : {below_layer_idx, below_layer_idx + 1}) {
-        if (isAPViaSide(net, via_stack.coord, side_layer_idx)) {
-          continue;
-        }
-        bool is_horizontal = _grid_graph.isHorizontalLayer(side_layer_idx);
-        if (is_horizontal) {
-          for (int32_t edge_x : {via_stack.coord.get_x() - 1, via_stack.coord.get_x()}) {
-            GRWireEdgeId edge_id{edge_x, via_stack.coord.get_y(), side_layer_idx};
-            if (!_grid_graph.hasWireEdge(edge_id)) {
-              continue;
-            }
-            if (isExemptWireEdge(net, edge_id)) {
-              continue;
-            }
-            if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
-              continue;
-            }
-            if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
-              return true;
-            }
+    for (int32_t layer_idx = via_stack.bottom_layer_idx; layer_idx <= via_stack.top_layer_idx; layer_idx++) {
+      if (hasPlanarEdgeOrAP(net, wire_edge_set, via_stack.coord, layer_idx)) {
+        continue;
+      }
+      bool is_horizontal = _grid_graph.isHorizontalLayer(layer_idx);
+      if (is_horizontal) {
+        for (int32_t edge_x : {via_stack.coord.get_x() - 1, via_stack.coord.get_x()}) {
+          GRWireEdgeId edge_id{edge_x, via_stack.coord.get_y(), layer_idx};
+          if (!_grid_graph.hasWireEdge(edge_id)) {
+            continue;
           }
-        } else {
-          for (int32_t edge_y : {via_stack.coord.get_y() - 1, via_stack.coord.get_y()}) {
-            GRWireEdgeId edge_id{via_stack.coord.get_x(), edge_y, side_layer_idx};
-            if (!_grid_graph.hasWireEdge(edge_id)) {
-              continue;
-            }
-            if (isExemptWireEdge(net, edge_id)) {
-              continue;
-            }
-            if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
-              continue;
-            }
-            if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > kEpsilon) {
-              return true;
-            }
+          if (isExemptWireEdge(net, edge_id)) {
+            continue;
+          }
+          if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= GRParams::kEpsilon) {
+            continue;
+          }
+          if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > GRParams::kEpsilon) {
+            return true;
+          }
+        }
+      } else {
+        for (int32_t edge_y : {via_stack.coord.get_y() - 1, via_stack.coord.get_y()}) {
+          GRWireEdgeId edge_id{via_stack.coord.get_x(), edge_y, layer_idx};
+          if (!_grid_graph.hasWireEdge(edge_id)) {
+            continue;
+          }
+          if (isExemptWireEdge(net, edge_id)) {
+            continue;
+          }
+          if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= GRParams::kEpsilon) {
+            continue;
+          }
+          if (edge_set.insert(edge_id).second && _grid_graph.getWireEdge(edge_id).getOverflow() > GRParams::kEpsilon) {
+            return true;
           }
         }
       }
@@ -856,8 +1006,8 @@ double GlobalRouter::getTotalRoutingCost() const
   double total_cost = 0.0;
   for (const GRNet& net : _gr_net_list) {
     double net_cost = getRoutingTreeCost(net, net.routing_tree);
-    if (net_cost >= kInf) {
-      return kInf;
+    if (net_cost >= GRParams::kInf) {
+      return GRParams::kInf;
     }
     total_cost += net_cost;
   }
@@ -872,8 +1022,8 @@ double GlobalRouter::getRoutingTreeCost(const GRNet& net, const GRTree& tree) co
       continue;
     }
     double wire_cost = getWireSegmentCost(net, wire_segment.first.get_layer_idx(), wire_segment.first, wire_segment.second);
-    if (wire_cost >= kInf) {
-      return kInf;
+    if (wire_cost >= GRParams::kInf) {
+      return GRParams::kInf;
     }
     total_cost += wire_cost;
   }
@@ -884,8 +1034,8 @@ double GlobalRouter::getRoutingTreeCost(const GRNet& net, const GRTree& tree) co
     }
     for (int32_t layer_idx = via_stack.bottom_layer_idx; layer_idx < via_stack.top_layer_idx; layer_idx++) {
       double via_cost = getViaCost(net, via_stack.coord, layer_idx);
-      if (via_cost >= kInf) {
-        return kInf;
+      if (via_cost >= GRParams::kInf) {
+        return GRParams::kInf;
       }
       total_cost += via_cost;
     }
@@ -893,18 +1043,77 @@ double GlobalRouter::getRoutingTreeCost(const GRNet& net, const GRTree& tree) co
   return total_cost;
 }
 
+double GlobalRouter::getRoutingTreeOverflow(const GRNet& net, const GRTree& tree) const
+{
+  double total_overflow = 0.0;
+  std::set<GRWireEdgeId> edge_set;
+  for (const GRWireSegment& wire_segment : tree.wire_list) {
+    int32_t layer_idx = wire_segment.first.get_layer_idx();
+    if (layer_idx != wire_segment.second.get_layer_idx()) {
+      continue;
+    }
+    if (wire_segment.first.get_y() == wire_segment.second.get_y()) {
+      int32_t y = wire_segment.first.get_y();
+      int32_t begin_x = std::min(wire_segment.first.get_x(), wire_segment.second.get_x());
+      int32_t end_x = std::max(wire_segment.first.get_x(), wire_segment.second.get_x());
+      for (int32_t x = begin_x; x < end_x; x++) {
+        GRWireEdgeId edge_id{x, y, layer_idx};
+        if (!_grid_graph.hasWireEdge(edge_id) || isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
+        if (edge_set.insert(edge_id).second) {
+          total_overflow += _grid_graph.getWireEdge(edge_id).getOverflow();
+        }
+      }
+    } else if (wire_segment.first.get_x() == wire_segment.second.get_x()) {
+      int32_t x = wire_segment.first.get_x();
+      int32_t begin_y = std::min(wire_segment.first.get_y(), wire_segment.second.get_y());
+      int32_t end_y = std::max(wire_segment.first.get_y(), wire_segment.second.get_y());
+      for (int32_t y = begin_y; y < end_y; y++) {
+        GRWireEdgeId edge_id{x, y, layer_idx};
+        if (!_grid_graph.hasWireEdge(edge_id) || isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
+        if (edge_set.insert(edge_id).second) {
+          total_overflow += _grid_graph.getWireEdge(edge_id).getOverflow();
+        }
+      }
+    }
+  }
+  return total_overflow;
+}
+
 bool GlobalRouter::buildRoutingTree(GRNet& net, GRTree& routing_tree)
 {
   routing_tree = GRTree();
-  if (!buildTopoTree(net)) {
+  GRSkeletonTree skeleton;
+  if (!buildSkeletonTree(net, skeleton)) {
+    return false;
+  }
+  if (!buildTopoTree(net, skeleton, false)) {
     return false;
   }
   return runDP(net, routing_tree);
 }
 
-bool GlobalRouter::buildTopoTree(GRNet& net)
+bool GlobalRouter::buildDetourRoutingTree(GRNet& net, GRTree& routing_tree)
 {
-  net.topology = GRTopoTree();
+  routing_tree = GRTree();
+  GRSkeletonTree skeleton;
+  if (!buildSkeletonTree(net, skeleton)) {
+    return false;
+  }
+  GRSkeletonTree detour_skeleton = skeleton;
+  _last_detour_shifted = buildDetourSkeleton(skeleton, detour_skeleton);
+  if (!buildTopoTree(net, detour_skeleton, true)) {
+    return false;
+  }
+  return runDP(net, routing_tree);
+}
+
+bool GlobalRouter::buildSkeletonTree(GRNet& net, GRSkeletonTree& skeleton)
+{
+  skeleton = GRSkeletonTree();
   std::vector<PlanarCoord> coord_list;
   coord_list.reserve(net.pin_list.size());
   for (GRPin& gr_pin : net.pin_list) {
@@ -918,12 +1127,12 @@ bool GlobalRouter::buildTopoTree(GRNet& net)
   }
 
   if (coord_list.size() == 1) {
-    GRTopoNode root_node;
+    GRSkeletonNode root_node;
     root_node.coord = coord_list.front();
-    net.topology.node_list.push_back(root_node);
-    net.topology.root_idx = 0;
+    skeleton.node_list.push_back(root_node);
+    skeleton.root_idx = 0;
     for (GRPin& gr_pin : net.pin_list) {
-      GRTopoNode& node = net.topology.node_list[0];
+      GRSkeletonNode& node = skeleton.node_list[0];
       node.fixed_low = std::min(node.fixed_low, gr_pin.layer_idx);
       node.fixed_high = std::max(node.fixed_high, gr_pin.layer_idx);
     }
@@ -970,7 +1179,7 @@ bool GlobalRouter::buildTopoTree(GRNet& net)
       }
     }
   }
-  if (branch_order_list.size() != static_cast<size_t>(branch_num)) {
+  if (static_cast<int32_t>(branch_order_list.size()) != branch_num) {
     RTLOG.warn(Loc::current(), "Net ", net.origin_net->get_net_name(), " FLUTE tree is not connected!");
     Flute::free_tree(flute_tree);
     return false;
@@ -979,9 +1188,19 @@ bool GlobalRouter::buildTopoTree(GRNet& net)
   std::map<PlanarCoord, int32_t, CmpPlanarCoordByXASC> coord_node_map;
   for (int32_t branch_idx : branch_order_list) {
     PlanarCoord coord(flute_tree.branch[branch_idx].x, flute_tree.branch[branch_idx].y);
-    int32_t node_idx = getOrCreateTopoNode(net.topology, coord_node_map, coord);
+    int32_t node_idx = -1;
+    auto iter = coord_node_map.find(coord);
+    if (iter == coord_node_map.end()) {
+      GRSkeletonNode node;
+      node.coord = coord;
+      node_idx = static_cast<int32_t>(skeleton.node_list.size());
+      skeleton.node_list.push_back(node);
+      coord_node_map[coord] = node_idx;
+    } else {
+      node_idx = iter->second;
+    }
     if (branch_idx == 0) {
-      net.topology.root_idx = node_idx;
+      skeleton.root_idx = node_idx;
     }
   }
   for (size_t i = 1; i < branch_order_list.size(); i++) {
@@ -994,74 +1213,11 @@ bool GlobalRouter::buildTopoTree(GRNet& net)
     }
     int32_t parent_node_idx = coord_node_map[parent_coord];
     int32_t child_node_idx = coord_node_map[child_coord];
-    if (parent_coord.get_x() != child_coord.get_x() && parent_coord.get_y() != child_coord.get_y()) {
-      std::vector<int32_t> candidate_list;
-      candidate_list.push_back(addBendNode(net.topology, parent_node_idx, child_node_idx, PlanarCoord(child_coord.get_x(), parent_coord.get_y())));
-      candidate_list.push_back(addBendNode(net.topology, parent_node_idx, child_node_idx, PlanarCoord(parent_coord.get_x(), child_coord.get_y())));
-
-      constexpr double kFractionList[] = {1.0 / 8.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 2.0, 5.0 / 8.0, 3.0 / 4.0, 7.0 / 8.0};
-      std::set<int32_t> used_x;
-      for (double fraction : kFractionList) {
-        int32_t x = parent_coord.get_x() + static_cast<int32_t>(std::lround((child_coord.get_x() - parent_coord.get_x()) * fraction));
-        if (x < 0 || x >= _grid_graph.getXSize() || x == parent_coord.get_x() || x == child_coord.get_x()) {
-          continue;
-        }
-        if (!used_x.insert(x).second) {
-          continue;
-        }
-        std::vector<PlanarCoord> path;
-        path.emplace_back(x, parent_coord.get_y());
-        path.emplace_back(x, child_coord.get_y());
-        candidate_list.push_back(addPatternPath(net.topology, parent_node_idx, child_node_idx, path));
-      }
-
-      std::set<int32_t> used_y;
-      for (double fraction : kFractionList) {
-        int32_t y = parent_coord.get_y() + static_cast<int32_t>(std::lround((child_coord.get_y() - parent_coord.get_y()) * fraction));
-        if (y < 0 || y >= _grid_graph.getYSize() || y == parent_coord.get_y() || y == child_coord.get_y()) {
-          continue;
-        }
-        if (!used_y.insert(y).second) {
-          continue;
-        }
-        std::vector<PlanarCoord> path;
-        path.emplace_back(parent_coord.get_x(), y);
-        path.emplace_back(child_coord.get_x(), y);
-        candidate_list.push_back(addPatternPath(net.topology, parent_node_idx, child_node_idx, path));
-      }
-      addTopoEdge(net.topology, parent_node_idx, child_node_idx, candidate_list);
-    } else {
-      std::vector<int32_t> candidate_list;
-      if (parent_coord.get_y() == child_coord.get_y()) {
-        for (int32_t offset : {1, -1, 2, -2}) {
-          int32_t y = parent_coord.get_y() + offset;
-          if (y < 0 || y >= _grid_graph.getYSize()) {
-            continue;
-          }
-          std::vector<PlanarCoord> path;
-          path.emplace_back(parent_coord.get_x(), y);
-          path.emplace_back(child_coord.get_x(), y);
-          candidate_list.push_back(addPatternPath(net.topology, parent_node_idx, child_node_idx, path));
-        }
-      } else {
-        for (int32_t offset : {1, -1, 2, -2}) {
-          int32_t x = parent_coord.get_x() + offset;
-          if (x < 0 || x >= _grid_graph.getXSize()) {
-            continue;
-          }
-          std::vector<PlanarCoord> path;
-          path.emplace_back(x, parent_coord.get_y());
-          path.emplace_back(x, child_coord.get_y());
-          candidate_list.push_back(addPatternPath(net.topology, parent_node_idx, child_node_idx, path));
-        }
-      }
-      if (candidate_list.empty()) {
-        addTopoEdge(net.topology, parent_node_idx, child_node_idx);
-      } else {
-        candidate_list.insert(candidate_list.begin(), -1);
-        addTopoEdge(net.topology, parent_node_idx, child_node_idx, std::move(candidate_list));
-      }
+    if (skeleton.node_list[child_node_idx].parent != -1) {
+      continue;
     }
+    skeleton.node_list[child_node_idx].parent = parent_node_idx;
+    skeleton.node_list[parent_node_idx].child_list.push_back(child_node_idx);
   }
 
   for (GRPin& gr_pin : net.pin_list) {
@@ -1071,25 +1227,464 @@ bool GlobalRouter::buildTopoTree(GRNet& net)
       Flute::free_tree(flute_tree);
       return false;
     }
-    GRTopoNode& node = net.topology.node_list[iter->second];
+    GRSkeletonNode& node = skeleton.node_list[iter->second];
     node.fixed_low = std::min(node.fixed_low, gr_pin.layer_idx);
     node.fixed_high = std::max(node.fixed_high, gr_pin.layer_idx);
   }
   Flute::free_tree(flute_tree);
 
-  if (net.topology.root_idx < 0) {
+  if (skeleton.root_idx < 0) {
     return false;
   }
-  for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(net.topology.node_list.size()); node_idx++) {
-    const GRTopoNode& node = net.topology.node_list[node_idx];
-    if (node.is_bend) {
-      continue;
-    }
-    if (node_idx != net.topology.root_idx && node.parent == -1) {
+  for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(skeleton.node_list.size()); node_idx++) {
+    if (node_idx != skeleton.root_idx && skeleton.node_list[node_idx].parent == -1) {
       return false;
     }
   }
   return true;
+}
+
+bool GlobalRouter::buildTopoTree(GRNet& net, const GRSkeletonTree& skeleton, bool with_detour)
+{
+  net.topology = GRTopoTree();
+  if (skeleton.node_list.empty() || skeleton.root_idx < 0) {
+    return false;
+  }
+  for (const GRSkeletonNode& skeleton_node : skeleton.node_list) {
+    GRTopoNode topo_node;
+    topo_node.coord = skeleton_node.coord;
+    topo_node.fixed_low = skeleton_node.fixed_low;
+    topo_node.fixed_high = skeleton_node.fixed_high;
+    net.topology.node_list.push_back(topo_node);
+  }
+  net.topology.root_idx = skeleton.root_idx;
+
+  for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(skeleton.node_list.size()); node_idx++) {
+    if (node_idx == skeleton.root_idx) {
+      continue;
+    }
+    int32_t parent_idx = skeleton.node_list[node_idx].parent;
+    if (parent_idx < 0) {
+      return false;
+    }
+    const PlanarCoord& parent_coord = skeleton.node_list[parent_idx].coord;
+    const PlanarCoord& child_coord = skeleton.node_list[node_idx].coord;
+    std::vector<std::vector<PlanarCoord>> path_list;
+    buildPatternPathList(parent_coord, child_coord, with_detour, path_list);
+
+    std::vector<int32_t> candidate_list;
+    candidate_list.reserve(path_list.size() + 1);
+    for (const std::vector<PlanarCoord>& path : path_list) {
+      candidate_list.push_back(addPatternPath(net.topology, parent_idx, node_idx, path));
+    }
+    bool is_collinear = parent_coord.get_x() == child_coord.get_x() || parent_coord.get_y() == child_coord.get_y();
+    if (is_collinear) {
+      candidate_list.insert(candidate_list.begin(), -1);
+    }
+    if (candidate_list.empty()) {
+      RTLOG.warn(Loc::current(), "Net ", net.origin_net->get_net_name(), " has no pattern candidate!");
+      return false;
+    }
+    addTopoEdge(net.topology, parent_idx, node_idx, std::move(candidate_list));
+  }
+  return true;
+}
+
+void GlobalRouter::buildPatternPathList(const PlanarCoord& parent_coord, const PlanarCoord& child_coord, bool with_detour,
+                                        std::vector<std::vector<PlanarCoord>>& path_list)
+{
+  path_list.clear();
+  bool is_collinear = parent_coord.get_x() == child_coord.get_x() || parent_coord.get_y() == child_coord.get_y();
+  if (!is_collinear) {
+    addPatternPathCandidate(path_list, {PlanarCoord(child_coord.get_x(), parent_coord.get_y())});
+    addPatternPathCandidate(path_list, {PlanarCoord(parent_coord.get_x(), child_coord.get_y())});
+
+    constexpr double kFractionList[] = {1.0 / 8.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 2.0, 5.0 / 8.0, 3.0 / 4.0, 7.0 / 8.0};
+    std::set<int32_t> used_x;
+    for (double fraction : kFractionList) {
+      int32_t x = parent_coord.get_x() + static_cast<int32_t>(std::lround((child_coord.get_x() - parent_coord.get_x()) * fraction));
+      if (x < 0 || x >= _grid_graph.getXSize() || x == parent_coord.get_x() || x == child_coord.get_x()) {
+        continue;
+      }
+      if (!used_x.insert(x).second) {
+        continue;
+      }
+      addPatternPathCandidate(path_list, {PlanarCoord(x, parent_coord.get_y()), PlanarCoord(x, child_coord.get_y())});
+    }
+
+    std::set<int32_t> used_y;
+    for (double fraction : kFractionList) {
+      int32_t y = parent_coord.get_y() + static_cast<int32_t>(std::lround((child_coord.get_y() - parent_coord.get_y()) * fraction));
+      if (y < 0 || y >= _grid_graph.getYSize() || y == parent_coord.get_y() || y == child_coord.get_y()) {
+        continue;
+      }
+      if (!used_y.insert(y).second) {
+        continue;
+      }
+      addPatternPathCandidate(path_list, {PlanarCoord(parent_coord.get_x(), y), PlanarCoord(child_coord.get_x(), y)});
+    }
+  } else {
+    int32_t max_offset = with_detour ? _gr_params.get_max_detour_offset() : 2;
+    for (int32_t offset = 1; offset <= max_offset; offset++) {
+      for (int32_t sign : {1, -1}) {
+        if (parent_coord.get_y() == child_coord.get_y()) {
+          int32_t y = parent_coord.get_y() + sign * offset;
+          if (y < 0 || y >= _grid_graph.getYSize()) {
+            continue;
+          }
+          addPatternPathCandidate(path_list, {PlanarCoord(parent_coord.get_x(), y), PlanarCoord(child_coord.get_x(), y)});
+        } else {
+          int32_t x = parent_coord.get_x() + sign * offset;
+          if (x < 0 || x >= _grid_graph.getXSize()) {
+            continue;
+          }
+          addPatternPathCandidate(path_list, {PlanarCoord(x, parent_coord.get_y()), PlanarCoord(x, child_coord.get_y())});
+        }
+      }
+    }
+  }
+
+  if (with_detour && getSegmentCongestionNum(parent_coord, child_coord) > 0) {
+    addUDetourPathList(parent_coord, child_coord, path_list);
+  }
+}
+
+void GlobalRouter::addPatternPathCandidate(std::vector<std::vector<PlanarCoord>>& path_list, const std::vector<PlanarCoord>& path) const
+{
+  constexpr size_t kMaxPatternPathNum = 64;
+  if (path.empty() || path_list.size() >= kMaxPatternPathNum) {
+    return;
+  }
+  for (const PlanarCoord& coord : path) {
+    if (coord.get_x() < 0 || coord.get_x() >= _grid_graph.getXSize() || coord.get_y() < 0 || coord.get_y() >= _grid_graph.getYSize()) {
+      return;
+    }
+  }
+  for (size_t i = 1; i < path.size(); i++) {
+    if (path[i - 1] == path[i]) {
+      return;
+    }
+  }
+  for (const std::vector<PlanarCoord>& exist_path : path_list) {
+    if (exist_path.size() != path.size()) {
+      continue;
+    }
+    bool is_same = true;
+    for (size_t i = 0; i < path.size(); i++) {
+      if (exist_path[i] != path[i]) {
+        is_same = false;
+        break;
+      }
+    }
+    if (is_same) {
+      return;
+    }
+  }
+  path_list.push_back(path);
+}
+
+void GlobalRouter::addUDetourPathList(const PlanarCoord& parent_coord, const PlanarCoord& child_coord,
+                                      std::vector<std::vector<PlanarCoord>>& path_list)
+{
+  int32_t x_min = std::min(parent_coord.get_x(), child_coord.get_x());
+  int32_t x_max = std::max(parent_coord.get_x(), child_coord.get_x());
+  int32_t y_min = std::min(parent_coord.get_y(), child_coord.get_y());
+  int32_t y_max = std::max(parent_coord.get_y(), child_coord.get_y());
+
+  if (parent_coord.get_y() != child_coord.get_y()) {
+    for (int32_t offset = 1; offset <= _gr_params.get_max_detour_offset(); offset++) {
+      int32_t left_x = x_min - offset;
+      if (left_x >= 0) {
+        addPatternPathCandidate(path_list, {PlanarCoord(left_x, parent_coord.get_y()), PlanarCoord(left_x, child_coord.get_y())});
+      }
+      int32_t right_x = x_max + offset;
+      if (right_x < _grid_graph.getXSize()) {
+        addPatternPathCandidate(path_list, {PlanarCoord(right_x, parent_coord.get_y()), PlanarCoord(right_x, child_coord.get_y())});
+      }
+    }
+  }
+  if (parent_coord.get_x() != child_coord.get_x()) {
+    for (int32_t offset = 1; offset <= _gr_params.get_max_detour_offset(); offset++) {
+      int32_t lower_y = y_min - offset;
+      if (lower_y >= 0) {
+        addPatternPathCandidate(path_list, {PlanarCoord(parent_coord.get_x(), lower_y), PlanarCoord(child_coord.get_x(), lower_y)});
+      }
+      int32_t upper_y = y_max + offset;
+      if (upper_y < _grid_graph.getYSize()) {
+        addPatternPathCandidate(path_list, {PlanarCoord(parent_coord.get_x(), upper_y), PlanarCoord(child_coord.get_x(), upper_y)});
+      }
+    }
+  }
+}
+
+bool GlobalRouter::buildDetourSkeleton(const GRSkeletonTree& skeleton, GRSkeletonTree& detour_skeleton) const
+{
+  detour_skeleton = skeleton;
+  int32_t node_num = static_cast<int32_t>(skeleton.node_list.size());
+  if (node_num < 3) {
+    return false;
+  }
+  std::vector<std::vector<int32_t>> adjacency(node_num);
+  for (int32_t node_idx = 0; node_idx < node_num; node_idx++) {
+    for (int32_t child_idx : skeleton.node_list[node_idx].child_list) {
+      adjacency[node_idx].push_back(child_idx);
+      adjacency[child_idx].push_back(node_idx);
+    }
+  }
+
+  std::set<PlanarCoord, CmpPlanarCoordByXASC> coord_set;
+  for (const GRSkeletonNode& node : skeleton.node_list) {
+    coord_set.insert(node.coord);
+  }
+
+  std::set<std::pair<int32_t, int32_t>> chain_set;
+  double best_score = GRParams::kInf;
+  std::vector<int32_t> best_chain;
+  int32_t best_offset = 0;
+  bool best_horizontal = false;
+
+  for (int32_t begin_idx = 0; begin_idx < node_num; begin_idx++) {
+    for (int32_t end_idx = begin_idx + 1; end_idx < node_num; end_idx++) {
+      std::vector<int32_t> parent_list(node_num, -1);
+      std::queue<int32_t> node_queue;
+      parent_list[begin_idx] = begin_idx;
+      node_queue.push(begin_idx);
+      while (!node_queue.empty() && parent_list[end_idx] == -1) {
+        int32_t node_idx = node_queue.front();
+        node_queue.pop();
+        for (int32_t neighbor_idx : adjacency[node_idx]) {
+          if (parent_list[neighbor_idx] != -1) {
+            continue;
+          }
+          parent_list[neighbor_idx] = node_idx;
+          node_queue.push(neighbor_idx);
+        }
+      }
+      if (parent_list[end_idx] == -1) {
+        continue;
+      }
+      std::vector<int32_t> chain;
+      for (int32_t node_idx = end_idx; node_idx != begin_idx; node_idx = parent_list[node_idx]) {
+        chain.push_back(node_idx);
+      }
+      chain.push_back(begin_idx);
+      std::reverse(chain.begin(), chain.end());
+      if (chain.size() < 3 || !isStraightSkeletonChain(skeleton, chain)) {
+        continue;
+      }
+      std::pair<int32_t, int32_t> chain_key(begin_idx, end_idx);
+      if (!chain_set.insert(chain_key).second) {
+        continue;
+      }
+
+      bool has_fixed_node = false;
+      for (size_t i = 1; i + 1 < chain.size(); i++) {
+        if (skeleton.node_list[chain[i]].fixed_low != INT_MAX) {
+          has_fixed_node = true;
+          break;
+        }
+      }
+      if (has_fixed_node) {
+        continue;
+      }
+
+      std::vector<PlanarCoord> chain_coord_list;
+      chain_coord_list.reserve(chain.size());
+      for (int32_t node_idx : chain) {
+        chain_coord_list.push_back(skeleton.node_list[node_idx].coord);
+      }
+      int32_t original_congestion = getPathCongestionNum(chain_coord_list);
+      if (original_congestion <= 0) {
+        continue;
+      }
+      double original_length = getPathLength(chain_coord_list);
+      double max_length = original_length + std::max(2.0, original_length * _gr_params.get_max_detour_length_ratio());
+      bool is_horizontal = chain_coord_list.front().get_y() == chain_coord_list[1].get_y();
+
+      for (int32_t offset = -_gr_params.get_max_detour_offset(); offset <= _gr_params.get_max_detour_offset(); offset++) {
+        if (offset == 0) {
+          continue;
+        }
+        std::vector<PlanarCoord> shifted_coord_list = chain_coord_list;
+        std::set<PlanarCoord, CmpPlanarCoordByXASC> shifted_coord_set;
+        bool is_valid = true;
+        for (size_t i = 1; i + 1 < shifted_coord_list.size(); i++) {
+          PlanarCoord shifted_coord = shifted_coord_list[i];
+          if (is_horizontal) {
+            shifted_coord.set_y(shifted_coord.get_y() + offset);
+          } else {
+            shifted_coord.set_x(shifted_coord.get_x() + offset);
+          }
+          if (shifted_coord.get_x() < 0 || shifted_coord.get_x() >= _grid_graph.getXSize() || shifted_coord.get_y() < 0
+              || shifted_coord.get_y() >= _grid_graph.getYSize()) {
+            is_valid = false;
+            break;
+          }
+          if (coord_set.find(shifted_coord) != coord_set.end() || !shifted_coord_set.insert(shifted_coord).second) {
+            is_valid = false;
+            break;
+          }
+          shifted_coord_list[i] = shifted_coord;
+        }
+        if (!is_valid) {
+          continue;
+        }
+        int32_t shifted_congestion = getPathCongestionNum(shifted_coord_list);
+        if (shifted_congestion >= original_congestion) {
+          continue;
+        }
+        double shifted_length = getPathLength(shifted_coord_list);
+        if (shifted_length > max_length + GRParams::kEpsilon) {
+          continue;
+        }
+        double score = shifted_congestion * 1000000.0 + shifted_length;
+        if (score < best_score) {
+          best_score = score;
+          best_chain = chain;
+          best_offset = offset;
+          best_horizontal = is_horizontal;
+        }
+      }
+    }
+  }
+
+  if (best_chain.empty()) {
+    return false;
+  }
+  for (size_t i = 1; i + 1 < best_chain.size(); i++) {
+    GRSkeletonNode& node = detour_skeleton.node_list[best_chain[i]];
+    if (best_horizontal) {
+      node.coord.set_y(node.coord.get_y() + best_offset);
+    } else {
+      node.coord.set_x(node.coord.get_x() + best_offset);
+    }
+  }
+  return true;
+}
+
+bool GlobalRouter::isStraightSkeletonChain(const GRSkeletonTree& skeleton, const std::vector<int32_t>& chain) const
+{
+  if (chain.size() < 2) {
+    return false;
+  }
+  const PlanarCoord& first_coord = skeleton.node_list[chain[0]].coord;
+  const PlanarCoord& second_coord = skeleton.node_list[chain[1]].coord;
+  bool is_horizontal = first_coord.get_y() == second_coord.get_y();
+  int32_t direction = 0;
+  for (size_t i = 1; i < chain.size(); i++) {
+    const PlanarCoord& prev_coord = skeleton.node_list[chain[i - 1]].coord;
+    const PlanarCoord& curr_coord = skeleton.node_list[chain[i]].coord;
+    if (is_horizontal) {
+      if (prev_coord.get_y() != curr_coord.get_y() || prev_coord.get_x() == curr_coord.get_x()) {
+        return false;
+      }
+      int32_t sign = curr_coord.get_x() > prev_coord.get_x() ? 1 : -1;
+      if (direction != 0 && direction != sign) {
+        return false;
+      }
+      direction = sign;
+    } else {
+      if (prev_coord.get_x() != curr_coord.get_x() || prev_coord.get_y() == curr_coord.get_y()) {
+        return false;
+      }
+      int32_t sign = curr_coord.get_y() > prev_coord.get_y() ? 1 : -1;
+      if (direction != 0 && direction != sign) {
+        return false;
+      }
+      direction = sign;
+    }
+  }
+  return true;
+}
+
+void GlobalRouter::initDetourCongestionView()
+{
+  int32_t x_size = _grid_graph.getXSize();
+  int32_t y_size = _grid_graph.getYSize();
+  GridMap<int32_t> horizontal_map(x_size, y_size, 0);
+  GridMap<int32_t> vertical_map(x_size, y_size, 0);
+  for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
+    const GridMap<GRWireEdge>& edge_map = _grid_graph.getEdgeMap(layer_idx);
+    for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+      for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
+        if (edge_map[x][y].getOverflow() <= GRParams::kEpsilon) {
+          continue;
+        }
+        if (_grid_graph.isHorizontalLayer(layer_idx)) {
+          horizontal_map[x][y] = 1;
+        } else {
+          vertical_map[x][y] = 1;
+        }
+      }
+    }
+  }
+
+  _horizontal_congestion_prefix.init(x_size + 1, y_size + 1, 0);
+  _vertical_congestion_prefix.init(x_size + 1, y_size + 1, 0);
+  for (int32_t x = 0; x < x_size; x++) {
+    for (int32_t y = 0; y < y_size; y++) {
+      _horizontal_congestion_prefix[x + 1][y + 1] = horizontal_map[x][y] + _horizontal_congestion_prefix[x][y + 1]
+                                                    + _horizontal_congestion_prefix[x + 1][y] - _horizontal_congestion_prefix[x][y];
+      _vertical_congestion_prefix[x + 1][y + 1] = vertical_map[x][y] + _vertical_congestion_prefix[x][y + 1]
+                                                  + _vertical_congestion_prefix[x + 1][y] - _vertical_congestion_prefix[x][y];
+    }
+  }
+}
+
+int32_t GlobalRouter::getCongestionPrefixSum(const GridMap<int32_t>& prefix_map, int32_t begin_x, int32_t begin_y, int32_t end_x,
+                                             int32_t end_y) const
+{
+  if (begin_x < 0 || begin_y < 0 || end_x < begin_x || end_y < begin_y || end_x + 1 >= prefix_map.get_x_size()
+      || end_y + 1 >= prefix_map.get_y_size()) {
+    return 0;
+  }
+  return prefix_map[end_x + 1][end_y + 1] - prefix_map[begin_x][end_y + 1] - prefix_map[end_x + 1][begin_y] + prefix_map[begin_x][begin_y];
+}
+
+int32_t GlobalRouter::getSegmentCongestionNum(const PlanarCoord& first_coord, const PlanarCoord& second_coord) const
+{
+  if (first_coord == second_coord) {
+    return 0;
+  }
+  if (first_coord.get_y() == second_coord.get_y()) {
+    int32_t begin_x = std::min(first_coord.get_x(), second_coord.get_x());
+    int32_t end_x = std::max(first_coord.get_x(), second_coord.get_x()) - 1;
+    if (end_x < begin_x) {
+      return 0;
+    }
+    return getCongestionPrefixSum(_horizontal_congestion_prefix, begin_x, first_coord.get_y(), end_x, first_coord.get_y());
+  }
+  if (first_coord.get_x() == second_coord.get_x()) {
+    int32_t begin_y = std::min(first_coord.get_y(), second_coord.get_y());
+    int32_t end_y = std::max(first_coord.get_y(), second_coord.get_y()) - 1;
+    if (end_y < begin_y) {
+      return 0;
+    }
+    return getCongestionPrefixSum(_vertical_congestion_prefix, first_coord.get_x(), begin_y, first_coord.get_x(), end_y);
+  }
+  PlanarCoord first_mid(first_coord.get_x(), second_coord.get_y());
+  PlanarCoord second_mid(second_coord.get_x(), first_coord.get_y());
+  int32_t first_num = getSegmentCongestionNum(first_coord, first_mid) + getSegmentCongestionNum(first_mid, second_coord);
+  int32_t second_num = getSegmentCongestionNum(first_coord, second_mid) + getSegmentCongestionNum(second_mid, second_coord);
+  return std::min(first_num, second_num);
+}
+
+int32_t GlobalRouter::getPathCongestionNum(const std::vector<PlanarCoord>& path) const
+{
+  int32_t congestion_num = 0;
+  for (size_t i = 1; i < path.size(); i++) {
+    congestion_num += getSegmentCongestionNum(path[i - 1], path[i]);
+  }
+  return congestion_num;
+}
+
+double GlobalRouter::getPathLength(const std::vector<PlanarCoord>& path) const
+{
+  double length = 0.0;
+  for (size_t i = 1; i < path.size(); i++) {
+    length += std::abs(path[i].get_x() - path[i - 1].get_x()) + std::abs(path[i].get_y() - path[i - 1].get_y());
+  }
+  return length;
 }
 
 bool GlobalRouter::runDP(const GRNet& net, GRTree& routing_tree)
@@ -1123,7 +1718,7 @@ bool GlobalRouter::runDP(const GRNet& net, GRTree& routing_tree)
   }
 
   int32_t root_layer_idx = -1;
-  double root_cost = kInf;
+  double root_cost = GRParams::kInf;
   for (int32_t layer_idx = bottom_layer_idx; layer_idx <= top_layer_idx; layer_idx++) {
     if (state.d[topo_tree.root_idx][layer_idx] < root_cost) {
       root_cost = state.d[topo_tree.root_idx][layer_idx];
@@ -1153,7 +1748,7 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
   std::vector<double> phi(state.layer_num + 1, 0.0);
   std::vector<int32_t> blocked_via_prefix(state.layer_num + 1, 0);
   for (int32_t layer_idx = 0; layer_idx < state.layer_num; layer_idx++) {
-    if (via_cost[layer_idx] >= kInf) {
+    if (via_cost[layer_idx] >= GRParams::kInf) {
       phi[layer_idx + 1] = phi[layer_idx];
       blocked_via_prefix[layer_idx + 1] = blocked_via_prefix[layer_idx] + 1;
     } else {
@@ -1162,10 +1757,10 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
     }
   }
 
-  std::vector<std::vector<double>> child_g(child_num, std::vector<double>(state.layer_num, kInf));
+  std::vector<std::vector<double>> child_g(child_num, std::vector<double>(state.layer_num, GRParams::kInf));
   std::vector<std::vector<int32_t>> child_bend(child_num, std::vector<int32_t>(state.layer_num, -1));
   std::vector<std::vector<std::vector<double>>> child_range_min(child_num,
-                                                                std::vector<std::vector<double>>(state.layer_num, std::vector<double>(state.layer_num, kInf)));
+                                                                std::vector<std::vector<double>>(state.layer_num, std::vector<double>(state.layer_num, GRParams::kInf)));
   for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
     int32_t child_idx = node.child_list[child_pos];
     if (!state.computed[child_idx]) {
@@ -1185,10 +1780,10 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
         }
       }
       for (int32_t layer_idx = state.bottom_layer_idx; layer_idx <= state.top_layer_idx; layer_idx++) {
-        double best_cost = kInf;
+        double best_cost = GRParams::kInf;
         int32_t best_bend_idx = -1;
         for (int32_t bend_idx : bend_idx_list) {
-          double cost = kInf;
+          double cost = GRParams::kInf;
           if (bend_idx < 0) {
             double wire_cost = getWireSegmentCost(net, layer_idx, node.coord, child_node.coord);
             cost = addCost(state.d[child_idx][layer_idx], wire_cost);
@@ -1207,7 +1802,7 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
       }
     }
     for (int32_t begin_layer = 0; begin_layer < state.layer_num; begin_layer++) {
-      double min_cost = kInf;
+      double min_cost = GRParams::kInf;
       for (int32_t end_layer = begin_layer; end_layer < state.layer_num; end_layer++) {
         min_cost = std::min(min_cost, child_g[child_pos][end_layer]);
         child_range_min[child_pos][begin_layer][end_layer] = min_cost;
@@ -1215,14 +1810,14 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
     }
   }
 
-  std::vector<std::vector<double>> sum_min(state.layer_num, std::vector<double>(state.layer_num, kInf));
+  std::vector<std::vector<double>> sum_min(state.layer_num, std::vector<double>(state.layer_num, GRParams::kInf));
   for (int32_t begin_layer = state.bottom_layer_idx; begin_layer <= state.top_layer_idx; begin_layer++) {
     for (int32_t end_layer = begin_layer; end_layer <= state.top_layer_idx; end_layer++) {
       double sum = 0.0;
       bool is_valid = true;
       for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
         double child_min = child_range_min[child_pos][begin_layer][end_layer];
-        if (child_min >= kInf) {
+        if (child_min >= GRParams::kInf) {
           is_valid = false;
           break;
         }
@@ -1240,7 +1835,7 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
     begin_limit = std::min(begin_limit, state.top_layer_idx);
     end_start = std::max(end_start, state.bottom_layer_idx);
 
-    double best_cost = kInf;
+    double best_cost = GRParams::kInf;
     int32_t best_begin = -1;
     int32_t best_end = -1;
     for (int32_t begin_layer = state.bottom_layer_idx; begin_layer <= begin_limit; begin_layer++) {
@@ -1266,7 +1861,7 @@ void GlobalRouter::computeNodeDP(const GRNet& net, GRDpState& state, int32_t nod
     state.best_child_layer[node_idx][layer_idx].resize(child_num, -1);
     state.best_child_bend[node_idx][layer_idx].resize(child_num, -1);
     for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
-      double min_child_cost = kInf;
+      double min_child_cost = GRParams::kInf;
       int32_t best_child_layer_idx = -1;
       for (int32_t child_layer_idx = best_begin; child_layer_idx <= best_end; child_layer_idx++) {
         if (child_g[child_pos][child_layer_idx] < min_child_cost) {
@@ -1381,21 +1976,21 @@ double GlobalRouter::getWireSegmentCost(const GRNet& net, int32_t layer_idx, con
     return 0.0;
   }
   if (layer_idx < _grid_graph.getBottomLayerIdx() || layer_idx > _grid_graph.getTopLayerIdx()) {
-    return kInf;
+    return GRParams::kInf;
   }
   bool is_horizontal = _grid_graph.isHorizontalLayer(layer_idx);
   double total_cost = 0.0;
   if (first_coord.get_y() == second_coord.get_y()) {
     if (!is_horizontal) {
-      return kInf;
+      return GRParams::kInf;
     }
     int32_t y = first_coord.get_y();
     int32_t begin_x = std::min(first_coord.get_x(), second_coord.get_x());
     int32_t end_x = std::max(first_coord.get_x(), second_coord.get_x());
     for (int32_t x = begin_x; x < end_x; x++) {
       double edge_cost = getWireEdgeCost(net, GRWireEdgeId{x, y, layer_idx});
-      if (edge_cost >= kInf) {
-        return kInf;
+      if (edge_cost >= GRParams::kInf) {
+        return GRParams::kInf;
       }
       total_cost += edge_cost;
     }
@@ -1403,49 +1998,49 @@ double GlobalRouter::getWireSegmentCost(const GRNet& net, int32_t layer_idx, con
   }
   if (first_coord.get_x() == second_coord.get_x()) {
     if (is_horizontal) {
-      return kInf;
+      return GRParams::kInf;
     }
     int32_t x = first_coord.get_x();
     int32_t begin_y = std::min(first_coord.get_y(), second_coord.get_y());
     int32_t end_y = std::max(first_coord.get_y(), second_coord.get_y());
     for (int32_t y = begin_y; y < end_y; y++) {
       double edge_cost = getWireEdgeCost(net, GRWireEdgeId{x, y, layer_idx});
-      if (edge_cost >= kInf) {
-        return kInf;
+      if (edge_cost >= GRParams::kInf) {
+        return GRParams::kInf;
       }
       total_cost += edge_cost;
     }
     return total_cost;
   }
   RTLOG.warn(Loc::current(), "The wire segment is not horizontal or vertical!");
-  return kInf;
+  return GRParams::kInf;
 }
 
 double GlobalRouter::getWireEdgeCost(const GRNet& net, const GRWireEdgeId& edge_id, double amount) const
 {
   if (edge_id.layer_idx < _grid_graph.getBottomLayerIdx() || edge_id.layer_idx > _grid_graph.getTopLayerIdx()) {
-    return kInf;
+    return GRParams::kInf;
   }
   if (!_grid_graph.hasWireEdge(edge_id)) {
-    return kInf;
+    return GRParams::kInf;
   }
   if (isExemptWireEdge(net, edge_id)) {
-    return amount * kUnitWireCost;
+    return amount * _gr_params.get_unit_wire_cost();
   }
   const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
   double usable_supply = edge.getUsableSupply();
-  if (usable_supply <= kEpsilon) {
-    return kInf;
+  if (usable_supply <= GRParams::kEpsilon) {
+    return GRParams::kInf;
   }
-  return amount * (kUnitWireCost + _cost_weight * getCongestionCost(usable_supply, edge.routing_demand, amount));
+  return amount * (_gr_params.get_unit_wire_cost() + _gr_params.get_cost_weight() * getCongestionCost(usable_supply, edge.routing_demand, amount) + edge.congestion_cost);
 }
 
 double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int32_t below_layer_idx) const
 {
   if (below_layer_idx < _grid_graph.getBottomLayerIdx() || below_layer_idx >= _grid_graph.getTopLayerIdx()) {
-    return kInf;
+    return GRParams::kInf;
   }
-  double total_cost = kViaBaseCost;
+  double total_cost = _gr_params.get_via_base_cost();
   for (int32_t side_layer_idx : {below_layer_idx, below_layer_idx + 1}) {
     if (isAPViaSide(net, coord, side_layer_idx)) {
       continue;
@@ -1459,12 +2054,12 @@ double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int3
         continue;
       }
       const GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
-      if (edge.getUsableSupply() <= kEpsilon) {
+      if (edge.getUsableSupply() <= GRParams::kEpsilon) {
         continue;
       }
-      double edge_cost = getWireEdgeCost(net, edge_id, kViaDemand);
-      if (edge_cost >= kInf) {
-        return kInf;
+      double edge_cost = getWireEdgeCost(net, edge_id, _gr_params.get_via_demand());
+      if (edge_cost >= GRParams::kInf) {
+        return GRParams::kInf;
       }
       total_cost += edge_cost;
     }
@@ -1474,24 +2069,37 @@ double GlobalRouter::getViaCost(const GRNet& net, const PlanarCoord& coord, int3
 
 double GlobalRouter::getCongestionCost(double supply, double demand, double amount) const
 {
-  double usage_ratio = (demand + amount) / supply;
-  double usage_ratio_2 = usage_ratio * usage_ratio;
-  if (usage_ratio < kCongestionKneeRatio) {
-    return usage_ratio_2 * usage_ratio_2;
+  double total_demand = demand + amount;
+  if (supply <= GRParams::kEpsilon || total_demand > supply) {
+    double overflow_ratio = total_demand - std::max(supply, 0.0) + 1.0;
+    double overflow_ratio_sqr = overflow_ratio * overflow_ratio;
+    return overflow_ratio_sqr * overflow_ratio_sqr * overflow_ratio_sqr;
   }
-  if (usage_ratio <= 1.0) {
-    return usage_ratio_2;
+  double usage_ratio = total_demand / supply;
+  double usage_ratio_sqr = usage_ratio * usage_ratio;
+  double unit_cost = usage_ratio_sqr * usage_ratio_sqr;
+  double saturation_start_ratio = _gr_params.get_congestion_saturation_ratio();
+  if (usage_ratio < saturation_start_ratio) {
+    return unit_cost;
   }
-  return usage_ratio_2 * usage_ratio_2;
+  double saturation_ratio = (usage_ratio - saturation_start_ratio) / (1.0 - saturation_start_ratio);
+  unit_cost += saturation_ratio * saturation_ratio;
+  double hotspot_start_ratio = _gr_params.get_congestion_hotspot_ratio();
+  if (usage_ratio < hotspot_start_ratio) {
+    return unit_cost;
+  }
+  double hotspot_ratio = (usage_ratio - hotspot_start_ratio) / (1.0 - hotspot_start_ratio);
+  unit_cost += 2.0 * hotspot_ratio * hotspot_ratio;
+  return unit_cost;
 }
 
 double GlobalRouter::addCost(double first, double second) const
 {
-  if (first >= kInf || second >= kInf) {
-    return kInf;
+  if (first >= GRParams::kInf || second >= GRParams::kInf) {
+    return GRParams::kInf;
   }
   double sum = first + second;
-  return sum >= kInf ? kInf : sum;
+  return sum >= GRParams::kInf ? GRParams::kInf : sum;
 }
 
 bool GlobalRouter::isExemptWireEdge(const GRNet& net, const GRWireEdgeId& edge_id) const
@@ -1511,21 +2119,73 @@ bool GlobalRouter::isAPViaSide(const GRNet& net, const PlanarCoord& coord, int32
 
 void GlobalRouter::ripupRoute(GRNet& net, const GRTree& routing_tree)
 {
+  std::set<GRWireEdgeId> wire_edge_set;
+  buildWireEdgeSet(routing_tree, wire_edge_set);
   std::set<GRWireEdgeId> used_edge_set;
   addWireDemand(net, routing_tree, used_edge_set, -1.0);
   for (const GRViaStack& via_stack : routing_tree.via_list) {
-    addViaDemand(net, via_stack, used_edge_set, -kViaDemand);
+    addViaDemand(net, via_stack, wire_edge_set, used_edge_set, -_gr_params.get_via_demand());
   }
 }
 
 void GlobalRouter::commitRoute(GRNet& net, const GRTree& routing_tree)
 {
+  std::set<GRWireEdgeId> wire_edge_set;
+  buildWireEdgeSet(routing_tree, wire_edge_set);
   std::set<GRWireEdgeId> used_edge_set;
   addWireDemand(net, routing_tree, used_edge_set, 1.0);
   for (const GRViaStack& via_stack : routing_tree.via_list) {
-    addViaDemand(net, via_stack, used_edge_set, kViaDemand);
+    addViaDemand(net, via_stack, wire_edge_set, used_edge_set, _gr_params.get_via_demand());
   }
   net.routing_tree = routing_tree;
+}
+
+void GlobalRouter::buildWireEdgeSet(const GRTree& routing_tree, std::set<GRWireEdgeId>& wire_edge_set) const
+{
+  for (const GRWireSegment& wire_segment : routing_tree.wire_list) {
+    int32_t layer_idx = wire_segment.first.get_layer_idx();
+    if (layer_idx != wire_segment.second.get_layer_idx()) {
+      continue;
+    }
+    bool is_horizontal = _grid_graph.isHorizontalLayer(layer_idx);
+    if (wire_segment.first.get_y() == wire_segment.second.get_y()) {
+      if (!is_horizontal) {
+        continue;
+      }
+      int32_t y = wire_segment.first.get_y();
+      int32_t begin_x = std::min(wire_segment.first.get_x(), wire_segment.second.get_x());
+      int32_t end_x = std::max(wire_segment.first.get_x(), wire_segment.second.get_x());
+      for (int32_t x = begin_x; x < end_x; x++) {
+        wire_edge_set.insert(GRWireEdgeId{x, y, layer_idx});
+      }
+    } else if (wire_segment.first.get_x() == wire_segment.second.get_x()) {
+      if (is_horizontal) {
+        continue;
+      }
+      int32_t x = wire_segment.first.get_x();
+      int32_t begin_y = std::min(wire_segment.first.get_y(), wire_segment.second.get_y());
+      int32_t end_y = std::max(wire_segment.first.get_y(), wire_segment.second.get_y());
+      for (int32_t y = begin_y; y < end_y; y++) {
+        wire_edge_set.insert(GRWireEdgeId{x, y, layer_idx});
+      }
+    }
+  }
+}
+
+bool GlobalRouter::hasPlanarEdgeOrAP(const GRNet& net, const std::set<GRWireEdgeId>& wire_edge_set, const PlanarCoord& coord,
+                                     int32_t layer_idx) const
+{
+  if (isAPViaSide(net, coord, layer_idx)) {
+    return true;
+  }
+  if (layer_idx < _grid_graph.getBottomLayerIdx() || layer_idx > _grid_graph.getTopLayerIdx()) {
+    return false;
+  }
+  bool is_horizontal = _grid_graph.isHorizontalLayer(layer_idx);
+  GRWireEdgeId first_edge = is_horizontal ? GRWireEdgeId{coord.get_x() - 1, coord.get_y(), layer_idx}
+                                          : GRWireEdgeId{coord.get_x(), coord.get_y() - 1, layer_idx};
+  GRWireEdgeId second_edge{coord.get_x(), coord.get_y(), layer_idx};
+  return wire_edge_set.contains(first_edge) || wire_edge_set.contains(second_edge);
 }
 
 void GlobalRouter::addWireDemand(const GRNet& net, const GRTree& routing_tree, std::set<GRWireEdgeId>& used_edge_set, double delta)
@@ -1554,7 +2214,7 @@ void GlobalRouter::addWireDemand(const GRNet& net, const GRTree& routing_tree, s
         }
         GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
         edge.routing_demand += delta;
-        if (edge.routing_demand < -kEpsilon) {
+        if (edge.routing_demand < -GRParams::kEpsilon) {
           RTLOG.error(Loc::current(), "The wire edge routing demand is negative!");
         }
         if (edge.routing_demand < 0.0) {
@@ -1583,7 +2243,7 @@ void GlobalRouter::addWireDemand(const GRNet& net, const GRTree& routing_tree, s
         }
         GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
         edge.routing_demand += delta;
-        if (edge.routing_demand < -kEpsilon) {
+        if (edge.routing_demand < -GRParams::kEpsilon) {
           RTLOG.error(Loc::current(), "The wire edge routing demand is negative!");
         }
         if (edge.routing_demand < 0.0) {
@@ -1599,78 +2259,77 @@ void GlobalRouter::addWireDemand(const GRNet& net, const GRTree& routing_tree, s
   }
 }
 
-void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, std::set<GRWireEdgeId>& used_edge_set, double delta)
+void GlobalRouter::addViaDemand(const GRNet& net, const GRViaStack& via_stack, const std::set<GRWireEdgeId>& wire_edge_set,
+                                std::set<GRWireEdgeId>& used_edge_set, double delta)
 {
   if (via_stack.bottom_layer_idx < _grid_graph.getBottomLayerIdx() || via_stack.top_layer_idx > _grid_graph.getTopLayerIdx()
       || via_stack.bottom_layer_idx >= via_stack.top_layer_idx) {
     return;
   }
   int32_t net_idx = net.origin_net->get_net_idx();
-  for (int32_t below_layer_idx = via_stack.bottom_layer_idx; below_layer_idx < via_stack.top_layer_idx; below_layer_idx++) {
-    for (int32_t side_layer_idx : {below_layer_idx, below_layer_idx + 1}) {
-      if (isAPViaSide(net, via_stack.coord, side_layer_idx)) {
-        continue;
-      }
-      bool is_horizontal = _grid_graph.isHorizontalLayer(side_layer_idx);
-      if (is_horizontal) {
-        for (int32_t edge_x : {via_stack.coord.get_x() - 1, via_stack.coord.get_x()}) {
-          int32_t edge_y = via_stack.coord.get_y();
-          GRWireEdgeId edge_id{edge_x, edge_y, side_layer_idx};
-          if (!_grid_graph.hasWireEdge(edge_id)) {
-            continue;
-          }
-          if (isExemptWireEdge(net, edge_id)) {
-            continue;
-          }
-          if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
-            continue;
-          }
-          if (!used_edge_set.insert(edge_id).second) {
-            continue;
-          }
-          GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
-          edge.routing_demand += delta;
-          if (edge.routing_demand < -kEpsilon) {
-            RTLOG.error(Loc::current(), "The via projection routing demand is negative!");
-          }
-          if (edge.routing_demand < 0.0) {
-            edge.routing_demand = 0.0;
-          }
-          if (delta > 0.0) {
-            edge.routing_demand_net_set.insert(net_idx);
-          } else if (delta < 0.0) {
-            edge.routing_demand_net_set.erase(net_idx);
-          }
+  for (int32_t layer_idx = via_stack.bottom_layer_idx; layer_idx <= via_stack.top_layer_idx; layer_idx++) {
+    if (hasPlanarEdgeOrAP(net, wire_edge_set, via_stack.coord, layer_idx)) {
+      continue;
+    }
+    bool is_horizontal = _grid_graph.isHorizontalLayer(layer_idx);
+    if (is_horizontal) {
+      for (int32_t edge_x : {via_stack.coord.get_x() - 1, via_stack.coord.get_x()}) {
+        int32_t edge_y = via_stack.coord.get_y();
+        GRWireEdgeId edge_id{edge_x, edge_y, layer_idx};
+        if (!_grid_graph.hasWireEdge(edge_id)) {
+          continue;
         }
-      } else {
-        for (int32_t edge_y : {via_stack.coord.get_y() - 1, via_stack.coord.get_y()}) {
-          int32_t edge_x = via_stack.coord.get_x();
-          GRWireEdgeId edge_id{edge_x, edge_y, side_layer_idx};
-          if (!_grid_graph.hasWireEdge(edge_id)) {
-            continue;
-          }
-          if (isExemptWireEdge(net, edge_id)) {
-            continue;
-          }
-          if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= kEpsilon) {
-            continue;
-          }
-          if (!used_edge_set.insert(edge_id).second) {
-            continue;
-          }
-          GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
-          edge.routing_demand += delta;
-          if (edge.routing_demand < -kEpsilon) {
-            RTLOG.error(Loc::current(), "The via projection routing demand is negative!");
-          }
-          if (edge.routing_demand < 0.0) {
-            edge.routing_demand = 0.0;
-          }
-          if (delta > 0.0) {
-            edge.routing_demand_net_set.insert(net_idx);
-          } else if (delta < 0.0) {
-            edge.routing_demand_net_set.erase(net_idx);
-          }
+        if (isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
+        if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= GRParams::kEpsilon) {
+          continue;
+        }
+        if (!used_edge_set.insert(edge_id).second) {
+          continue;
+        }
+        GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
+        edge.routing_demand += delta;
+        if (edge.routing_demand < -GRParams::kEpsilon) {
+          RTLOG.error(Loc::current(), "The via projection routing demand is negative!");
+        }
+        if (edge.routing_demand < 0.0) {
+          edge.routing_demand = 0.0;
+        }
+        if (delta > 0.0) {
+          edge.routing_demand_net_set.insert(net_idx);
+        } else if (delta < 0.0) {
+          edge.routing_demand_net_set.erase(net_idx);
+        }
+      }
+    } else {
+      for (int32_t edge_y : {via_stack.coord.get_y() - 1, via_stack.coord.get_y()}) {
+        int32_t edge_x = via_stack.coord.get_x();
+        GRWireEdgeId edge_id{edge_x, edge_y, layer_idx};
+        if (!_grid_graph.hasWireEdge(edge_id)) {
+          continue;
+        }
+        if (isExemptWireEdge(net, edge_id)) {
+          continue;
+        }
+        if (_grid_graph.getWireEdge(edge_id).getUsableSupply() <= GRParams::kEpsilon) {
+          continue;
+        }
+        if (!used_edge_set.insert(edge_id).second) {
+          continue;
+        }
+        GRWireEdge& edge = _grid_graph.getWireEdge(edge_id);
+        edge.routing_demand += delta;
+        if (edge.routing_demand < -GRParams::kEpsilon) {
+          RTLOG.error(Loc::current(), "The via projection routing demand is negative!");
+        }
+        if (edge.routing_demand < 0.0) {
+          edge.routing_demand = 0.0;
+        }
+        if (delta > 0.0) {
+          edge.routing_demand_net_set.insert(net_idx);
+        } else if (delta < 0.0) {
+          edge.routing_demand_net_set.erase(net_idx);
         }
       }
     }
@@ -1905,6 +2564,60 @@ void GlobalRouter::debugPlotGRModel(const std::string& flag)
     gp_gds.addStruct(global_result_struct);
   }
 
+  // edge_info
+  {
+    GPStruct edge_info_struct("edge_info");
+    for (int32_t layer_idx = _grid_graph.getBottomLayerIdx(); layer_idx <= _grid_graph.getTopLayerIdx(); layer_idx++) {
+      const GridMap<GRWireEdge>& edge_map = _grid_graph.getEdgeMap(layer_idx);
+      bool is_horizontal = _grid_graph.isHorizontalLayer(layer_idx);
+      int32_t info_data_type = static_cast<int32_t>(is_horizontal ? GPDataType::kHEdgeInfo : GPDataType::kVEdgeInfo);
+      for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+        for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
+          const GRWireEdge& edge = edge_map[x][y];
+          PlanarCoord first_grid_coord(x, y);
+          PlanarCoord second_grid_coord = is_horizontal ? PlanarCoord(x + 1, y) : PlanarCoord(x, y + 1);
+          PlanarRect first_gcell_rect = RTUTIL.getRealRectByGCell(first_grid_coord, gcell_axis);
+          PlanarRect second_gcell_rect = RTUTIL.getRealRectByGCell(second_grid_coord, gcell_axis);
+          PlanarCoord first_coord = first_gcell_rect.getMidPoint();
+          PlanarCoord second_coord = second_gcell_rect.getMidPoint();
+          PlanarRect edge_rect = is_horizontal
+                                     ? PlanarRect(first_coord.get_x(), first_gcell_rect.get_ll_y(), second_coord.get_x(), first_gcell_rect.get_ur_y())
+                                     : PlanarRect(first_gcell_rect.get_ll_x(), first_coord.get_y(), first_gcell_rect.get_ur_x(), second_coord.get_y());
+
+          GPBoundary gp_boundary;
+          gp_boundary.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
+          gp_boundary.set_data_type(info_data_type);
+          gp_boundary.set_rect(edge_rect);
+          edge_info_struct.push(gp_boundary);
+
+          std::string demand_net_idx_list = getNetIdxList(edge.routing_demand_net_set);
+          std::string fixed_demand_net_idx_list = getNetIdxList(edge.fixed_demand_net_set);
+          std::vector<std::string> info_line_list;
+          info_line_list.push_back(RTUTIL.getString(is_horizontal ? "H" : "V", " (", x, ",", y, ")-(", second_grid_coord.get_x(), ",",
+                                                    second_grid_coord.get_y(), ")"));
+          info_line_list.push_back(RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(),
+                                                    ", demand: ", edge.getDemand(), ", congestion_cost: ", edge.congestion_cost));
+          info_line_list.push_back(RTUTIL.getString("demand_nets: ", demand_net_idx_list.empty() ? "-" : demand_net_idx_list));
+          info_line_list.push_back(RTUTIL.getString("fixed_demand: ", edge.fixed_demand, ", fixed_nets: ",
+                                                    fixed_demand_net_idx_list.empty() ? "-" : fixed_demand_net_idx_list));
+          int32_t line_spacing = std::max(1, edge_rect.getYSpan() / 8);
+          int32_t text_y = edge_rect.get_ur_y();
+          for (const std::string& info_line : info_line_list) {
+            text_y -= line_spacing;
+            GPText gp_text;
+            gp_text.set_coord(edge_rect.get_ll_x(), text_y);
+            gp_text.set_text_type(info_data_type);
+            gp_text.set_message(info_line);
+            gp_text.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
+            gp_text.set_presentation(GPTextPresentation::kLeftMiddle);
+            edge_info_struct.push(gp_text);
+          }
+        }
+      }
+    }
+    gp_gds.addStruct(edge_info_struct);
+  }
+
   // overflow
   {
     GPStruct overflow_struct("overflow");
@@ -1914,7 +2627,7 @@ void GlobalRouter::debugPlotGRModel(const std::string& flag)
       for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
         for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
           const GRWireEdge& edge = edge_map[x][y];
-          if (edge.getOverflow() <= kEpsilon) {
+          if (edge.getOverflow() <= GRParams::kEpsilon) {
             continue;
           }
           PlanarRect first_gcell_rect = RTUTIL.getRealRectByGCell(PlanarCoord(x, y), gcell_axis);
@@ -1928,26 +2641,6 @@ void GlobalRouter::debugPlotGRModel(const std::string& flag)
           gp_path.set_width(point_size);
           gp_path.set_segment(first_coord, second_coord);
           overflow_struct.push(gp_path);
-
-          std::string demand_net_idx_list = getNetIdxList(edge.routing_demand_net_set);
-          std::string fixed_demand_net_idx_list = getNetIdxList(edge.fixed_demand_net_set);
-          std::vector<std::string> info_line_list;
-          info_line_list.push_back(RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(),
-                                                    ", demand: ", edge.getDemand()));
-          info_line_list.push_back(RTUTIL.getString("demand_nets: ", demand_net_idx_list.empty() ? "-" : demand_net_idx_list));
-          info_line_list.push_back(RTUTIL.getString("fixed_nets: ", fixed_demand_net_idx_list.empty() ? "-" : fixed_demand_net_idx_list));
-          int32_t line_spacing = std::max(1, first_gcell_rect.getYSpan() / 12);
-          int32_t text_y = first_coord.get_y() + line_spacing;
-          for (const std::string& info_line : info_line_list) {
-            GPText gp_text;
-            gp_text.set_coord(first_coord.get_x(), text_y);
-            gp_text.set_text_type(static_cast<int32_t>(GPDataType::kInfo));
-            gp_text.set_message(info_line);
-            gp_text.set_layer_idx(RTGP.getGDSIdxByRouting(layer_idx));
-            gp_text.set_presentation(GPTextPresentation::kLeftMiddle);
-            overflow_struct.push(gp_text);
-            text_y -= line_spacing;
-          }
         }
       }
     }

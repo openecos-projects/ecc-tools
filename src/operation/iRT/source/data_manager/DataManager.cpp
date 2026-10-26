@@ -791,14 +791,13 @@ void DataManager::makeGCellAxis()
 std::vector<ScaleGrid> DataManager::makeGCellGridList(Direction direction)
 {
   Die& die = _database.get_die();
-  Row& row = _database.get_row();
-  int32_t row_height = row.get_height();
   int32_t only_offset = getOnlyOffset(direction);
   int32_t only_pitch = getOnlyPitch();
 
+  constexpr int32_t kGCellPitchNum = 15;
   int32_t die_start_scale = (direction == Direction::kVertical ? die.get_real_ll_x() : die.get_real_ll_y());
   int32_t die_end_scale = (direction == Direction::kVertical ? die.get_real_ur_x() : die.get_real_ur_y());
-  int32_t step_length = (row_height / only_pitch) * only_pitch + ((row_height % only_pitch) >= (only_pitch / 2) ? only_pitch : 0);
+  int32_t step_length = kGCellPitchNum * only_pitch;
 
   std::vector<int32_t> gcell_scale_list;
   gcell_scale_list.push_back(die_start_scale);
