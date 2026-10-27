@@ -91,6 +91,8 @@ class TASummary
   ~TASummary() = default;
   std::map<int32_t, double> routing_wire_length_map;
   double total_wire_length = 0;
+  std::map<int32_t, int32_t> cut_via_num_map;
+  int32_t total_via_num = 0;
   std::map<int32_t, int32_t> routing_violation_num_map;
   int32_t total_violation_num = 0;
 };

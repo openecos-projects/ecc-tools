@@ -213,20 +213,55 @@ std::vector<Violation> DRCInterface::getMacroViolationList(std::vector<DRCShape>
           }
         }
 
+        // polygon_90_set only keeps areas, zero-area violations (line/point) are dropped by clean()
         GTLPolySetInt violation_polyset;
+        std::vector<PlanarRect> zero_area_violation_rect_list;
         for (PlanarRect& violation_rect : violation_rect_list) {
-          violation_polyset += DRCUTIL.convertToGTLRectInt(violation_rect);
+          if (violation_rect.getArea() == 0) {
+            zero_area_violation_rect_list.push_back(violation_rect);
+          } else {
+            violation_polyset += DRCUTIL.convertToGTLRectInt(violation_rect);
+          }
         }
         std::vector<GTLRectInt> merged_rect_list;
         gtl::get_max_rectangles(merged_rect_list, violation_polyset);
+
+        std::vector<PlanarRect> final_violation_rect_list;
+        final_violation_rect_list.reserve(merged_rect_list.size() + zero_area_violation_rect_list.size());
         for (const GTLRectInt& merged_rect : merged_rect_list) {
+          final_violation_rect_list.push_back(DRCUTIL.convertToPlanarRect(merged_rect));
+        }
+        final_violation_rect_list.insert(final_violation_rect_list.end(), zero_area_violation_rect_list.begin(),
+                                         zero_area_violation_rect_list.end());
+
+        // zero-area violations can not be merged by polygon set, remove duplicated ones at last
+        std::vector<PlanarRect> unique_violation_rect_list;
+        unique_violation_rect_list.reserve(final_violation_rect_list.size());
+        for (const PlanarRect& violation_rect : final_violation_rect_list) {
+          if (violation_rect.getArea() != 0) {
+            unique_violation_rect_list.push_back(violation_rect);
+            continue;
+          }
+          bool is_duplicated = false;
+          for (const PlanarRect& kept_rect : unique_violation_rect_list) {
+            if (DRCUTIL.isInside(kept_rect, violation_rect)) {
+              is_duplicated = true;
+              break;
+            }
+          }
+          if (!is_duplicated) {
+            unique_violation_rect_list.push_back(violation_rect);
+          }
+        }
+
+        for (const PlanarRect& violation_rect : unique_violation_rect_list) {
           Violation violation;
           violation.set_violation_type(ViolationType::kMacroObsSpacing);
           violation.set_is_routing(true);
           violation.set_violation_net_set({net_idx});
           violation.set_required_size(macro_obs_layer.min_spacing);
           violation.set_layer_idx(macro_obs_layer.layer_idx);
-          violation.set_rect(DRCUTIL.convertToPlanarRect(merged_rect));
+          violation.set_rect(violation_rect);
           violation_list.push_back(std::move(violation));
         }
       }

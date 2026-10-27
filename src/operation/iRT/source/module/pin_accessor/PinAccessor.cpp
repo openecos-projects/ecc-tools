@@ -71,9 +71,9 @@ void PinAccessor::access()
   // debugPlotPAModel(pa_model, "init");
   routePAModel(pa_model);
   uploadAccessPoint(pa_model);
-  uploadAccessResult(pa_model);
-  uploadAccessPatch(pa_model);
-  uploadViolation(pa_model);
+  // uploadAccessResult(pa_model);
+  // uploadAccessPatch(pa_model);
+  // uploadViolation(pa_model);
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -384,8 +384,22 @@ std::vector<PALegalShape> PinAccessor::getLegalShapeList(int32_t net_idx, PAPin&
       std::ranges::sort(routing_pin_shape_list, [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a,
                                                    const std::pair<int32_t, std::vector<EXTLayerRect>>& b) { return a.first > b.first; });
     } else {
+      // macro/pad pin 优先使用开口方向对应的连接层, 使 AP 的 prefer 方向与 pin 的开口方向一致
+      int32_t preferred_conn_layer_idx = pa_pin.get_preferred_conn_layer_idx();
+      if (preferred_conn_layer_idx != -1) {
+        std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+        if (routing_layer_list[preferred_conn_layer_idx].get_prefer_direction() != pa_pin.get_preferred_escape_direction()) {
+          preferred_conn_layer_idx = -1;
+        }
+      }
       std::ranges::sort(routing_pin_shape_list,
-                        [](const std::pair<int32_t, std::vector<EXTLayerRect>>& a, const std::pair<int32_t, std::vector<EXTLayerRect>>& b) {
+                        [preferred_conn_layer_idx](const std::pair<int32_t, std::vector<EXTLayerRect>>& a,
+                                                   const std::pair<int32_t, std::vector<EXTLayerRect>>& b) {
+                          bool a_is_preferred = (a.first == preferred_conn_layer_idx);
+                          bool b_is_preferred = (b.first == preferred_conn_layer_idx);
+                          if (a_is_preferred != b_is_preferred) {
+                            return a_is_preferred;
+                          }
                           return (a.first % 2 != 0 && b.first % 2 == 0) || (a.first % 2 == b.first % 2 && a.first > b.first);
                         });
     }

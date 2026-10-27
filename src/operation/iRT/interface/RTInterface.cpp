@@ -21,15 +21,13 @@
 #include "DetailedRouter.hpp"
 #include "EarlyRouter.hpp"
 #include "GDSPlotter.hpp"
-#include "LayerAssigner.hpp"
+#include "GlobalRouter.hpp"
 #include "Monitor.hpp"
 #include "PinAccessor.hpp"
 #include "PlanarRect.hpp"
-#include "PlanarRouter.hpp"
 #include "RTHeader.hpp"
-#include "SupplyAnalyzer.hpp"
+#include "TARouter.hpp"
 #include "TOPOBuilder.hpp"
-#include "TrackAssigner.hpp"
 #include "ViolationReporter.hpp"
 #include "feature_irt.h"
 #include "feature_manager.h"
@@ -122,24 +120,13 @@ void RTInterface::runRT()
 
   initRegionRoute();
 
-  SupplyAnalyzer::initInst();
-  RTSA.analyze();
-  SupplyAnalyzer::destroyInst();
+  GlobalRouter::initInst();
+  RTGR.route();
+  GlobalRouter::destroyInst();
 
-  PlanarRouter::initInst();
-  RTPR.generate();
-  PlanarRouter::destroyInst();
-
-  LayerAssigner::initInst();
-  RTLA.assign();
-  LayerAssigner::destroyInst();
-
-  std::vector<GridMap<RoutingEdge>>().swap(RTDM.getDatabase().get_routing_h_edge_map());
-  std::vector<GridMap<RoutingEdge>>().swap(RTDM.getDatabase().get_routing_v_edge_map());
-
-  TrackAssigner::initInst();
-  RTTA.assign();
-  TrackAssigner::destroyInst();
+  TARouter::initInst();
+  RTTR.route();
+  TARouter::destroyInst();
   // outputDef("irt_ta.def");
 
   DetailedRouter::initInst();

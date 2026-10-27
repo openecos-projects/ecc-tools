@@ -97,6 +97,8 @@ using PlanarTopo = std::vector<Segment<PlanarCoord>>;
 using NeighborList = std::vector<std::vector<int32_t>>;
 
 constexpr double kCostEpsilon = 1e-9;
+// 无拥挤时 finite_cost 等于曼哈顿长度，比值超过该阈值即认为 Steiner 点处于拥挤区域
+constexpr double kCongestedCostRatio = 2.0;
 constexpr int32_t kMaxSteinerShiftNum = 32;
 constexpr int32_t kSteinerShiftExactSpan = 16;
 constexpr int32_t kSteinerShiftCoarseSampleNum = 8;
@@ -104,7 +106,9 @@ constexpr int32_t kSteinerShiftKeepBinNum = 2;
 constexpr int32_t kSteinerShiftFineSampleNum = 8;
 constexpr int32_t kSteinerShiftLocalRadius = 4;
 constexpr int32_t kMaxLocalSteinerRepairPassNum = 8;
+constexpr int32_t kMaxCongestionSteinerMoveNum = 8;
 constexpr int32_t kLocalSteinerMaxRadius = 64;
+constexpr int32_t kLocalSteinerRayStep = 2;
 constexpr int32_t kLocalSteinerMaxCandidateNum = 128;
 
 struct TBTopoCandidate
@@ -509,9 +513,9 @@ bool isBetterLocalSteinerScore(const TBLocalSteinerScore& first, const TBLocalSt
   return first.displacement < second.displacement;
 }
 
-bool isTerminalCoord(const TBTask& task, const PlanarCoord& coord)
+bool isTerminalCoord(const std::set<PlanarCoord, CmpPlanarCoordByXASC>& terminal_set, const PlanarCoord& coord)
 {
-  return std::ranges::find(task.get_planar_coord_list(), coord) != task.get_planar_coord_list().end();
+  return terminal_set.find(coord) != terminal_set.end();
 }
 
 TBLocalSteinerScore getLocalSteinerScore(const TBTask& task, const Flute::Tree& tree, const std::set<int32_t>& neighbor_set,
@@ -535,23 +539,23 @@ TBLocalSteinerScore getLocalSteinerScore(const TBTask& task, const Flute::Tree& 
   return score;
 }
 
+bool isCongestedSteinerScore(const TBLocalSteinerScore& score)
+{
+  return score.illegal_point == 0 && score.inf_pattern_num == 0 && score.wire_length > 0
+         && score.finite_cost > kCongestedCostRatio * static_cast<double>(score.wire_length);
+}
+
 std::vector<PlanarCoord> getLocalSteinerCandidateList(const TBTask& task, const Flute::Tree& tree, const PlanarCoord& current,
-                                                      const std::set<int32_t>& neighbor_set)
+                                                      const std::set<int32_t>& neighbor_set,
+                                                      const std::set<PlanarCoord, CmpPlanarCoordByXASC>& terminal_set)
 {
   std::set<PlanarCoord, CmpPlanarCoordByXASC> candidate_set;
   auto add_candidate = [&](const PlanarCoord& candidate) {
     if (static_cast<int32_t>(candidate_set.size()) >= kLocalSteinerMaxCandidateNum || !isInsideSearchRegion(task, candidate)
-        || isTerminalCoord(task, candidate)) {
+        || isTerminalCoord(terminal_set, candidate)) {
       return;
     }
     candidate_set.insert(candidate);
-  };
-  auto add_offset_candidate = [&](int64_t x, int64_t y) {
-    if (x < std::numeric_limits<int32_t>::min() || x > std::numeric_limits<int32_t>::max()
-        || y < std::numeric_limits<int32_t>::min() || y > std::numeric_limits<int32_t>::max()) {
-      return;
-    }
-    add_candidate(PlanarCoord(static_cast<int32_t>(x), static_cast<int32_t>(y)));
   };
   auto get_direction_candidate = [&](int32_t step_x, int32_t step_y, int32_t distance, PlanarCoord& candidate) {
     int64_t candidate_x = static_cast<int64_t>(current.get_x()) + static_cast<int64_t>(step_x) * distance;
@@ -618,21 +622,56 @@ std::vector<PlanarCoord> getLocalSteinerCandidateList(const TBTask& task, const 
         lower = middle;
       }
     }
-    add_offset_candidate(static_cast<int64_t>(current.get_x()) + static_cast<int64_t>(step_x) * first_legal,
-                         static_cast<int64_t>(current.get_y()) + static_cast<int64_t>(step_y) * first_legal);
-  }
-
-  for (int32_t radius : {1, 2, 4, 8, 16, 32, 64}) {
-    if (radius > kLocalSteinerMaxRadius) {
-      break;
+    PlanarCoord best_coord;
+    TBLocalSteinerScore best_score;
+    bool has_best = false;
+    for (int32_t distance = first_legal; distance <= kLocalSteinerMaxRadius; distance += kLocalSteinerRayStep) {
+      PlanarCoord candidate;
+      if (!get_direction_candidate(step_x, step_y, distance, candidate)) {
+        break;
+      }
+      if (!isInsideSearchRegion(task, candidate)) {
+        break;
+      }
+      if (!task.is_point_legal(candidate) || isTerminalCoord(terminal_set, candidate)) {
+        continue;
+      }
+      TBLocalSteinerScore score = getLocalSteinerScore(task, tree, neighbor_set, current, candidate);
+      if (!has_best || isBetterLocalSteinerScore(score, best_score)) {
+        has_best = true;
+        best_coord = candidate;
+        best_score = score;
+      }
     }
-    for (const auto& [step_x, step_y] : directions) {
-      add_offset_candidate(static_cast<int64_t>(current.get_x()) + static_cast<int64_t>(step_x) * radius,
-                           static_cast<int64_t>(current.get_y()) + static_cast<int64_t>(step_y) * radius);
+    if (has_best) {
+      add_candidate(best_coord);
     }
   }
 
   return {candidate_set.begin(), candidate_set.end()};
+}
+
+struct TBLocalSteinerBest
+{
+  bool has_best = false;
+  PlanarCoord coord;
+  std::vector<int32_t> branch_idx_list;
+  TBLocalSteinerScore score;
+  int32_t radius = 0;
+};
+
+void updateLocalSteinerBest(TBLocalSteinerBest& best, const PlanarCoord& candidate, const std::vector<int32_t>& branch_idx_list,
+                            const TBLocalSteinerScore& candidate_score)
+{
+  if (best.has_best && !isBetterLocalSteinerScore(candidate_score, best.score)
+      && (isBetterLocalSteinerScore(best.score, candidate_score) || !CmpPlanarCoordByXASC()(candidate, best.coord))) {
+    return;
+  }
+  best.has_best = true;
+  best.coord = candidate;
+  best.branch_idx_list = branch_idx_list;
+  best.score = candidate_score;
+  best.radius = static_cast<int32_t>(candidate_score.displacement);
 }
 
 void refineIllegalSteinerLocally(const TBTask& task, Flute::Tree& tree, TBRefineStat& stat)
@@ -641,20 +680,23 @@ void refineIllegalSteinerLocally(const TBTask& task, Flute::Tree& tree, TBRefine
     return;
   }
 
+  std::set<PlanarCoord, CmpPlanarCoordByXASC> terminal_set(task.get_planar_coord_list().begin(), task.get_planar_coord_list().end());
   NeighborList neighbor_list = getNeighborList(tree);
-  for (int32_t pass = 0; pass < kMaxLocalSteinerRepairPassNum; pass++) {
+  int32_t repair_num = 0;
+  int32_t congestion_move_num = 0;
+  while (repair_num < kMaxLocalSteinerRepairPassNum || congestion_move_num < kMaxCongestionSteinerMoveNum) {
+    bool repair_enabled = repair_num < kMaxLocalSteinerRepairPassNum;
+    bool congestion_enabled = congestion_move_num < kMaxCongestionSteinerMoveNum;
+
     std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> steiner_group_map;
     for (int32_t branch_idx = tree.deg; branch_idx < getBranchNum(tree); branch_idx++) {
       steiner_group_map[getBranchCoord(tree, branch_idx)].push_back(branch_idx);
     }
 
-    PlanarCoord best_coord;
-    std::vector<int32_t> best_branch_idx_list;
-    TBLocalSteinerScore best_score;
-    bool has_best = false;
-    int32_t best_radius = 0;
+    TBLocalSteinerBest repair_best;
+    TBLocalSteinerBest congestion_best;
     for (const auto& [current, branch_idx_list] : steiner_group_map) {
-      if (isTerminalCoord(task, current)) {
+      if (isTerminalCoord(terminal_set, current)) {
         continue;
       }
       std::set<int32_t> neighbor_set;
@@ -665,10 +707,12 @@ void refineIllegalSteinerLocally(const TBTask& task, Flute::Tree& tree, TBRefine
         continue;
       }
       TBLocalSteinerScore current_score = getLocalSteinerScore(task, tree, neighbor_set, current, current);
-      if (current_score.illegal_point == 0 && current_score.inf_pattern_num == 0) {
+      bool needs_repair = current_score.illegal_point != 0 || current_score.inf_pattern_num != 0;
+      if (needs_repair ? !repair_enabled : (!congestion_enabled || !isCongestedSteinerScore(current_score))) {
         continue;
       }
-      for (const PlanarCoord& candidate : getLocalSteinerCandidateList(task, tree, current, neighbor_set)) {
+      TBLocalSteinerBest& best = needs_repair ? repair_best : congestion_best;
+      for (const PlanarCoord& candidate : getLocalSteinerCandidateList(task, tree, current, neighbor_set, terminal_set)) {
         if (candidate == current) {
           continue;
         }
@@ -676,25 +720,24 @@ void refineIllegalSteinerLocally(const TBTask& task, Flute::Tree& tree, TBRefine
         if (!isBetterLocalSteinerScore(candidate_score, current_score)) {
           continue;
         }
-        if (!has_best || isBetterLocalSteinerScore(candidate_score, best_score)
-            || (!isBetterLocalSteinerScore(best_score, candidate_score) && CmpPlanarCoordByXASC()(candidate, best_coord))) {
-          has_best = true;
-          best_coord = candidate;
-          best_branch_idx_list = branch_idx_list;
-          best_score = candidate_score;
-          best_radius = static_cast<int32_t>(candidate_score.displacement);
-        }
+        updateLocalSteinerBest(best, candidate, branch_idx_list, candidate_score);
       }
     }
 
-    if (!has_best) {
+    const TBLocalSteinerBest* best = repair_best.has_best ? &repair_best : (congestion_best.has_best ? &congestion_best : nullptr);
+    if (best == nullptr) {
       break;
     }
-    for (int32_t branch_idx : best_branch_idx_list) {
-      setBranchCoord(tree, branch_idx, best_coord);
+    for (int32_t branch_idx : best->branch_idx_list) {
+      setBranchCoord(tree, branch_idx, best->coord);
     }
-    stat.local_steiner_repair_num++;
-    stat.max_local_steiner_radius = std::max(stat.max_local_steiner_radius, best_radius);
+    if (repair_best.has_best) {
+      repair_num++;
+      stat.local_steiner_repair_num++;
+    } else {
+      congestion_move_num++;
+    }
+    stat.max_local_steiner_radius = std::max(stat.max_local_steiner_radius, best->radius);
   }
 
   std::map<PlanarCoord, std::vector<int32_t>, CmpPlanarCoordByXASC> remaining_group_map;

@@ -43,6 +43,7 @@ struct PRGridNode
 {
   PlanarRect rect;
   bool is_blocked = false;
+  int32_t blocked_distance = std::numeric_limits<int32_t>::max();
 };
 
 struct PRGridEdge
@@ -60,6 +61,13 @@ struct PRGridEdge
 class PRGridGraph
 {
  public:
+  // macro halo：topo/pattern/A* 共用的软禁区参数
+  static constexpr int32_t kMacroHaloRadius = 5;
+  static constexpr double kMacroHaloUnitCost = 4.0;
+  // macro 内圈的 supply 削减：让这些边更早进入饱和/overflow
+  static constexpr int32_t kMacroSupplyReduceRadius = 3;
+  static constexpr int32_t kMacroSupplyReduceNum = 2;
+
   class NetRouteTrial
   {
    public:
@@ -98,6 +106,12 @@ class PRGridGraph
   const PRGridNode& get_node(const PlanarCoord& coord) const;
   const PlanarRect& get_gcell_rect(const PlanarCoord& coord) const { return get_node(coord).rect; }
   bool isCellLegal(const PlanarCoord& coord) const;
+  // caller must ensure coord is inside the graph
+  int32_t get_blocked_distance(const PlanarCoord& coord) const
+  {
+    return _node_list[static_cast<size_t>(coord.get_x()) * _y_size + coord.get_y()].blocked_distance;
+  }
+  bool isCellInMacroHalo(const PlanarCoord& coord) const;
   const std::vector<PlanarRect>& get_macro_grid_rect_list() const { return _macro_grid_rect_list; }
 
   PREdgeId get_edge_id(const PlanarCoord& first_coord, const PlanarCoord& second_coord) const;
@@ -112,6 +126,14 @@ class PRGridGraph
   double get_edge_cost(PREdgeId edge_id, double overflow_unit) const;
   double get_segment_cost(int32_t net_idx, const PlanarCoord& first_coord, const PlanarCoord& second_coord,
                           double overflow_unit) const;
+  double get_edge_halo_cost(const PlanarCoord& first_coord, const PlanarCoord& second_coord) const
+  {
+    int32_t halo_distance = std::min(get_blocked_distance(first_coord), get_blocked_distance(second_coord));
+    if (kMacroHaloRadius <= 0 || kMacroHaloRadius < halo_distance) {
+      return 0;
+    }
+    return kMacroHaloUnitCost * static_cast<double>(kMacroHaloRadius - halo_distance + 1);
+  }
 
   NetRouteTrial begin_route(PRNet& pr_net) { return NetRouteTrial(*this, pr_net); }
   void update_congestion(double overflow_unit);
