@@ -70,6 +70,9 @@ struct CandidateBuildEvaluation
   bool used_boundary_relaxation = false;
   std::optional<double> boundary_relaxation_score = std::nullopt;
   std::string boundary_relaxation_reason;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
+  std::string cap_fallback_detail;
   TopologyPatternLibrary topology_pattern_library;
 };
 
@@ -89,6 +92,8 @@ struct CandidateCharRef
   unsigned split_local_depth = 0U;
   bool split_triggered_by_fanout = false;
   bool split_triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
 };
 
 struct CandidateCharRefFilterOutput

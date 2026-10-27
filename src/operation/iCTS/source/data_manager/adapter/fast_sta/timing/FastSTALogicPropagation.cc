@@ -25,16 +25,22 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <mutex>
+#include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "FastSTA.hh"
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockState.hh"
+#include "FastSTACondition.hh"
 #include "FastSTAConstraints.hh"
 #include "FastSTADmpCeff.hh"
 #include "FastSTAEvents.hh"

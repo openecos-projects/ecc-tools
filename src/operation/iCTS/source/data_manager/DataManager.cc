@@ -34,15 +34,21 @@
 #include <system_error>
 #include <utility>
 
+#include "ClockLayout.hh"
+#include "Config.hh"
+#include "Design.hh"
+#include "FastSTA.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
+#include "QOR.hh"
+#include "Wrapper.hh"
 #include "adapter/sdc/SDCClockReader.hh"
-#include "builder.h"
 #include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
+#include "dm_config.h"
 #include "idm.h"
 #include "routing/ClockRouteSegmentRC.hh"
 
@@ -644,7 +650,9 @@ auto DataManager::synchronizeTimingContexts(const Design& design, const ClockLay
     }
     return result;
   };
-  for (const auto& [identity, id] : _timing_contexts.clocks) {
+  for (const auto& clock_context : _timing_contexts.clocks) {
+    const auto& identity = clock_context.first;
+    const auto id = clock_context.second;
     const Clock* owner = nullptr;
     for (const auto* clock : design.get_clocks()) {
       if (identity == std::pair{clock->get_clock_name(), clock->get_clock_net_name()}) {
@@ -714,7 +722,9 @@ auto DataManager::timingContextsMatchDesign(const TimingContextSet& contexts, co
       return false;
     }
   }
-  for (const auto& [identity, id] : contexts.clocks) {
+  for (const auto& clock_context : contexts.clocks) {
+    const auto& identity = clock_context.first;
+    const auto id = clock_context.second;
     const Clock* owner = nullptr;
     for (const auto* clock : design.get_clocks()) {
       if (identity == std::pair{clock->get_clock_name(), clock->get_clock_net_name()}) {

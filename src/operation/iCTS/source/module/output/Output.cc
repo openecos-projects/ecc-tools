@@ -24,6 +24,7 @@
 #include "output/Output.hh"
 
 #include <filesystem>
+#include <vector>
 
 #include "LogTable.hh"
 #include "Logger.hh"

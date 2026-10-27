@@ -2,13 +2,13 @@ add_executable(test_ista_sdc_compatibility EXCLUDE_FROM_ALL
     sdc_compatibility_test.cpp
 )
 
-target_link_libraries(test_ista_sdc_compatibility PRIVATE ista_sdc_command ista_data_manager ista_output_sdc)
+target_link_libraries(test_ista_sdc_compatibility PRIVATE ista_sdc_frontend ista_data_manager)
 
 add_test(NAME ista_sdc_compatibility COMMAND test_ista_sdc_compatibility)
 set_tests_properties(ista_sdc_compatibility PROPERTIES TIMEOUT 30)
 
 add_executable(test_ista_io_boundary EXCLUDE_FROM_ALL io_boundary_test.cpp)
-target_link_libraries(test_ista_io_boundary PRIVATE ista_interface ista_data_manager ista_sdc_command idb)
+target_link_libraries(test_ista_io_boundary PRIVATE ista_interface ista_data_manager ista_sdc_frontend idb)
 add_test(NAME ista_io_boundary COMMAND test_ista_io_boundary)
 set_tests_properties(ista_io_boundary PROPERTIES TIMEOUT 30)
 
@@ -17,11 +17,312 @@ target_link_libraries(test_ista_power_net PRIVATE ista_interface ista_data_manag
 add_test(NAME ista_power_net COMMAND test_ista_power_net)
 set_tests_properties(ista_power_net PROPERTIES TIMEOUT 30)
 add_executable(test_ista_bidirectional_graph EXCLUDE_FROM_ALL bidirectional_graph_test.cpp)
-target_link_libraries(test_ista_bidirectional_graph PRIVATE ista_interface ista_source liberty)
+target_link_libraries(test_ista_bidirectional_graph PRIVATE ista_interface ista_graph_builder ista_clock_propagator ista_data_propagator ista_path_analyzer ista_delay_calculator ista_data_manager ista_sdc_frontend liberty)
 add_test(NAME ista_bidirectional_graph COMMAND test_ista_bidirectional_graph ${CMAKE_CURRENT_SOURCE_DIR}/bidirectional.lib.in)
 set_tests_properties(ista_bidirectional_graph PROPERTIES TIMEOUT 60)
 
+add_executable(test_ista_hierarchy_sdc EXCLUDE_FROM_ALL hierarchy_sdc_test.cpp)
+target_link_libraries(test_ista_hierarchy_sdc PRIVATE ista_interface ista_graph_builder ista_clock_propagator ista_data_propagator ista_delay_calculator ista_data_manager ista_sdc_frontend verilog_builder verilog idb)
+add_test(NAME ista_hierarchy_sdc COMMAND test_ista_hierarchy_sdc)
+add_test(NAME ista_hierarchy_net_filter COMMAND test_ista_hierarchy_sdc net_filter)
+add_test(NAME ista_hierarchy_net_scope COMMAND test_ista_hierarchy_sdc net_scope)
+set_tests_properties(ista_hierarchy_sdc PROPERTIES TIMEOUT 60)
+
+add_executable(test_ista_liberty_export_contract EXCLUDE_FROM_ALL liberty_export_contract_test.cpp)
+target_link_libraries(test_ista_liberty_export_contract PRIVATE ista_interface ista_model)
+add_test(NAME ista_liberty_export_contract COMMAND test_ista_liberty_export_contract)
+set_tests_properties(ista_liberty_export_contract PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_report_path_filter EXCLUDE_FROM_ALL report_path_filter_test.cpp)
+target_include_directories(test_ista_report_path_filter PRIVATE ${HOME_ISTA}/source/module/timing_reporter)
+add_test(NAME ista_report_path_filter COMMAND test_ista_report_path_filter)
+set_tests_properties(ista_report_path_filter PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_report_path_filter_integration EXCLUDE_FROM_ALL report_path_filter_integration_test.cpp)
+target_link_libraries(test_ista_report_path_filter_integration PRIVATE ista_timing_reporter)
+add_test(NAME ista_report_path_filter_integration COMMAND test_ista_report_path_filter_integration)
+set_tests_properties(ista_report_path_filter_integration PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_read_config EXCLUDE_FROM_ALL read_config_test.cpp)
+target_link_libraries(test_ista_read_config PRIVATE ista_data_manager)
+add_test(NAME ista_read_config COMMAND test_ista_read_config)
+set_tests_properties(ista_read_config PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_read_network EXCLUDE_FROM_ALL read_network_test.cpp)
+target_link_libraries(test_ista_read_network PRIVATE ista_reader ista_data_manager idm idb)
+add_test(NAME ista_read_network COMMAND test_ista_read_network)
+set_tests_properties(ista_read_network PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_report_path EXCLUDE_FROM_ALL report_path_test.cpp)
+target_link_libraries(test_ista_report_path PRIVATE ista_timing_reporter)
+add_test(NAME ista_report_path COMMAND test_ista_report_path)
+set_tests_properties(ista_report_path PROPERTIES TIMEOUT 30)
+
+
+add_executable(test_ista_core_link EXCLUDE_FROM_ALL core_link_test.cpp)
+target_link_libraries(test_ista_core_link PRIVATE ista_data_manager)
+add_test(NAME ista_core_link COMMAND test_ista_core_link)
+set_tests_properties(ista_core_link PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_liberty_writer EXCLUDE_FROM_ALL liberty_writer_test.cpp)
+target_link_libraries(test_ista_liberty_writer PRIVATE ista_liberty_writer liberty)
+add_test(NAME ista_liberty_writer COMMAND test_ista_liberty_writer)
+set_tests_properties(ista_liberty_writer PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_path_groups EXCLUDE_FROM_ALL path_groups_test.cpp)
+target_link_libraries(test_ista_path_groups PRIVATE ista_path_analyzer)
+add_test(NAME ista_path_groups COMMAND test_ista_path_groups)
+set_tests_properties(ista_path_groups PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_search EXCLUDE_FROM_ALL search_test.cpp)
+target_link_libraries(test_ista_search PRIVATE ista_path_analyzer ista_required_propagator ista_delay_calculator ista_sdc)
+add_test(NAME ista_search COMMAND test_ista_search)
+set_tests_properties(ista_search PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_sdc_core EXCLUDE_FROM_ALL sdc_core_test.cpp)
+target_link_libraries(test_ista_sdc_core PRIVATE ista_fanout_checker)
+add_test(NAME ista_sdc_core COMMAND test_ista_sdc_core)
+set_tests_properties(ista_sdc_core PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_domain_ownership EXCLUDE_FROM_ALL domain_ownership_test.cpp)
+target_link_libraries(test_ista_domain_ownership PRIVATE ista_fanout_checker)
+add_test(NAME ista_domain_ownership COMMAND test_ista_domain_ownership)
+set_tests_properties(ista_domain_ownership PROPERTIES TIMEOUT 30)
+
+# Reader and export unit tests exercise their owning modules directly.
+target_link_libraries(test_ista_io_boundary PRIVATE ista_reader)
+target_link_libraries(test_ista_power_net PRIVATE ista_reader)
+target_link_libraries(test_ista_bidirectional_graph PRIVATE ista_reader ista_required_propagator)
+target_link_libraries(test_ista_hierarchy_sdc PRIVATE ista_reader)
+target_link_libraries(test_ista_liberty_export_contract PRIVATE ista_data_exporter)
+
+add_executable(test_ista_arc_binding EXCLUDE_FROM_ALL arc_binding_test.cpp)
+target_link_libraries(test_ista_arc_binding PRIVATE ista_model)
+add_test(NAME ista_arc_binding COMMAND test_ista_arc_binding)
+set_tests_properties(ista_arc_binding PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_logic EXCLUDE_FROM_ALL sim_test.cpp)
+target_link_libraries(test_ista_logic PRIVATE ista_logic_simulator)
+add_test(NAME ista_logic_simulator COMMAND test_ista_logic)
+set_tests_properties(ista_logic_simulator PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_clock_state EXCLUDE_FROM_ALL clock_state_test.cpp)
+target_link_libraries(test_ista_clock_state PRIVATE ista_model)
+add_test(NAME ista_clock_state COMMAND test_ista_clock_state)
+set_tests_properties(ista_clock_state PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_dmp_ceff EXCLUDE_FROM_ALL dmp_ceff_test.cpp)
+target_link_libraries(test_ista_dmp_ceff PRIVATE ista_dmp_ceff_calculator)
+add_test(NAME ista_dmp_ceff_calculator COMMAND test_ista_dmp_ceff)
+set_tests_properties(ista_dmp_ceff_calculator PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_clock_reconvergence EXCLUDE_FROM_ALL clock_reconvergence_test.cpp)
+target_link_libraries(test_ista_clock_reconvergence PRIVATE ista_clock_reconvergence_calculator)
+add_test(NAME ista_clock_reconvergence_calculator COMMAND test_ista_clock_reconvergence)
+set_tests_properties(ista_clock_reconvergence_calculator PROPERTIES TIMEOUT 30)
+
+# The endpoint evaluator links independently from enumeration and publication.
+add_executable(test_ista_path_check EXCLUDE_FROM_ALL path_check_test.cpp)
+target_link_libraries(test_ista_path_check PRIVATE ista_path_checker ista_delay_calculator ista_sdc)
+add_test(NAME ista_path_checker COMMAND test_ista_path_check)
+set_tests_properties(ista_path_checker PROPERTIES TIMEOUT 30)
+
+add_test(NAME ista_architecture
+    COMMAND ${CMAKE_COMMAND}
+      -DARCHITECTURE_FILE=${HOME_ISTA}/Architecture.cmake
+      -DTEST_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/architecture_checks
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/check_architecture.cmake)
+set_tests_properties(ista_architecture PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_sdc_frontend EXCLUDE_FROM_ALL sdc_frontend_test.cpp)
+target_link_libraries(test_ista_sdc_frontend PRIVATE ista_sdc_frontend)
+add_test(NAME ista_sdc_frontend COMMAND test_ista_sdc_frontend)
+set_tests_properties(ista_sdc_frontend PROPERTIES TIMEOUT 30)
+
+# No coordinator, DataManager or graph target: numerical inputs are explicit.
+add_executable(test_ista_delay_calculators EXCLUDE_FROM_ALL delay_calculators_test.cpp)
+target_link_libraries(test_ista_delay_calculators PRIVATE ista_arnoldi_delay_calculator ista_dmp_delay_calculator)
+add_test(NAME ista_delay_calculators COMMAND test_ista_delay_calculators)
+set_tests_properties(ista_delay_calculators PROPERTIES TIMEOUT 30)
+
+# Preserve upstream constraint cases independently of refactoring regressions.
 add_executable(test_ista_sdc_output EXCLUDE_FROM_ALL sdc_output_test.cpp)
-target_link_libraries(test_ista_sdc_output PRIVATE ista_output_sdc ista_sdc_command tcl_ista)
+target_link_libraries(test_ista_sdc_output PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager ista_interface tcl_ista)
 add_test(NAME ista_sdc_output COMMAND test_ista_sdc_output)
 set_tests_properties(ista_sdc_output PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_upstream_sdc_compatibility EXCLUDE_FROM_ALL upstream_sdc_compatibility_test.cpp)
+target_link_libraries(test_ista_upstream_sdc_compatibility PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager)
+add_test(NAME ista_upstream_sdc_compatibility COMMAND test_ista_upstream_sdc_compatibility)
+set_tests_properties(ista_upstream_sdc_compatibility PROPERTIES TIMEOUT 30)
+
+add_executable(test_ista_arc_delay EXCLUDE_FROM_ALL arc_delay_test.cpp)
+target_link_libraries(test_ista_arc_delay PRIVATE ista_delay_calculator)
+add_test(NAME ista_arc_delay COMMAND test_ista_arc_delay)
+set_tests_properties(ista_arc_delay PROPERTIES TIMEOUT 30)
+
+# Compile public component headers with only their declared usage requirements.
+function(ista_check_component_header target header)
+  get_filename_component(header_name "${header}" NAME_WE)
+  set(probe "${target}_${header_name}")
+  set(source "${CMAKE_CURRENT_BINARY_DIR}/headers/${probe}.cpp")
+  file(GENERATE OUTPUT "${source}" CONTENT "#include \"${header}\"\n")
+  add_library(${probe}_header OBJECT EXCLUDE_FROM_ALL "${source}")
+  target_link_libraries(${probe}_header PRIVATE ${target})
+  add_dependencies(test_ista_component_headers ${probe}_header)
+endfunction()
+add_custom_target(test_ista_component_headers)
+ista_check_component_header(ista_report_paths ReportPathContext.hpp)
+ista_check_component_header(ista_report_paths QorSummaryBuilder.hpp)
+ista_check_component_header(ista_clock_propagator ClockArcPropagator.hpp)
+ista_check_component_header(ista_clock_propagator GeneratedClockSeeder.hpp)
+ista_check_component_header(ista_data_arrival_propagator DataArrivalPropagator.hpp)
+ista_check_component_header(ista_delay_calculator DelayCalculator.hpp)
+ista_check_component_header(ista_delay_data DelayResult.hpp)
+ista_check_component_header(ista_arnoldi_delay_calculator ArnoldiWaveformSolver.hpp)
+ista_check_component_header(ista_dmp_delay_calculator DmpDelayCalculator.hpp)
+
+add_executable(test_ista_link_network EXCLUDE_FROM_ALL link_network_test.cpp)
+target_link_libraries(test_ista_link_network PRIVATE ista_link_network ista_sdc)
+add_test(NAME ista_link_network COMMAND test_ista_link_network)
+ista_check_component_header(ista_link_network network/LinkNetwork.hpp)
+
+add_executable(test_ista_driver_response EXCLUDE_FROM_ALL driver_response_test.cpp)
+target_link_libraries(test_ista_driver_response PRIVATE ista_parasitic_delay)
+add_test(NAME ista_driver_response COMMAND test_ista_driver_response)
+ista_check_component_header(ista_parasitic_delay DmpResponseCalculator.hpp)
+ista_check_component_header(ista_parasitic_delay ArnoldiResponseCalculator.hpp)
+ista_check_component_header(ista_parasitic_delay InputPortResponseCalculator.hpp)
+
+add_executable(test_ista_sdc_query EXCLUDE_FROM_ALL sdc_query_test.cpp)
+target_link_libraries(test_ista_sdc_query PRIVATE ista_sdc_query tcl)
+add_test(NAME ista_sdc_query COMMAND test_ista_sdc_query)
+ista_check_component_header(ista_sdc_query query/ObjectQuery.hpp)
+
+add_executable(test_ista_sdf_writer EXCLUDE_FROM_ALL sdf_writer_test.cpp)
+target_link_libraries(test_ista_sdf_writer PRIVATE ista_sdf_writer ista_graph_query)
+add_test(NAME ista_sdf_writer COMMAND test_ista_sdf_writer)
+ista_check_component_header(ista_sdf_writer SdfWriter.hpp)
+ista_check_component_header(ista_sdf_writer SdfValueExtractor.hpp)
+ista_check_component_header(ista_sdf_writer SdfFormatter.hpp)
+
+ista_check_component_header(ista_graph_builder GraphBuilder.hpp)
+ista_check_component_header(ista_graph_builder GraphConnectivityBuilder.hpp)
+ista_check_component_header(ista_path_analyzer PathAnalyzer.hpp)
+ista_check_component_header(ista_path_analyzer PathSearcher.hpp)
+ista_check_component_header(ista_path_analyzer PathTracer.hpp)
+ista_check_component_header(ista_path_analyzer PathGroupBuilder.hpp)
+ista_check_component_header(ista_model_extractor ModelExtractor.hpp)
+ista_check_component_header(ista_model liberty/TimingModel.hpp)
+
+add_executable(test_ista_timing_analyzer EXCLUDE_FROM_ALL timing_analyzer_test.cpp)
+target_link_libraries(test_ista_timing_analyzer PRIVATE ista_timing_analyzer ista_delay_calculator)
+add_test(NAME ista_timing_analyzer COMMAND test_ista_timing_analyzer)
+
+add_executable(test_ista_interface EXCLUDE_FROM_ALL sta_interface_test.cpp)
+target_link_libraries(test_ista_interface PRIVATE ista_interface ista_data_manager ista_sdc_frontend idm idb tcl_ista)
+add_test(NAME ista_interface COMMAND test_ista_interface)
+set_tests_properties(ista_interface PROPERTIES TIMEOUT 30)
+
+# Each design IO API compiles without borrowing session or algorithm headers.
+ista_check_component_header(ista_reader ReadNetwork.hpp)
+ista_check_component_header(ista_reader ReadHierarchy.hpp)
+ista_check_component_header(ista_reader ReadLiberty.hpp)
+ista_check_component_header(ista_reader ReadParasitics.hpp)
+ista_check_component_header(ista_sdc_writer SdcWriter.hpp)
+ista_check_component_header(ista_sdc_writer SdcObjectWriter.hpp)
+ista_check_component_header(ista_liberty_writer LibertyWriter.hpp)
+
+add_executable(test_ista_sdc_edit EXCLUDE_FROM_ALL sdc_edit_test.cpp)
+target_link_libraries(test_ista_sdc_edit PRIVATE ista_sdc)
+add_test(NAME ista_sdc_edit COMMAND test_ista_sdc_edit)
+
+add_executable(test_ista_startpoint EXCLUDE_FROM_ALL startpoint_test.cpp)
+target_link_libraries(test_ista_startpoint PRIVATE ista_data_propagator)
+add_test(NAME ista_startpoint COMMAND test_ista_startpoint)
+
+add_executable(test_ista_resources EXCLUDE_FROM_ALL resource_test.cpp)
+target_link_libraries(test_ista_resources PRIVATE ista_data_manager)
+add_test(NAME ista_resources COMMAND test_ista_resources)
+
+add_executable(test_ista_clock_propagation EXCLUDE_FROM_ALL clock_propagation_test.cpp)
+target_link_libraries(test_ista_clock_propagation PRIVATE ista_clock_propagator ista_data_propagator ista_graph_builder ista_clock_reconvergence_calculator)
+add_test(NAME ista_clock_propagation COMMAND test_ista_clock_propagation)
+add_test(NAME ista_generated_clock_reconvergence COMMAND test_ista_clock_propagation generated)
+add_test(NAME ista_clock_source_phases COMMAND test_ista_clock_propagation phase)
+add_test(NAME ista_clock_derate COMMAND test_ista_clock_propagation derate)
+add_test(NAME ista_named_clock_startpoint COMMAND test_ista_clock_propagation source)
+
+add_executable(test_ista_sdc_identity EXCLUDE_FROM_ALL sdc_identity_test.cpp)
+add_executable(test_ista_sdc_limits EXCLUDE_FROM_ALL sdc_limits_test.cpp)
+target_link_libraries(test_ista_sdc_limits PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager ista_graph_query)
+foreach(case transition capacitance derate corners scoped check force hierarchy pulse)
+  add_test(NAME ista_sdc_limits_${case} COMMAND test_ista_sdc_limits ${case})
+endforeach()
+target_link_libraries(test_ista_sdc_identity PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager)
+foreach(case load collection fan regexp object_names query_collection all_clock_collection io_clock_count empty_related query_scope typed_setters typed_related clock_kinds exception_kinds typed_alias)
+  add_test(NAME ista_sdc_identity_${case} COMMAND test_ista_sdc_identity ${case})
+endforeach()
+
+add_executable(test_ista_path_context EXCLUDE_FROM_ALL path_context_test.cpp)
+target_link_libraries(test_ista_path_context PRIVATE ista_timing_reporter ista_model_extractor ista_path_analyzer ista_delay_calculator)
+foreach(case query edge model uncertainty)
+  add_test(NAME ista_path_context_${case} COMMAND test_ista_path_context ${case})
+endforeach()
+
+add_executable(test_ista_path_io_report EXCLUDE_FROM_ALL path_io_report_test.cpp)
+target_link_libraries(test_ista_path_io_report PRIVATE ista_timing_analyzer ista_delay_calculator ista_timing_reporter)
+add_test(NAME ista_path_io_report COMMAND test_ista_path_io_report)
+
+add_executable(test_ista_path_io_exception EXCLUDE_FROM_ALL path_io_exception_test.cpp)
+target_link_libraries(test_ista_path_io_exception PRIVATE ista_timing_analyzer ista_delay_calculator)
+add_test(NAME ista_path_io_exception COMMAND test_ista_path_io_exception)
+
+add_executable(test_ista_through_index EXCLUDE_FROM_ALL through_index_test.cpp)
+target_link_libraries(test_ista_through_index PRIVATE ista_sdc)
+add_test(NAME ista_through_index COMMAND test_ista_through_index)
+
+add_executable(test_ista_timing_derate EXCLUDE_FROM_ALL timing_derate_test.cpp)
+target_link_libraries(test_ista_timing_derate PRIVATE ista_timing_analyzer ista_delay_calculator)
+add_test(NAME ista_timing_derate COMMAND test_ista_timing_derate)
+
+add_executable(test_ista_electrical_check EXCLUDE_FROM_ALL electrical_check_test.cpp)
+target_link_libraries(test_ista_electrical_check PRIVATE ista_timing_analyzer ista_electrical_checker ista_delay_calculator ista_timing_reporter)
+target_link_libraries(test_ista_electrical_check PRIVATE ista_reader ista_graph_builder)
+add_test(NAME ista_electrical_check COMMAND test_ista_electrical_check)
+add_test(NAME ista_electrical_json COMMAND test_ista_electrical_check json)
+add_test(NAME ista_electrical_reports COMMAND test_ista_electrical_check reports)
+add_test(NAME ista_electrical_inout COMMAND test_ista_electrical_check inout)
+
+ista_check_component_header(ista_model sdc/ElectricalLimits.hpp)
+ista_check_component_header(ista_model sdc/TimingDerates.hpp)
+ista_check_component_header(ista_model check/ElectricalCheck.hpp)
+ista_check_component_header(ista_electrical_checker ElectricalChecker.hpp)
+
+add_executable(test_ista_clock_check EXCLUDE_FROM_ALL clock_check_test.cpp)
+target_link_libraries(test_ista_clock_check PRIVATE ista_clock_checker)
+add_test(NAME ista_clock_check COMMAND test_ista_clock_check)
+
+ista_check_component_header(ista_model check/ClockCheck.hpp)
+ista_check_component_header(ista_clock_checker ClockChecker.hpp)
+add_executable(test_ista_clock_check_reader EXCLUDE_FROM_ALL clock_check_reader_test.cpp)
+target_link_libraries(test_ista_clock_check_reader PRIVATE ista_reader ista_model liberty idm)
+add_test(NAME ista_clock_check_reader COMMAND test_ista_clock_check_reader ${CMAKE_CURRENT_SOURCE_DIR}/clock_check_reader.lib)
+
+add_executable(test_ista_sdc_semantics EXCLUDE_FROM_ALL sdc_semantics_test.cpp)
+target_link_libraries(test_ista_sdc_semantics PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager ista_graph_query)
+foreach(case uncertainty reset groups generated waveform latency local_clock driving units status writer_names removed_refs removed_source)
+  add_test(NAME ista_sdc_semantics_${case} COMMAND test_ista_sdc_semantics ${case})
+endforeach()
+
+add_executable(test_ista_io_level EXCLUDE_FROM_ALL io_level_test.cpp)
+target_link_libraries(test_ista_io_level PRIVATE ista_timing_analyzer ista_delay_calculator ista_path_analyzer)
+add_test(NAME ista_io_level COMMAND test_ista_io_level)
+
+add_executable(test_ista_clock_waveform EXCLUDE_FROM_ALL clock_waveform_test.cpp)
+target_link_libraries(test_ista_clock_waveform PRIVATE ista_timing_analyzer ista_delay_calculator)
+add_test(NAME ista_clock_waveform COMMAND test_ista_clock_waveform)
+
+add_executable(test_ista_shared_sdc EXCLUDE_FROM_ALL shared_sdc_test.cpp)
+target_link_libraries(test_ista_shared_sdc PRIVATE ista_sdc_frontend ista_data_manager)
+add_test(NAME ista_shared_sdc COMMAND test_ista_shared_sdc)

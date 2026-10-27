@@ -371,6 +371,37 @@ TEST(SinkLoadRegionSplitTest, MissingBufferCandidateAndRecoveryLimitsAreTyped)
   EXPECT_EQ(count_limited.failure, icts::htree::SinkLoadRegionRecoveryFailure::kBufferLimit);
 }
 
+TEST(SinkLoadRegionSplitTest, FarAnchorPullsSplitBufferOffTheLoad)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(1000, 0)};
+  // Pin plus the full anchor-to-centroid wire is over budget, but each child
+  // can move part of that wire onto its own legal downstream hop.
+  auto input = makeRecoveryInput(loads, 0.001, 32U, 0.0015);
+  input.split_buffer_input_cap_pf = 0.0002;
+  input.clock_route_segment_rc.capacitance_per_um_pf = 0.000002;
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  ASSERT_TRUE(plan.feasible) << plan.failure_reason;
+  ASSERT_EQ(plan.children.size(), 2U);
+  EXPECT_LE(plan.root_cap_pf, input.max_cap_pf);
+  // The unbuffered star from the anchor is 0.0024 pF. Recovery must move wire
+  // off that parent net.
+  EXPECT_LT(plan.root_cap_pf, 0.002);
+}
+
+TEST(SinkLoadRegionSplitTest, CapFallbackKeepsLeastOverrunPlan)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(10, 0)};
+  auto input = makeRecoveryInput(loads, 0.04, 32U, 0.05);
+  input.split_buffer_input_cap_pf = 0.04;
+  input.allow_cap_fallback = true;
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(5, 0), input);
+  EXPECT_TRUE(plan.feasible);
+  EXPECT_TRUE(plan.used_cap_fallback);
+  EXPECT_GT(plan.cap_overrun_pf, 0.0);
+}
+
 TEST(SinkLoadRegionSplitTest, BufferInputCapNoProgressIsTyped)
 {
   SplitPinFactory factory;

@@ -42,7 +42,6 @@ class Wrapper;
 struct WrapperTimingGraph;
 struct SdcClockData;
 struct FastStaContext;
-struct FastStaTimingSummary;
 template <typename T>
 class ClockSteinerTree;
 

@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -33,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "ClockDAG.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
@@ -53,8 +55,10 @@
 #include "synthesis/trace/domain_status/DomainStatusRecorder.hh"
 
 namespace icts {
+class FastSTA;
+}
 
-class Net;
+namespace icts {
 
 namespace {
 

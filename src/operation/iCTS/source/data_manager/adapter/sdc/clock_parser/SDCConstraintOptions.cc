@@ -23,10 +23,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <initializer_list>
+#include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 

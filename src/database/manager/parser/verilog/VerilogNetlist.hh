@@ -30,6 +30,7 @@ struct Net
 {
   std::string name;
   NetType type;
+  std::string scope;  // Elaborated owner; identifiers may contain literal slashes.
 };
 struct TopPort
 {
@@ -75,6 +76,7 @@ struct HierarchicalPort
   size_t leaf_begin = 0;
   size_t leaf_end = 0;
   int depth = 0;
+  NetId parent_net = xBit;  // Before flattening, the actual connection in the enclosing scope.
 };
 struct Netlist
 {

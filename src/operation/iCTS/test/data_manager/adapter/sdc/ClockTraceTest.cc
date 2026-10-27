@@ -22,7 +22,9 @@
  */
 
 #include <gtest/gtest.h>
+#include <stdint.h>
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <string>
@@ -34,13 +36,19 @@
 #include "IdbEnum.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
-#include "IdbNet.h"
-#include "IdbPins.h"
 #include "IdbTerm.h"
 #include "LibParserCpp.hh"
 #include "SDCClockReader.hh"
-#include "clock_trace/SDCClockTraceAlgorithm.hh"
+#include "TimingConstraints.hh"
 #include "liberty/Lib.hh"
+
+namespace idb {
+class IdbPin;
+}
+
+namespace idb {
+class IdbNet;
+}
 
 namespace icts_test {
 namespace {

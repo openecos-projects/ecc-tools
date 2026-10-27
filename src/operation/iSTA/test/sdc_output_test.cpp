@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <unistd.h>
 
+#include <cmath>
+#include <exception>
 #include <filesystem>
+#include <fstream>
+#include <limits>
+#include <sstream>
+#include <string>
 
+#include "Logger.hpp"
 #include "STAInterface.hpp"
 #include "SdcTestDesign.hpp"
 #include "SdcWriter.hpp"
@@ -19,7 +26,7 @@ std::string snapshot()
 
 void reload(const std::string& script)
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
+  STADM.getDatabase().sdc() = Sdc{};
   SdcCommand::destroyInst();
   SdcCommand::initInst();
   sdc::registerSdcCommands(SdcCommand::getInst());
@@ -65,12 +72,13 @@ void testConstraintFamilies()
   if (!interoperability_output.empty())
     sdc::writeSdcFile(STADM.getDatabase(), interoperability_output);
   reload(first);
-  auto& c = STADM.getDatabase().get_timing_constraint();
+  auto& c = STADM.getDatabase().sdc();
   require(c.get_clock_map().size() == 4, "export lost clocks");
   require(c.get_clock_map().at("a_divided").get_period() == 20, "generated clock division changed");
   require(c.get_clock_map().at("aa_shifted").get_rise_edge() == 2, "generated clock shift changed");
   require(c.get_clock_map().at("a_divided").get_is_propagated(), "propagated clock state lost");
-  require(c.get_clock_map().at("z_master").get_source_latency_map().at(AnalysisType::kMin).at(TransType::kRise) == 0, "explicit zero latency lost");
+  require(c.get_clock_map().at("z_master").get_source_latency_map().at(AnalysisType::kMin).at(ClockVariation::kEarly).at(TransType::kRise) == 0,
+          "explicit zero latency lost");
   require(c.get_clock_map().at("virtual").get_source_latency_map().empty(), "removed latency resurrected");
   require(c.get_clock_uncertainty_list().size() == 1 && c.get_clock_uncertainty_list()[0].get_to_trans_type() == TransType::kFall,
           "inter-clock uncertainty selector lost");
@@ -78,7 +86,7 @@ void testConstraintFamilies()
   require(input.get_input_delay_list().size() == 5 && input.get_input_delay_min() == -1.5 && input.get_input_delay_max() == 3,
           "I/O delay multiplicity or value changed");
   require(input.get_has_input_transition(AnalysisType::kMin, TransType::kRise) && input.get_input_transition(AnalysisType::kMin, TransType::kRise) == 0
-              && input.get_has_driving_cell(AnalysisType::kMax, TransType::kFall),
+              && !input.get_has_driving_cell(AnalysisType::kMax, TransType::kFall),
           "input drive precedence changed");
   require(c.get_port_constraint_map().at("out").get_load(AnalysisType::kMax, TransType::kRise) == 0.75, "pin/wire loads changed");
   require(c.get_net_load_map().at("sink_net").has(AnalysisType::kMin, TransType::kRise), "zero net load lost");
@@ -92,8 +100,8 @@ void testConstraintFamilies()
 
 void testNamesAndIdentity()
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
-  for (const std::string& name : {"data[0]", "data0", "literal*", "literal_suffix", "space brace} $d;[x]\\tail"})
+  STADM.getDatabase().sdc() = Sdc{};
+  for (const std::string name : {"data[0]", "data0", "literal*", "literal_suffix", "space brace} $d;[x]\\tail"})
     addPin("", name, PinDirection::kInput);
   addPin("", "package", PinDirection::kInout);
   addNet("package", {"package"});
@@ -110,21 +118,22 @@ void testNamesAndIdentity()
   eval("set_load 0.7 [get_ports package]; set_load 0.2 [get_nets package]");
   const auto first = snapshot();
   reload(first);
-  auto& c = STADM.getDatabase().get_timing_constraint();
+  auto& c = STADM.getDatabase().sdc();
   require(c.get_clock_map().at("generated with space").get_period() == 20, "spaced clock name changed");
   require(c.get_port_constraint_map().at("data[0]").get_input_delay_max() == 1, "bus name changed");
   require(!c.get_port_constraint_map().contains("data0"), "bus brackets matched a different port");
   require(c.get_port_constraint_map().at("literal*").get_input_transition() == 0.2 && !c.get_port_constraint_map().contains("literal_suffix"),
           "literal wildcard became a pattern");
   require(c.get_port_constraint_map().at(special).get_input_transition() == 0.3, "Tcl metacharacters in an object name changed");
-  require(c.get_port_constraint_map().at("package").get_load() == 0.7 && c.get_net_load_map().at("package").get(AnalysisType::kMax, TransType::kRise) == 0.2,
+  require(c.get_port_constraint_map().at("package").get_load(AnalysisType::kMax, TransType::kRise) == 0.7
+              && c.get_net_load_map().at("package").get(AnalysisType::kMax, TransType::kRise) == 0.2,
           "same-name port and net loads became conflated");
   require(first == snapshot(), "special-name snapshot changed after reimport");
 }
 
 void testGeneratedSnapshotAfterMasterChange()
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
+  STADM.getDatabase().sdc() = Sdc{};
   eval(R"TCL(
     create_clock -name master -period 10 [get_ports clk]
     create_generated_clock -name gen -master_clock master -source [get_ports clk] -divide_by 2 [get_pins cdc/source_reg/CK]
@@ -132,20 +141,19 @@ void testGeneratedSnapshotAfterMasterChange()
   )TCL");
   const auto exported = snapshot();
   reload(exported);
-  require(STADM.getDatabase().get_timing_constraint().get_clock_map().at("gen").get_period() == 20,
-          "export recomputed a generated clock against a redefined master");
+  require(STADM.getDatabase().sdc().get_clock_map().at("gen").get_period() == 40, "generated clock did not follow redefined master through export");
 }
 
 void testMixedObjectCollections()
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
+  STADM.getDatabase().sdc() = Sdc{};
   eval(R"TCL(
     create_clock -name {clock with space} -period 10 [concat [get_ports clk] [get_pins {{cell with space/A}}]]
     set_false_path -from [concat [get_ports in] [get_clocks {{clock with space}}]] -to [get_ports out]
   )TCL");
   const auto exported = snapshot();
   reload(exported);
-  auto& c = STADM.getDatabase().get_timing_constraint();
+  auto& c = STADM.getDatabase().sdc();
   require(c.get_clock_map().at("clock with space").get_source_objects().size() == 2, "mixed clock sources changed");
   require(c.get_path_exception_list()[0].get_from_objects().size() == 2, "mixed exception objects changed");
   require(exported == snapshot(), "mixed collection snapshot changed after reimport");
@@ -153,43 +161,50 @@ void testMixedObjectCollections()
 
 void testRemovedInterClockUncertainty()
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
+  STADM.getDatabase().sdc() = Sdc{};
   eval("create_clock -name launch -period 10; create_clock -name capture -period 12");
   eval("set_clock_uncertainty -from [get_clocks launch] -to [get_clocks capture] 0.7");
   eval("remove_clock_uncertainty -from [get_clocks launch] -to [get_clocks capture]");
   reload(snapshot());
-  require(
-      STADM.getDatabase().get_timing_constraint().resolve_clock_uncertainty("launch", TransType::kRise, "capture", TransType::kRise, AnalysisType::kMax) == 0,
-      "export resurrected removed inter-clock uncertainty");
+  require(STADM.getDatabase().sdc().resolve_clock_uncertainty("launch", TransType::kRise, "capture", TransType::kRise, AnalysisType::kMax) == 0,
+          "export resurrected removed inter-clock uncertainty");
 }
 
 void testLevelSensitiveDelay()
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
+  STADM.getDatabase().sdc() = Sdc{};
   eval("create_clock -name clock -period 10 [get_ports clk]");
   eval("set_output_delay -clock clock -level_sensitive 1 [get_ports out]");
   reload(snapshot());
-  require(STADM.getDatabase().get_timing_constraint().get_port_constraint_map().at("out").get_output_delay_list()[0].get_level_sensitive(),
+  require(STADM.getDatabase().sdc().get_port_constraint_map().at("out").get_output_delay_list()[0].get_level_sensitive(),
           "output delay level-sensitive qualifier lost");
 }
 
-void testLegacyIoDelay()
+void testModelIoDelay()
 {
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
-  auto& port = STADM.getDatabase().get_timing_constraint().get_port_constraint_map()["in"];
+  STADM.getDatabase().sdc() = Sdc{};
+  auto& port = STADM.getDatabase().sdc().get_port_constraint_map()["in"];
   port.set_port_name("in");
-  port.set_input_delay_max(2.5);
-  port.set_has_input_delay_max(true);
+  std::vector<TimingIoDelay> delays;
+  for (auto edge : {TransType::kRise, TransType::kFall}) {
+    TimingIoDelay delay;
+    delay.set_trans_type(edge);
+    delay.set_delay(2.5);
+    delays.push_back(delay);
+  }
+  port.set_input_delays(delays, false);
   const auto exported = snapshot();
   reload(exported);
-  auto& ports = STADM.getDatabase().get_timing_constraint().get_port_constraint_map();
-  require(ports.contains("in") && ports.at("in").get_input_delay_max() == 2.5, "legacy API I/O delay was omitted");
+  auto& ports = STADM.getDatabase().sdc().get_port_constraint_map();
+  require(ports.contains("in") && ports.at("in").get_input_delay_max() == 2.5, "model I/O delay was omitted");
 }
 
 void testFileAndCommandErrors()
 {
   require(SdcCommand::getInst().evalString("info commands output_sdc") == TCL_OK, "command lookup failed");
-  require(std::string(Tcl_GetStringResult(SdcCommand::getInst().getInterp())).empty(), "output_sdc registered in the internal SDC interpreter");
+  require(std::string(Tcl_GetStringResult(SdcCommand::getInst().getInterp())).empty(), "obsolete output_sdc command registered");
+  require(SdcCommand::getInst().evalString("info commands write_sdc") == TCL_OK, "command lookup failed");
+  require(std::string(Tcl_GetStringResult(SdcCommand::getInst().getInterp())) == "write_sdc", "write_sdc command missing");
   const auto exportFails = [](const std::filesystem::path& path) {
     try {
       sdc::writeSdcFile(STADM.getDatabase(), path.string());
@@ -201,8 +216,25 @@ void testFileAndCommandErrors()
   const auto dir = std::filesystem::temp_directory_path() / ("ista-sdc-writer-" + std::to_string(getpid()));
   std::filesystem::create_directory(dir);
   const auto path = dir / "result.sdc";
-  sdc::writeSdcFile(STADM.getDatabase(), path.string());
+  auto* interp = SdcCommand::getInst().getInterp();
+  Tcl_SetVar(interp, "destination", path.c_str(), TCL_GLOBAL_ONLY);
+  eval("write_sdc -nosplit $destination");
+  require(std::string(Tcl_GetStringResult(interp)) == "1", "write_sdc success result is not 1");
   require(std::filesystem::file_size(path) > 0, "file writer produced no data");
+  std::ifstream saved(path);
+  const std::string original((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+  require(original == snapshot(), "command output differs from the serializer");
+  for (const auto* command : {"write_sdc", "write_sdc {}", "write_sdc -nosplit", "write_sdc $destination extra", "write_sdc -version 1.9 $destination",
+                              "write_sdc -compress gzip $destination", "write_sdc -include exceptions $destination", "write_sdc -bogus"}) {
+    require(SdcCommand::getInst().evalString(command) == TCL_ERROR, "invalid write_sdc command accepted");
+  }
+  eval("write_sdc $destination -nosplit");
+  eval("write_sdc $destination");
+  const auto spaced_path = dir / "spaces $[x];.sdc";
+  Tcl_SetVar(interp, "destination", spaced_path.c_str(), TCL_GLOBAL_ONLY);
+  eval("write_sdc $destination");
+  require(std::filesystem::file_size(spaced_path) > 0, "write_sdc changed literal path characters");
+  std::filesystem::remove(spaced_path);
   require(exportFails(dir / "missing" / "result.sdc"), "output into a missing directory succeeded");
   require(exportFails(dir), "output overwrote a directory");
   const auto source = dir / "constraints.tcl";
@@ -210,11 +242,11 @@ void testFileAndCommandErrors()
                            "set_input_transition [transition_value] [get_ports in]\n";
   eval("source {" + source.string() + "}");
   reload(snapshot());
-  require(std::abs(STADM.getDatabase().get_timing_constraint().get_port_constraint_map().at("in").get_input_transition() - 0.3) < 1e-12,
+  require(std::abs(STADM.getDatabase().sdc().get_port_constraint_map().at("in").get_input_transition() - 0.3) < 1e-12,
           "sourced procedure result did not survive export");
   std::filesystem::remove(source);
   std::ofstream(path) << "sentinel";
-  auto& clocks = STADM.getDatabase().get_timing_constraint().get_clock_map();
+  auto& clocks = STADM.getDatabase().sdc().get_clock_map();
   TimingClock invalid;
   invalid.set_clock_name("invalid");
   invalid.set_period(std::numeric_limits<double>::quiet_NaN());
@@ -225,16 +257,14 @@ void testFileAndCommandErrors()
   input >> retained;
   require(retained == "sentinel", "failed export overwrote existing output");
   clocks.erase("invalid");
-  // Displaced generated clocks must be diagnosed without losing their identity
-  // or replacing a previous successful output file.
-  STADM.getDatabase().get_timing_constraint() = TimingConstraint{};
+  // Replacing the final target deletes the old clock, never creates a virtual
+  // generated clock. Other malformed exports above still preserve the file.
+  STADM.getDatabase().sdc() = Sdc{};
   eval("create_clock -name master -period 10 [get_ports clk]");
   eval("create_generated_clock -name displaced -source [get_ports clk] -master_clock master -divide_by 2 [get_pins cdc/source_reg/CK]");
   eval("create_clock -name replacement -period 5 [get_pins cdc/source_reg/CK]");
-  require(exportFails(path), "unrepresentable generated clock was silently changed");
-  std::ifstream retained_file(path);
-  retained_file >> retained;
-  require(retained == "sentinel", "unrepresentable clock export overwrote previous output");
+  require(!STADM.getDatabase().sdc().get_clock_map().contains("displaced"), "displaced clock became virtual");
+  require(!exportFails(path), "valid replacement clock could not be exported");
 
   for (const auto& entry : std::filesystem::directory_iterator(dir))
     require(entry.path() == path, "temporary output file leaked");
@@ -243,13 +273,12 @@ void testFileAndCommandErrors()
 
 void testPublicCommand()
 {
-  using ecc::TclCmds;
-  registerTclCmd(tcl::TclOutputSDC, "output_sdc");
   auto* engine = ecc::ScriptEngine::getOrCreateInstance();
-  require(engine->evalString("output_sdc -file_path unused.sdc") == TCL_ERROR, "public command accepted uninitialized STA");
+  Tcl_CreateObjCommand(engine->get_interp(), "write_sdc", &tcl::writeSdcCommand, nullptr, nullptr);
+  require(engine->evalString("write_sdc unused.sdc") == TCL_ERROR, "public command accepted uninitialized STA");
   require(std::string(engine->getResult()).find("initialized") != std::string::npos, "public command lost initialization error");
-  require(engine->evalString("output_sdc -file_path {}") == TCL_ERROR, "public command accepted empty path");
-  require(engine->evalString("output_sdc") == TCL_ERROR, "public command reused its previous path");
+  require(engine->evalString("write_sdc {}") == TCL_ERROR, "public command accepted empty path");
+  require(engine->evalString("write_sdc") == TCL_ERROR, "public command reused its previous path");
   ecc::ScriptEngine::destroyInstance();
   STAInterface::destroyInst();
 }
@@ -271,7 +300,7 @@ int main(int argc, char** argv)
     testMixedObjectCollections();
     testRemovedInterClockUncertainty();
     testLevelSensitiveDelay();
-    testLegacyIoDelay();
+    testModelIoDelay();
     testFileAndCommandErrors();
     testPublicCommand();
     STALOG.info(Loc::current(), "SDC output tests passed");

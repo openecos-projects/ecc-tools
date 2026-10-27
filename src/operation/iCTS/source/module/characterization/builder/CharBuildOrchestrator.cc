@@ -25,13 +25,11 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <utility>
+#include <string>
 #include <vector>
 
-#include "BufferingPattern.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
-#include "SegmentChar.hh"
 #include "Utility.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
 #include "characterization/pattern/CharPatternEnumerator.hh"

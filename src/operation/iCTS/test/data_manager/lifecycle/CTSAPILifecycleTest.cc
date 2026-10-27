@@ -22,22 +22,41 @@
  */
 
 #include <gtest/gtest.h>
+#include <stdint.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "CTSAPI.hh"
+#include "CTSStatus.hh"
+#include "ClockDAG.hh"
+#include "ClockLayout.hh"
+#include "Config.hh"
+#include "FastSTA.hh"
 #include "IdbDesign.h"
+#include "IdbEnum.h"
+#include "IdbGeometry.h"
+#include "IdbInstance.h"
 #include "IdbLayer.h"
+#include "IdbLayout.h"
+#include "IdbNet.h"
+#include "IdbPins.h"
 #include "Logger.hh"
-#include "Utility.hh"
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "design/Clock.hh"
@@ -45,6 +64,7 @@
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
+#include "dm_config.h"
 #include "evaluation/Evaluation.hh"
 #include "evaluation/qor/ClockQORMetricCollector.hh"
 #include "idm.h"
@@ -52,6 +72,7 @@
 #include "module/synthesis/Synthesis.hh"
 #include "module/synthesis/realization/ClockTreeRealization.hh"
 #include "optimization/Optimization.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts_test {
 namespace {

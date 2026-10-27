@@ -24,11 +24,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <map>
 #include <memory>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
 #include "IdbDesign.h"
+#include "IdbUnits.h"
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/design/Clock.hh"
 #include "data_manager/design/ClockDAG.hh"
@@ -40,6 +46,7 @@
 #include "data_manager/spatial/Point.hh"
 #include "module/evaluation/qor/QOREvaluation.hh"
 #include "module/synthesis/realization/ClockTreeRealization.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts_test {
 namespace {

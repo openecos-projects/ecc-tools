@@ -1,4 +1,5 @@
 #include "PyPlaceDB.h"
+
 #include "utility/logger/Logger.hpp"
 // #include "ContestDriver.h"
 #include <algorithm>
@@ -20,10 +21,8 @@
 #include "IdbInstance.h"
 #include "IdbLayout.h"
 #include "IdbPins.h"
+#include "STAInterface.hpp"
 #include "idm.h"
-#include "TimingExportAdapter.hpp"
-#include <boost/polygon/polygon.hpp>
-#include <vector>
 
 namespace python_interface {
 
@@ -204,14 +203,11 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
         box_tmp.xh += node->get_halo()->get_extend_right();
         box_tmp.yh += node->get_halo()->get_extend_top();
         ECCLOG.info(ecc::Loc::current(), "Instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
-                     node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
-                     node->get_halo()->get_extend_top(), ").");
+                    node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
+                    node->get_halo()->get_extend_top(), ").");
       }
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro,
-              is_macro_writeback_candidate, node);
-    }
-    else
-    {
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro, is_macro_writeback_candidate, node);
+    } else {
       Box body_box = buildInstanceBox(node);
       Box halo_box = body_box;
       if (node->get_halo()) {
@@ -219,19 +215,18 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
         halo_box.yl -= node->get_halo()->get_extend_bottom();
         halo_box.xh += node->get_halo()->get_extend_right();
         halo_box.yh += node->get_halo()->get_extend_top();
-        ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
-                     ", ", node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
-                     node->get_halo()->get_extend_top(), ").");
+        ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
+                    node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
+                    node->get_halo()->get_extend_top(), ").");
       }
       // Keep the real instance as a body-only terminal.  Its halo is added to
       // the unioned obstacle set below so overlapping halos cannot be counted
       // multiple times as independent fixed nodes.
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro,
-              is_macro_writeback_candidate, node);
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro, is_macro_writeback_candidate, node);
       if (node->get_cell_master()->is_io_cell()) {
-        ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
-                     node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
-                     node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
+        ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (", node->get_coordinate()->get_x(), ", ",
+                    node->get_coordinate()->get_y(), ", ", node->get_bounding_box()->get_high_x(), ", ",
+                    node->get_bounding_box()->get_high_y(), ").");
       }
       num_terminals += 1;
       total_fixed_terminal_area += body_box.area();
@@ -350,8 +345,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
     string block_name = "blockage" + std::to_string(id);
-    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
-                 box.xh, ", ", box.yh, ").");
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ", box.xh, ", ",
+                box.yh, ").");
     addNode("R0", block_name, box, true, false, false, nullptr);
     total_fixed_terminal_area += 1LL * box.area();
   }
@@ -379,8 +374,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     num_terminal_NIs += 1;
   }
   // we only know num_nodes when all fixed cells with shapes are expanded
-  ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
-               ", num_terminal_NIs ", num_terminal_NIs, ".");
+  ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num, ", num_terminal_NIs ",
+              num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
   // Compute the exact fixed/obstacle area inside the core from the same union
   // represented by the terminal rectangles above.
@@ -609,7 +604,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     init_routability(db, inst_resort_list);
   }
   if (with_sta) {
-    init_timing(ista::TimingExportAdapter::exportSnapshot(), db);
+    init_timing(ista::STAInterface::getInst().exportTimingData(), db);
   }
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 
@@ -648,8 +643,8 @@ std::size_t PyPlaceDB::writeMacroPlacementBack(
         || checked_y > static_cast<double>(std::numeric_limits<int32_t>::max())) {
       throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
     }
-    updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x),
-                       static_cast<int32_t>(candidate_y), candidate.orient});
+    updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x), static_cast<int32_t>(candidate_y),
+                       candidate.orient});
   }
   return _db->write_selected_placement_back(updates);
 }

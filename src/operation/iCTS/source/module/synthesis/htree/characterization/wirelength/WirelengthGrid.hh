@@ -24,7 +24,6 @@
 #pragma once
 
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 #include "characterization/Characterization.hh"

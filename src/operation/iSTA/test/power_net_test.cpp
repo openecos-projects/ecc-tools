@@ -1,3 +1,7 @@
+#include <stdexcept>
+#include <string>
+
+#include "ReadNetwork.hpp"
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "DataManager.hpp"
 #include "IdbCellMaster.h"
@@ -16,8 +20,7 @@ void require(bool condition, const std::string& message)
   }
 }
 
-void testRegularNet(idb::IdbConnectType net_type, idb::IdbConnectType pin_type, idb::IdbConnectType port_type, bool excluded,
-                    bool has_signal_load = false)
+void testRegularNet(idb::IdbConnectType net_type, idb::IdbConnectType pin_type, idb::IdbConnectType port_type, bool excluded, bool has_signal_load = false)
 {
   idb::IdbCellMaster master;
   master.set_name("cell");
@@ -52,27 +55,27 @@ void testRegularNet(idb::IdbConnectType net_type, idb::IdbConnectType pin_type, 
   }
 
   DataManager::initInst();
-  STAI.wrapInstance(&instance);
-  STAI.wrapInstancePinList(&instance);
-  STAI.wrapPortPin(&port);
-  STAI.wrapNet(&net);
+  read_network_detail::readInstance(STADM.getDatabase().network(), &instance);
+  read_network_detail::readInstancePins(STADM.getDatabase().network(), &instance);
+  read_network_detail::readPort(STADM.getDatabase().network(), &port);
+  read_network_detail::readNet(STADM.getDatabase().network(), &net);
 
   Database& database = STADM.getDatabase();
-  bool keep_cell_pin = STAI.wrapSignalConnectType(pin_type);
-  bool keep_port = !excluded && STAI.wrapSignalConnectType(port_type);
-  require(database.get_instance_map().count("cell0") == 1, "supply filtering removed the instance");
-  require(database.get_pin_map().count("cell0:contact") == (keep_cell_pin ? 1U : 0U), "incorrect supply pin membership");
-  require(database.get_pin_map().count("external") == (keep_port ? 1U : 0U), "supply port was not filtered with its net");
-  require(database.get_pin_map().count("cell0:A") == 1, "unrelated or mixed-net signal pin was removed");
+  bool keep_cell_pin = read_network_detail::isSignalConnectType(pin_type);
+  bool keep_port = !excluded && read_network_detail::isSignalConnectType(port_type);
+  require(database.network().instances().count("cell0") == 1, "supply filtering removed the instance");
+  require(database.network().pins().count("cell0:contact") == (keep_cell_pin ? 1U : 0U), "incorrect supply pin membership");
+  require(database.network().pins().count("external") == (keep_port ? 1U : 0U), "supply port was not filtered with its net");
+  require(database.network().pins().count("cell0:A") == 1, "unrelated or mixed-net signal pin was removed");
   if (keep_cell_pin && (net_type == idb::IdbConnectType::kPower || net_type == idb::IdbConnectType::kGround)) {
-    require(database.get_pin_map().at("cell0:contact").get_constant_value()
+    require(database.network().pins().at("cell0:contact").get_constant_value()
                 == (net_type == idb::IdbConnectType::kPower ? TimingCaseValue::kOne : TimingCaseValue::kZero),
             "supply-tied logic input lost its constant");
   }
-  require(database.get_net_map().count(net.get_net_name()) == (excluded ? 0U : 1U), "incorrect supply net membership");
+  require(database.network().nets().count(net.get_net_name()) == (excluded ? 0U : 1U), "incorrect supply net membership");
   if (!excluded) {
-    for (const std::string& pin_name : database.get_net_map().at(net.get_net_name()).get_pin_name_list()) {
-      require(database.get_pin_map().count(pin_name) == 1, "net references a filtered pin");
+    for (const std::string& pin_name : database.network().nets().at(net.get_net_name()).get_pin_name_list()) {
+      require(database.network().pins().count(pin_name) == 1, "net references a filtered pin");
     }
   }
   require(port.get_net() == &net && cell_pin->get_net() == &net, "IDB connectivity changed");
@@ -104,13 +107,13 @@ void testSpecialNet(idb::IdbConnectType net_type)
   port.set_special_net(&net);
 
   DataManager::initInst();
-  STAI.wrapInstance(&instance);
-  STAI.wrapInstancePinList(&instance);
-  STAI.wrapPortPin(&port);
+  read_network_detail::readInstance(STADM.getDatabase().network(), &instance);
+  read_network_detail::readInstancePins(STADM.getDatabase().network(), &instance);
+  read_network_detail::readPort(STADM.getDatabase().network(), &port);
   bool excluded = net_type == idb::IdbConnectType::kPower || net_type == idb::IdbConnectType::kGround;
-  require(STADM.getDatabase().get_pin_map().size() == (excluded ? 1U : 2U), "incorrect special net pin filtering");
+  require(STADM.getDatabase().network().pins().size() == (excluded ? 1U : 2U), "incorrect special net pin filtering");
   if (excluded) {
-    require(STADM.getDatabase().get_pin_map().at("cell0:contact").get_constant_value()
+    require(STADM.getDatabase().network().pins().at("cell0:contact").get_constant_value()
                 == (net_type == idb::IdbConnectType::kPower ? TimingCaseValue::kOne : TimingCaseValue::kZero),
             "special supply-tied logic input lost its constant");
   }
@@ -126,16 +129,16 @@ void testSupplyEvidence()
   ground_pin.set_term()->set_type(idb::IdbConnectType::kGround);
   idb::IdbNet net;
   net.set_connect_type(idb::IdbConnectType::kSignal);
-  require(!STAI.isPGNet(nullptr) && !STAI.isPGNet(&net), "missing supply evidence was accepted");
+  require(!read_network_detail::isPGNet(nullptr) && !read_network_detail::isPGNet(&net), "missing supply evidence was accepted");
   net.add_instance_pin(&power_pin);
-  require(STAI.isPGNet(&net), "LEF power pin was not recognized");
+  require(read_network_detail::isPGNet(&net), "LEF power pin was not recognized");
   net.set_connect_type(idb::IdbConnectType::kClock);
-  require(!STAI.isPGNet(&net), "explicit clock type was overridden");
+  require(!read_network_detail::isPGNet(&net), "explicit clock type was overridden");
   net.set_connect_type(idb::IdbConnectType::kSignal);
   net.add_io_pin(&ground_pin);
-  require(!STAI.isPGNet(&net), "conflicting port and cell types were ignored");
+  require(!read_network_detail::isPGNet(&net), "conflicting port and cell types were ignored");
   net.add_instance_pin(&ground_pin);
-  require(!STAI.isPGNet(&net), "conflicting cell PG types were ignored");
+  require(!read_network_detail::isPGNet(&net), "conflicting cell PG types were ignored");
 }
 
 int main()
@@ -149,8 +152,8 @@ int main()
     testRegularNet(idb::IdbConnectType::kSignal, pg_type, idb::IdbConnectType::kSignal, false, true);
     testSpecialNet(pg_type);
   }
-  for (idb::IdbConnectType signal_type : {idb::IdbConnectType::kNone, idb::IdbConnectType::kSignal, idb::IdbConnectType::kClock,
-                                        idb::IdbConnectType::kReset, idb::IdbConnectType::kScan, idb::IdbConnectType::kTieOff}) {
+  for (idb::IdbConnectType signal_type : {idb::IdbConnectType::kNone, idb::IdbConnectType::kSignal, idb::IdbConnectType::kClock, idb::IdbConnectType::kReset,
+                                          idb::IdbConnectType::kScan, idb::IdbConnectType::kTieOff}) {
     testRegularNet(signal_type, idb::IdbConnectType::kSignal, idb::IdbConnectType::kSignal, false);
   }
   testSpecialNet(idb::IdbConnectType::kClock);

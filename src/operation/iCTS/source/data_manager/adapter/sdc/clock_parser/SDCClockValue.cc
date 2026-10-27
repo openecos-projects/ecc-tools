@@ -30,13 +30,16 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 namespace {

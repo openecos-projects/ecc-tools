@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -33,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "IdbCellMaster.h"
 #include "IdbDesign.h"
 #include "IdbEnum.h"
 #include "IdbInstance.h"
@@ -42,6 +44,7 @@
 #include "LibParserCpp.hh"
 #include "SDCClockReader.hh"
 #include "SDCClockTraceAlgorithm.hh"
+#include "TimingConstraints.hh"
 #include "liberty/Lib.hh"
 
 namespace icts::clock_trace {

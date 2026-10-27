@@ -24,14 +24,19 @@
 #include "FastSTAGraphImport.hh"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "FastSTA.hh"
 #include "FastSTABuilder.hh"
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockState.hh"
 #include "FastSTALiberty.hh"
 #include "FastSTALibertyModel.hh"

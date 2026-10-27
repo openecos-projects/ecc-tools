@@ -106,7 +106,7 @@ class ConnectivityLowerer
     return nullptr;
   }
   const Expression& expr(ExprId id) const { return _ast.expressions.at(id); }
-  NetId net(const std::string& name, NetType type, SourceLocation location)
+  NetId net(const std::string& name, NetType type, SourceLocation location, const std::string& scope)
   {
     if (_flat.nets.size() >= zBit)
       throw Error(location, "net count exceeds frontend limit");
@@ -120,7 +120,7 @@ class ConnectivityLowerer
       while (!_net_names.emplace(unique_name).second)
         unique_name += "$";
     }
-    _flat.nets.push_back({std::move(unique_name), type});
+    _flat.nets.push_back({std::move(unique_name), type, scope});
     return id;
   }
   Signal makeSignal(ConnectedScope& scope, const std::string& name, NetType type, std::optional<std::pair<int32_t, int32_t>> range,
@@ -130,13 +130,13 @@ class ConnectivityLowerer
     signal.is_signed = sign;
     const auto full = scope.prefix + name;
     if (!range)
-      signal.bits.push_back(net(full, type, location));
+      signal.bits.push_back(net(full, type, location, scope.prefix));
     else {
       const auto [left, right] = *range;
       const auto width = rangeWidth(left, right, location);
       signal.bits.reserve(width);
       for (size_t i = 0; i < width; ++i)
-        signal.bits.push_back(net(indexed(full, int64_t(left) + (left <= right ? int64_t(i) : -int64_t(i))), type, location));
+        signal.bits.push_back(net(indexed(full, int64_t(left) + (left <= right ? int64_t(i) : -int64_t(i))), type, location, scope.prefix));
       _flat.buses.push_back({full, left, right, signal.bits});
     }
     return signal;
@@ -411,6 +411,12 @@ class ConnectivityLowerer
       const auto shape = shapeOf(formal.declaration);
       auto value = actualSignal(actual, parent, shape, !expansion.array_count && shape.direction == Direction::input ? shape.width : 0);
       value = arrayConnection(std::move(value), shape.width, expansion.array_count, expansion.offset, actual.location);
+      const auto connected = resized(value, shape.width);
+      for (size_t bit = 0; bit < formal.signal.bits.size(); ++bit)
+        for (size_t p = port_begin; p < port_end; ++p)
+          if (_flat.hierarchical_ports[p].net == formal.signal.bits[bit])
+            _flat.hierarchical_ports[p].parent_net = connected.bits[bit];
+
       if (shape.direction == Direction::input)
         assign(formal.signal, std::move(value), actual.location, true);
       else if (shape.direction == Direction::output)

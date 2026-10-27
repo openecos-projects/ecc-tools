@@ -20,6 +20,14 @@ int main()
     auto flat = compile(*result.design, "top");
     if (!flat || flat.design->instances[0].name != "u;" || flat.design->instances[0].ports[0].name != "p)")
       throw std::runtime_error("escaped cell or port name changed");
+    auto collision = compile(R"(module top; wire \bus[0] ; wire [0:0] bus;
+CELL a(.A(\bus[0] )); CELL b(.A(bus[0])); endmodule)");
+    if (!collision)
+      throw std::runtime_error("escaped scalar and bus bit rejected: " + collision.diagnostics.front().text());
+    const auto scalar = collision.design->instances[0].ports[0].signal.bits[0];
+    const auto bus_bit = collision.design->instances[1].ports[0].signal.bits[0];
+    if (scalar == bus_bit || collision.design->nets[scalar].name == collision.design->nets[bus_bit].name)
+      throw std::runtime_error("distinct scalar and bus bit were merged");
     for (const auto* invalid : {"module top; wire \\ ; endmodule", "module top; wire $abc; endmodule", "module top; wire \\abc"})
       if (parse(invalid))
         throw std::runtime_error("invalid identifier accepted");

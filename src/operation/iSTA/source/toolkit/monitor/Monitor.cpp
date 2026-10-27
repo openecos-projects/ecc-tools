@@ -16,6 +16,11 @@
 // ***************************************************************************************
 #include "Monitor.hpp"
 
+#include <sys/resource.h>
+#include <sys/time.h>
+
+#include <string>
+
 #include "Logger.hpp"
 #include "Utility.hpp"
 

@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include "ValueLattice.hh"
 #include "characterization/builder/CharBuilderImpl.hh"

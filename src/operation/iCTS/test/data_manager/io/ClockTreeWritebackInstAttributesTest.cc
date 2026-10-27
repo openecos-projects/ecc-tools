@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,9 +32,9 @@
 #include "IdbCellMaster.h"
 #include "IdbDesign.h"
 #include "IdbEnum.h"
+#include "IdbGeometry.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
-#include "IdbNet.h"
 #include "IdbPins.h"
 #include "IdbTerm.h"
 #include "data_manager/adapter/sdc/SDCClockReader.hh"
@@ -41,6 +42,10 @@
 #include "data_manager/design/Design.hh"
 #include "data_manager/design/Inst.hh"
 #include "data_manager/io/Wrapper.hh"
+
+namespace idb {
+class IdbNet;
+}
 
 namespace icts_test {
 namespace {

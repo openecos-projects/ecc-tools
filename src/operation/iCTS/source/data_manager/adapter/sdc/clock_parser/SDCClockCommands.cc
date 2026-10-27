@@ -22,18 +22,20 @@
  */
 
 #include <algorithm>
-#include <cstddef>
+#include <initializer_list>
 #include <iomanip>
 #include <iterator>
 #include <limits>
-#include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 

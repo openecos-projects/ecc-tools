@@ -24,6 +24,7 @@
 #include "data_manager/design/ClockDAG.hh"
 
 #include <algorithm>
+#include <compare>
 #include <deque>
 #include <limits>
 #include <queue>

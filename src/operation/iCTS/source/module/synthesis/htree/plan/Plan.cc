@@ -29,7 +29,6 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,7 +67,7 @@ auto BuildLevelPlans(const Tree& topology, double length_step_um, int32_t dbu_pe
     std::size_t distance_count = 0;
     for (const auto node_id : levels.at(level)) {
       const auto* node = topology.get_node(node_id);
-      if (node == nullptr || node->get_parent() == std::numeric_limits<std::size_t>::max()) {
+      if (node == nullptr || node->get_loads().empty() || node->get_parent() == std::numeric_limits<std::size_t>::max()) {
         continue;
       }
 
@@ -135,7 +134,14 @@ auto CountCandidateLeafNodes(const Tree& topology, unsigned depth) -> std::size_
   if (depth == 0U || depth >= topology_levels.size()) {
     return 0U;
   }
-  return topology_levels.at(depth).size();
+  std::size_t occupied_leaf_count = 0U;
+  for (const auto node_id : topology_levels.at(depth)) {
+    const auto* node = topology.get_node(node_id);
+    if (node != nullptr && !node->get_loads().empty()) {
+      ++occupied_leaf_count;
+    }
+  }
+  return occupied_leaf_count;
 }
 
 auto ResolveDepthCandidates(unsigned max_depth, const HTree::Config& config) -> std::vector<unsigned>

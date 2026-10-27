@@ -39,7 +39,6 @@
 #include "Logger.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/config/Config.hh"
-#include "data_manager/io/Wrapper.hh"
 #include "data_manager/realtech/setup/RealTechDesignSetup.hh"
 #include "dm_config.h"
 #include "idm.h"

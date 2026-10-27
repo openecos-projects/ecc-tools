@@ -23,7 +23,6 @@
 
 #include "synthesis/distribution/ClockDistribution.hh"
 
-#include <ostream>
 #include <utility>
 
 #include "ClockLayout.hh"

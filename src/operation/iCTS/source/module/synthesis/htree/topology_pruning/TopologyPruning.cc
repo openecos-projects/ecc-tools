@@ -549,6 +549,9 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     result.split_local_depth = feasible_sink_load_region_filter.summary.max_split_local_depth;
     result.split_triggered_by_fanout = feasible_sink_load_region_filter.summary.any_split_triggered_by_fanout;
     result.split_triggered_by_capacitance = feasible_sink_load_region_filter.summary.any_split_triggered_by_capacitance;
+    result.used_cap_fallback = feasible_sink_load_region_filter.summary.any_used_cap_fallback;
+    result.cap_overrun_pf = feasible_sink_load_region_filter.summary.max_cap_overrun_pf;
+    result.cap_fallback_detail = feasible_sink_load_region_filter.summary.first_cap_fallback_detail;
     if (result.candidate_frontier_entries.empty() && !candidate_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = candidate_sink_load_region_filter.summary.first_failure_reason;
     }
@@ -566,6 +569,9 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     result.split_local_depth = feasible_sink_load_region_filter.summary.max_split_local_depth;
     result.split_triggered_by_fanout = feasible_sink_load_region_filter.summary.any_split_triggered_by_fanout;
     result.split_triggered_by_capacitance = feasible_sink_load_region_filter.summary.any_split_triggered_by_capacitance;
+    result.used_cap_fallback = feasible_sink_load_region_filter.summary.any_used_cap_fallback;
+    result.cap_overrun_pf = feasible_sink_load_region_filter.summary.max_cap_overrun_pf;
+    result.cap_fallback_detail = feasible_sink_load_region_filter.summary.first_cap_fallback_detail;
     if (result.feasible_frontier_entries.empty() && !feasible_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = feasible_sink_load_region_filter.summary.first_failure_reason;
     }

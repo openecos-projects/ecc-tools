@@ -24,12 +24,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "IdbDesign.h"
+#include "IdbEnum.h"
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "IdbPins.h"

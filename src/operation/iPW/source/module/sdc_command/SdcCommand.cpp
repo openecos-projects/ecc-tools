@@ -255,7 +255,7 @@ bool TclGetFan::isDriver(Pin& pin)
 }
 
 void registerSdcCommands(SdcCommand& interpreter);
-}
+}  // namespace sdc
 
 namespace {
 
@@ -507,6 +507,7 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclAllInputs>(interpreter, "all_inputs");
   registerCommand<TclAllOutputs>(interpreter, "all_outputs");
   registerCommand<TclAllClocks>(interpreter, "all_clocks");
+  registerCommand<TclAllDelayCorners>(interpreter, "all_delay_corners");
   registerCommand<TclGetObjectName>(interpreter, "get_object_name");
   registerCommand<TclGetObjectName>(interpreter, "get_name");
   registerCommand<TclGetFan>(interpreter, "get_fanin");
@@ -1113,8 +1114,7 @@ unsigned TclSetDrivingCell::exec()
   Database& database = PWDM.getDatabase();
   const std::string cell_name = cell_option->getStringVal();
   // 惰性 wrap 只覆盖设计实例用到的 cell；SDC 引用的其它库 cell 在这里按需 wrap。
-  TimingCell* timing_cell_ptr
-      = cell_name.empty() ? nullptr : database.get_timing_library().findOrWrapCell(cell_name);
+  TimingCell* timing_cell_ptr = cell_name.empty() ? nullptr : database.get_timing_library().findOrWrapCell(cell_name);
   if (timing_cell_ptr == nullptr) {
     setTclError("set_driving_cell library cell does not exist: " + cell_name);
     return 0;
@@ -1867,6 +1867,19 @@ unsigned TclAllClocks::exec()
   // all_clocks uses the same query path as get_clocks so ordering and object
   // matching stay consistent.
   setResult(findObjects(PWDM.getDatabase(), {"*"}, QueryObjectType::kClock));
+  return 1;
+}
+
+TclAllDelayCorners::TclAllDelayCorners(const char* cmd_name) : SdcTclCmd(cmd_name)
+{
+}
+
+unsigned TclAllDelayCorners::exec()
+{
+  // Tcl evaluates this query even when its enclosing set_timing_derate command is ignored.
+  // iPW has no named delay-corner model; do not invent corners or apply derates here.
+  warn("all_delay_corners is accepted for SDC syntax compatibility only; returning an empty collection");
+  setResult(std::vector<std::string>());
   return 1;
 }
 

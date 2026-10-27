@@ -23,10 +23,12 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <memory>
-#include <sstream>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <system_error>
 #include <utility>

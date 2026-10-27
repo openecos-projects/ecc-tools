@@ -25,7 +25,7 @@
 
 #include <string>
 
-#include "evaluation/qor/QOREvaluation.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts {
 

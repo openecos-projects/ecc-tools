@@ -37,20 +37,25 @@
 #include <utility>
 #include <vector>
 
-#include "BufferingPattern.hh"
 #include "ClockRouteSegmentRC.hh"
 #include "Clustering.hh"
 #include "FastClustering.hh"
 #include "HTreeTopologyChar.hh"
 #include "HTreeTopologyPattern.hh"
+#include "LocalLegalization.hh"
 #include "Logger.hh"
 #include "PatternId.hh"
 #include "Pin.hh"
 #include "Point.hh"
+#include "RCTree.hh"
+#include "TimingEngine.hh"
 #include "TopologyConfig.hh"
 #include "Tree.hh"
 #include "design/Design.hh"
+#include "geometry/Geometry.hh"
 #include "io/Wrapper.hh"
+#include "router/Router.hh"
+#include "routing/RoutingTerminal.hh"
 #include "synthesis/htree/constraint/Constraint.hh"
 #include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
 #include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
@@ -315,6 +320,59 @@ auto CalcSplitChildrenCapPf(const Point<int>& anchor, const std::vector<SinkLoad
   return cap_pf;
 }
 
+auto EvaluateSplitChildrenSteinerCapPf(const Point<int>& anchor, const std::vector<SinkLoadRegionSplitNode>& children, const SinkLoadRegionLegalityInput& input)
+    -> std::optional<double>
+{
+  if (children.size() < 2U || input.clock_route_segment_rc.dbu_per_um <= 0 || input.clock_route_segment_rc.capacitance_per_um_pf <= 0.0
+      || input.clock_route_segment_rc.resistance_per_um_ohm <= 0.0) {
+    return std::nullopt;
+  }
+  std::vector<Point<int>> child_locations;
+  child_locations.reserve(children.size());
+  for (const auto& child : children) {
+    child_locations.push_back(child.center);
+  }
+  Point<int> legalized_anchor = anchor;
+  if (std::ranges::any_of(child_locations, [&](const Point<int>& location) -> bool { return location == anchor; })) {
+    std::vector<Point<int>> movable_points{anchor};
+    LocalLegalization::Config legalization_config;
+    legalization_config.failure_policy = LocalLegalization::FailurePolicy::kKeepOriginal;
+    const auto legalized
+        = LocalLegalization::legalize(movable_points, child_locations, LocalLegalization::RegionType{}, LocalLegalization::RegionType{}, legalization_config);
+    if (legalized.legalized_points.empty()) {
+      return std::nullopt;
+    }
+    legalized_anchor = legalized.legalized_points.front();
+    if (std::ranges::any_of(child_locations, [&](const Point<int>& location) -> bool { return location == legalized_anchor; })) {
+      return std::nullopt;
+    }
+  }
+
+  const double child_pin_cap_pf = std::max(0.0, input.split_buffer_input_cap_pf);
+  std::vector<Router::ClockTerminal> child_terminals;
+  child_terminals.reserve(children.size());
+  for (std::size_t child_index = 0U; child_index < children.size(); ++child_index) {
+    Router::ClockTerminal terminal;
+    terminal.name = "split_child_" + std::to_string(child_index);
+    terminal.location = children.at(child_index).center;
+    terminal.pin_cap = child_pin_cap_pf;
+    child_terminals.push_back(std::move(terminal));
+  }
+  Router::ClockTerminal driver_terminal;
+  driver_terminal.name = "split_driver";
+  driver_terminal.location = legalized_anchor;
+  auto clock_tree = Router::buildFluteTree(driver_terminal, child_terminals);
+  if (clock_tree.node_count() == 0U || !clock_tree.validate()) {
+    return std::nullopt;
+  }
+  auto rc_tree = Router::buildRCTree(clock_tree, input.clock_route_segment_rc);
+  if (!rc_tree.validate()) {
+    return std::nullopt;
+  }
+  const auto metrics = TimingEngine::update(rc_tree);
+  return std::max(metrics.total_cap, child_pin_cap_pf * static_cast<double>(children.size()));
+}
+
 auto CheckSplitChildrenElectrical(const Point<int>& anchor, const std::vector<SinkLoadRegionSplitNode>& children, const SinkLoadRegionLegalityInput& input,
                                   const char* scope) -> SplitElectricalCheck
 {
@@ -329,6 +387,15 @@ auto CheckSplitChildrenElectrical(const Point<int>& anchor, const std::vector<Si
   }
 
   check.root_cap_pf = CalcSplitChildrenCapPf(anchor, children, input);
+  // The star sum double-counts a shared stem. It is a sufficient proof of
+  // legality; only an over-budget star is replaced by the Steiner RC used for
+  // direct sink groups.
+  if (input.has_max_cap && check.root_cap_pf > input.max_cap_pf) {
+    const auto steiner_cap_pf = EvaluateSplitChildrenSteinerCapPf(anchor, children, input);
+    if (steiner_cap_pf.has_value()) {
+      check.root_cap_pf = *steiner_cap_pf;
+    }
+  }
   if (input.has_max_cap && check.root_cap_pf > input.max_cap_pf) {
     std::ostringstream detail;
     detail << scope << "_cap_violation total_cap_pf=" << check.root_cap_pf << ", max_cap_pf=" << input.max_cap_pf;
@@ -377,7 +444,7 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
     result.split_triggered_by_capacitance = result.split_triggered_by_capacitance || split_plan.triggered_by_capacitance;
     result.split_plans.push_back(std::move(split_plan));
     const auto& recorded_plan = result.split_plans.back();
-    if (!recorded_plan.feasible) {
+    if (!recorded_plan.feasible && !(recovery_input.allow_cap_fallback && recorded_plan.used_cap_fallback)) {
       switch (recorded_plan.failure) {
         case SinkLoadRegionRecoveryFailure::kPinCapUnavailable:
           result.violation = SinkLoadRegionViolation::kPinCapUnavailable;
@@ -422,6 +489,15 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
           if (legality_context.input.has_max_cap) {
             detail << ", max_cap_pf=" << legality_context.input.max_cap_pf;
           }
+          if (legality_context.input.allow_cap_fallback && loads->size() <= legality_context.input.max_fanout) {
+            result.used_cap_fallback = true;
+            result.total_cap_overrun_pf += std::max(0.0, exact.summary.total_cap_pf - legality_context.input.max_cap_pf);
+            if (result.cap_fallback_detail.empty()) {
+              result.cap_fallback_detail = BuildSinkLoadRegionFeasibilityReason(group.node_id, group.anchor, detail.str());
+            }
+            total_caps_pf.push_back(exact.summary.total_cap_pf);
+            continue;
+          }
           result.violation = SinkLoadRegionViolation::kCapacitance;
           result.failure_reason = BuildSinkLoadRegionFeasibilityReason(group.node_id, group.anchor, detail.str());
         } else if (exact.violation == ClusterElectricalViolation::kFanout) {
@@ -441,6 +517,13 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
     }
 
     total_caps_pf.push_back(split_plan.root_cap_pf);
+    if (split_plan.used_cap_fallback) {
+      result.used_cap_fallback = true;
+      result.total_cap_overrun_pf += split_plan.cap_overrun_pf;
+      if (result.cap_fallback_detail.empty()) {
+        result.cap_fallback_detail = BuildSinkLoadRegionFeasibilityReason(group.node_id, group.anchor, split_plan.warning_detail);
+      }
+    }
     ++split_group_count;
     split_extra_buffer_count += split_plan.buffer_count;
     split_local_depth = std::max(split_local_depth, split_plan.local_depth);
@@ -452,6 +535,10 @@ auto EvaluateSinkLoadRegionLegality(const Tree& topology, const SinkLoadRegionLe
   result.cap_distribution = BuildCapDistributionStats(total_caps_pf);
   result.required_leaf_load_cap_pf = result.cap_distribution.cap_max_pf;
   result.required_leaf_load_cap_covering_idx = CoveringBoundaryIndex(result.required_leaf_load_cap_pf, legality_context.cap_lattice);
+  if (result.used_cap_fallback && result.required_leaf_load_cap_covering_idx.has_value() && legality_context.cap_lattice.isValid()
+      && *result.required_leaf_load_cap_covering_idx > legality_context.cap_lattice.steps()) {
+    result.required_leaf_load_cap_covering_idx = legality_context.cap_lattice.steps();
+  }
   result.violation = SinkLoadRegionViolation::kNone;
   result.legal = true;
   return result;
@@ -740,6 +827,151 @@ auto SplitSinkLoadRegionGroup(const std::vector<Pin*>& loads, std::size_t max_fa
   return plan;
 }
 
+namespace {
+
+auto EvaluateSplitNodeDownstreamLegal(const SinkLoadRegionSplitNode& child, const Point<int>& candidate_center, const ClusterConfig& electrical_config,
+                                      const SinkLoadRegionLegalityInput& input) -> bool
+{
+  if (child.children.empty()) {
+    return Clustering::evaluateClusterElectrical(child.loads, candidate_center, electrical_config, true).legal;
+  }
+  return CheckSplitChildrenElectrical(candidate_center, child.children, input, "split_internal").legal;
+}
+
+auto ResolveSplitChildOrigin(const SinkLoadRegionSplitNode& child) -> Point<int>
+{
+  if (!child.children.empty() || child.loads.empty()) {
+    return child.center;
+  }
+  return CalcLoadCenter(child.loads);
+}
+
+auto PullSplitChildTowardDriver(SinkLoadRegionSplitNode& child, const Point<int>& driver_pos, const ClusterConfig& electrical_config,
+                                const SinkLoadRegionLegalityInput& input) -> void
+{
+  const auto origin = ResolveSplitChildOrigin(child);
+  const auto total_dist = geometry::Manhattan(origin, driver_pos);
+  if (total_dist <= 0) {
+    return;
+  }
+  int low = 0;
+  int high = total_dist;
+  while (low < high) {
+    const int middle = low + (high - low + 1) / 2;
+    const auto candidate = InterpolateBoundaryAnchor(origin, driver_pos, static_cast<double>(middle) / static_cast<double>(total_dist));
+    if (EvaluateSplitNodeDownstreamLegal(child, candidate, electrical_config, input)) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (low > 0) {
+    child.center = InterpolateBoundaryAnchor(origin, driver_pos, static_cast<double>(low) / static_cast<double>(total_dist));
+  }
+}
+
+auto CalcSplitChildrenCenter(const std::vector<SinkLoadRegionSplitNode>& children) -> Point<int>
+{
+  if (children.empty()) {
+    return Point<int>(0, 0);
+  }
+  long long sum_x = 0;
+  long long sum_y = 0;
+  for (const auto& child : children) {
+    sum_x += child.center.get_x();
+    sum_y += child.center.get_y();
+  }
+  const auto count = static_cast<double>(children.size());
+  return Point<int>(static_cast<int>(std::llround(static_cast<double>(sum_x) / count)), static_cast<int>(std::llround(static_cast<double>(sum_y) / count)));
+}
+
+auto RelayStepLimitDbu(const SinkLoadRegionLegalityInput& input) -> std::optional<long long>
+{
+  if (!input.has_max_cap || !(input.split_buffer_input_cap_pf < input.max_cap_pf) || input.clock_route_segment_rc.capacitance_per_um_pf <= 0.0
+      || input.clock_route_segment_rc.dbu_per_um <= 0) {
+    return std::nullopt;
+  }
+  const double reach_um = (input.max_cap_pf - input.split_buffer_input_cap_pf) / input.clock_route_segment_rc.capacitance_per_um_pf;
+  if (!(reach_um > 0.0)) {
+    return std::nullopt;
+  }
+  return static_cast<long long>(std::floor(reach_um * static_cast<double>(input.clock_route_segment_rc.dbu_per_um)));
+}
+
+struct SplitRecoveryBudget
+{
+  std::size_t buffer_count = 0U;
+  unsigned depth = 0U;
+};
+
+auto RecoverSplitChildrenCapacitance(std::vector<SinkLoadRegionSplitNode>& children, const Point<int>& driver_pos, const ClusterConfig& electrical_config,
+                                     const SinkLoadRegionLegalityInput& input, SplitRecoveryBudget& budget, const char* scope) -> bool
+{
+  auto check = CheckSplitChildrenElectrical(driver_pos, children, input, scope);
+  if (check.legal || check.violation != SinkLoadRegionViolation::kCapacitance) {
+    return check.legal;
+  }
+  for (auto& child : children) {
+    PullSplitChildTowardDriver(child, driver_pos, electrical_config, input);
+  }
+  check = CheckSplitChildrenElectrical(driver_pos, children, input, scope);
+  if (check.legal) {
+    return true;
+  }
+  if (check.violation != SinkLoadRegionViolation::kCapacitance) {
+    return false;
+  }
+
+  if (children.size() > 1U && budget.buffer_count < input.max_split_buffer_count && budget.depth < input.max_split_depth) {
+    const auto branch_center = CalcSplitChildrenCenter(children);
+    if ((branch_center.get_x() != driver_pos.get_x() || branch_center.get_y() != driver_pos.get_y())
+        && CheckSplitChildrenElectrical(branch_center, children, input, "split_internal").legal) {
+      SinkLoadRegionSplitNode consolidated{
+          .loads = {},
+          .center = branch_center,
+          .children = std::move(children),
+      };
+      PullSplitChildTowardDriver(consolidated, driver_pos, electrical_config, input);
+      children = {std::move(consolidated)};
+      ++budget.buffer_count;
+      budget.depth = std::max(budget.depth, CalcSplitDepth(children));
+      check = CheckSplitChildrenElectrical(driver_pos, children, input, scope);
+      if (check.legal) {
+        return true;
+      }
+    }
+  }
+
+  const auto relay_step_dbu = RelayStepLimitDbu(input);
+  if (!relay_step_dbu.has_value() || *relay_step_dbu <= 0) {
+    return false;
+  }
+  bool changed = true;
+  while (changed && !CheckSplitChildrenElectrical(driver_pos, children, input, scope).legal) {
+    changed = false;
+    for (auto& child : children) {
+      const auto distance = static_cast<long long>(geometry::Manhattan(child.center, driver_pos));
+      if (distance <= *relay_step_dbu || budget.buffer_count >= input.max_split_buffer_count || budget.depth >= input.max_split_depth) {
+        continue;
+      }
+      const auto step = std::min(distance - 1, *relay_step_dbu);
+      const auto relay_center = InterpolateBoundaryAnchor(child.center, driver_pos, static_cast<double>(step) / static_cast<double>(distance));
+      SinkLoadRegionSplitNode relay{
+          .loads = {},
+          .center = relay_center,
+          .children = {std::move(child)},
+      };
+      child = std::move(relay);
+      ++budget.buffer_count;
+      budget.depth = std::max(budget.depth, CalcSplitDepth(children));
+      changed = true;
+    }
+  }
+  return CheckSplitChildrenElectrical(driver_pos, children, input, scope).legal;
+}
+
+}  // namespace
+
 auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>& anchor, const SinkLoadRegionLegalityInput& input) -> SinkLoadRegionSplitPlan
 {
   SinkLoadRegionSplitPlan plan;
@@ -780,7 +1012,7 @@ auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>
   cap_only_config.max_fanout = std::numeric_limits<std::size_t>::max();
   const auto cap_only = Clustering::evaluateClusterElectrical(ordered_loads, anchor, cap_only_config, true);
   plan.triggered_by_capacitance = input.has_max_cap && cap_only.summary.total_cap_pf > input.max_cap_pf;
-  if (initial.legal) {
+  if (initial.legal && !plan.triggered_by_capacitance) {
     plan.feasible = true;
     return plan;
   }
@@ -858,12 +1090,15 @@ auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>
     }
     node.children.push_back(std::move(*left_node));
     node.children.push_back(std::move(*right_node));
-    const auto internal = CheckSplitChildrenElectrical(node.center, node.children, input, "split_internal");
-    if (!internal.legal) {
+    SplitRecoveryBudget budget{.buffer_count = buffer_count, .depth = maximum_depth};
+    if (!RecoverSplitChildrenCapacitance(node.children, node.center, electrical_config, input, budget, "split_internal")) {
+      const auto internal = CheckSplitChildrenElectrical(node.center, node.children, input, "split_internal");
       failure = SinkLoadRegionRecoveryFailure::kNoProgress;
-      failure_reason = internal.detail;
+      failure_reason = internal.detail.empty() ? "split_internal_cap_violation" : internal.detail;
       return std::nullopt;
     }
+    buffer_count = budget.buffer_count;
+    maximum_depth = std::max(maximum_depth, budget.depth);
     return node;
   };
 
@@ -880,12 +1115,24 @@ auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>
   }
   plan.children.push_back(std::move(*left_node));
   plan.children.push_back(std::move(*right_node));
+  SplitRecoveryBudget budget{.buffer_count = buffer_count, .depth = maximum_depth};
+  const bool recovered = RecoverSplitChildrenCapacitance(plan.children, anchor, electrical_config, input, budget, "split_root");
+  buffer_count = budget.buffer_count;
+  maximum_depth = std::max(maximum_depth, budget.depth);
   const auto root_check = CheckSplitChildrenElectrical(anchor, plan.children, input, "split_root");
-  if (!root_check.legal) {
-    plan.failure = SinkLoadRegionRecoveryFailure::kNoProgress;
-    plan.failure_reason = root_check.detail;
-    plan.children.clear();
-    return plan;
+  if (!recovered || !root_check.legal) {
+    if (input.allow_cap_fallback && plan.triggered_by_capacitance && !plan.triggered_by_fanout
+        && root_check.violation == SinkLoadRegionViolation::kCapacitance) {
+      plan.used_cap_fallback = true;
+      plan.cap_overrun_pf = std::max(0.0, root_check.root_cap_pf - input.max_cap_pf);
+      plan.warning_detail = root_check.detail;
+      plan.root_cap_pf = root_check.root_cap_pf;
+    } else {
+      plan.failure = SinkLoadRegionRecoveryFailure::kNoProgress;
+      plan.failure_reason = root_check.detail.empty() ? "split_root_cap_violation" : root_check.detail;
+      plan.children.clear();
+      return plan;
+    }
   }
   plan.root_cap_pf = root_check.root_cap_pf;
   plan.local_depth = maximum_depth;
@@ -954,6 +1201,11 @@ auto FilterSinkLoadRegionLegalEntries(const std::vector<HTreeTopologyChar>& entr
     result.summary.max_split_local_depth = std::max(result.summary.max_split_local_depth, legality.split_local_depth);
     result.summary.any_split_triggered_by_fanout = result.summary.any_split_triggered_by_fanout || legality.split_triggered_by_fanout;
     result.summary.any_split_triggered_by_capacitance = result.summary.any_split_triggered_by_capacitance || legality.split_triggered_by_capacitance;
+    result.summary.any_used_cap_fallback = result.summary.any_used_cap_fallback || legality.used_cap_fallback;
+    result.summary.max_cap_overrun_pf = std::max(result.summary.max_cap_overrun_pf, legality.total_cap_overrun_pf);
+    if (result.summary.first_cap_fallback_detail.empty() && !legality.cap_fallback_detail.empty()) {
+      result.summary.first_cap_fallback_detail = legality.cap_fallback_detail;
+    }
     result.output.entries.push_back(entry);
   }
   return result;

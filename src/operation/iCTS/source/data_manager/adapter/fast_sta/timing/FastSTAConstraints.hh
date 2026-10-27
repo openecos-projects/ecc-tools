@@ -28,7 +28,18 @@
 
 #include "FastSTA.hh"
 #include "liberty/FastSTACondition.hh"
-#include "timing/TimingConstraints.hh"
+
+namespace icts {
+struct SdcObjectRef;
+}
+
+namespace icts {
+struct SdcClockDecl;
+}
+
+namespace icts {
+enum class SdcTransition;
+}
 
 namespace icts {
 

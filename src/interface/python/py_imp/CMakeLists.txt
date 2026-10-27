@@ -21,6 +21,5 @@ target_include_directories(py_imp
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${HOME_OPERATION}
-    ${HOME_OPERATION}/iSTA/interface
     ${HOME_PLATFORM}/data_manager
     ${HOME_DATABASE}/data/design)

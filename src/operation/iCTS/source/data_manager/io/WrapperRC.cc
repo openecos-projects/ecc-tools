@@ -23,7 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <optional>
-#include <ostream>
+#include <vector>
 
 #include "IdbLayer.h"
 #include "IdbLayout.h"

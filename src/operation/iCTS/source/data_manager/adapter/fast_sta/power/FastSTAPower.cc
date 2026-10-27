@@ -27,12 +27,14 @@
 #include <cmath>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "FastSTA.hh"
 #include "FastSTAClockState.hh"
+#include "FastSTACondition.hh"
 #include "FastSTALibertyModel.hh"
 #include "Logger.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"

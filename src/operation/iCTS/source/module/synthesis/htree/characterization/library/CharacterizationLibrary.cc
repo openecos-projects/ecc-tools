@@ -24,9 +24,7 @@
 #include "synthesis/htree/characterization/library/CharacterizationLibrary.hh"
 
 #include <algorithm>
-#include <ostream>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "Logger.hh"

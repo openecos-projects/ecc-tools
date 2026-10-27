@@ -16,7 +16,7 @@
 #include "idm.h"
 
 namespace ista {
-struct TimingSnapshot;
+struct TimingData;
 }
 
 namespace python_interface {
@@ -58,9 +58,9 @@ inline bool isPlacementFixed(idb::IdbInstance* node)
 struct PyPlaceDB
 {
  public:
-  unsigned int num_nodes;           ///< number of nodes, including terminals and terminal_NIs
-  unsigned int num_terminals;       ///< number of terminals, essentially fixed macros
-  unsigned int num_terminal_NIs;    ///< number of terminal_NIs, essentially IO pins
+  unsigned int num_nodes;         ///< number of nodes, including terminals and terminal_NIs
+  unsigned int num_terminals;     ///< number of terminals, essentially fixed macros
+  unsigned int num_terminal_NIs;  ///< number of terminal_NIs, essentially IO pins
   unsigned int m2_pg_rail_blockage_rects;
   pybind11::list m2_pg_rail_boxes;
   pybind11::list m2_pg_rail_density_boxes;
@@ -274,21 +274,19 @@ struct PyPlaceDB
   PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
             bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true)
   {
-    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
-        include_m2_pg_rail_density);
+    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage, include_m2_pg_rail_density);
   }
 
   const std::vector<bool>& getNodeIsHardMacro() const { return _node_is_hard_macro; }
   const std::vector<bool>& getMacroWritebackCandidate() const { return _macro_writeback_candidate; }
-  std::size_t writeMacroPlacementBack(
-      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
-      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
+  std::size_t writeMacroPlacementBack(const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
+                                      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
   pybind11::dict applySizing(const std::vector<int>& cell_ids, const std::vector<std::string>& target_master_names);
   pybind11::dict applyBufferActions(const pybind11::list& actions, const std::string& action_digest);
 
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
-  void init_timing(const ista::TimingSnapshot& snapshot, idm::DataManager* db);
+  void init_timing(const ista::TimingData& snapshot, idm::DataManager* db);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
 

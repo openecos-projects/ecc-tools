@@ -32,8 +32,10 @@
 #include <cstdio>
 #include <fstream>
 #include <string>
+#include <vector>
 
-#include "clock_parser/SDCClockParser.hh"
+#include "SDCClockReader.hh"
+#include "TimingConstraints.hh"
 
 namespace icts_test {
 namespace {
@@ -53,7 +55,7 @@ class SdcConstraintStatusFixtureInterface : public ::testing::Test
   static auto readSdc(const std::string& name, const std::string& text) -> icts::SdcClockData
   {
     const auto path = WriteTempSdc(name, text);
-    auto data = icts::sdc_reader::SdcSubsetEvaluator{}.readFile(path);
+    auto data = icts::SdcClockReader(path).readClockData();
     std::remove(path.c_str());
     return data;
   }
@@ -85,6 +87,20 @@ TEST_F(SdcConstraintStatusFixtureInterface, RecognizedCommandWithUnresolvedArgum
   const auto data = readSdc("recognized_unresolved", "set_propagated_clock $UNDEFINED_CLOCK\n");
   EXPECT_FALSE(data.ok());
   ASSERT_FALSE(data.issues.empty());
+}
+
+TEST_F(SdcConstraintStatusFixtureInterface, DefaultEccUnitsOutsideClockScopeStayIgnored)
+{
+  const auto data = readSdc("ecc_default_units",
+                            "set_units -time ns -resistance kOhm -capacitance pF -voltage V -current mA\n"
+                            "create_clock -name i_clk -period 20 [get_ports i_clk]\n"
+                            "set_max_transition 3.4 -clock_path [get_clocks i_clk]\n"
+                            "set_timing_derate -late 1.10 -clock -delay_corner [all_delay_corners]\n");
+  EXPECT_TRUE(data.ok()) << (data.diagnostics.empty() ? "" : data.diagnostics.front());
+  ASSERT_EQ(data.clocks.size(), 1U);
+  EXPECT_EQ(data.clocks.front().clock_name, "i_clk");
+  EXPECT_DOUBLE_EQ(data.clocks.front().period_ns, 20.0);
+  EXPECT_FALSE(data.ignored.empty());
 }
 
 TEST_F(SdcConstraintStatusFixtureInterface, RecognizedCommandsKeepStatusOk)

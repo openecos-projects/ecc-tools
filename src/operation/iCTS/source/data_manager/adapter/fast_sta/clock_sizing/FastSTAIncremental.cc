@@ -24,9 +24,11 @@
 #include "FastSTAIncremental.hh"
 
 #include <algorithm>
-#include <cstdint>
-#include <ostream>
+#include <array>
+#include <cstddef>
+#include <ranges>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>

@@ -27,7 +27,6 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
-#include <ostream>
 #include <utility>
 #include <vector>
 

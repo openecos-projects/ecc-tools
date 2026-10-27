@@ -25,7 +25,6 @@
 
 #include <cstddef>
 #include <initializer_list>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,7 +33,7 @@
 #include <utility>
 #include <vector>
 
-#include "SDCClockReader.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 

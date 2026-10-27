@@ -24,9 +24,12 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <string>
 #include <vector>
 
+#include "characterization/Characterization.hh"
 #include "module/synthesis/htree/characterization/wirelength/WirelengthGrid.hh"
+#include "synthesis/htree/characterization/Characterization.hh"
 
 namespace icts_test {
 namespace {

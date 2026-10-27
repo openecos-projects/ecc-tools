@@ -22,6 +22,7 @@
  */
 
 #include <algorithm>
+#include <compare>
 #include <map>
 #include <set>
 #include <string>
@@ -32,6 +33,7 @@
 #include "IdbNet.h"
 #include "SDCClockReader.hh"
 #include "SDCClockTraceAlgorithm.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::clock_trace {
 

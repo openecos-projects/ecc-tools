@@ -114,6 +114,9 @@ struct SinkLoadRegionLegalitySummary
   unsigned split_local_depth = 0U;
   bool split_triggered_by_fanout = false;
   bool split_triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double total_cap_overrun_pf = 0.0;
+  std::string cap_fallback_detail;
   std::vector<SinkLoadRegionSplitPlan> split_plans;
 };
 
@@ -129,6 +132,9 @@ struct SinkLoadRegionLegalityInput
   bool split_buffer_available = false;
   unsigned max_split_depth = 16U;
   std::size_t max_split_buffer_count = 4096U;
+  // Enabled only by the last-resort discrete selection pass. A capacitance-only
+  // miss then keeps the least-over-budget plan instead of failing the clock.
+  bool allow_cap_fallback = false;
   std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
 };
 
@@ -155,6 +161,9 @@ struct SinkLoadRegionEntryFilterSummary
   unsigned max_split_local_depth = 0U;
   bool any_split_triggered_by_fanout = false;
   bool any_split_triggered_by_capacitance = false;
+  bool any_used_cap_fallback = false;
+  double max_cap_overrun_pf = 0.0;
+  std::string first_cap_fallback_detail;
 };
 
 struct SinkLoadRegionEntryFilterBuild
@@ -197,6 +206,9 @@ struct SinkLoadRegionSplitPlan
   bool required = false;
   bool triggered_by_fanout = false;
   bool triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
+  std::string warning_detail;
   SinkLoadRegionRecoveryFailure failure = SinkLoadRegionRecoveryFailure::kNone;
   std::string failure_reason;
   double root_cap_pf = 0.0;

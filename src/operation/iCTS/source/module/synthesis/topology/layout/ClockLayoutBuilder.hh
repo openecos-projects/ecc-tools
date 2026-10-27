@@ -32,7 +32,6 @@
 namespace icts {
 
 class Clock;
-class Inst;
 class Net;
 class Pin;
 struct ClockDistributionContext;

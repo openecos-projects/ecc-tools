@@ -1,10 +1,138 @@
 // SPDX-License-Identifier: MulanPSL-2.0
-#include <unistd.h>
+#include <exception>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-#include <filesystem>
+#include "DataManager.hpp"
+#include "Logger.hpp"
+#include "SdcCommand.hpp"
 
-#include "SdcTestDesign.hpp"
-#include "SdcWriter.hpp"
+using namespace ista;
+
+void require(bool condition, const std::string& message)
+{
+  if (!condition) {
+    throw std::runtime_error(message);
+  }
+}
+
+void addPin(const std::string& instance_name, const std::string& port_name, PinDirection direction)
+{
+  Database& database = STADM.getDatabase();
+  std::string name = instance_name.empty() ? port_name : instance_name + ":" + port_name;
+  Pin& pin = database.network().pins()[name];
+  pin.set_full_name(name);
+  pin.set_pin_name(port_name);
+  pin.set_instance_name(instance_name);
+  pin.set_direction(direction);
+  pin.set_is_port(instance_name.empty());
+  if (!instance_name.empty()) {
+    database.network().instances()[instance_name].get_pin_name_list().push_back(name);
+  }
+}
+
+void addCellArc(LibertyCell& cell, const std::string& from, const std::string& to, bool is_clock = false, bool is_reset = false)
+{
+  TimingCellArc arc;
+  arc.set_source_port(from);
+  arc.set_sink_port(to);
+  arc.set_is_clock_arc(is_clock);
+  arc.set_is_clear_preset_arc(is_reset);
+  cell.get_cell_arc_list().push_back(arc);
+}
+
+void addInstance(const std::string& name, const std::string& cell_name, bool sequential)
+{
+  Database& database = STADM.getDatabase();
+  Instance& instance = database.network().instances()[name];
+  instance.set_instance_name(name);
+  instance.set_cell_name(cell_name);
+  instance.set_is_sequential(sequential);
+  LibertyCell& cell = database.liberty().get_cell_map()[cell_name];
+  for (auto& [port_name, port] : cell.get_port_map()) {
+    addPin(name, port_name, port.get_is_input() ? PinDirection::kInput : PinDirection::kOutput);
+  }
+  if (sequential) {
+    instance.set_clock_pin_name(name + ":CK");
+    TimingCheckArc check;
+    check.set_clock_port(name + ":CK");
+    check.set_data_port(name + ":D");
+    check.set_check_type(TimingCheckType::kSetup);
+    instance.get_check_arc_list().push_back(check);
+  }
+}
+
+void addNet(const std::string& name, const std::vector<std::string>& pins)
+{
+  Database& database = STADM.getDatabase();
+  Net& net = database.network().nets()[name];
+  net.set_net_name(name);
+  net.set_pin_name_list(pins);
+  // Deliberately leave driver/load lists empty, as during SDC input.
+  for (const std::string& pin : pins) {
+    database.network().pins()[pin].set_net_name(name);
+  }
+}
+
+void buildDesign()
+{
+  Database& database = STADM.getDatabase();
+  database.network().setName("sdc_test");
+  database.liberty().set_current_unit_name("1mA");
+  database.liberty().set_voltage_unit_name("1V");
+  for (std::string name : {"FF", "COMB"}) {
+    LibertyCell& cell = database.liberty().get_cell_map()[name];
+    cell.set_is_sequential(name == "FF");
+    std::vector<std::string> inputs = name == "FF" ? std::vector<std::string>{"CK", "D", "RN"} : std::vector<std::string>{"A", "B", "UNUSED"};
+    for (const std::string& input : inputs) {
+      LibertyPort& port = cell.get_port_map()[input];
+      port.set_port_name(input);
+      port.set_is_input(true);
+      port.set_is_clock(input == "CK");
+    }
+    std::string output = name == "FF" ? "Q" : "Y";
+    cell.get_port_map()[output].set_port_name(output);
+    cell.get_port_map()[output].set_is_output(true);
+    if (name == "FF") {
+      addCellArc(cell, "CK", "Q", true);
+      addCellArc(cell, "RN", "Q", false, true);
+    } else {
+      addCellArc(cell, "A", "Y");
+      addCellArc(cell, "B", "Y");
+      addCellArc(cell, "UNUSED", "Y");
+      cell.get_cell_arc_list().back().set_is_disable_arc(true);
+    }
+  }
+  for (std::string name : {"cdc/source_reg", "cdc/sink_reg", "outside_reg", "after_reg"}) {
+    addInstance(name, "FF", true);
+  }
+  for (std::string name : {"cdc/buf", "cdc/reconv", "loop", "cell with space"}) {
+    addInstance(name, "COMB", false);
+  }
+  for (std::string name : {"clk", "in", "reset"}) {
+    addPin("", name, PinDirection::kInput);
+  }
+  addPin("", "out", PinDirection::kOutput);
+  addNet("clock_net", {"clk", "cdc/source_reg:CK", "cdc/sink_reg:CK", "outside_reg:CK", "after_reg:CK"});
+  addNet("input_net", {"in", "cdc/source_reg:D"});
+  addNet("reset_net", {"reset", "cdc/source_reg:RN"});
+  addNet("cdc/async_data[0]", {"cdc/source_reg:Q", "cdc/buf:A", "cdc/buf:B", "cdc/reconv:B"});
+  addNet("buf_net", {"cdc/buf:Y", "cdc/reconv:A"});
+  addNet("sink_net", {"cdc/reconv:Y", "cdc/sink_reg:D", "outside_reg:D", "out"});
+  addNet("after_net", {"cdc/sink_reg:Q", "after_reg:D"});
+  addNet("loop_net", {"loop:Y", "loop:A", "loop:B"});
+  // Liberty overrides an imprecise physical pin direction without mutating IDB.
+  database.network().pins()["cdc/source_reg:Q"].set_direction(PinDirection::kInout);
+}
+
+void eval(const std::string& script)
+{
+  SdcCommand& interpreter = SdcCommand::getInst();
+  int status = interpreter.evalString(script);
+  require(status == TCL_OK, "SDC failed: " + std::string(Tcl_GetStringResult(interpreter.getInterp())));
+}
 
 void testUnits()
 {
@@ -12,11 +140,12 @@ void testUnits()
   eval("set_units -time 1000ps -capacitance 1000fF -distance um -power W");
   eval("create_clock -name clk -period 10 [get_ports clk]");
   eval("set_units -time ps");
+  eval("set_units -time 2ns -capacitance 0.5pF");
   eval("create_clock -name after_units -period 5");
-  require(STADM.getDatabase().get_timing_constraint().get_clock_map()["clk"].get_period() == 10.0, "set_units changed an existing clock");
-  require(STADM.getDatabase().get_timing_constraint().get_clock_map()["after_units"].get_period() == 5.0, "set_units rescaled a new clock");
-  for (std::string script : {"set_units -time ns_bad", "set_units -time 0ns", "set_units -time -1ns", "set_units -time 2ns", "set_units -capacitance nS",
-                             "set_units -current", "set_units -typo ns"}) {
+  require(STADM.getDatabase().sdc().get_clock_map()["clk"].get_period() == 10.0, "set_units changed an existing clock");
+  require(STADM.getDatabase().sdc().get_clock_map()["after_units"].get_period() == 5.0, "set_units rescaled a new clock");
+  for (std::string script :
+       {"set_units -time ns_bad", "set_units -time 0ns", "set_units -time -1ns", "set_units -capacitance nS", "set_units -current", "set_units -typo ns"}) {
     require(SdcCommand::getInst().evalString(script) == TCL_ERROR, "invalid units accepted: " + script);
   }
 }
@@ -52,8 +181,8 @@ void testQueries()
                              "get_fanout -from in -trace_arcs invalid", "get_name {}", "get_name {cdc/source_reg outside_reg}", "get_name missing"}) {
     require(SdcCommand::getInst().evalString(script) == TCL_ERROR, "invalid query accepted: " + script);
   }
-  require(STADM.getDatabase().get_arc_list().empty(), "SDC queries changed the analysis graph");
-  require(STADM.getDatabase().get_pin_map()["cdc/source_reg:Q"].get_direction() == PinDirection::kInout, "SDC queries changed pin direction");
+  require(STADM.getDatabase().graph().arcs().empty(), "SDC queries changed the analysis graph");
+  require(STADM.getDatabase().network().pins()["cdc/source_reg:Q"].get_direction() == PinDirection::kInout, "SDC queries changed pin direction");
 }
 
 void testCdcException()
@@ -70,10 +199,11 @@ void testCdcException()
     lappend END {*}[get_fanout -from [get_pins $CDC/source_reg/Q] -flat -endpoints_only -only_cells]
     set_max_delay 3.0 -from $START -to $END -ignore_clock_latency
   )TCL");
-  std::vector<TimingException>& exceptions = STADM.getDatabase().get_timing_constraint().get_path_exception_list();
+  std::vector<TimingException>& exceptions = STADM.getDatabase().sdc().get_path_exception_list();
   require(exceptions.size() == 1, "CDC exception missing");
-  require(exceptions[0].get_from_objects() == std::set<std::string>{"cdc/source_reg"}, "CDC launch cells incorrect");
-  require(exceptions[0].get_to_objects() == std::set<std::string>{"cdc/sink_reg", "outside_reg"}, "CDC capture cells incorrect");
+  require(exceptions[0].get_from_objects() == ExceptionObjects{{ExceptionObjectType::kCell, "cdc/source_reg"}}, "CDC launch cells incorrect");
+  require(exceptions[0].get_to_objects() == ExceptionObjects{{ExceptionObjectType::kCell, "cdc/sink_reg"}, {ExceptionObjectType::kCell, "outside_reg"}},
+          "CDC capture cells incorrect");
   require(exceptions[0].get_delay() == 3.0 && exceptions[0].get_ignore_clock_latency(), "CDC delay qualifiers lost");
 }
 
@@ -84,7 +214,7 @@ void testLoadObjectIdentity()
   addNet("package", {"package"});
   addNet("inner/package", {});
   eval("set port [get_ports package]; set net [get_nets -filter {full_name == package}]; set_load 0.7 $port");
-  TimingConstraint& constraint = database.get_timing_constraint();
+  Sdc& constraint = database.sdc();
   require(constraint.get_net_load_map().empty(), "port load also applied to same-name nets");
   require(constraint.get_port_constraint_map().at("package").get_load(AnalysisType::kMax, TransType::kRise) == 0.7, "port load missing");
   eval("foreach item $net {set_load 0.2 $item}");
@@ -101,36 +231,6 @@ void testLoadObjectIdentity()
           "mixed port/net collection was not preserved");
 }
 
-// A Tcl input script must become a self-contained SDC constraint snapshot.
-void testOutputSdc()
-{
-  auto& database = STADM.getDatabase();
-  database.get_timing_constraint() = TimingConstraint{};
-  eval(R"TCL(
-    set p [expr {5 * 2}]
-    create_clock -name main -period $p [get_ports clk]
-    set inputs [remove_from_collection [all_inputs] [get_ports clk]]
-    foreach port $inputs { set_input_delay -clock main 2 [get_ports $port] }
-    set_clock_latency -source 3 [get_clocks main]
-    remove_clock_latency -source [get_clocks main]
-  )TCL");
-  const auto path = std::filesystem::temp_directory_path() / ("ista-output-sdc-" + std::to_string(getpid()) + ".sdc");
-  sdc::writeSdcFile(database, path.string());
-  std::ifstream input(path);
-  std::string exported((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
-  require(!exported.empty(), "output_sdc produced an empty snapshot");
-  require(exported.find("remove_from_collection") == std::string::npos && exported.find("foreach") == std::string::npos,
-          "output_sdc retained Tcl script operations");
-  database.get_timing_constraint() = TimingConstraint{};
-  eval(exported);
-  auto& constraints = database.get_timing_constraint();
-  require(constraints.get_clock_map().at("main").get_period() == 10, "clock period did not survive SDC export");
-  require(constraints.get_clock_map().at("main").get_source_latency(AnalysisType::kMax, TransType::kRise) == 0, "export resurrected removed clock latency");
-  require(constraints.get_port_constraint_map().at("in").get_input_delay_max() == 2, "input delay did not survive SDC export");
-  require(!constraints.get_port_constraint_map().contains("clk"), "export lost the result of collection subtraction");
-  std::filesystem::remove(path);
-}
-
 int main()
 {
   Logger::initInst();
@@ -144,7 +244,6 @@ int main()
     testQueries();
     testCdcException();
     testLoadObjectIdentity();
-    testOutputSdc();
     STALOG.info(Loc::current(), "SDC compatibility tests passed");
   } catch (const std::exception& error) {
     STALOG.warn(Loc::current(), error.what());

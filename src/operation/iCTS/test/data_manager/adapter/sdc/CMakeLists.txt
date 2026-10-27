@@ -10,5 +10,6 @@ icts_add_test_executable(
 target_include_directories(
   icts_test_data_manager_adapter_sdc
   PRIVATE
+  ${ICTS_SOURCE}/data_manager/adapter/sdc
   ${ICTS_SOURCE}/data_manager/adapter/sdc/clock_trace
 )

@@ -22,10 +22,14 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -37,7 +41,10 @@
 #include <utility>
 #include <vector>
 
+#include "IdbCellMaster.h"
 #include "IdbDesign.h"
+#include "IdbEnum.h"
+#include "IdbGeometry.h"
 #include "IdbInstance.h"
 #include "IdbLayer.h"
 #include "IdbLayout.h"
@@ -45,7 +52,9 @@
 #include "IdbPins.h"
 #include "IdbTerm.h"
 #include "IdbUnits.h"
+#include "Type.hh"
 #include "Wrapper.hh"
+#include "dm_config.h"
 #include "idm.h"
 #include "liberty/Lib.hh"
 #include "salt/base/flute.h"

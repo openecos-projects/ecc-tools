@@ -27,8 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <ostream>
-#include <ranges>
+#include <optional>
 #include <vector>
 
 #include "Logger.hh"

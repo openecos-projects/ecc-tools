@@ -28,7 +28,17 @@
 #include <unordered_map>
 #include <vector>
 
-#include "module/topology/fixture/analysis/TopologyStats.hh"
+namespace icts_test {
+namespace module {
+namespace topology {
+namespace fixture {
+namespace analysis {
+struct TopologyStats;
+}
+}  // namespace fixture
+}  // namespace topology
+}  // namespace module
+}  // namespace icts_test
 
 namespace icts {
 class Pin;

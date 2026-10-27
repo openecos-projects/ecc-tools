@@ -27,6 +27,10 @@
 
 #include "SDCClockReader.hh"
 
+namespace icts {
+struct SdcClockData;
+}
+
 namespace idb {
 class IdbDesign;
 }  // namespace idb

@@ -33,8 +33,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "FastSTA.hh"
+#include "FastSTAClockTiming.hh"
 #include "clock_state/FastSTAClockState.hh"
-#include "timing/FastSTADmpCeff.hh"
 
 namespace icts {
 struct FastStaDirtyRegion;

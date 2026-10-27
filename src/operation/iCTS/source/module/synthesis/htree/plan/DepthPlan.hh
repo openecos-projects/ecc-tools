@@ -68,6 +68,8 @@ struct DepthSummary
   bool split_triggered_by_fanout = false;
   bool split_triggered_by_capacitance = false;
   bool used_boundary_relaxation = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
   double selected_power_w = 0.0;
   double selected_delay_ns = 0.0;
 };

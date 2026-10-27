@@ -39,6 +39,7 @@
 #include "ClockRouteSegmentRC.hh"
 #include "Logger.hh"
 #include "data_manager/design/Pin.hh"
+#include "data_manager/design/fixture/data/GeneratedPins.hh"
 #include "data_manager/design/fixture/data/pin_factory/PinFactory.hh"
 #include "data_manager/spatial/Point.hh"
 #include "module/topology/clustering/Clustering.hh"

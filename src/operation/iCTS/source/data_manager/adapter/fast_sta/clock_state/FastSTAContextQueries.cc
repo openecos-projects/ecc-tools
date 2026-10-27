@@ -22,14 +22,21 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <functional>
+#include <initializer_list>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "FastSTA.hh"
+#include "FastSTAClockNetParasitic.hh"
+#include "FastSTAClockTiming.hh"
+#include "FastSTALibertyModel.hh"
 #include "Logger.hh"
 #include "branch_timing/FastSTABranch.hh"
 #include "clock_state/FastSTAClockState.hh"

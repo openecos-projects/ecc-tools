@@ -77,6 +77,8 @@ auto RecordTopologyDepthCandidateBuild(unsigned depth, bool used_explicit_target
       .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
       .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
       .used_boundary_relaxation = evaluation.used_boundary_relaxation,
+      .used_cap_fallback = evaluation.used_cap_fallback,
+      .cap_overrun_pf = evaluation.cap_overrun_pf,
       .selected_power_w = evaluation.best_char.has_value() ? evaluation.best_char->get_power() : 0.0,
       .selected_delay_ns = evaluation.best_char.has_value() ? evaluation.best_char->get_delay() : 0.0,
   });
@@ -94,6 +96,8 @@ auto AppendGlobalCandidateRefs(std::size_t candidate_index, const CandidateBuild
         .split_local_depth = evaluation.split_local_depth,
         .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
         .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
+        .used_cap_fallback = evaluation.used_cap_fallback,
+        .cap_overrun_pf = evaluation.cap_overrun_pf,
     });
   }
   for (const auto& entry : evaluation.candidate_frontier_entries) {
@@ -105,6 +109,8 @@ auto AppendGlobalCandidateRefs(std::size_t candidate_index, const CandidateBuild
         .split_local_depth = evaluation.split_local_depth,
         .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
         .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
+        .used_cap_fallback = evaluation.used_cap_fallback,
+        .cap_overrun_pf = evaluation.cap_overrun_pf,
     });
   }
 }

@@ -37,6 +37,13 @@ struct PlannedInstance
   std::vector<PlannedPin> pins;
   std::vector<PlannedBus> buses;
 };
+struct PlannedNetSegment
+{
+  std::string name;
+  std::string scope;
+  verilog::NetId net;
+  std::vector<std::string> pins;
+};
 // Fully owned, validated physical connectivity. No AST/LEF pointers or expressions.
 struct VerilogImportPlan
 {
@@ -47,6 +54,7 @@ struct VerilogImportPlan
   std::vector<PlannedBus> net_buses;
   std::vector<PlannedInstance> instances;
   std::vector<verilog::HierarchicalPort> hierarchical_ports;
+  std::vector<PlannedNetSegment> net_segments;
 };
 struct ImportPlanResult
 {

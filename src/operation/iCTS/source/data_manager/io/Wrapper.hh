@@ -47,7 +47,6 @@ class IdbPin;
 template <typename T>
 class IdbCoordinate;
 class LibCell;
-class LibLibrary;
 }  // namespace idb
 
 namespace idm {

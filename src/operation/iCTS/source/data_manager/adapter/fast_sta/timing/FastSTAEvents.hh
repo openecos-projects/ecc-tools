@@ -25,7 +25,19 @@
 #include <optional>
 #include <unordered_map>
 
-#include "clock_state/FastSTAClockState.hh"
+#include "FastSTA.hh"
+
+namespace icts {
+struct FastStaTimingPoint;
+}
+
+namespace icts {
+struct FastStaTimingCheck;
+}
+
+namespace icts {
+struct FastStaContext;
+}
 
 namespace icts {
 

@@ -16,14 +16,30 @@
 // ***************************************************************************************
 #pragma once
 
-#include "AnalysisType.hpp"
+#include <libgen.h>
+#include <unistd.h>
+
+#include <any>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <map>
+#include <set>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 #include "Logger.hpp"
-#include "STAHeader.hpp"
-#include "TransType.hpp"
 
 namespace ista {
-
-class Database;
 
 #define STAUTIL (ista::Utility::getInst())
 
@@ -34,9 +50,6 @@ class Utility
   static Utility& getInst();
   static void destroyInst();
   // function
-  static TransType getLaunchClockTransition(Database& database, std::string_view start);
-  static double getLaunchClockEdge(Database& database, std::string_view start, std::string_view clock);
-  static double getClockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type);
 #if 1  // std数据结构工具函数
 
   template <typename T, typename... Args>
@@ -177,26 +190,23 @@ class Utility
     return all;
   }
 
-  static std::ifstream* getInputFileStream(const std::string_view file_path) { return getFileStream<std::ifstream>(std::string{file_path}); }
-
-  static std::ofstream* getOutputFileStream(const std::string_view file_path) { return getFileStream<std::ofstream>(std::string{file_path}); }
-
-  template <typename T>
-  static T* getFileStream(const std::string_view file_path)
+  static std::ofstream openOutputFile(std::string_view file_path)
   {
-    T* file = new T(std::string{file_path});
-    if (!file->is_open()) {
-      STALOG.error(Loc::current(), "Failed to open file '", file_path, "'!");
+    std::ofstream file{std::string(file_path)};
+    if (!file.is_open()) {
+      throw std::runtime_error("Failed to open file '" + std::string(file_path) + "'");
     }
     return file;
   }
 
-  template <typename T>
-  static void closeFileStream(T* t)
+  // The owner checks buffered writes and close before publishing success.
+  static void finishOutputFile(std::ofstream& file)
   {
-    if (t != nullptr) {
-      t->close();
-      delete t;
+    file.flush();
+    const bool failed = !file;
+    file.close();
+    if (failed || !file) {
+      throw std::runtime_error("Failed to finish output file");
     }
   }
 

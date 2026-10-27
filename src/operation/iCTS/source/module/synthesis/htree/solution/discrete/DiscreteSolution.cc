@@ -129,7 +129,42 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
     const auto per_depth_candidate_pareto_pool = htree::BuildPerDepthDelayPowerParetoRefs(covered_global_candidate_pool.output.entries);
     selected_relaxed_ref = htree::SelectAdaptiveGlobalEntry(per_depth_candidate_pareto_pool, exploration.output.candidate_evaluations, segment_pattern_library);
   }
-  const auto selected_ref = selected_feasible_ref.has_value() ? selected_feasible_ref : selected_relaxed_ref;
+  auto selected_ref = selected_feasible_ref.has_value() ? selected_feasible_ref : selected_relaxed_ref;
+  bool used_cap_fallback = false;
+  if ((!selected_ref.has_value() || selected_ref->entry == nullptr) && !state.sink_load_region_input.allow_cap_fallback) {
+    state.sink_load_region_input.allow_cap_fallback = true;
+    auto fallback_constraints = state.search_boundary_constraints;
+    auto fallback_fanout = state.fanout_pruning_config;
+    fallback_fanout.allow_boundary_relaxation = true;
+    auto fallback = htree::SearchTopologyDepthCandidates(result.output.topology, state.full_level_plans, state.depth_candidates, segment_frontier_catalog,
+                                                         segment_pattern_library, fallback_constraints, char_builder.get_cap_lattice(),
+                                                         result.diagnostics.char_slew_steps, config.target_depth.has_value(),
+                                                         state.root_driver_compensation_input, state.sink_load_region_input, fallback_fanout);
+    auto fallback_pool = htree::FilterGlobalEntriesBySinkLoadRegionCoverage(fallback.output.global_feasible_pool, fallback.output.candidate_evaluations,
+                                                                            result.output.topology, segment_pattern_library,
+                                                                            fallback.output.sink_load_region_legality_context);
+    std::optional<htree::CandidateCharRef> least_overrun;
+    for (const auto& entry_ref : fallback_pool.output.entries) {
+      if (!least_overrun.has_value() || entry_ref.cap_overrun_pf < least_overrun->cap_overrun_pf) {
+        least_overrun = entry_ref;
+      }
+    }
+    if (least_overrun.has_value()) {
+      std::vector<htree::CandidateCharRef> least_overrun_entries;
+      for (const auto& entry_ref : fallback_pool.output.entries) {
+        if (entry_ref.cap_overrun_pf == least_overrun->cap_overrun_pf) {
+          least_overrun_entries.push_back(entry_ref);
+        }
+      }
+      const auto fallback_pareto = htree::BuildPerDepthDelayPowerParetoRefs(least_overrun_entries);
+      selected_ref = htree::SelectAdaptiveGlobalEntry(fallback_pareto, fallback.output.candidate_evaluations, segment_pattern_library);
+      if (selected_ref.has_value()) {
+        exploration = std::move(fallback);
+        used_cap_fallback = true;
+      }
+    }
+    state.sink_load_region_input.allow_cap_fallback = false;
+  }
   if (!selected_ref.has_value() || selected_ref->entry == nullptr) {
     HTreeSelectionBuild selection_build;
     selection_build.engine = htree::HTreeSelectionEngine::kDiscrete;
@@ -181,6 +216,12 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
   const auto selected_compensation_detail = selected_compensation_pass.evaluate(
       selected_ref->entry->get_pattern_id(), selected_evaluation.topology_pattern_library, segment_pattern_library, result.output.topology);
 
+  if (used_cap_fallback) {
+    CTSLOG.warn(Loc::current(), "HTree: capacitance remains above the configured maximum after split recovery and topology search; clock ",
+                state.input->log_context.clock_name, " sink domain ", state.input->log_context.sink_domain, " depth ", selected_summary.depth,
+                " keeps the least overrun. ", selected_sink_load_region_legality.cap_fallback_detail,
+                " overrun_pf=", selected_sink_load_region_legality.total_cap_overrun_pf, " max_cap_pf=", state.sink_load_region_input.max_cap_pf);
+  }
   const bool used_boundary_relaxation = !selected_feasible_ref.has_value();
   const std::string boundary_relaxation_reason = used_boundary_relaxation ? "no_strict_boundary_feasible_solution_any_depth" : "";
   const std::optional<double> boundary_relaxation_score

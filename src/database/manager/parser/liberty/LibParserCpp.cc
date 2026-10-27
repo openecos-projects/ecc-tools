@@ -22,10 +22,7 @@
  * @date 2023-10-13
  *
  */
-#include "CppLibertyDriver.hh"
-#include "Lib.hh"
 #include "LibParserCpp.hh"
-#include "utility/logger/Logger.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -35,10 +32,15 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "CppLibertyDriver.hh"
+#include "Lib.hh"
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
 
@@ -94,11 +96,13 @@ std::unique_ptr<LibLibrary> LibertyReader::takeLib()
 
 namespace {
 
-double getRawFloatValue(const liberty_ast::LibValue* value) {
+double getRawFloatValue(const liberty_ast::LibValue* value)
+{
   return value ? value->asFloat() : 0.0;
 }
 
-const char* getRawStringValue(const liberty_ast::LibValue* value) {
+const char* getRawStringValue(const liberty_ast::LibValue* value)
+{
   return value ? value->asString() : "";
 }
 
@@ -109,10 +113,9 @@ bool isEqual(std::string_view lhs, std::string_view rhs)
 
 bool isNoCaseEqual(std::string_view lhs, std::string_view rhs)
 {
-  return lhs.size() == rhs.size()
-         && std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](char lhs_char, char rhs_char) {
-              return std::tolower(static_cast<unsigned char>(lhs_char)) == std::tolower(static_cast<unsigned char>(rhs_char));
-            });
+  return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin(), [](char lhs_char, char rhs_char) {
+           return std::tolower(static_cast<unsigned char>(lhs_char)) == std::tolower(static_cast<unsigned char>(rhs_char));
+         });
 }
 
 bool startsWith(std::string_view str, std::string_view prefix)
@@ -154,13 +157,13 @@ std::string makeIndexedName(const std::string& name, int index)
   return name + "[" + std::to_string(index) + "]";
 }
 
-void appendFloatValue(std::vector<std::unique_ptr<LibAttrValue>>& values,
-                      double value) {
+void appendFloatValue(std::vector<std::unique_ptr<LibAttrValue>>& values, double value)
+{
   values.emplace_back(std::make_unique<LibFloatValue>(value));
 }
 
-void appendDelimitedFloatValues(
-    const char* value, std::vector<std::unique_ptr<LibAttrValue>>& values) {
+void appendDelimitedFloatValues(const char* value, std::vector<std::unique_ptr<LibAttrValue>>& values)
+{
   if (!value) {
     return;
   }
@@ -183,8 +186,8 @@ void appendDelimitedFloatValues(
   }
 }
 
-std::vector<std::unique_ptr<LibAttrValue>> convertRawAxisValues(
-    liberty_ast::LibValueList* attri_values) {
+std::vector<std::unique_ptr<LibAttrValue>> convertRawAxisValues(liberty_ast::LibValueList* attri_values)
+{
   std::vector<std::unique_ptr<LibAttrValue>> result_values;
   if (!attri_values) {
     return result_values;
@@ -211,7 +214,8 @@ std::vector<std::unique_ptr<LibAttrValue>> convertRawAxisValues(
  * @brief liberty expr builder.
  *
  */
-void LibertyExprBuilder::execute() {
+void LibertyExprBuilder::execute()
+{
   if (std::string::npos != _expr_str.find('\\')) {
     // LOG_INFO << "before remove backslash, expr is " << _expr_str;
     // contain backslash, remove backslash.
@@ -228,7 +232,8 @@ void LibertyExprBuilder::execute() {
  * @param attri
  * @return unsigned return 1 if success, else 0
  */
-unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
+unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* current_lib = lib_builder->get_lib();
   LibPort* lib_port = lib_builder->get_port();
@@ -240,10 +245,8 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   LibArc* lib_arc = lib_builder->get_arc();
   LibPowerArc* lib_power_arc = lib_builder->get_power_arc();
   auto* lib_obj = lib_builder->get_obj();
-  LibBuilder::LibertyOwnPortType own_port_type =
-      lib_builder->get_own_port_type();
-  LibBuilder::LibertyOwnPgOrWhenType own_pg_or_when_type =
-      lib_builder->get_own_pg_or_when_type();
+  LibBuilder::LibertyOwnPortType own_port_type = lib_builder->get_own_port_type();
+  LibBuilder::LibertyOwnPgOrWhenType own_pg_or_when_type = lib_builder->get_own_pg_or_when_type();
 
   double cap_unit_convert = 1.0;  // sta use pf internal
   if (CapacitiveUnit::kFF == current_lib->get_cap_unit()) {
@@ -264,33 +267,27 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     return ret;
   };
 
-  auto is_attri = [attri_name](const char* candidate) {
-    return isEqual(attri_name, candidate);
-  };
+  auto is_attri = [attri_name](const char* candidate) { return isEqual(attri_name, candidate); };
 
   if (is_attri("slew_lower_threshold_pct_rise")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double slew_lower_threshold_pct_rise = attri_value_handle->value;
-    current_lib->set_slew_lower_threshold_pct_rise(
-        slew_lower_threshold_pct_rise);
+    current_lib->set_slew_lower_threshold_pct_rise(slew_lower_threshold_pct_rise);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("slew_upper_threshold_pct_rise")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double slew_upper_threshold_pct_rise = attri_value_handle->value;
-    current_lib->set_slew_upper_threshold_pct_rise(
-        slew_upper_threshold_pct_rise);
+    current_lib->set_slew_upper_threshold_pct_rise(slew_upper_threshold_pct_rise);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("slew_lower_threshold_pct_fall")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double slew_lower_threshold_pct_fall = attri_value_handle->value;
-    current_lib->set_slew_lower_threshold_pct_fall(
-        slew_lower_threshold_pct_fall);
+    current_lib->set_slew_lower_threshold_pct_fall(slew_lower_threshold_pct_fall);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("slew_upper_threshold_pct_fall")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double slew_upper_threshold_pct_fall = attri_value_handle->value;
-    current_lib->set_slew_upper_threshold_pct_fall(
-        slew_upper_threshold_pct_fall);
+    current_lib->set_slew_upper_threshold_pct_fall(slew_upper_threshold_pct_fall);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("input_threshold_pct_rise")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
@@ -332,8 +329,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("simulation")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
-    current_lib->set_simulation(
-        convert_string_to_bool(attri_value_handle->value));
+    current_lib->set_simulation(convert_string_to_bool(attri_value_handle->value));
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("time_unit")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
@@ -344,6 +340,10 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
       current_lib->set_time_unit(TimeUnit::kPS);
     } else if (isEqual(time_unit, "1ns")) {
       current_lib->set_time_unit(TimeUnit::kNS);
+    } else {
+      const std::string unsupported = time_unit;
+      liberty_free_string_value(attri_value_handle);
+      throw std::invalid_argument("unsupported Liberty time_unit: " + unsupported + "; supported units are 1ns, 1ps and 1fs");
     }
     liberty_free_string_value(attri_value_handle);
   } else if (is_attri("current_unit")) {
@@ -386,8 +386,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("default_max_transition")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double default_max_transition = attri_value_handle->value;
-    default_max_transition =
-        current_lib->convert_time_unit_to_ns(default_max_transition);
+    default_max_transition = current_lib->convert_time_unit_to_ns(default_max_transition);
     current_lib->set_default_max_transition(default_max_transition);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("default_max_fanout")) {
@@ -477,8 +476,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("cell_leakage_power")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double cell_leakage_power = attri_value_handle->value;
-    cell_leakage_power =
-        current_lib->convert_power_unit_to_mw(cell_leakage_power);
+    cell_leakage_power = current_lib->convert_power_unit_to_mw(cell_leakage_power);
     lib_cell->set_cell_leakage_power(cell_leakage_power);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("clock_gating_integrated_cell")) {
@@ -491,8 +489,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double resistance = attri_value_handle->value;
     resistance *= resistance_unit_convert;
-    dynamic_cast<LibWireLoad*>(lib_obj)->set_resistance_per_length_unit(
-        resistance);
+    dynamic_cast<LibWireLoad*>(lib_obj)->set_resistance_per_length_unit(resistance);
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("slope")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
@@ -522,6 +519,15 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     double min_cap_limit = attri_value_handle->value;
     min_cap_limit *= cap_unit_convert;
     lib_port->set_port_cap_limit(AnalysisMode::kMin, min_cap_limit);
+    liberty_free_float_value(attri_value_handle);
+  } else if (is_attri("min_period") || is_attri("min_pulse_width_high") || is_attri("min_pulse_width_low")) {
+    auto* attri_value_handle = liberty_convert_float_value(attri_value);
+    const double value = current_lib->convert_time_unit_to_ns(attri_value_handle->value);
+    if (is_attri("min_period")) {
+      lib_port->set_min_period(value);
+    } else {
+      lib_port->set_min_pulse_width(is_attri("min_pulse_width_high") ? TransType::kRise : TransType::kFall, value);
+    }
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("max_transition")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
@@ -560,11 +566,9 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("related_pg_pin")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
     const char* pg_pin_name = attri_value_handle->value;
-    if (own_pg_or_when_type ==
-        LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower) {
+    if (own_pg_or_when_type == LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower) {
       leakage_power->set_related_pg_port(pg_pin_name);
-    } else if (own_pg_or_when_type ==
-               LibBuilder::LibertyOwnPgOrWhenType::kPowerArc) {
+    } else if (own_pg_or_when_type == LibBuilder::LibertyOwnPgOrWhenType::kPowerArc) {
       lib_power_arc->set_related_pg_port(pg_pin_name);
     }
     liberty_free_string_value(attri_value_handle);
@@ -575,11 +579,9 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
       if (lib_arc) {
         lib_arc->set_when(when);
       }
-    } else if (own_pg_or_when_type ==
-               LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower) {
+    } else if (own_pg_or_when_type == LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower) {
       leakage_power->set_when(when);
-    } else if (own_pg_or_when_type ==
-               LibBuilder::LibertyOwnPgOrWhenType::kPowerArc) {
+    } else if (own_pg_or_when_type == LibBuilder::LibertyOwnPgOrWhenType::kPowerArc) {
       if (lib_power_arc) {
         lib_power_arc->set_when(when);
       }
@@ -598,8 +600,7 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
     if (liberty_is_string_value(attri_value)) {
       auto* attri_value_handle = liberty_convert_string_value(attri_value);
       const char* value = attri_value_handle->value;  // ysxy
-      leakage_power->set_value(
-          current_lib->convert_power_unit_to_mw(atof(value)));
+      leakage_power->set_value(current_lib->convert_power_unit_to_mw(atof(value)));
       liberty_free_string_value(attri_value_handle);
     } else {
       auto* attri_value_handle = liberty_convert_float_value(attri_value);
@@ -654,20 +655,17 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
   } else if (is_attri("bit_width")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double bit_width = attri_value_handle->value;
-    dynamic_cast<LibType*>(lib_obj)->set_bit_width(
-        static_cast<unsigned>(bit_width));
+    dynamic_cast<LibType*>(lib_obj)->set_bit_width(static_cast<unsigned>(bit_width));
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("bit_from")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double bit_from = attri_value_handle->value;
-    dynamic_cast<LibType*>(lib_obj)->set_bit_from(
-        static_cast<unsigned>(bit_from));
+    dynamic_cast<LibType*>(lib_obj)->set_bit_from(static_cast<unsigned>(bit_from));
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("bit_to")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double bit_to = attri_value_handle->value;
-    dynamic_cast<LibType*>(lib_obj)->set_bit_to(
-        static_cast<unsigned>(bit_to));
+    dynamic_cast<LibType*>(lib_obj)->set_bit_to(static_cast<unsigned>(bit_to));
     liberty_free_float_value(attri_value_handle);
   } else if (is_attri("bus_type")) {
     auto* attri_value_handle = liberty_convert_string_value(attri_value);
@@ -687,8 +685,8 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri) {
  * @param attri
  * @return unsigned
  */
-unsigned LibertyReader::visitAxisOrValues(
-    LibertyComplexAttrStmt* attri) {
+unsigned LibertyReader::visitAxisOrValues(LibertyComplexAttrStmt* attri)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const char* attri_name = attri->attri_name;
@@ -697,10 +695,8 @@ unsigned LibertyReader::visitAxisOrValues(
   /**
   @note the origial value may be quote by string.
    * So we need recover the double value.*/
-  auto convert_attri_values =
-      [](auto& attribute_values) -> std::vector<std::unique_ptr<LibAttrValue>> {
-    auto split_str = [](std::string const& original,
-                        char separator) -> std::vector<std::string> {
+  auto convert_attri_values = [](auto& attribute_values) -> std::vector<std::unique_ptr<LibAttrValue>> {
+    auto split_str = [](std::string const& original, char separator) -> std::vector<std::string> {
       std::vector<std::string> results;
       std::string token;
       std::istringstream is(original);
@@ -715,13 +711,13 @@ unsigned LibertyReader::visitAxisOrValues(
     std::vector<std::unique_ptr<LibAttrValue>> result_values;
 
     void* attri_value;
-    FOREACH_LIBERTY_VEC_ELEM(&attribute_values, void, attri_value) {
+    FOREACH_LIBERTY_VEC_ELEM(&attribute_values, void, attri_value)
+    {
       if (liberty_is_string_value(attri_value)) {
         std::string val = liberty_convert_string_value(attri_value)->value;
         auto str_vec = split_str(val, ',');
         for (auto& str : str_vec) {
-          auto double_val =
-              std::make_unique<LibFloatValue>(std::atof(str.c_str()));
+          auto double_val = std::make_unique<LibFloatValue>(std::atof(str.c_str()));
           result_values.emplace_back(std::move(double_val));
         }
       } else {
@@ -762,8 +758,8 @@ unsigned LibertyReader::visitAxisOrValues(
  * @param attri
  * @return unsigned return 1 if success, else 0
  */
-unsigned LibertyReader::visitComplexAttri(
-    LibertyComplexAttrStmt* attri) {
+unsigned LibertyReader::visitComplexAttri(LibertyComplexAttrStmt* attri)
+{
   const char* attri_name = attri->attri_name;
   LibBuilder* lib_builder = get_library_builder();
   auto* the_lib = lib_builder->get_lib();
@@ -783,12 +779,12 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((liberty_convert_float_value(attri_0)->value == 1.0)
-        && (isEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
+    if ((liberty_convert_float_value(attri_0)->value == 1.0) && (isNoCaseEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
-    } else if (liberty_convert_float_value(attri_0)->value == 1.0
-               && isEqual(liberty_convert_string_value(attri_1)->value, "ff")) {
+    } else if (liberty_convert_float_value(attri_0)->value == 1.0 && isNoCaseEqual(liberty_convert_string_value(attri_1)->value, "ff")) {
       the_lib->set_cap_unit(CapacitiveUnit::kFF);
+    } else {
+      throw std::invalid_argument("unsupported Liberty capacitive_load_unit; supported units are (1,pf) and (1,ff)");
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = liberty_convert_float_value(attri_0)->value;
@@ -796,26 +792,21 @@ unsigned LibertyReader::visitComplexAttri(
     min_rise_cap *= cap_unit_convert;
     max_rise_cap *= cap_unit_convert;
 
-    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kRise,
-                           min_rise_cap);
-    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kRise,
-                           max_rise_cap);
+    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kRise, min_rise_cap);
+    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kRise, max_rise_cap);
   } else if (isEqual(attri_name, "fall_capacitance_range")) {
     double min_fall_cap = liberty_convert_float_value(attri_0)->value;
     double max_fall_cap = liberty_convert_float_value(attri_1)->value;
     min_fall_cap *= cap_unit_convert;
     max_fall_cap *= cap_unit_convert;
 
-    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kFall,
-                           min_fall_cap);
-    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kFall,
-                           max_fall_cap);
+    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kFall, min_fall_cap);
+    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kFall, max_fall_cap);
   } else if (isEqual(attri_name, "fanout_length")) {
     if (attri_values.len == 2) {
       double fanout = liberty_convert_float_value(attri_0)->value;
       double length = liberty_convert_float_value(attri_1)->value;
-      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
-          static_cast<int>(fanout), length);
+      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(static_cast<int>(fanout), length);
     } else if (attri_values.len == 1) {
       // this case is fix cx55 issue, such as:
       // fanout_length("1", \
@@ -830,8 +821,7 @@ unsigned LibertyReader::visitComplexAttri(
       double fanout = std::atof(fanout_lenth_vec[0].c_str());
       double length = std::atof(fanout_lenth_vec[1].c_str());
 
-      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
-          static_cast<int>(fanout), length);
+      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(static_cast<int>(fanout), length);
     }
   } else if (isEqual(attri_name, "library_features")) {
     void* attri_value = nullptr;
@@ -847,8 +837,7 @@ unsigned LibertyReader::visitComplexAttri(
         liberty_free_float_value(feature_value);
       }
     }
-  } else if (startsWith(attri_name, "index") ||
-             isEqual(attri_name, "values")) {
+  } else if (startsWith(attri_name, "index") || isEqual(attri_name, "values")) {
     is_ok = visitAxisOrValues(attri);
   } else if (!Lib::isSilentOutput()) {
     static std::atomic<int32_t> unknown_attribute_count = 0;
@@ -865,7 +854,8 @@ unsigned LibertyReader::visitComplexAttri(
  * @param group
  * @return const char*
  */
-const char* LibertyReader::getGroupAttriName(LibertyGroupStmt* group) {
+const char* LibertyReader::getGroupAttriName(LibertyGroupStmt* group)
+{
   auto& attri_values = group->attri_values;
   if (!liberty_is_string_value(attri_values.data)) {
     ECCLOG.error(ecc::Loc::current(), "Liberty group attribute is not a string.");
@@ -881,12 +871,14 @@ const char* LibertyReader::getGroupAttriName(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitStmtInGroup(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitStmtInGroup(LibertyGroupStmt* group)
+{
   unsigned is_ok = 1;
 
   auto lib_stmts = group->stmts;
   void* lib_stmt;
-  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt) {
+  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt)
+  {
     // simple attri stmt first, we need set attribute.
     if (liberty_is_simple_attri_stmt(lib_stmt)) {
       auto* simple_lib_stmt = liberty_convert_simple_attribute_stmt(lib_stmt);
@@ -896,7 +888,8 @@ unsigned LibertyReader::visitStmtInGroup(LibertyGroupStmt* group) {
   }
 
   // visit complex/group data finally.
-  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt) {
+  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt)
+  {
     if (liberty_is_complex_attri_stmt(lib_stmt)) {
       auto* complex_lib_stmt = liberty_convert_complex_attribute_stmt(lib_stmt);
       is_ok &= visitComplexAttri(complex_lib_stmt);
@@ -912,8 +905,8 @@ unsigned LibertyReader::visitStmtInGroup(LibertyGroupStmt* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitSimpleAttri(
-    liberty_ast::LibSimpleAttribute* attri) {
+unsigned LibertyReader::visitSimpleAttri(liberty_ast::LibSimpleAttribute* attri)
+{
   if (!attri) {
     return 0;
   }
@@ -927,7 +920,8 @@ unsigned LibertyReader::visitSimpleAttri(
   return visitSimpleAttri(&simple_attri);
 }
 
-unsigned LibertyReader::visitVariable(liberty_ast::LibVarDecl* var_decl) {
+unsigned LibertyReader::visitVariable(liberty_ast::LibVarDecl* var_decl)
+{
   if (!var_decl) {
     return 0;
   }
@@ -942,8 +936,8 @@ unsigned LibertyReader::visitVariable(liberty_ast::LibVarDecl* var_decl) {
   return visitSimpleAttri(&simple_attri);
 }
 
-unsigned LibertyReader::visitAxisOrValues(
-    liberty_ast::LibComplexAttribute* attri) {
+unsigned LibertyReader::visitAxisOrValues(liberty_ast::LibComplexAttribute* attri)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const char* attri_name = attri->getName();
@@ -969,8 +963,8 @@ unsigned LibertyReader::visitAxisOrValues(
   return 1;
 }
 
-unsigned LibertyReader::visitComplexAttri(
-    liberty_ast::LibComplexAttribute* attri) {
+unsigned LibertyReader::visitComplexAttri(liberty_ast::LibComplexAttribute* attri)
+{
   const char* attri_name = attri->getName();
   LibBuilder* lib_builder = get_library_builder();
   auto* the_lib = lib_builder->get_lib();
@@ -978,12 +972,8 @@ unsigned LibertyReader::visitComplexAttri(
   auto* lib_port = lib_builder->get_port();
 
   auto* attri_values = attri->getAllValues();
-  liberty_ast::LibValue* attri_0 =
-      attri_values && attri_values->size() > 0 ? (*attri_values)[0].get()
-                                               : nullptr;
-  liberty_ast::LibValue* attri_1 =
-      attri_values && attri_values->size() > 1 ? (*attri_values)[1].get()
-                                               : nullptr;
+  liberty_ast::LibValue* attri_0 = attri_values && attri_values->size() > 0 ? (*attri_values)[0].get() : nullptr;
+  liberty_ast::LibValue* attri_1 = attri_values && attri_values->size() > 1 ? (*attri_values)[1].get() : nullptr;
 
   unsigned is_ok = 1;
 
@@ -993,11 +983,12 @@ unsigned LibertyReader::visitComplexAttri(
   }
 
   if (isEqual(attri_name, "capacitive_load_unit")) {
-    if ((getRawFloatValue(attri_0) == 1.0) &&
-        (isEqual(getRawStringValue(attri_1), "pf"))) {
+    if ((getRawFloatValue(attri_0) == 1.0) && (isNoCaseEqual(getRawStringValue(attri_1), "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
-    } else if (getRawFloatValue(attri_0) == 1.0 && isEqual(getRawStringValue(attri_1), "ff")) {
+    } else if (getRawFloatValue(attri_0) == 1.0 && isNoCaseEqual(getRawStringValue(attri_1), "ff")) {
       the_lib->set_cap_unit(CapacitiveUnit::kFF);
+    } else {
+      throw std::invalid_argument("unsupported Liberty capacitive_load_unit; supported units are (1,pf) and (1,ff)");
     }
   } else if (isEqual(attri_name, "rise_capacitance_range")) {
     double min_rise_cap = getRawFloatValue(attri_0);
@@ -1005,26 +996,21 @@ unsigned LibertyReader::visitComplexAttri(
     min_rise_cap *= cap_unit_convert;
     max_rise_cap *= cap_unit_convert;
 
-    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kRise,
-                           min_rise_cap);
-    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kRise,
-                           max_rise_cap);
+    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kRise, min_rise_cap);
+    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kRise, max_rise_cap);
   } else if (isEqual(attri_name, "fall_capacitance_range")) {
     double min_fall_cap = getRawFloatValue(attri_0);
     double max_fall_cap = getRawFloatValue(attri_1);
     min_fall_cap *= cap_unit_convert;
     max_fall_cap *= cap_unit_convert;
 
-    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kFall,
-                           min_fall_cap);
-    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kFall,
-                           max_fall_cap);
+    lib_port->set_port_cap(AnalysisMode::kMin, TransType::kFall, min_fall_cap);
+    lib_port->set_port_cap(AnalysisMode::kMax, TransType::kFall, max_fall_cap);
   } else if (isEqual(attri_name, "fanout_length")) {
     if (attri_values && attri_values->size() == 2) {
       double fanout = getRawFloatValue(attri_0);
       double length = getRawFloatValue(attri_1);
-      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
-          static_cast<int>(fanout), length);
+      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(static_cast<int>(fanout), length);
     } else if (attri_values && attri_values->size() == 1) {
       auto fanout_lenth_vec = splitString(getRawStringValue(attri_0), ',');
       if (fanout_lenth_vec.size() != 2) {
@@ -1034,8 +1020,7 @@ unsigned LibertyReader::visitComplexAttri(
       double fanout = std::atof(fanout_lenth_vec[0].c_str());
       double length = std::atof(fanout_lenth_vec[1].c_str());
 
-      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(
-          static_cast<int>(fanout), length);
+      dynamic_cast<LibWireLoad*>(lib_obj)->add_length_to_map(static_cast<int>(fanout), length);
     }
   } else if (isEqual(attri_name, "library_features")) {
     if (attri_values) {
@@ -1047,36 +1032,33 @@ unsigned LibertyReader::visitComplexAttri(
         }
       }
     }
-  } else if (startsWith(attri_name, "index") ||
-             isEqual(attri_name, "values")) {
+  } else if (startsWith(attri_name, "index") || isEqual(attri_name, "values")) {
     is_ok = visitAxisOrValues(attri);
   } else if (!Lib::isSilentOutput()) {
     static std::atomic<int32_t> unknown_attribute_count = 0;
     if (unknown_attribute_count.fetch_add(1, std::memory_order_relaxed) % 10 == 0) {
       ECCLOG.info(ecc::Loc::current(), "unkown attri name: ", attri_name, " in ", attri->getSourceFile(), " line no ",
-                   attri->getSourceLine());
+                  attri->getSourceLine());
     }
   }
   return is_ok;
 }
 
-unsigned LibertyReader::visitStmtInGroup(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitStmtInGroup(liberty_ast::LibGroup* group)
+{
   unsigned is_ok = 1;
 
   for (auto* lib_stmt : group->getStatements()) {
     if (lib_stmt->isSimpleAttr()) {
-      is_ok &= visitSimpleAttri(
-          static_cast<liberty_ast::LibSimpleAttribute*>(lib_stmt));
+      is_ok &= visitSimpleAttri(static_cast<liberty_ast::LibSimpleAttribute*>(lib_stmt));
     } else if (lib_stmt->isVariable()) {
-      is_ok &=
-          visitVariable(static_cast<liberty_ast::LibVarDecl*>(lib_stmt));
+      is_ok &= visitVariable(static_cast<liberty_ast::LibVarDecl*>(lib_stmt));
     }
   }
 
   for (auto* lib_stmt : group->getStatements()) {
     if (lib_stmt->isComplexAttr()) {
-      is_ok &= visitComplexAttri(
-          static_cast<liberty_ast::LibComplexAttribute*>(lib_stmt));
+      is_ok &= visitComplexAttri(static_cast<liberty_ast::LibComplexAttribute*>(lib_stmt));
     } else if (lib_stmt->isGroup()) {
       is_ok &= visitGroup(static_cast<liberty_ast::LibGroup*>(lib_stmt));
     }
@@ -1091,7 +1073,8 @@ unsigned LibertyReader::visitStmtInGroup(liberty_ast::LibGroup* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitLibrary(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitLibrary(LibertyGroupStmt* group)
+{
   const char* lib_name = getGroupAttriName(group);
 
   auto* library_builder = new LibBuilder(lib_name);
@@ -1111,7 +1094,8 @@ unsigned LibertyReader::visitLibrary(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitWireLoad(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitWireLoad(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
@@ -1132,13 +1116,13 @@ unsigned LibertyReader::visitWireLoad(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitLuTableTemplate(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitLuTableTemplate(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
   const char* template_name = getGroupAttriName(group);
-  auto lut_table_template =
-      std::make_unique<LibLutTableTemplate>(template_name);
+  auto lut_table_template = std::make_unique<LibLutTableTemplate>(template_name);
 
   lib_builder->set_port(nullptr);
   lib_builder->set_obj(lut_table_template.get());
@@ -1158,7 +1142,8 @@ unsigned LibertyReader::visitLuTableTemplate(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitType(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitType(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
@@ -1183,14 +1168,13 @@ unsigned LibertyReader::visitType(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitOutputCurrentTemplate(
-    LibertyGroupStmt* group) {
+unsigned LibertyReader::visitOutputCurrentTemplate(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
   const char* template_name = getGroupAttriName(group);
-  auto current_table_template =
-      std::make_unique<LibCurrentTemplate>(template_name);
+  auto current_table_template = std::make_unique<LibCurrentTemplate>(template_name);
 
   lib_builder->set_obj(current_table_template.get());
 
@@ -1209,7 +1193,8 @@ unsigned LibertyReader::visitOutputCurrentTemplate(
  * @param group
  * @return unsigned return 1 if success, else 0
  */
-unsigned LibertyReader::visitCell(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitCell(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
@@ -1237,13 +1222,15 @@ unsigned LibertyReader::visitCell(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitSequential(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitSequential(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* lib_cell = lib_builder->get_cell();
   LibSequential sequential;
   sequential.is_latch = isEqual(group->group_name, "latch");
   void* parameter;
-  FOREACH_LIBERTY_VEC_ELEM(&group->attri_values, void, parameter) {
+  FOREACH_LIBERTY_VEC_ELEM(&group->attri_values, void, parameter)
+  {
     // Ignore an unsupported definition as a whole; do not shift state names.
     if (!liberty_is_string_value(parameter)) {
       return 1;
@@ -1259,7 +1246,8 @@ unsigned LibertyReader::visitSequential(LibertyGroupStmt* group) {
     return 1;
   }
   void* statement;
-  FOREACH_LIBERTY_VEC_ELEM(&group->stmts, void, statement) {
+  FOREACH_LIBERTY_VEC_ELEM(&group->stmts, void, statement)
+  {
     if (liberty_is_simple_attri_stmt(statement)) {
       auto* attr = liberty_convert_simple_attribute_stmt(statement);
       void* attri_value = const_cast<void*>(attr->attri_value);
@@ -1281,12 +1269,12 @@ unsigned LibertyReader::visitSequential(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitLeakagePower(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitLeakagePower(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* lib_cell = lib_builder->get_cell();
 
-  lib_builder->set_own_pg_or_when_type(
-      LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower);
+  lib_builder->set_own_pg_or_when_type(LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower);
   auto leakage_power = std::make_unique<LibLeakagePower>();
   lib_builder->set_leakage_power(leakage_power.get());
   leakage_power->set_owner_cell(lib_cell);
@@ -1306,7 +1294,8 @@ unsigned LibertyReader::visitLeakagePower(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitBus(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitBus(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* cell = lib_builder->get_cell();
   LibPort* previous_port = lib_builder->get_port();
@@ -1334,7 +1323,8 @@ unsigned LibertyReader::visitBus(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned return 1 if success, else 0
  */
-unsigned LibertyReader::visitPin(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitPin(LibertyGroupStmt* group)
+{
   return visitPinGroup(group);
 }
 
@@ -1393,7 +1383,8 @@ unsigned LibertyReader::visitPinGroup(Group* group)
  * @param group
  * @return unsigned return 1 if success, else 0
  */
-unsigned LibertyReader::visitTiming(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitTiming(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibPort* lib_port = lib_builder->get_port();
   LibPortBus* lib_port_bus;
@@ -1405,8 +1396,7 @@ unsigned LibertyReader::visitTiming(LibertyGroupStmt* group) {
   auto lib_arc = std::make_unique<LibArc>();
   lib_builder->set_arc(lib_arc.get());
   lib_builder->set_table_model(nullptr);  // reset table model.
-  lib_port ? lib_arc->set_snk_port(lib_port->get_port_name())
-           : lib_arc->set_snk_port(lib_port_bus->get_port_name());
+  lib_port ? lib_arc->set_snk_port(lib_port->get_port_name()) : lib_arc->set_snk_port(lib_port_bus->get_port_name());
   lib_arc->set_owner_cell(lib_cell);
 
   unsigned is_ok = visitStmtInGroup(group);
@@ -1422,7 +1412,8 @@ unsigned LibertyReader::visitTiming(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibPort* lib_port = lib_builder->get_port();
   LibPortBus* lib_port_bus;
@@ -1431,8 +1422,7 @@ unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group) {
   }
   LibCell* lib_cell = lib_builder->get_cell();
   lib_builder->set_own_port_type(LibBuilder::LibertyOwnPortType::kPowerArc);
-  lib_builder->set_own_pg_or_when_type(
-      LibBuilder::LibertyOwnPgOrWhenType::kPowerArc);
+  lib_builder->set_own_pg_or_when_type(LibBuilder::LibertyOwnPgOrWhenType::kPowerArc);
   auto lib_power_arc = std::make_unique<LibPowerArc>();
   lib_builder->set_power_arc(lib_power_arc.get());
   lib_builder->set_table_model(nullptr);  // reset table model.
@@ -1454,7 +1444,8 @@ unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group) {
   void* lib_stmt;
 
   // for simple stmt, need first visit set powr arc attribute.
-  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt) {
+  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt)
+  {
     if (liberty_is_simple_attri_stmt(lib_stmt)) {
       // for the power arc attribute.
       auto* simple_lib_stmt = liberty_convert_simple_attribute_stmt(lib_stmt);
@@ -1464,7 +1455,8 @@ unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group) {
   }
 
   // visit group data finally.
-  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt) {
+  FOREACH_LIBERTY_VEC_ELEM(&lib_stmts, void, lib_stmt)
+  {
     if (liberty_is_group_stmt(lib_stmt)) {
       // for the power data.
       // group stmt.
@@ -1476,15 +1468,12 @@ unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group) {
 
   if (!lib_power_arc->isSrcPortEmpty()) {
     lib_cell->addLibertyPowerArc(std::move(lib_power_arc));
-  } else if (lib_power_arc->isSrcPortEmpty() &&
-             lib_power_arc->isSnkPortEmpty()) {
-    lib_cell->addLibertyPowerArc(std::move(
-        lib_power_arc));  // TODO(to taosimin), for s180, the internal power
-                          // calculation may be power arc src and snk is empty.
+  } else if (lib_power_arc->isSrcPortEmpty() && lib_power_arc->isSnkPortEmpty()) {
+    lib_cell->addLibertyPowerArc(std::move(lib_power_arc));  // TODO(to taosimin), for s180, the internal power
+                                                             // calculation may be power arc src and snk is empty.
   } else {
     auto& internal_power_info = lib_power_arc->get_internal_power_info();
-    lib_port ? lib_port->addInternalPower(std::move(internal_power_info))
-             : lib_port_bus->addInternalPower(std::move(internal_power_info));
+    lib_port ? lib_port->addInternalPower(std::move(internal_power_info)) : lib_port_bus->addInternalPower(std::move(internal_power_info));
     lib_builder->set_power_arc(nullptr);
   }
 
@@ -1497,7 +1486,8 @@ unsigned LibertyReader::visitInternalPower(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitCurrentTable(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitCurrentTable(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   auto* lib_model = lib_builder->get_table_model();
   auto* lib_delay_model = dynamic_cast<LibDelayTableModel*>(lib_model);
@@ -1521,7 +1511,8 @@ unsigned LibertyReader::visitCurrentTable(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitVector(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitVector(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const char* table_template_name = getGroupAttriName(group);
@@ -1531,8 +1522,7 @@ unsigned LibertyReader::visitVector(LibertyGroupStmt* group) {
     ECCLOG.error(ecc::Loc::current(), "not found template ", table_template_name);
   }
 
-  auto* current_table =
-      dynamic_cast<LibCCSTable*>(lib_builder->get_current_table());
+  auto* current_table = dynamic_cast<LibCCSTable*>(lib_builder->get_current_table());
   auto table_type = current_table->get_table_type();
 
   auto lib_table = std::make_unique<LibVectorTable>(table_type, lut_template);
@@ -1556,7 +1546,8 @@ unsigned LibertyReader::visitVector(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitTable(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitTable(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const auto* const table_name = group->group_name;
@@ -1604,7 +1595,8 @@ unsigned LibertyReader::visitTable(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitPowerTable(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitPowerTable(LibertyGroupStmt* group)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const auto* const table_name = group->group_name;
@@ -1649,21 +1641,21 @@ unsigned LibertyReader::visitPowerTable(LibertyGroupStmt* group) {
  * @param group
  * @return unsigned
  */
-unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
+unsigned LibertyReader::visitGroup(LibertyGroupStmt* group)
+{
   unsigned is_ok = 1;
   const char* group_name = group->group_name;
 
-  static const std::set<std::string> table_names = {
-      "cell_rise",       "cell_fall",       "rise_transition",
-      "fall_transition", "rise_constraint", "fall_constraint"};
+  static const std::set<std::string> table_names
+      = {"cell_rise",       "cell_fall",      "rise_transition", "fall_transition",  "rise_constraint",
+         "fall_constraint", "retaining_rise", "retaining_fall",  "retain_rise_slew", "retain_fall_slew"};
   static const std::set<std::string> power_table_names = {"rise_power", "fall_power"};
 
   if (isEqual(group_name, "library")) {
     is_ok = visitLibrary(group);
   } else if (isEqual(group_name, "wire_load")) {
     is_ok = visitWireLoad(group);
-  } else if (isEqual(group_name, "lu_table_template") ||
-             isEqual(group_name, "power_lut_template")) {
+  } else if (isEqual(group_name, "lu_table_template") || isEqual(group_name, "power_lut_template")) {
     is_ok = visitLuTableTemplate(group);
   } else if (isEqual(group_name, "type")) {
     is_ok = visitType(group);
@@ -1683,8 +1675,7 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
     is_ok = visitTiming(group);
   } else if (isEqual(group_name, "internal_power")) {
     is_ok = visitInternalPower(group);
-  } else if (isEqual(group_name, "output_current_rise") ||
-             isEqual(group_name, "output_current_fall")) {
+  } else if (isEqual(group_name, "output_current_rise") || isEqual(group_name, "output_current_fall")) {
     is_ok = visitCurrentTable(group);
   } else if (isEqual(group_name, "vector")) {
     is_ok = visitVector(group);
@@ -1702,7 +1693,8 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group) {
   return 1;
 }
 
-const char* LibertyReader::getGroupAttriName(liberty_ast::LibGroup* group) {
+const char* LibertyReader::getGroupAttriName(liberty_ast::LibGroup* group)
+{
   auto* attri_values = group->getParams();
   if (!attri_values || attri_values->empty() || !(*attri_values)[0]->isString()) {
     ECCLOG.error(ecc::Loc::current(), "Liberty group attribute is not a string.");
@@ -1711,7 +1703,8 @@ const char* LibertyReader::getGroupAttriName(liberty_ast::LibGroup* group) {
   return (*attri_values)[0]->asString();
 }
 
-unsigned LibertyReader::visitLibrary(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitLibrary(liberty_ast::LibGroup* group)
+{
   const char* lib_name = getGroupAttriName(group);
 
   auto* library_builder = new LibBuilder(lib_name);
@@ -1725,7 +1718,8 @@ unsigned LibertyReader::visitLibrary(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitWireLoad(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitWireLoad(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
@@ -1742,13 +1736,13 @@ unsigned LibertyReader::visitWireLoad(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitLuTableTemplate(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitLuTableTemplate(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
   const char* template_name = getGroupAttriName(group);
-  auto lut_table_template =
-      std::make_unique<LibLutTableTemplate>(template_name);
+  auto lut_table_template = std::make_unique<LibLutTableTemplate>(template_name);
 
   lib_builder->set_port(nullptr);
   lib_builder->set_obj(lut_table_template.get());
@@ -1762,7 +1756,8 @@ unsigned LibertyReader::visitLuTableTemplate(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitType(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitType(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
@@ -1781,14 +1776,13 @@ unsigned LibertyReader::visitType(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitOutputCurrentTemplate(
-    liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitOutputCurrentTemplate(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
   const char* template_name = getGroupAttriName(group);
-  auto current_table_template =
-      std::make_unique<LibCurrentTemplate>(template_name);
+  auto current_table_template = std::make_unique<LibCurrentTemplate>(template_name);
 
   lib_builder->set_obj(current_table_template.get());
 
@@ -1801,7 +1795,8 @@ unsigned LibertyReader::visitOutputCurrentTemplate(
   return is_ok;
 }
 
-unsigned LibertyReader::visitCell(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitCell(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibLibrary* lib = lib_builder->get_lib();
 
@@ -1823,7 +1818,8 @@ unsigned LibertyReader::visitCell(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitSequential(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitSequential(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* lib_cell = lib_builder->get_cell();
   LibSequential sequential;
@@ -1853,12 +1849,12 @@ unsigned LibertyReader::visitSequential(liberty_ast::LibGroup* group) {
   return 1;
 }
 
-unsigned LibertyReader::visitLeakagePower(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitLeakagePower(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* lib_cell = lib_builder->get_cell();
 
-  lib_builder->set_own_pg_or_when_type(
-      LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower);
+  lib_builder->set_own_pg_or_when_type(LibBuilder::LibertyOwnPgOrWhenType::kLibertyLeakagePower);
   auto leakage_power = std::make_unique<LibLeakagePower>();
   lib_builder->set_leakage_power(leakage_power.get());
   leakage_power->set_owner_cell(lib_cell);
@@ -1872,7 +1868,8 @@ unsigned LibertyReader::visitLeakagePower(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitBus(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitBus(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibCell* cell = lib_builder->get_cell();
   LibPort* previous_port = lib_builder->get_port();
@@ -1895,11 +1892,13 @@ unsigned LibertyReader::visitBus(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitPin(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitPin(liberty_ast::LibGroup* group)
+{
   return visitPinGroup(group);
 }
 
-unsigned LibertyReader::visitTiming(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitTiming(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibPort* lib_port = lib_builder->get_port();
   LibPortBus* lib_port_bus;
@@ -1911,8 +1910,7 @@ unsigned LibertyReader::visitTiming(liberty_ast::LibGroup* group) {
   auto lib_arc = std::make_unique<LibArc>();
   lib_builder->set_arc(lib_arc.get());
   lib_builder->set_table_model(nullptr);  // reset table model.
-  lib_port ? lib_arc->set_snk_port(lib_port->get_port_name())
-           : lib_arc->set_snk_port(lib_port_bus->get_port_name());
+  lib_port ? lib_arc->set_snk_port(lib_port->get_port_name()) : lib_arc->set_snk_port(lib_port_bus->get_port_name());
   lib_arc->set_owner_cell(lib_cell);
 
   unsigned is_ok = visitStmtInGroup(group);
@@ -1922,7 +1920,8 @@ unsigned LibertyReader::visitTiming(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitInternalPower(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitInternalPower(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   LibPort* lib_port = lib_builder->get_port();
   LibPortBus* lib_port_bus;
@@ -1931,8 +1930,7 @@ unsigned LibertyReader::visitInternalPower(liberty_ast::LibGroup* group) {
   }
   LibCell* lib_cell = lib_builder->get_cell();
   lib_builder->set_own_port_type(LibBuilder::LibertyOwnPortType::kPowerArc);
-  lib_builder->set_own_pg_or_when_type(
-      LibBuilder::LibertyOwnPgOrWhenType::kPowerArc);
+  lib_builder->set_own_pg_or_when_type(LibBuilder::LibertyOwnPgOrWhenType::kPowerArc);
   auto lib_power_arc = std::make_unique<LibPowerArc>();
   lib_builder->set_power_arc(lib_power_arc.get());
   lib_builder->set_table_model(nullptr);  // reset table model.
@@ -1953,11 +1951,9 @@ unsigned LibertyReader::visitInternalPower(liberty_ast::LibGroup* group) {
 
   for (auto* lib_stmt : group->getStatements()) {
     if (lib_stmt->isSimpleAttr()) {
-      is_ok &= visitSimpleAttri(
-          static_cast<liberty_ast::LibSimpleAttribute*>(lib_stmt));
+      is_ok &= visitSimpleAttri(static_cast<liberty_ast::LibSimpleAttribute*>(lib_stmt));
     } else if (lib_stmt->isVariable()) {
-      is_ok &=
-          visitVariable(static_cast<liberty_ast::LibVarDecl*>(lib_stmt));
+      is_ok &= visitVariable(static_cast<liberty_ast::LibVarDecl*>(lib_stmt));
     }
   }
 
@@ -1969,22 +1965,20 @@ unsigned LibertyReader::visitInternalPower(liberty_ast::LibGroup* group) {
 
   if (!lib_power_arc->isSrcPortEmpty()) {
     lib_cell->addLibertyPowerArc(std::move(lib_power_arc));
-  } else if (lib_power_arc->isSrcPortEmpty() &&
-             lib_power_arc->isSnkPortEmpty()) {
-    lib_cell->addLibertyPowerArc(std::move(
-        lib_power_arc));  // TODO(to taosimin), for s180, the internal power
-                          // calculation may be power arc src and snk is empty.
+  } else if (lib_power_arc->isSrcPortEmpty() && lib_power_arc->isSnkPortEmpty()) {
+    lib_cell->addLibertyPowerArc(std::move(lib_power_arc));  // TODO(to taosimin), for s180, the internal power
+                                                             // calculation may be power arc src and snk is empty.
   } else {
     auto& internal_power_info = lib_power_arc->get_internal_power_info();
-    lib_port ? lib_port->addInternalPower(std::move(internal_power_info))
-             : lib_port_bus->addInternalPower(std::move(internal_power_info));
+    lib_port ? lib_port->addInternalPower(std::move(internal_power_info)) : lib_port_bus->addInternalPower(std::move(internal_power_info));
     lib_builder->set_power_arc(nullptr);
   }
 
   return is_ok;
 }
 
-unsigned LibertyReader::visitCurrentTable(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitCurrentTable(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
   auto* lib_model = lib_builder->get_table_model();
   auto* lib_delay_model = dynamic_cast<LibDelayTableModel*>(lib_model);
@@ -2002,7 +1996,8 @@ unsigned LibertyReader::visitCurrentTable(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitVector(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitVector(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const char* table_template_name = getGroupAttriName(group);
@@ -2012,8 +2007,7 @@ unsigned LibertyReader::visitVector(liberty_ast::LibGroup* group) {
     ECCLOG.error(ecc::Loc::current(), "not found template ", table_template_name);
   }
 
-  auto* current_table =
-      dynamic_cast<LibCCSTable*>(lib_builder->get_current_table());
+  auto* current_table = dynamic_cast<LibCCSTable*>(lib_builder->get_current_table());
   auto table_type = current_table->get_table_type();
 
   auto lib_table = std::make_unique<LibVectorTable>(table_type, lut_template);
@@ -2031,7 +2025,8 @@ unsigned LibertyReader::visitVector(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitTable(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitTable(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const auto* const table_name = group->getGroupType();
@@ -2071,7 +2066,8 @@ unsigned LibertyReader::visitTable(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitPowerTable(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitPowerTable(liberty_ast::LibGroup* group)
+{
   LibBuilder* lib_builder = get_library_builder();
 
   const auto* const table_name = group->getGroupType();
@@ -2106,21 +2102,21 @@ unsigned LibertyReader::visitPowerTable(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
+unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group)
+{
   unsigned is_ok = 1;
   const char* group_name = group->getGroupType();
 
-  static const std::set<std::string> table_names = {
-      "cell_rise",       "cell_fall",       "rise_transition",
-      "fall_transition", "rise_constraint", "fall_constraint"};
+  static const std::set<std::string> table_names
+      = {"cell_rise",       "cell_fall",      "rise_transition", "fall_transition",  "rise_constraint",
+         "fall_constraint", "retaining_rise", "retaining_fall",  "retain_rise_slew", "retain_fall_slew"};
   static const std::set<std::string> power_table_names = {"rise_power", "fall_power"};
 
   if (isEqual(group_name, "library")) {
     is_ok = visitLibrary(group);
   } else if (isEqual(group_name, "wire_load")) {
     is_ok = visitWireLoad(group);
-  } else if (isEqual(group_name, "lu_table_template") ||
-             isEqual(group_name, "power_lut_template")) {
+  } else if (isEqual(group_name, "lu_table_template") || isEqual(group_name, "power_lut_template")) {
     is_ok = visitLuTableTemplate(group);
   } else if (isEqual(group_name, "type")) {
     is_ok = visitType(group);
@@ -2144,8 +2140,8 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
         return value != nullptr && value->isString() ? value->asString() : "";
       };
       cell->addLatch(LibLatch{group->getFirstParamName() == nullptr ? "" : group->getFirstParamName(),
-                              group->getSecondParamName() == nullptr ? "" : group->getSecondParamName(),
-                              attribute("data_in"), attribute("enable")});
+                              group->getSecondParamName() == nullptr ? "" : group->getSecondParamName(), attribute("data_in"),
+                              attribute("enable")});
     }
   } else if (isEqual(group_name, "leakage_power")) {
     is_ok = visitLeakagePower(group);
@@ -2157,8 +2153,7 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
     is_ok = visitTiming(group);
   } else if (isEqual(group_name, "internal_power")) {
     is_ok = visitInternalPower(group);
-  } else if (isEqual(group_name, "output_current_rise") ||
-             isEqual(group_name, "output_current_fall")) {
+  } else if (isEqual(group_name, "output_current_rise") || isEqual(group_name, "output_current_fall")) {
     is_ok = visitCurrentTable(group);
   } else if (isEqual(group_name, "vector")) {
     is_ok = visitVector(group);
@@ -2176,7 +2171,8 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group) {
   return is_ok;
 }
 
-unsigned LibertyReader::readLib() {
+unsigned LibertyReader::readLib()
+{
   if (!Lib::isSilentOutput()) {
     ECCLOG.info(ecc::Loc::current(), "load liberty file ", _file_name);
   }
@@ -2215,7 +2211,8 @@ unsigned LibertyReader::readLib() {
  *
  * @return unsigned
  */
-unsigned LibertyReader::linkLib() {
+unsigned LibertyReader::linkLib()
+{
   if (!Lib::isSilentOutput()) {
     ECCLOG.info(ecc::Loc::current(), "link liberty file ", _file_name, " start.");
   }

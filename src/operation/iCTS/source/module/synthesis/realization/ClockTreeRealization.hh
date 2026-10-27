@@ -28,7 +28,13 @@
 #include <string>
 #include <vector>
 
-#include "design/Clock.hh"
+namespace icts {
+struct ClockPropagationArc;
+}
+
+namespace icts {
+class Clock;
+}
 
 namespace icts {
 

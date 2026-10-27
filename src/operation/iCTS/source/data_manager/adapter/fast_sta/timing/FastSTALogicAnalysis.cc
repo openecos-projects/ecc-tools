@@ -26,13 +26,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <compare>
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <queue>
-#include <ranges>
 #include <set>
 #include <string>
 #include <tuple>
@@ -41,13 +42,14 @@
 #include <utility>
 #include <vector>
 
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockState.hh"
 #include "FastSTAConstraints.hh"
 #include "FastSTAEvents.hh"
 #include "FastSTALiberty.hh"
-#include "FastSTALibertyModel.hh"
 #include "FastSTATiming.hh"
 #include "FastSTATimingLookup.hh"
+#include "TimingConstraints.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
 #include "timing/FastSTAClockTiming.hh"
 

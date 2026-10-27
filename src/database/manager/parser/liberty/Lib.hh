@@ -35,8 +35,8 @@
 #include <utility>
 #include <vector>
 
-#include "LibParserCpp.hh"
 #include "Config.hh"
+#include "LibParserCpp.hh"
 #include "Type.hh"
 #include "utility/logger/Logger.hpp"
 
@@ -145,7 +145,11 @@ class LibTable : public LibObject
     kCellRiseSigma = 10,
     kCellFallSigma = 12,
     kRiseTransitionSigma = 14,
-    kFallTransitionSigma = 16
+    kFallTransitionSigma = 16,
+    kRetainingRise = 18,
+    kRetainingFall = 19,
+    kRetainRiseSlew = 20,
+    kRetainFallSlew = 21
   };
 
   enum class CornerType : int
@@ -194,7 +198,7 @@ class LibTable : public LibObject
   // Liberty LUT templates and tables use zero through three axes in the
   // supported models. Keep arbitrary-axis compatibility through the vector's
   // heap spill path without reserving 64 pointers in every object.
-  std::vector<std::unique_ptr<LibAxis>> _axes;  //!< May be zero, one, two, three axes.
+  std::vector<std::unique_ptr<LibAxis>> _axes;               //!< May be zero, one, two, three axes.
   std::vector<std::unique_ptr<LibAttrValue>> _table_values;  //!< The axis values.
   TableType _table_type;                                     //!< The table type.
 
@@ -393,6 +397,10 @@ class LibDelayTableModel final : public LibTableModel
   unsigned addTable(std::unique_ptr<LibTable>&& table)
   {
     auto table_type = table->get_table_type();
+    if (table_type >= LibTable::TableType::kRetainingRise && table_type <= LibTable::TableType::kRetainFallSlew) {
+      _retaining_tables.at(static_cast<int>(table_type) - static_cast<int>(LibTable::TableType::kRetainingRise)) = std::move(table);
+      return 1;
+    }
     int index = CAST_TYPE_TO_INDEX(table_type);
     int shift_index = calcShiftIndex(table->get_corner_type());
     index += shift_index;
@@ -403,6 +411,11 @@ class LibDelayTableModel final : public LibTableModel
 
   LibTable* getTable(int index) override { return _tables[index].get(); }
   auto& get_tables() { return _tables; }
+
+  LibTable* retainingTable(LibTable::TableType type)
+  {
+    return _retaining_tables.at(static_cast<int>(type) - static_cast<int>(LibTable::TableType::kRetainingRise)).get();
+  }
 
   unsigned addCurrentTable(std::unique_ptr<LibCCSTable>&& table)
   {
@@ -422,6 +435,7 @@ class LibDelayTableModel final : public LibTableModel
  private:
   std::array<std::unique_ptr<LibTable>, kTableNum> _tables;  // NLDM table,include cell rise/cell fall/rise transition/fall transition,
                                                              // and  eight sigma table(rise/fall, early/late, delay/slew ).
+  std::array<std::unique_ptr<LibTable>, 4> _retaining_tables;
   std::array<std::unique_ptr<LibCCSTable>,
              kCurrentTableNum>  // Output current rise/fall.
       _current_tables;
@@ -598,8 +612,19 @@ class LibPort : public LibObject
   void set_port_slew_limit(AnalysisMode mode, double slew_limit);
   std::optional<double> get_port_slew_limit(AnalysisMode mode);
 
-  void set_func_expr(::LibertyExpr* lib_expr) { _func_expr = lib_expr; }
-  ::LibertyExpr* get_func_expr() { return _func_expr; }
+  void set_min_period(double value) { _min_period = value; }
+  std::optional<double> get_min_period() const { return _min_period; }
+  void set_min_pulse_width(TransType edge, double value) { _min_pulse_width[edge == TransType::kRise ? 0 : 1] = value; }
+  std::optional<double> get_min_pulse_width(TransType edge) const { return _min_pulse_width[edge == TransType::kRise ? 0 : 1]; }
+
+  // Takes ownership; bus bits share the tree through inheritBusAttributes.
+  void set_func_expr(::LibertyExpr* lib_expr)
+  {
+    if (_func_expr.get() != lib_expr) {
+      _func_expr = std::shared_ptr<::LibertyExpr>(lib_expr, liberty_free_expr);
+    }
+  }
+  ::LibertyExpr* get_func_expr() { return _func_expr.get(); }
 
   void set_func_expr_str(const char* func_expr_str) { _func_expr_str = func_expr_str; }
   auto& get_func_expr_str() { return _func_expr_str; }
@@ -647,15 +672,17 @@ class LibPort : public LibObject
   bool _clock_gate_test_pin = false;
   bool _clock_gate_out_pin = false;
   bool _is_clock = false;  //!< The explicit clock flag for emitted pins.
-  ::LibertyExpr* _func_expr = nullptr;
+  std::shared_ptr<::LibertyExpr> _func_expr;
   std::string _func_expr_str;  //!< store func expr string for debug.
   std::string _three_state_expr_str;
-  double _port_cap = 0.0;      //!< The input pin corresponding to the port has capacitance.
+  double _port_cap = 0.0;  //!< The input pin corresponding to the port has capacitance.
   bool _has_port_cap = false;
   std::array<std::optional<double>, MODE_TRANS_SPLIT> _port_caps{};  //!< May be port cap split max rise, max fall, min rise,
                                                                      //!< min fall.
   std::array<std::optional<double>, MODE_SPLIT> _cap_limits{};
   std::array<std::optional<double>, MODE_SPLIT> _slew_limits{};
+  std::optional<double> _min_period;                        // ns
+  std::array<std::optional<double>, 2> _min_pulse_width{};  // high/low, ns
 
   std::optional<double> _fanout_load;
   std::optional<double> _max_fanout;
@@ -886,7 +913,7 @@ class LibArc : public LibObject
 
   unsigned isNegativeArc() { return _timing_sense == TimingSense::kNegativeUnate; }
 
-  unsigned isNonUnateArc() { return _timing_sense == TimingSense::kNonUnate;}
+  unsigned isNonUnateArc() { return _timing_sense == TimingSense::kNonUnate; }
 
   unsigned isSetupArc() { return (_timing_type == TimingType::kSetupRising) || (_timing_type == TimingType::kSetupFalling); }
 
@@ -927,8 +954,7 @@ class LibArc : public LibObject
   // - delay arc: first arg is slew in ns, second arg is load in library cap unit
   // - check arc: first arg is related-pin slew in ns, second arg is
   //   constrained-pin slew in liberty table time unit
-  double getDelayOrConstrainCheckNs(TransType trans_type, double slew,
-                                    double load_or_constrain_slew);
+  double getDelayOrConstrainCheckNs(TransType trans_type, double slew, double load_or_constrain_slew);
   double getDelaySigma(AnalysisMode mode, TransType trans_type, double slew, double load_or_constrain_slew);
   double getSlewNs(TransType trans_type, double slew, double load);
   double getSlewSigma(AnalysisMode mode, TransType trans_type, double slew, double load);
@@ -975,7 +1001,8 @@ class LibArcSet
   LibArc* front() { return _arcs.front().get(); }
   auto& get_arcs() { return _arcs; }
 
-  std::vector<double> getDelayOrConstrainCheckNs(TransType input_trans_type, TransType output_trans_type, double slew, double load_or_constrain_slew);
+  std::vector<double> getDelayOrConstrainCheckNs(TransType input_trans_type, TransType output_trans_type, double slew,
+                                                 double load_or_constrain_slew);
   std::vector<double> getSlewNs(TransType input_trans_type, TransType output_trans_type, double slew, double load);
   bool isMatchTimingType(TransType trans_type);
 
@@ -1207,7 +1234,7 @@ class LibCell : public LibObject
   std::string _cell_name;                         //!< The liberty cell name.
   double _cell_area;                              //!< The liberty cell area.
   double _cell_leakage_power = 0.0;               //!< The cell leakage power of the cell.
-  bool _has_cell_leakage_power = false;          //!< Distinguishes an explicit zero from a missing attribute.
+  bool _has_cell_leakage_power = false;           //!< Distinguishes an explicit zero from a missing attribute.
   std::string _clock_gating_integrated_cell;      //!< The clock gate cell.
   bool _is_clock_gating_integrated_cell = false;  //!< The flag of the clock gate cell.
   std::vector<LibLatch> _latches;
@@ -1240,7 +1267,7 @@ class LibCell : public LibObject
  * }
  *
  */
-#define FOREACH_CELL_PORT(cell, port)                                                               \
+#define FOREACH_CELL_PORT(cell, port)                                                              \
   for (std::vector<std::unique_ptr<idb::LibPort>>::iterator iter = cell->get_cell_ports().begin(); \
        (iter != cell->get_cell_ports().end()) ? port = (iter++->get()), true : false;)
 
@@ -1280,7 +1307,7 @@ class LibCell : public LibObject
  *    do_something_for_power_arc_set();
  * }
  */
-#define FOREACH_POWER_ARC_SET(cell, power_arc_set)                                                              \
+#define FOREACH_POWER_ARC_SET(cell, power_arc_set)                                                             \
   for (std::vector<std::unique_ptr<idb::LibPowerArcSet>>::iterator iter = cell->get_cell_power_arcs().begin(); \
        iter != cell->get_cell_power_arcs().end() ? power_arc_set = iter++->get(), true : false;)
 
@@ -1361,8 +1388,9 @@ class LibLutTableTemplate : public LibObject
 
   const char* get_template_name() { return _template_name.c_str(); }
 
-  void set_template_variable1(const char* template_variable1) override {
-    if(!_str2var.contains(template_variable1)){
+  void set_template_variable1(const char* template_variable1) override
+  {
+    if (!_str2var.contains(template_variable1)) {
       ECCLOG.warn(ecc::Loc::current(), "not contain the template variable ");
     }
     // DLOG_FATAL_IF(!_str2var.contains(template_variable1))
@@ -1606,15 +1634,9 @@ class LibLibrary : public LibObject
     return 0.0;
   }
 
-  void set_power_unit_mw_scale(double power_unit_mw_scale)
-  {
-    _power_unit_mw_scale = power_unit_mw_scale;
-  }
+  void set_power_unit_mw_scale(double power_unit_mw_scale) { _power_unit_mw_scale = power_unit_mw_scale; }
   double get_power_unit_mw_scale() const { return _power_unit_mw_scale; }
-  double convert_power_unit_to_mw(double src_value) const
-  {
-    return src_value * _power_unit_mw_scale;
-  }
+  double convert_power_unit_to_mw(double src_value) const { return src_value * _power_unit_mw_scale; }
 
   std::vector<std::unique_ptr<LibCell>>& get_cells() { return _cells; }
   auto& get_lut_templates() { return _lut_templates; }
@@ -1635,14 +1657,8 @@ class LibLibrary : public LibObject
   void set_nom_process(double nom_process) { _nom_process = nom_process; }
   const std::optional<double>& get_nom_process() const { return _nom_process; }
 
-  void set_nom_temperature(double nom_temperature)
-  {
-    _nom_temperature = nom_temperature;
-  }
-  const std::optional<double>& get_nom_temperature() const
-  {
-    return _nom_temperature;
-  }
+  void set_nom_temperature(double nom_temperature) { _nom_temperature = nom_temperature; }
+  const std::optional<double>& get_nom_temperature() const { return _nom_temperature; }
 
   void set_slew_lower_threshold_pct_rise(double slew_lower_threshold_pct_rise)
   {
@@ -1708,7 +1724,7 @@ class LibLibrary : public LibObject
   std::map<std::string, LibCell*> _str2cell;
 
   std::vector<std::unique_ptr<LibLutTableTemplate>> _lut_templates;  //!< The timing table lut template, preserve the
-                                                                                   //!< template order.
+                                                                     //!< template order.
 
   std::map<std::string, LibLutTableTemplate*> _str2template;
 

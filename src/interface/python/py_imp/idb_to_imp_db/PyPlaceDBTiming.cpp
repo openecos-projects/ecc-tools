@@ -1,5 +1,3 @@
-#include "PyPlaceDB.h"
-
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -9,40 +7,44 @@
 #include <utility>
 #include <vector>
 
-#include "IdbLayer.h"
-#include "IdbLayout.h"
 #include "IdbCellMaster.h"
 #include "IdbDesign.h"
 #include "IdbInstance.h"
-#include "TimingExportAdapter.hpp"
+#include "IdbLayer.h"
+#include "IdbLayout.h"
+#include "PyPlaceDB.h"
+#include "TimingData.hpp"
 
 namespace python_interface {
 namespace {
 
-using ista::TimingGraphArcSnapshot;
-using ista::TimingLibArcSnapshot;
-using ista::TimingLibCellSnapshot;
-using ista::TimingLibPortSnapshot;
-using ista::TimingLutSnapshot;
-using ista::TimingNetArcSnapshot;
-using ista::TimingPinSnapshot;
-using ista::TimingSnapshot;
+using ista::LibertyArcData;
+using ista::LibertyCellData;
+using ista::LibertyPortData;
+using ista::LibertyTableData;
+using ista::TimingData;
+using ista::TimingGraphArcData;
+using ista::TimingNetArcData;
+using ista::TimingPinData;
 
 template <typename T>
 void appendValues(pybind11::list& target, const std::vector<T>& values)
 {
-  for (const T& value : values) target.append(value);
+  for (const T& value : values)
+    target.append(value);
 }
 
-void appendLut(pybind11::list& values, pybind11::list& axis1, pybind11::list& axis2, pybind11::list& dims, const TimingLutSnapshot& lut)
+void appendLut(pybind11::list& values, pybind11::list& axis1, pybind11::list& axis2, pybind11::list& dims, const LibertyTableData& lut)
 {
   pybind11::list value_row;
   appendValues(value_row, lut.values);
   values.append(value_row);
   pybind11::list first_axis;
   pybind11::list second_axis;
-  if (!lut.axes.empty()) appendValues(first_axis, lut.axes[0]);
-  if (lut.axes.size() > 1) appendValues(second_axis, lut.axes[1]);
+  if (!lut.axes.empty())
+    appendValues(first_axis, lut.axes[0]);
+  if (lut.axes.size() > 1)
+    appendValues(second_axis, lut.axes[1]);
   axis1.append(first_axis);
   axis2.append(second_axis);
   dims.append(pybind11::make_tuple(lut.axes.empty() ? 0 : lut.axes[0].size(), lut.axes.size() > 1 ? lut.axes[1].size() : 0));
@@ -62,7 +64,7 @@ void appendQualification(pybind11::list& valid, pybind11::list& reasons, const i
 
 }  // namespace
 
-void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db)
+void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
 {
   timing_schema_version = snapshot.schema_version;
   timing_source_time_unit_ps = snapshot.time_unit_ps;
@@ -95,15 +97,18 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       if (!signal_rc_layer.empty() && layer->get_name() != signal_rc_layer)
         continue;
       auto* routing_layer = dynamic_cast<idb::IdbLayerRouting*>(layer);
-      if (routing_layer == nullptr || micron_dbu <= 0.0 || routing_layer->get_width() <= 0) continue;
+      if (routing_layer == nullptr || micron_dbu <= 0.0 || routing_layer->get_width() <= 0)
+        continue;
       const double width_um = static_cast<double>(routing_layer->get_width()) / micron_dbu;
       const double capacitance = routing_layer->get_capacitance();
       const double edge_capacitance = routing_layer->get_edge_capacitance();
       const double resistance = routing_layer->get_resistance();
-      if (width_um <= 0.0 || capacitance < 0.0 || resistance < 0.0) continue;
+      if (width_um <= 0.0 || capacitance < 0.0 || resistance < 0.0)
+        continue;
       const double candidate_c_unit = capacitance * width_um + std::max(0.0, edge_capacitance) * 2.0;
       const double candidate_r_unit = resistance / width_um;
-      if (!std::isfinite(candidate_c_unit) || !std::isfinite(candidate_r_unit) || candidate_c_unit <= 0.0 || candidate_r_unit <= 0.0) continue;
+      if (!std::isfinite(candidate_c_unit) || !std::isfinite(candidate_r_unit) || candidate_c_unit <= 0.0 || candidate_r_unit <= 0.0)
+        continue;
       c_unit = candidate_c_unit;
       r_unit = candidate_r_unit;
       rc_provenance = "LEF routing layer " + routing_layer->get_name() + " (pF/um, ohm/um)";
@@ -127,8 +132,9 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
 
   std::unordered_map<std::string, int32_t> clock_pin_indices;
 
-  std::unordered_map<std::string, TimingPinSnapshot> timing_pins;
-  for (const TimingPinSnapshot& pin : snapshot.pins) timing_pins.emplace(pin.name, pin);
+  std::unordered_map<std::string, TimingPinData> timing_pins;
+  for (const TimingPinData& pin : snapshot.pins)
+    timing_pins.emplace(pin.name, pin);
   for (const std::string& name : snapshot.clock_pins) {
     const int32_t id = mapId(pin_ids, name);
     if (id >= 0) {
@@ -136,7 +142,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       clock_pins.append(id);
       clk_pin_names.append(name);
       const auto pin_it = timing_pins.find(name);
-      const TimingPinSnapshot& pin = pin_it == timing_pins.end() ? TimingPinSnapshot{} : pin_it->second;
+      const TimingPinData& pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
       clk_pin_r_aat.append(pin.max_rise_aat_ps);
       clk_pin_f_aat.append(pin.max_fall_aat_ps);
       clk_pin_rtran.append(pin.max_rise_slew_ps);
@@ -145,7 +151,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   }
   for (const std::string& name : snapshot.ff_output_pins) {
     const int32_t id = mapId(pin_ids, name);
-    if (id >= 0) FF_ids.append(id);
+    if (id >= 0)
+      FF_ids.append(id);
   }
 
   for (const std::string& name : snapshot.start_points) {
@@ -156,7 +163,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     }
     start_points.append(id);
     const auto pin_it = timing_pins.find(name);
-    const TimingPinSnapshot pin = pin_it == timing_pins.end() ? TimingPinSnapshot{} : pin_it->second;
+    const TimingPinData pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
     inrdelays.append(pin.max_rise_aat_ps);
     infdelays.append(pin.max_fall_aat_ps);
     inrtrans.append(pin.max_rise_slew_ps);
@@ -170,7 +177,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     }
     end_points.append(id);
     const auto pin_it = timing_pins.find(name);
-    const TimingPinSnapshot pin = pin_it == timing_pins.end() ? TimingPinSnapshot{} : pin_it->second;
+    const TimingPinData pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
     outcaps.append(0.0);
     appendQualification(endpoints_max_valid, endpoints_max_reason, pin.max_qualification);
     // Python subtracts setup at the current data slew. Restore the capture
@@ -197,9 +204,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   }
 
   std::unordered_map<std::string, int32_t> cell_ids;
-  auto* physical_masters = db == nullptr || db->get_idb_layout() == nullptr
-                               ? nullptr : db->get_idb_layout()->get_cell_master_list();
-  for (const TimingLibCellSnapshot& cell : snapshot.lib_cells) {
+  auto* physical_masters = db == nullptr || db->get_idb_layout() == nullptr ? nullptr : db->get_idb_layout()->get_cell_master_list();
+  for (const LibertyCellData& cell : snapshot.lib_cells) {
     const int32_t id = static_cast<int32_t>(cell_ids.size());
     cell_ids.emplace(cell.name, id);
     flat_libcell_names.append(cell.name);
@@ -215,7 +221,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       main_id_2_cell_id_start.append(index);
     }
   }
-  if (!snapshot.lib_cells.empty()) main_id_2_cell_id_start.append(snapshot.lib_cells.size());
+  if (!snapshot.lib_cells.empty())
+    main_id_2_cell_id_start.append(snapshot.lib_cells.size());
   int32_t sizeable_families = 0;
   for (std::size_t main_id = 0; main_id + 1 < main_id_2_cell_id_start.size(); ++main_id) {
     const auto begin = main_id_2_cell_id_start[main_id].cast<std::size_t>();
@@ -233,24 +240,24 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
           || (row_height != 0 && master->get_height() != row_height)) {
         physical_family = false;
       }
-      if (master != nullptr) row_height = master->get_height();
+      if (master != nullptr)
+        row_height = master->get_height();
       size_limit = std::max(size_limit, cell.size_index);
       vt_limit = std::max(vt_limit, cell.vt_index + 1);
     }
     const bool sizeable = physical_family && end - begin > 1 && (size_limit > 1 || vt_limit > 1);
     main_id_is_sizeable.append(sizeable);
-    if (physical_family && buffer_family) buffer_main_type_candidate_indices.append(main_id);
+    if (physical_family && buffer_family)
+      buffer_main_type_candidate_indices.append(main_id);
     sizeable_families += sizeable;
-    flat_libcell_main_id2size_vt_limit.append(
-        pybind11::make_tuple(snapshot.lib_cells[begin].name, size_limit, vt_limit));
+    flat_libcell_main_id2size_vt_limit.append(pybind11::make_tuple(snapshot.lib_cells[begin].name, size_limit, vt_limit));
   }
   if (buffer_main_type_candidate_indices.size() == 1) {
     buffer_main_type_index = buffer_main_type_candidate_indices[0].cast<int32_t>();
     buffer_main_type_status = "ok";
   } else {
-    buffer_main_type_status = buffer_main_type_candidate_indices.empty()
-                                  ? "unsupported_no_buffer_family"
-                                  : "unsupported_multiple_buffer_families";
+    buffer_main_type_status
+        = buffer_main_type_candidate_indices.empty() ? "unsupported_no_buffer_family" : "unsupported_multiple_buffer_families";
   }
   timing_diagnostics.append("Liberty families: " + std::to_string(main_id_is_sizeable.size())
                             + ", physically sizeable: " + std::to_string(sizeable_families));
@@ -258,23 +265,26 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   std::unordered_map<std::string, int32_t> instance_cells;
   if (db != nullptr && db->get_idb_design() != nullptr) {
     for (idb::IdbInstance* instance : db->get_idb_design()->get_instance_list()->get_instance_list()) {
-      if (instance == nullptr || instance->get_cell_master() == nullptr) continue;
+      if (instance == nullptr || instance->get_cell_master() == nullptr)
+        continue;
       const int32_t node_id = mapId(node_ids, instance->get_name());
       const int32_t cell_id = mapId(cell_ids, instance->get_cell_master()->get_name());
-      if (node_id < 0 || cell_id < 0) continue;
+      if (node_id < 0 || cell_id < 0)
+        continue;
       const int32_t main_id = snapshot.lib_cells[cell_id].main_id;
       inst_main_id[static_cast<std::size_t>(node_id)] = main_id;
-      inst_libcell_offset[static_cast<std::size_t>(node_id)]
-          = cell_id - main_id_2_cell_id_start[main_id].cast<int32_t>();
+      inst_libcell_offset[static_cast<std::size_t>(node_id)] = cell_id - main_id_2_cell_id_start[main_id].cast<int32_t>();
       instance_cells.emplace(instance->get_name(), cell_id);
     }
   }
   for (std::size_t pin_id = 0; pin_id < pin_names.size(); ++pin_id) {
     const std::string name = pin_names[pin_id].cast<std::string>();
     const auto timing_pin = timing_pins.find(name);
-    if (timing_pin == timing_pins.end()) continue;
+    if (timing_pin == timing_pins.end())
+      continue;
     const auto instance = instance_cells.find(timing_pin->second.instance_name);
-    if (instance == instance_cells.end()) continue;
+    if (instance == instance_cells.end())
+      continue;
     const auto& ports = snapshot.lib_cells[instance->second].ports;
     const std::string port_name = name.substr(name.rfind(':') + 1);
     for (std::size_t offset = 0; offset < ports.size(); ++offset) {
@@ -290,9 +300,9 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   int32_t flat_arc_id = 0;
   int32_t flat_pin_id = 0;
   int32_t missing_physical_pin_shapes = 0;
-  for (const TimingLibCellSnapshot& cell : snapshot.lib_cells) {
+  for (const LibertyCellData& cell : snapshot.lib_cells) {
     auto* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
-    for (const TimingLibPortSnapshot& port : cell.ports) {
+    for (const LibertyPortData& port : cell.ports) {
       auto* term = master == nullptr ? nullptr : master->findTerm(port.name);
       auto* box = term == nullptr || term->get_port_number() == 0 ? nullptr : term->get_bounding_box();
       flat_lib_pin_offset_x.append(box == nullptr ? 0 : (box->get_low_x() + box->get_high_x()) / 2);
@@ -306,28 +316,34 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       ++flat_pin_id;
     }
     int32_t local_arc_id = 0;
-    for (const TimingLibArcSnapshot& arc : cell.arcs) {
-      flat_libarc_info.append(pybind11::make_tuple(arc.source_port, arc.sink_port, cell_ids[cell.name], local_arc_id, arc.sense, arc.trigger));
-      appendLut(f_delay_flat_luts_values, f_delay_flat_luts_trans_table, f_delay_flat_luts_cap_table, f_delay_flat_luts_dim, arc.fall_delay);
-      appendLut(r_delay_flat_luts_values, r_delay_flat_luts_trans_table, r_delay_flat_luts_cap_table, r_delay_flat_luts_dim, arc.rise_delay);
+    for (const LibertyArcData& arc : cell.arcs) {
+      flat_libarc_info.append(
+          pybind11::make_tuple(arc.source_port, arc.sink_port, cell_ids[cell.name], local_arc_id, arc.sense, arc.trigger));
+      appendLut(f_delay_flat_luts_values, f_delay_flat_luts_trans_table, f_delay_flat_luts_cap_table, f_delay_flat_luts_dim,
+                arc.fall_delay);
+      appendLut(r_delay_flat_luts_values, r_delay_flat_luts_trans_table, r_delay_flat_luts_cap_table, r_delay_flat_luts_dim,
+                arc.rise_delay);
       appendLut(f_trans_flat_luts_values, f_trans_flat_luts_trans_table, f_trans_flat_luts_cap_table, f_trans_flat_luts_dim, arc.fall_slew);
       appendLut(r_trans_flat_luts_values, r_trans_flat_luts_trans_table, r_trans_flat_luts_cap_table, r_trans_flat_luts_dim, arc.rise_slew);
-      appendLut(f_check_flat_luts_values, f_check_flat_luts_trans_table, f_check_flat_luts_cap_table, f_check_flat_luts_dim, arc.fall_check);
-      appendLut(r_check_flat_luts_values, r_check_flat_luts_trans_table, r_check_flat_luts_cap_table, r_check_flat_luts_dim, arc.rise_check);
+      appendLut(f_check_flat_luts_values, f_check_flat_luts_trans_table, f_check_flat_luts_cap_table, f_check_flat_luts_dim,
+                arc.fall_check);
+      appendLut(r_check_flat_luts_values, r_check_flat_luts_trans_table, r_check_flat_luts_cap_table, r_check_flat_luts_dim,
+                arc.rise_check);
       ++flat_arc_id;
       ++local_arc_id;
     }
     cell_id_2_arc_id_start.append(flat_arc_id);
     cell_id_2_libpin_id_start.append(flat_pin_id);
   }
-  timing_diagnostics.append("Liberty pin geometry: LEF term bounding-box centers in DBU; "
-                            + std::to_string(missing_physical_pin_shapes) + " ports without physical shapes use (0,0)");
+  timing_diagnostics.append("Liberty pin geometry: LEF term bounding-box centers in DBU; " + std::to_string(missing_physical_pin_shapes)
+                            + " ports without physical shapes use (0,0)");
   auto lutId = [&](int32_t cell_id, int32_t local_arc_id) -> int32_t {
-    if (cell_id < 0 || local_arc_id < 0) return -1;
+    if (cell_id < 0 || local_arc_id < 0)
+      return -1;
     return cell_id_2_arc_id_start[cell_id].cast<int32_t>() + local_arc_id;
   };
 
-  auto appendEndpointArc = [&](const ista::TimingEndpointArcSnapshot& arc) {
+  auto appendEndpointArc = [&](const ista::TimingEndpointArcData& arc) {
     pybind11::list row;
     row.append(mapId(pin_ids, arc.source_pin));
     row.append(mapId(pin_ids, arc.sink_pin));
@@ -340,7 +356,7 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     endpoints_timing_check_arcs.append(row);
     appendQualification(endpoints_timing_check_max_valid, endpoints_timing_check_max_reason, arc.max_qualification);
   };
-  auto appendConstraintArc = [&](const ista::TimingEndpointArcSnapshot& arc) {
+  auto appendConstraintArc = [&](const ista::TimingEndpointArcData& arc) {
     const int32_t clock_index = mapId(clock_pin_indices, arc.source_pin);
     const int32_t sink_pin = mapId(pin_ids, arc.sink_pin);
     if (clock_index < 0 || sink_pin < 0) {
@@ -359,24 +375,29 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
     endpoints_constraint_arcs.append(row);
     appendQualification(endpoints_constraint_max_valid, endpoints_constraint_max_reason, arc.max_qualification);
   };
-  for (const auto& arc : snapshot.constraint_arcs) appendConstraintArc(arc);
-  for (const auto& arc : snapshot.timing_check_arcs) appendEndpointArc(arc);
+  for (const auto& arc : snapshot.constraint_arcs)
+    appendConstraintArc(arc);
+  for (const auto& arc : snapshot.timing_check_arcs)
+    appendEndpointArc(arc);
 
   std::vector<std::vector<std::pair<int32_t, int32_t>>> net_rows(net_names.size());
-  for (const TimingNetArcSnapshot& arc : snapshot.net_arcs) {
+  for (const TimingNetArcData& arc : snapshot.net_arcs) {
     const int32_t source = mapId(pin_ids, arc.source_pin);
     const int32_t sink = mapId(pin_ids, arc.sink_pin);
-    if (source < 0 || sink < 0) continue;
+    if (source < 0 || sink < 0)
+      continue;
     const auto pin_it = timing_pins.find(arc.source_pin);
     const int32_t net_id = pin_it == timing_pins.end() ? -1 : mapId(net_ids, pin_it->second.net_name);
-    if (net_id >= 0 && static_cast<std::size_t>(net_id) < net_rows.size()) net_rows[net_id].emplace_back(source, sink);
+    if (net_id >= 0 && static_cast<std::size_t>(net_id) < net_rows.size())
+      net_rows[net_id].emplace_back(source, sink);
   }
   int32_t net_arc_count = 0;
   net_flat_arcs_start.append(0);
   net2driver_pin_map = pybind11::list();
   for (std::size_t net_id = 0; net_id < net_rows.size(); ++net_id) {
     int32_t driver = -1;
-    if (!net_rows[net_id].empty()) driver = net_rows[net_id].front().first;
+    if (!net_rows[net_id].empty())
+      driver = net_rows[net_id].front().first;
     net2driver_pin_map.append(driver);
     for (const auto& [source, sink] : net_rows[net_id]) {
       net_flat_arcs.append(pybind11::make_tuple(source, sink));
@@ -390,11 +411,12 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   std::vector<std::vector<int32_t>> incoming_arc(pin_names.size());
   std::vector<std::vector<int32_t>> outgoing_arc(pin_names.size());
   std::vector<std::vector<int32_t>> inst_arc_ids(node_names.size());
-  std::vector<std::vector<TimingGraphArcSnapshot>> levels;
-  for (const TimingGraphArcSnapshot& arc : snapshot.graph_arcs) {
+  std::vector<std::vector<TimingGraphArcData>> levels;
+  for (const TimingGraphArcData& arc : snapshot.graph_arcs) {
     const int32_t source = mapId(pin_ids, arc.source_pin);
     const int32_t sink = mapId(pin_ids, arc.sink_pin);
-    if (source < 0 || sink < 0) continue;
+    if (source < 0 || sink < 0)
+      continue;
     arc_src_pin.append(source);
     arc_dst_pin.append(sink);
     const int32_t cell_id = cell_ids.contains(arc.library_cell) ? cell_ids.at(arc.library_cell) : -1;
@@ -410,7 +432,8 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
         timing_diagnostics.append("cell arc omitted from instance CSR because its owner is not a PyPlaceDB node");
         continue;
       }
-      if (static_cast<std::size_t>(arc.level) >= levels.size()) levels.resize(arc.level + 1);
+      if (static_cast<std::size_t>(arc.level) >= levels.size())
+        levels.resize(arc.level + 1);
       levels[arc.level].push_back(arc);
     }
   }
@@ -434,10 +457,11 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
       }
       if (owner_id >= 0) {
         inst_arc_ids[owner_id].push_back(level_arc_id);
-        if (level_nodes.insert(owner_id).second) inst_topo_ids.append(owner_id);
+        if (level_nodes.insert(owner_id).second)
+          inst_topo_ids.append(owner_id);
       }
-      flat_inst_arcs_by_level.append(pybind11::make_tuple(arc_source, sink, cell_id, lutId(cell_id, arc.library_arc_id), arc.sense, arc.timing_type,
-                                                          arc.library_arc_id, owner_id));
+      flat_inst_arcs_by_level.append(pybind11::make_tuple(arc_source, sink, cell_id, lutId(cell_id, arc.library_arc_id), arc.sense,
+                                                          arc.timing_type, arc.library_arc_id, owner_id));
       ++flat_arc_id;
     }
     flat_inst_arcs_by_level_start.append(flat_inst_arcs_by_level.size());
@@ -472,12 +496,18 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
   pin_to_inst_id = pybind11::list();
   pin_to_node_id = pybind11::list();
   for (std::size_t pin_id = 0; pin_id < pin_names.size(); ++pin_id) {
-    for (int32_t value : outgoing[pin_id]) flat_pin_to_graph.append(value);
-    for (int32_t value : incoming[pin_id]) flat_pin_to_graph_reverse.append(value);
-    for (int32_t value : incoming[pin_id]) pin_pred_pin.append(value);
-    for (int32_t value : incoming_arc[pin_id]) pin_pred_arc_id.append(value);
-    for (int32_t value : outgoing[pin_id]) pin_succ_pin.append(value);
-    for (int32_t value : outgoing_arc[pin_id]) pin_succ_arc_id.append(value);
+    for (int32_t value : outgoing[pin_id])
+      flat_pin_to_graph.append(value);
+    for (int32_t value : incoming[pin_id])
+      flat_pin_to_graph_reverse.append(value);
+    for (int32_t value : incoming[pin_id])
+      pin_pred_pin.append(value);
+    for (int32_t value : incoming_arc[pin_id])
+      pin_pred_arc_id.append(value);
+    for (int32_t value : outgoing[pin_id])
+      pin_succ_pin.append(value);
+    for (int32_t value : outgoing_arc[pin_id])
+      pin_succ_arc_id.append(value);
     flat_pin_to_graph_start.append(flat_pin_to_graph.size());
     flat_pin_to_graph_start_reverse.append(flat_pin_to_graph_reverse.size());
     pin_pred_start.append(pin_pred_pin.size());
@@ -493,9 +523,11 @@ void PyPlaceDB::init_timing(const TimingSnapshot& snapshot, idm::DataManager* db
 
   for (std::size_t i = 0; i < pin_names.size(); ++i) {
     const auto pin_it = timing_pins.find(pin_names[i].cast<std::string>());
-    const TimingPinSnapshot pin = pin_it == timing_pins.end() ? TimingPinSnapshot{} : pin_it->second;
-    if (pin_it == timing_pins.end()) timing_diagnostics.append("PyPlaceDB pin missing from timing snapshot");
-    if (i >= pin2net_map.size()) pin2net_map.append(mapId(net_ids, pin.net_name));
+    const TimingPinData pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
+    if (pin_it == timing_pins.end())
+      timing_diagnostics.append("PyPlaceDB pin missing from timing snapshot");
+    if (i >= pin2net_map.size())
+      pin2net_map.append(mapId(net_ids, pin.net_name));
   }
 }
 

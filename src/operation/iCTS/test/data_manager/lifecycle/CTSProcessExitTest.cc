@@ -21,6 +21,9 @@
  * @brief Process-exit fallback test for CTS static RAII owners.
  */
 
+#include <string>
+
+#include "Design.hh"
 #include "Logger.hh"
 #include "data_manager/DataManager.hh"
 

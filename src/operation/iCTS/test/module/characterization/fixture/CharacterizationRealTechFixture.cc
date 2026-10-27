@@ -24,8 +24,10 @@
 #include "module/characterization/fixture/CharacterizationRealTechFixture.hh"
 
 #include <cmath>
+#include <compare>
 #include <filesystem>
 #include <limits>
+#include <ranges>
 #include <set>
 #include <sstream>
 #include <system_error>

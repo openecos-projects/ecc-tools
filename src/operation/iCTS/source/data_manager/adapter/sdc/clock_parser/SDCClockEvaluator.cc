@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 namespace {

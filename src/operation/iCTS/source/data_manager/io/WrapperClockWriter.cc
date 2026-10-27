@@ -21,8 +21,8 @@
  * @brief Clock-tree materialization helpers for the iCTS iDB wrapper.
  */
 #include <algorithm>
+#include <cstddef>
 #include <optional>
-#include <ostream>
 #include <set>
 #include <string>
 #include <unordered_map>

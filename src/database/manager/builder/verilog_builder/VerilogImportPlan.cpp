@@ -2,7 +2,9 @@
 #include "VerilogImportPlan.hh"
 
 #include <algorithm>
+#include <map>
 #include <numeric>
+#include <set>
 #include <unordered_set>
 
 #include "VerilogConstantNet.hh"
@@ -42,6 +44,11 @@ class PlanBuilder
       _mapped[i] = _plan.nets.size();
       _plan.nets.push_back({_flat.nets[i].name, NetType::wire});
     }
+    std::vector<std::vector<std::string>> local_pins(_flat.nets.size());
+    auto connectSegment = [&](NetId bit, const std::string& pin) {
+      if (!isConstant(bit))
+        local_pins.at(bit).push_back(pin);
+    };
     std::unordered_set<std::string> io_buses;
     for (const auto& port : _flat.ports) {
       PlannedBus bus;
@@ -55,6 +62,7 @@ class PlanBuilder
         auto name = port.range ? port.name + "[" + std::to_string(index) + "]" : port.name;
         if (port.range)
           bus.members.push_back({unsigned(index), uint32_t(_plan.ports.size())});
+        connectSegment(port.signal.bits[bit], name);
         _plan.ports.push_back({std::move(name), mapped(port.signal.bits[bit]), port.direction});
       }
       if (port.range)
@@ -85,6 +93,7 @@ class PlanBuilder
         for (size_t bit = 0; bit < port.pins.size(); ++bit) {
           if (port.range)
             bus.members.push_back({unsigned(port.range->first) - unsigned(bit), uint32_t(instance.pins.size())});
+          connectSegment(value.bits[bit], cell.name + ":" + port.pins[bit]);
           instance.pins.push_back({port.pins[bit], mapped(value.bits[bit]), port.direction});
         }
         if (port.range)
@@ -93,9 +102,24 @@ class PlanBuilder
       _plan.instances.push_back(std::move(instance));
     }
     for (const auto& port : _flat.hierarchical_ports) {
+      connectSegment(port.net, port.instance + ":" + port.name);
+      connectSegment(port.parent_net, port.instance + ":" + port.name);
       auto resolved = port;
+      resolved.parent_net = isConstant(port.parent_net) ? port.parent_net : mapped(port.parent_net);
       resolved.net = mapped(port.net);
       _plan.hierarchical_ports.push_back(std::move(resolved));
+    }
+    // Local assignments may alias declarations at one scope. Combine their
+    // terminals without collapsing the identity of nets in different scopes.
+    std::map<std::pair<std::string, NetId>, std::set<std::string>> terminals;
+    for (NetId bit = 0; bit < _flat.nets.size(); ++bit) {
+      auto& pins = terminals[{_flat.nets[bit].scope, mapped(bit)}];
+      pins.insert(local_pins[bit].begin(), local_pins[bit].end());
+    }
+    for (NetId bit = 0; bit < _flat.nets.size(); ++bit) {
+      const auto& net = _flat.nets[bit];
+      const auto& pins = terminals.at({net.scope, mapped(bit)});
+      _plan.net_segments.push_back({net.name, net.scope, mapped(bit), {pins.begin(), pins.end()}});
     }
     return std::move(_plan);
   }

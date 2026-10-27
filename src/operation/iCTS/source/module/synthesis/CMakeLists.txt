@@ -15,10 +15,11 @@ add_library(icts_source_module_synthesis ${ICTS_MODULE_SYNTHESIS}/Synthesis.cc)
 target_link_libraries(
   icts_source_module_synthesis
   PUBLIC
-  icts_source_module_synthesis_distribution
-  icts_source_module_synthesis_topology
+  icts_source_data_manager
   icts_source_module_synthesis_trace_domain_status
   PRIVATE
+  icts_source_module_synthesis_distribution
+  icts_source_module_synthesis_topology
   icts_source_module_synthesis_htree_characterization_library
   icts_source_toolkit_logger
   icts_source_toolkit_monitor

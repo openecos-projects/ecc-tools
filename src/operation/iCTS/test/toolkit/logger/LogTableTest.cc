@@ -28,6 +28,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include "LogTable.hh"
 #include "Logger.hh"

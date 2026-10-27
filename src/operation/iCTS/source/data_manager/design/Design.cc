@@ -23,9 +23,6 @@
 
 #include "data_manager/design/Design.hh"
 
-#include <algorithm>
-#include <cstddef>
-#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>

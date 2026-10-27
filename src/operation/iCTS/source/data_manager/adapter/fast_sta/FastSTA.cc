@@ -28,22 +28,29 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "FastSTABuilder.hh"
 #include "FastSTAChar.hh"
+#include "FastSTAClockNetParasitic.hh"
+#include "FastSTAClockSizingEdit.hh"
+#include "FastSTAClockState.hh"
 #include "FastSTAIncremental.hh"
 #include "FastSTAPower.hh"
 #include "FastSTATiming.hh"
 #include "Logger.hh"
+#include "Net.hh"
+#include "Point.hh"
 #include "clock_state/FastSTAContextStore.hh"
 #include "design/Clock.hh"
 #include "design/ClockLayout.hh"
 #include "design/Design.hh"
 #include "io/Wrapper.hh"
 #include "timing/FastSTAConstraints.hh"
+#include "timing/TimingConstraints.hh"
 
 namespace icts {
 namespace {

@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>

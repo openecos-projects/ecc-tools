@@ -23,9 +23,6 @@
 
 #pragma once
 
-#include <cstddef>
-#include <string>
-
 #include "stage/StageSummary.hh"
 
 namespace icts {

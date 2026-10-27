@@ -22,6 +22,7 @@
  */
 #include "CTSAPI.hh"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,11 +33,11 @@
 #include "Utility.hh"
 #include "data_manager/DataManager.hh"
 #include "evaluation/Evaluation.hh"
-#include "evaluation/qor/QOREvaluation.hh"
 #include "feature_icts.h"
 #include "instantiation/Instantiation.hh"
 #include "optimization/Optimization.hh"
 #include "output/Output.hh"
+#include "stage/StageSummary.hh"
 #include "synthesis/Synthesis.hh"
 
 namespace icts {

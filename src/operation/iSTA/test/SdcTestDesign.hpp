@@ -1,4 +1,8 @@
 #pragma once
+
+#include <stdexcept>
+#include <string>
+#include <vector>
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "DataManager.hpp"
 #include "Logger.hpp"
@@ -17,18 +21,18 @@ void addPin(const std::string& instance_name, const std::string& port_name, PinD
 {
   Database& database = STADM.getDatabase();
   std::string name = instance_name.empty() ? port_name : instance_name + ":" + port_name;
-  Pin& pin = database.get_pin_map()[name];
+  Pin& pin = database.network().pins()[name];
   pin.set_full_name(name);
   pin.set_pin_name(port_name);
   pin.set_instance_name(instance_name);
   pin.set_direction(direction);
   pin.set_is_port(instance_name.empty());
   if (!instance_name.empty()) {
-    database.get_instance_map()[instance_name].get_pin_name_list().push_back(name);
+    database.network().instances()[instance_name].get_pin_name_list().push_back(name);
   }
 }
 
-void addCellArc(TimingCell& cell, const std::string& from, const std::string& to, bool is_clock = false, bool is_reset = false)
+void addCellArc(LibertyCell& cell, const std::string& from, const std::string& to, bool is_clock = false, bool is_reset = false)
 {
   TimingCellArc arc;
   arc.set_source_port(from);
@@ -41,11 +45,11 @@ void addCellArc(TimingCell& cell, const std::string& from, const std::string& to
 void addInstance(const std::string& name, const std::string& cell_name, bool sequential)
 {
   Database& database = STADM.getDatabase();
-  Instance& instance = database.get_instance_map()[name];
+  Instance& instance = database.network().instances()[name];
   instance.set_instance_name(name);
   instance.set_cell_name(cell_name);
   instance.set_is_sequential(sequential);
-  TimingCell& cell = database.get_timing_library().get_cell_map()[cell_name];
+  LibertyCell& cell = database.liberty().get_cell_map()[cell_name];
   for (auto& [port_name, port] : cell.get_port_map()) {
     addPin(name, port_name, port.get_is_input() ? PinDirection::kInput : PinDirection::kOutput);
   }
@@ -62,27 +66,27 @@ void addInstance(const std::string& name, const std::string& cell_name, bool seq
 void addNet(const std::string& name, const std::vector<std::string>& pins)
 {
   Database& database = STADM.getDatabase();
-  Net& net = database.get_net_map()[name];
+  Net& net = database.network().nets()[name];
   net.set_net_name(name);
   net.set_pin_name_list(pins);
   // Deliberately leave driver/load lists empty, as during SDC input.
   for (const std::string& pin : pins) {
-    database.get_pin_map()[pin].set_net_name(name);
+    database.network().pins()[pin].set_net_name(name);
   }
 }
 
 void buildDesign()
 {
   Database& database = STADM.getDatabase();
-  database.set_design_name("sdc_test");
-  database.get_timing_library().set_current_unit_name("1mA");
-  database.get_timing_library().set_voltage_unit_name("1V");
+  database.network().setName("sdc_test");
+  database.liberty().set_current_unit_name("1mA");
+  database.liberty().set_voltage_unit_name("1V");
   for (std::string name : {"FF", "COMB"}) {
-    TimingCell& cell = database.get_timing_library().get_cell_map()[name];
+    LibertyCell& cell = database.liberty().get_cell_map()[name];
     cell.set_is_sequential(name == "FF");
     std::vector<std::string> inputs = name == "FF" ? std::vector<std::string>{"CK", "D", "RN"} : std::vector<std::string>{"A", "B", "UNUSED"};
     for (const std::string& input : inputs) {
-      TimingCellPort& port = cell.get_port_map()[input];
+      LibertyPort& port = cell.get_port_map()[input];
       port.set_port_name(input);
       port.set_is_input(true);
       port.set_is_clock(input == "CK");
@@ -119,12 +123,15 @@ void buildDesign()
   addNet("after_net", {"cdc/sink_reg:Q", "after_reg:D"});
   addNet("loop_net", {"loop:Y", "loop:A", "loop:B"});
   // Liberty overrides an imprecise physical pin direction without mutating IDB.
-  database.get_pin_map()["cdc/source_reg:Q"].set_direction(PinDirection::kInout);
+  database.network().pins()["cdc/source_reg:Q"].set_direction(PinDirection::kInout);
 }
 
 void eval(const std::string& script)
 {
   SdcCommand& interpreter = SdcCommand::getInst();
   int status = interpreter.evalString(script);
-  require(status == TCL_OK, "SDC failed: " + std::string(Tcl_GetStringResult(interpreter.getInterp())));
+  if (status != TCL_OK) {
+    const char* info = Tcl_GetVar(interpreter.getInterp(), "errorInfo", TCL_GLOBAL_ONLY);
+    throw std::runtime_error("SDC failed: " + std::string(info ? info : Tcl_GetStringResult(interpreter.getInterp())));
+  }
 }

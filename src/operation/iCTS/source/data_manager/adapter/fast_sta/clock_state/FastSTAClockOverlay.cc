@@ -24,7 +24,9 @@
 #include "FastSTAClockOverlay.hh"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -34,13 +36,15 @@
 
 #include "FastSTA.hh"
 #include "FastSTABuilder.hh"
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockState.hh"
+#include "FastSTAClockTiming.hh"
 #include "FastSTAClockTree.hh"
 #include "FastSTAGraphImport.hh"
 #include "FastSTALibertyModel.hh"
+#include "TimingConstraints.hh"
 #include "design/Clock.hh"
 #include "design/Design.hh"
-#include "design/Net.hh"
 
 namespace icts {
 namespace fast_sta {

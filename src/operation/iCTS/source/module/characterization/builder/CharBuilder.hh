@@ -26,7 +26,6 @@
  */
 
 #pragma once
-// IWYU pragma: private, include "characterization/builder/CharBuilder.hh"
 
 #include <cstddef>
 #include <cstdint>

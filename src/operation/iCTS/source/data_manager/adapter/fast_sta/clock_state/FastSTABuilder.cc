@@ -24,8 +24,11 @@
 #include "FastSTABuilder.hh"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <initializer_list>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -33,13 +36,18 @@
 #include <vector>
 
 #include "FastSTA.hh"
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockOverlay.hh"
 #include "FastSTAClockState.hh"
 #include "FastSTAGraphImport.hh"
 #include "FastSTALiberty.hh"
 #include "FastSTALibertyModel.hh"
 #include "FastSTAParasitics.hh"
+#include "Inst.hh"
 #include "Logger.hh"
+#include "Net.hh"
+#include "Pin.hh"
+#include "TimingConstraints.hh"
 #include "design/Clock.hh"
 #include "design/Design.hh"
 #include "io/Wrapper.hh"
@@ -52,8 +60,6 @@ using fast_sta::CollectClocks;
 using fast_sta::CollectRoutes;
 using fast_sta::MergeLibertyCell;
 using fast_sta::RequiresPropagationBufferModel;
-
-class Pin;
 
 namespace {
 

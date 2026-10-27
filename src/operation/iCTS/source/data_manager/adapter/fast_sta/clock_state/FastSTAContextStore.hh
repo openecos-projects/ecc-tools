@@ -34,9 +34,14 @@
 #include <vector>
 
 #include "FastSTA.hh"
-#include "clock_sizing/FastSTAClockSizingEdit.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "segment_char/FastSTAChar.hh"
+#include "timing/FastSTAClockTiming.hh"
+#include "timing/TimingConstraints.hh"
+
+namespace icts {
+struct FastStaDirtyRegion;
+}
 
 namespace icts {
 

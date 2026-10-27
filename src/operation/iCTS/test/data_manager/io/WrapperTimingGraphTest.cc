@@ -23,7 +23,11 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+#include <vector>
+
 #include "IdbDesign.h"
+#include "IdbEnum.h"
 #include "IdbLayout.h"
 #include "IdbNet.h"
 #include "data_manager/io/Wrapper.hh"

@@ -27,10 +27,14 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
 #include "Logger.hh"
+#include "QOR.hh"
 #include "output/qor/QORReport.hh"
 #include "stage/StageSummary.hh"
 

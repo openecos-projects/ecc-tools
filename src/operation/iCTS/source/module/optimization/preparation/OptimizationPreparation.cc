@@ -28,7 +28,7 @@
 #include <compare>
 #include <cstddef>
 #include <optional>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -38,9 +38,7 @@
 #include "FastSTA.hh"
 #include "Logger.hh"
 #include "Point.hh"
-#include "SteinerTree.hh"
 #include "config/Config.hh"
-#include "design/Clock.hh"
 #include "design/ClockDAG.hh"
 #include "design/ClockLayout.hh"
 #include "design/Design.hh"

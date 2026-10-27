@@ -25,11 +25,12 @@
 
 #include <algorithm>
 #include <memory>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "Clock.hh"
 #include "Logger.hh"
 #include "design/Design.hh"
 #include "design/Inst.hh"

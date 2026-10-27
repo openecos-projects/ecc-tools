@@ -26,16 +26,21 @@
 #include <fnmatch.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <queue>
+#include <ranges>
 #include <string_view>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "FastSTACondition.hh"
 #include "Logger.hh"
 #include "SDCClockReader.hh"
+#include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALibertyModel.hh"
 

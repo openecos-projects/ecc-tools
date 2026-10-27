@@ -1,11 +1,17 @@
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "ReadNetwork.hpp"
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "DataManager.hpp"
 #include "IdbCellMaster.h"
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "Logger.hpp"
-#include "SdcCommand.hpp"
 #include "STAInterface.hpp"
+#include "SdcCommand.hpp"
 
 using namespace ista;
 
@@ -16,8 +22,8 @@ void require(bool condition, const std::string& message)
   }
 }
 
-void testNet(idb::CellMasterType cell_type, idb::IdbConnectDirection port_direction, idb::IdbConnectDirection cell_direction,
-             int32_t port_num, bool has_core_load)
+void testNet(idb::CellMasterType cell_type, idb::IdbConnectDirection port_direction, idb::IdbConnectDirection cell_direction, int32_t port_num,
+             bool has_core_load)
 {
   idb::IdbCellMaster io_master;
   io_master.set_name("boundary_cell");
@@ -66,35 +72,35 @@ void testNet(idb::CellMasterType cell_type, idb::IdbConnectDirection port_direct
   }
 
   DataManager::initInst();
-  STAI.wrapInstance(&io_instance);
-  STAI.wrapInstancePinList(&io_instance);
+  read_network_detail::readInstance(STADM.getDatabase().network(), &io_instance);
+  read_network_detail::readInstancePins(STADM.getDatabase().network(), &io_instance);
   if (has_core_load) {
-    STAI.wrapInstance(&core_instance);
-    STAI.wrapInstancePinList(&core_instance);
+    read_network_detail::readInstance(STADM.getDatabase().network(), &core_instance);
+    read_network_detail::readInstancePins(STADM.getDatabase().network(), &core_instance);
   }
   for (idb::IdbPin* pin : net.get_io_pins()->get_pin_list()) {
-    STAI.wrapPortPin(pin);
+    read_network_detail::readPort(STADM.getDatabase().network(), pin);
   }
-  STAI.wrapNet(&net);
+  read_network_detail::readNet(STADM.getDatabase().network(), &net);
 
   Database& database = STADM.getDatabase();
-  require(database.get_instance_map().count("io_cell") == 1, "IO cell instance was removed");
-  require(database.get_pin_map().count("io_cell:package_contact") == 1, "IO cell pin was removed");
-  require(database.get_net_map().count("connection") == 1, "signal net was removed");
-  require(database.get_pin_map()["io_cell:package_contact"].get_direction() == STAI.wrapPinDirection(cell_direction),
+  require(database.network().instances().count("io_cell") == 1, "IO cell instance was removed");
+  require(database.network().pins().count("io_cell:package_contact") == 1, "IO cell pin was removed");
+  require(database.network().nets().count("connection") == 1, "signal net was removed");
+  require(database.network().pins()["io_cell:package_contact"].get_direction() == read_network_detail::pinDirection(cell_direction),
           "wrapping changed IO cell pin direction");
   for (idb::IdbPin* pin : net.get_io_pins()->get_pin_list()) {
-    require(database.get_pin_map().count(pin->get_pin_name()) == 1, "top port was removed");
-    require(database.get_pin_map()[pin->get_pin_name()].get_direction() == STAI.wrapPinDirection(port_direction),
+    require(database.network().pins().count(pin->get_pin_name()) == 1, "top port was removed");
+    require(database.network().pins()[pin->get_pin_name()].get_direction() == read_network_detail::pinDirection(port_direction),
             "wrapping changed top port direction");
   }
   if (has_core_load) {
-    require(database.get_pin_map().count("core:A") == 1, "core-facing load was removed");
+    require(database.network().pins().count("core:A") == 1, "core-facing load was removed");
   }
-  for (auto& [name, wrapped_net] : database.get_net_map()) {
+  for (auto& [name, wrapped_net] : database.network().nets()) {
     require(wrapped_net.get_pin_name_list().size() == port_num + (has_core_load ? 2U : 1U), "signal net lost pin membership");
     for (const std::string& pin_name : wrapped_net.get_pin_name_list()) {
-      require(database.get_pin_map().count(pin_name) == 1, "wrapped net references a filtered pin");
+      require(database.network().pins().count(pin_name) == 1, "wrapped net references a filtered pin");
     }
   }
 
@@ -105,20 +111,18 @@ void testNet(idb::CellMasterType cell_type, idb::IdbConnectDirection port_direct
       clock_command += " [get_ports external]";
     }
     require(interpreter.evalString(clock_command) == TCL_OK, "clock constraint failed at retained port");
-    TimingConstraint& constraint = database.get_timing_constraint();
+    Sdc& constraint = database.sdc();
     if (port_direction != idb::IdbConnectDirection::kOutput) {
       require(constraint.get_clock_map()["external_clock"].get_source_list() == std::vector<std::string>{"external"},
               "clock source was not retained at the original port");
-      require(interpreter.evalString("set_input_delay -clock external_clock 1 [get_ports external]") == TCL_OK,
-              "input delay failed at retained port");
+      require(interpreter.evalString("set_input_delay -clock external_clock 1 [get_ports external]") == TCL_OK, "input delay failed at retained port");
       require(constraint.get_port_constraint_map()["external"].get_input_delay_max() == 1.0, "input delay was lost");
     }
     if (port_direction != idb::IdbConnectDirection::kInput) {
-      require(interpreter.evalString("set_output_delay -clock external_clock 2 [get_ports external]") == TCL_OK,
-              "output delay failed at retained port");
+      require(interpreter.evalString("set_output_delay -clock external_clock 2 [get_ports external]") == TCL_OK, "output delay failed at retained port");
       require(interpreter.evalString("set_load 1 [get_ports external]") == TCL_OK, "external load failed at retained port");
       require(constraint.get_port_constraint_map()["external"].get_output_delay_max() == 2.0, "output delay was lost");
-      require(constraint.get_port_constraint_map()["external"].get_load() == 1.0, "external load was lost");
+      require(constraint.get_port_constraint_map()["external"].get_load(AnalysisType::kMax, TransType::kRise) == 1.0, "external load was lost");
     }
   }
 
@@ -135,8 +139,8 @@ void testUnconnectedPort()
   port.set_pin_name("unconnected");
   port.set_as_io();
   port.set_term()->set_direction(idb::IdbConnectDirection::kInput);
-  STAI.wrapPortPin(&port);
-  require(STADM.getDatabase().get_pin_map().count("unconnected") == 1, "unconnected port was removed");
+  read_network_detail::readPort(STADM.getDatabase().network(), &port);
+  require(STADM.getDatabase().network().pins().count("unconnected") == 1, "unconnected port was removed");
   DataManager::destroyInst();
 }
 
@@ -145,10 +149,8 @@ int main()
   Logger::initInst();
   SdcCommand::initInst();
   sdc::registerSdcCommands(SdcCommand::getInst());
-  for (idb::IdbConnectDirection port_direction :
-       {idb::IdbConnectDirection::kInput, idb::IdbConnectDirection::kOutput, idb::IdbConnectDirection::kInOut}) {
-    for (idb::IdbConnectDirection cell_direction :
-         {idb::IdbConnectDirection::kInput, idb::IdbConnectDirection::kOutput, idb::IdbConnectDirection::kInOut}) {
+  for (idb::IdbConnectDirection port_direction : {idb::IdbConnectDirection::kInput, idb::IdbConnectDirection::kOutput, idb::IdbConnectDirection::kInOut}) {
+    for (idb::IdbConnectDirection cell_direction : {idb::IdbConnectDirection::kInput, idb::IdbConnectDirection::kOutput, idb::IdbConnectDirection::kInOut}) {
       testNet(idb::CellMasterType::kPad, port_direction, cell_direction, 1, false);
       testNet(idb::CellMasterType::kCore, port_direction, cell_direction, 1, false);
     }

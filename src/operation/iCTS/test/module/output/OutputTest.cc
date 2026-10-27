@@ -23,9 +23,15 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
+#include <string>
+#include <utility>
+
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
 #include "module/evaluation/qor/QOREvaluation.hh"
 #include "module/output/Output.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts_test {
 namespace {

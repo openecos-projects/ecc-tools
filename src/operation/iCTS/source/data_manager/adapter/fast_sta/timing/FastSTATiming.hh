@@ -23,13 +23,15 @@
 
 #pragma once
 
+#include <optional>
+#include <vector>
+
 #include "FastSTA.hh"
 
 namespace icts {
 
 struct FastStaContext;
 struct FastStaDirtyRegion;
-class FastStaChar;
 
 class FastStaTiming
 {

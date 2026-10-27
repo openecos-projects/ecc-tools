@@ -28,7 +28,6 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -36,7 +35,6 @@
 #include <vector>
 
 #include "FastSTA.hh"
-#include "Logger.hh"
 #include "optimization/candidate/OptimizationCandidates.hh"
 #include "optimization/model/ClockSizingOptimizationData.hh"
 #include "optimization/policy/OptimizationPolicy.hh"

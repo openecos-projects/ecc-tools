@@ -23,8 +23,6 @@
 
 #include "synthesis/topology/trunk/SourceTrunk.hh"
 
-#include <algorithm>
-#include <memory>
 #include <optional>
 #include <string>
 #include <utility>

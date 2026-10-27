@@ -16,7 +16,9 @@
 // ***************************************************************************************
 #pragma once
 
-#include "STAHeader.hpp"
+#include <mutex>
+#include <optional>
+#include <utility>
 
 namespace ista {
 

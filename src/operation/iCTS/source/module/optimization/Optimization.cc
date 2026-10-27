@@ -24,16 +24,20 @@
 #include "optimization/Optimization.hh"
 
 #include <algorithm>
+#include <cstddef>
 #include <iomanip>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
+#include "ClockLayout.hh"
 #include "FastSTA.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
@@ -42,7 +46,6 @@
 #include "data_manager/DataManager.hh"
 #include "design/Clock.hh"
 #include "design/Design.hh"
-#include "io/Wrapper.hh"
 #include "optimization/clock_sizing_edit/ClockSizingAcceptedEdit.hh"
 #include "optimization/model/ClockSizingOptimizationData.hh"
 #include "optimization/policy/OptimizationPolicy.hh"

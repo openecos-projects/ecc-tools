@@ -27,7 +27,7 @@ int registerCmdSTA()
   // sta
   registerTclCmd(TclInitSTA, "init_sta");
   registerTclCmd(TclRunSTA, "run_sta");
-  registerTclCmd(TclOutputSDC, "output_sdc");
+  Tcl_CreateObjCommand(ScriptEngine::getOrCreateInstance()->get_interp(), "write_sdc", &writeSdcCommand, nullptr, nullptr);
   registerTclCmd(TclExtractLib, "extract_lib");
   registerTclCmd(TclDestroySTA, "destroy_sta");
   return EXIT_SUCCESS;

@@ -29,9 +29,14 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "FastSTA.hh"
+#include "IdbCellMaster.h"
+#include "IdbLayer.h"
 #include "IdbLayout.h"
+#include "IdbUnits.h"
+#include "dm_config.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 

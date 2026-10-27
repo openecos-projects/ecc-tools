@@ -16,8 +16,23 @@
 // ***************************************************************************************
 #pragma once
 
+#include <unistd.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <ctime>
+#include <experimental/source_location>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+
 #include "LogLevel.hpp"
-#include "STAHeader.hpp"
 
 namespace ista {
 
@@ -35,15 +50,19 @@ class Logger
 
   void openLogFileStream(const std::string& log_file_path)
   {
+    closeLogFileStream();
+    _log_file.clear();
+    _log_file.open(log_file_path);
+    if (!_log_file.is_open()) {
+      throw std::runtime_error("Failed to open log file '" + log_file_path + "'");
+    }
     _log_file_path = log_file_path;
-    _log_file = new std::ofstream(_log_file_path);
   }
 
   void closeLogFileStream()
   {
-    if (_log_file != nullptr) {
-      _log_file->close();
-      delete _log_file;
+    if (_log_file.is_open()) {
+      _log_file.close();
     }
   }
 
@@ -85,7 +104,7 @@ class Logger
   static Logger* _log_instance;
   // config & database
   std::string _log_file_path;
-  std::ofstream* _log_file = nullptr;
+  std::ofstream _log_file;
   std::vector<std::string> _temp_log_list;
 
   Logger() = default;
@@ -134,15 +153,15 @@ class Logger
     std::string origin_log = getString(prefix, log_level_char, suffix, "] ", message, "\n");
     std::string color_log = getString(prefix, log_color_start, log_level_char, log_color_end, suffix, "] ", message, "\n");
 
-    if (_log_file != nullptr) {
+    if (_log_file.is_open()) {
       if (!_temp_log_list.empty()) {
         for (std::string& temp_log : _temp_log_list) {
-          pushStream(*_log_file, temp_log);
+          pushStream(_log_file, temp_log);
         }
         _temp_log_list.clear();
       }
-      pushStream(*_log_file, origin_log);
-      _log_file->flush();
+      pushStream(_log_file, origin_log);
+      _log_file.flush();
     } else {
       _temp_log_list.push_back(origin_log);
     }

@@ -29,6 +29,7 @@
 #include <string>
 #include <vector>
 
+#include "Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
