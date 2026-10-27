@@ -22,6 +22,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 #include "ReadHierarchy.hpp"
 #include "ReadLiberty.hpp"
@@ -29,6 +30,8 @@
 #include "ReadParasitics.hpp"
 #include "SdcWriter.hpp"
 #include "TimingDataExporter.hpp"
+#include "MinTimingDataExporter.hpp"
+#include "SparseTimingSnapshot.hpp"
 
 #ifdef __GLIBC__
 #include <malloc.h>
@@ -49,8 +52,73 @@
 #include "TimingReporter.hpp"
 #include "Utility.hpp"
 #include "idm.h"
+#include "sdc/TimingClock.hpp"
+#include "sdc/TimingPortConstraint.hpp"
 
 namespace ista {
+
+namespace {
+
+double modelTransitionPs(TimingClock& clock, TransType transition, double time_unit_ps)
+{
+  const auto max = clock.get_transition_map().find(AnalysisType::kMax);
+  if (max != clock.get_transition_map().end()) {
+    const auto value = max->second.find(transition);
+    if (value != max->second.end())
+      return value->second * time_unit_ps;
+  }
+  const auto min = clock.get_transition_map().find(AnalysisType::kMin);
+  if (min != clock.get_transition_map().end()) {
+    const auto value = min->second.find(transition);
+    if (value != min->second.end())
+      return value->second * time_unit_ps;
+  }
+  return 0.0;
+}
+
+void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
+{
+  std::unordered_map<std::string, TimingPinData*> pins;
+  pins.reserve(snapshot.pins.size());
+  for (auto& pin : snapshot.pins)
+    pins.emplace(pin.name, &pin);
+
+  // Input transition constraints are the electrical boundary for PI-launched
+  // model states. Keep the seed in the same ps unit as the exported LUTs.
+  for (const auto& [name, constraint] : database.sdc().get_port_constraint_map()) {
+    const auto pin_it = database.network().pins().find(name);
+    const auto exported = pins.find(name);
+    if (pin_it == database.network().pins().end() || exported == pins.end() || !pin_it->second.get_is_port()
+        || (pin_it->second.get_direction() != PinDirection::kInput && pin_it->second.get_direction() != PinDirection::kInout))
+      continue;
+    exported->second->max_rise_slew_ps = constraint.get_input_transition(AnalysisType::kMax, TransType::kRise) * snapshot.time_unit_ps;
+    exported->second->max_fall_slew_ps = constraint.get_input_transition(AnalysisType::kMax, TransType::kFall) * snapshot.time_unit_ps;
+  }
+
+  // Clock pins have no numeric waveform in structural preparation. Use the
+  // SDC ideal transition as the CK boundary so the normal LUT CK->Q arc still
+  // evaluates with the same electrical seed as complete STA.
+  for (const auto& pin_name : snapshot.clock_pins) {
+    const auto exported = pins.find(pin_name);
+    const auto point = database.graph().points().find(pin_name);
+    if (exported == pins.end() || point == database.graph().points().end())
+      continue;
+    double rise = 0.0;
+    double fall = 0.0;
+    for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
+      (void) state;
+      const auto clock = database.sdc().get_clock_map().find(clock_name);
+      if (clock == database.sdc().get_clock_map().end())
+        continue;
+      rise = std::max(rise, modelTransitionPs(clock->second, TransType::kRise, snapshot.time_unit_ps));
+      fall = std::max(fall, modelTransitionPs(clock->second, TransType::kFall, snapshot.time_unit_ps));
+    }
+    exported->second->max_rise_slew_ps = rise;
+    exported->second->max_fall_slew_ps = fall;
+  }
+}
+
+}  // namespace
 
 // public
 
@@ -80,6 +148,7 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   }
   // From this point initialization may mutate the shared design and constraints.
   _initialized = false;
+  _model_ready = false;
   _timing_ready = false;
   Logger::initInst();
   // clang-format off
@@ -113,9 +182,30 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   readSdc(STADM.getDatabase().sdc());
 
   _initialized = true;
+  _model_ready = false;
   _timing_ready = false;
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void STAInterface::prepareTimingModel()
+{
+  if (!_initialized) {
+    throw std::runtime_error("STA must be initialized before prepareTimingModel");
+  }
+  TimingAnalyzer analyzer(STADM.getDatabase(), STADC);
+  if (_model_ready && analyzer.isStructureCurrent()) {
+    return;
+  }
+
+  _model_ready = false;
+  _timing_ready = false;
+  Monitor monitor;
+  STALOG.info(Loc::current(), "Starting structural timing model preparation...");
+  analyzer.prepareStructure();
+  _model_ready = true;
+  _timing_ready = false;
+  STALOG.info(Loc::current(), "Completed structural timing model preparation", monitor.getStatsInfo());
 }
 
 void STAInterface::runSTA()
@@ -127,15 +217,22 @@ void STAInterface::runSTA()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
-  TimingAnalyzer(STADM.getDatabase(), STADC).analyze();
+  try {
+    TimingAnalyzer(STADM.getDatabase(), STADC).analyze(_model_ready);
 
-  TimingReporter(STADM.getDatabase(), STADM.getConfig()).report();
+    TimingReporter(STADM.getDatabase(), STADM.getConfig()).report();
 
-  SdfWriter(STADM.getDatabase(), STADM.getConfig()).write();
+    SdfWriter(STADM.getDatabase(), STADM.getConfig()).write();
 
-  STADC.clear();
+    STADC.clear();
 
-  _timing_ready = true;
+    _timing_ready = true;
+    _model_ready = true;
+  } catch (...) {
+    _timing_ready = false;
+    _model_ready = false;
+    throw;
+  }
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -157,14 +254,21 @@ void STAInterface::extractLib()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
-  TimingAnalyzer(STADM.getDatabase(), STADC).analyze();
+  try {
+    TimingAnalyzer(STADM.getDatabase(), STADC).analyze();
 
-  auto timing_model = ModelExtractor(STADM.getDatabase()).extract();
-  std::string output_path = STADM.getConfig().tc_temp_directory_path;
-  liberty_writer::writeLib(timing_model, STADM.getDatabase().liberty(), output_path);
+    auto timing_model = ModelExtractor(STADM.getDatabase()).extract();
+    std::string output_path = STADM.getConfig().tc_temp_directory_path;
+    liberty_writer::writeLib(timing_model, STADM.getDatabase().liberty(), output_path);
 
-  STADC.clear();
-  _timing_ready = true;
+    STADC.clear();
+    _timing_ready = true;
+    _model_ready = true;
+  } catch (...) {
+    _timing_ready = false;
+    _model_ready = false;
+    throw;
+  }
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -199,6 +303,7 @@ void STAInterface::destroySTA()
   Logger::destroyInst();
 
   _initialized = false;
+  _model_ready = false;
   _timing_ready = false;
 
 #ifdef __GLIBC__
@@ -215,7 +320,31 @@ TimingData STAInterface::exportTimingData()
   if (!isTimingReady()) {
     throw std::runtime_error("timing export requires initialized and executed current-main STA");
   }
-  return TimingDataExporter::exportData(STADM.getDatabase(), STADM.getConfig());
+  TimingData snapshot = TimingDataExporter::exportData(STADM.getDatabase(), STADM.getConfig());
+  exportMinTimingData(snapshot, STADM.getDatabase(), STADM.getConfig());
+  SparseTimingExportAdapter::compile(snapshot);
+  return snapshot;
+}
+
+TimingData STAInterface::exportTimingModel()
+{
+  if (!isModelReady()) {
+    throw std::runtime_error("timing model export requires initialized and prepared structural timing model");
+  }
+  Monitor monitor;
+  STALOG.info(Loc::current(), "Starting structural timing snapshot export...");
+  TimingData snapshot = TimingDataExporter::exportData(STADM.getDatabase(), STADM.getConfig());
+  STALOG.info(Loc::current(), "Structural base snapshot ready: pins=", snapshot.pins.size(), ", arcs=", snapshot.graph_arcs.size(),
+              ", diagnostics=", snapshot.diagnostics.size(), "; phase ", monitor.getStatsInfo());
+  seedStructuralElectricalInputs(snapshot, STADM.getDatabase());
+  STALOG.info(Loc::current(), "Structural electrical seeds ready; phase ", monitor.getStatsInfo());
+  exportMinTimingModel(snapshot, STADM.getDatabase(), STADM.getConfig());
+  STALOG.info(Loc::current(), "Structural min contexts ready: contexts=", snapshot.min_contexts.size(), "; phase ", monitor.getStatsInfo());
+  SparseTimingExportAdapter::compileModel(snapshot);
+  STALOG.info(Loc::current(), "Structural max/min sparse snapshots ready: states=", snapshot.sparse.states.size(), "/", snapshot.sparse_min.states.size(),
+              "; phase ", monitor.getStatsInfo());
+  snapshot.diagnostics.push_back("preparation_mode=model_only; numeric timing values are not reference data");
+  return snapshot;
 }
 
 void STAInterface::readDesign(std::map<std::string, std::any>& config_map)

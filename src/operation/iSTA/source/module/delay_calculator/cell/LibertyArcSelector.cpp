@@ -96,6 +96,12 @@ std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing
 {
   bool is_flip = input_trans_type != output_trans_type;
   std::vector<TimingArc*> candidate_arc_list;
+  bool is_virtual_driver = false;
+  if (!output_pin.empty()) {
+    Database& database = _database;
+    auto pin = database.network().pins().find(output_pin);
+    is_virtual_driver = pin != database.network().pins().end() && pin->second.get_is_port();
+  }
   for (TimingArc& timing_arc : timing_cell_arc.get_timing_arc_list()) {
     if (is_flip && isPositiveArc(timing_arc)) {
       continue;
@@ -106,7 +112,7 @@ std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing
     if (!isMatchTimingType(timing_arc, output_trans_type)) {
       continue;
     }
-    if (!timing_arc.get_when_expression().get_is_empty() && !output_pin.empty()) {
+    if (!timing_arc.get_when_expression().get_is_empty() && !output_pin.empty() && !is_virtual_driver) {
       Database& database = _database;
       auto pin = database.network().pins().find(output_pin);
       if (pin != database.network().pins().end() && !pin->second.get_is_port()) {
@@ -126,6 +132,23 @@ std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing
       }
     }
     candidate_arc_list.push_back(&timing_arc);
+  }
+  if (is_virtual_driver && !candidate_arc_list.empty()) {
+    // A set_driving_cell cell is a virtual instance, so it has no instance
+    // pins from which to resolve Liberty `when` conditions.  OpenSTA uses the
+    // default (first declared) conditional arc for this case.  Keep all
+    // unconditional alternatives for the existing max/min reduction, but do
+    // not let an unresolved conditional arc win by pessimism.
+    std::vector<TimingArc*> unconditional_arc_list;
+    for (TimingArc* timing_arc : candidate_arc_list) {
+      if (timing_arc->get_when_expression().get_is_empty()) {
+        unconditional_arc_list.push_back(timing_arc);
+      }
+    }
+    if (!unconditional_arc_list.empty()) {
+      return unconditional_arc_list;
+    }
+    return {candidate_arc_list.front()};
   }
   return candidate_arc_list;
 }

@@ -36,7 +36,25 @@ bool TimingStateQuery::isDisableArc(Arc& arc)
 
 bool TimingStateQuery::shouldStopDataPropagation(Arc& arc)
 {
-  return arc.get_type() == ArcType::kNet && isSequentialClockPin(arc.get_sink_pin());
+  if (arc.get_type() == ArcType::kNet)
+    return isSequentialClockPin(arc.get_sink_pin());
+  const auto* cell_arc = arc.libertyArcId() ? _database.liberty().findCellArc(*arc.libertyArcId()) : nullptr;
+  if (cell_arc == nullptr || !cell_arc->get_is_latch_data_arc())
+    return false;
+  const auto& instance = _database.network().instances().at(arc.get_owner_name());
+  const auto& enable = instance.get_clock_pin_name();
+  const auto value = _database.graph().simValues().value(enable);
+  // The static simulator already excludes a closed enable via Liberty's
+  // when condition. A known open enable acts as a combinational data path.
+  if (value == TimingCaseValue::kZero || value == TimingCaseValue::kOne)
+    return false;
+  const auto point = _database.graph().points().find(enable);
+  if (point != _database.graph().points().end())
+    for (const auto& [clock, state] : point->second.get_clock_state_map())
+      if (!state.is_source_path_only && _database.sdc().get_clock_map().contains(clock))
+        return false;
+  // An ordinary data arrival at the gate pin is not a latch opening clock.
+  return true;
 }
 
 bool TimingStateQuery::isSequentialClockPin(const std::string& pin_name)
@@ -62,12 +80,21 @@ double TimingStateQuery::getClockArrival(const std::string& pin_name, AnalysisTy
     return 0.0;
   }
   TimingPoint& timing_point = database.graph().points()[pin_name];
-  return getClockArrival(timing_point, analysis_type, trans_type);
+  if (timing_point.findDefaultClockState() == nullptr)
+    return 0.0;
+  return getClockArrival(pin_name, timing_point.defaultClock(), analysis_type, trans_type);
 }
 
 double TimingStateQuery::getClockArrival(const std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
                                          std::optional<TransType> source)
 {
+  const auto* point = clockPoint(_database, pin_name, clock_name);
+  if (point && point->find_clock_state(clock_name)->is_structural) {
+    const auto values = clockPinValues(_database, pin_name, clock_name, analysis_type, trans_type, AnalysisType::kNone, source, point);
+    if (values.propagated)
+      throw std::invalid_argument("structural timing preparation requires ideal clocks");
+    return values.source_latency + values.network_latency;
+  }
   const ClockWaveform* state = clockWaveform(_database, pin_name, clock_name, source);
   return state == nullptr ? 0.0 : state->arrival(analysis_type, trans_type).value_or(0.0);
 }
@@ -85,13 +112,21 @@ double TimingStateQuery::getClockSlew(const std::string& pin_name, AnalysisType 
     return 0.0;
   }
   TimingPoint& timing_point = database.graph().points()[pin_name];
-  const auto* state = timing_point.findDefaultClockState();
-  return state == nullptr ? 0.0 : state->slew(analysis_type, trans_type).value_or(0.0);
+  if (timing_point.findDefaultClockState() == nullptr)
+    return 0.0;
+  return getClockSlew(pin_name, timing_point.defaultClock(), analysis_type, trans_type);
 }
 
 double TimingStateQuery::getClockSlew(const std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
                                       std::optional<TransType> source)
 {
+  const auto* point = clockPoint(_database, pin_name, clock_name);
+  if (point && point->find_clock_state(clock_name)->is_structural) {
+    auto& clock = _database.sdc().get_clock_map().at(std::string(clock_name));
+    const auto mode = clock.get_transition_map().find(analysis_type);
+    const auto edge = source.value_or(trans_type);
+    return mode != clock.get_transition_map().end() && mode->second.contains(edge) ? mode->second.at(edge) : 0.0;
+  }
   const ClockWaveform* state = clockWaveform(_database, pin_name, clock_name, source);
   return state == nullptr ? 0.0 : state->slew(analysis_type, trans_type).value_or(0.0);
 }
@@ -117,9 +152,16 @@ std::vector<TransType> clockSourceTransitions(const Database& database, const st
   if (!point)
     return {local_edge};  // Virtual or unconstrained clock.
   std::vector<TransType> result;
-  for (const auto& [source, wave] : point->find_clock_state(clock)->waveforms)
+  const auto* clock_state = point->find_clock_state(clock);
+  for (const auto& [source, wave] : clock_state->waveforms)
     if (wave.arrival(mode, local_edge))
       result.push_back(source);
+  // Model preparation deliberately has no numeric clock propagation.  Keep
+  // the logical capture edge usable by PathChecker without manufacturing an
+  // arrival/slew value.  A complete STA with an unreachable clock still
+  // follows the old empty-result behavior because is_structural is false.
+  if (result.empty() && clock_state->is_structural)
+    result.push_back(local_edge);
   return result;
 }
 

@@ -68,6 +68,14 @@ test/**
 !test/operations/test_placement_map.py
 !test/timing/
 !test/timing/endpoint_qualification_test.cpp
+!test/timing/CMakeLists.txt
+!test/timing/case_analysis_pad_test.cpp
+!test/timing/check_slew_order_test.cpp
+!test/timing/check_lut_export_test.cpp
+!test/timing/clock_source_transition_test.cpp
+!test/timing/net_threshold_test.cpp
+!test/timing/io_constraint_test.cpp
+!test/timing/sparse_export_contract_test.cpp
 !test/fixtures/
 !test/fixtures/gcd/
 !test/fixtures/gcd/config/

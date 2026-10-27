@@ -30,6 +30,7 @@
 namespace ista {
 void DataArrivalPropagator::propagate()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kDataArrival);
   Database& database = _database;
   _through_index.rebuild(database.sdc(), database.network());
   for (int32_t vertex_idx : database.graph().vertexOrder()) {

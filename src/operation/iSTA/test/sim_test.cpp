@@ -168,14 +168,24 @@ void arcConditionsAndSequentialSensitivity()
   clock.set_library_sink_port("Q");
   clock.set_is_clock_arc(true);
   db.graph().arcs().push_back(clock);
+  TimingCellArc latch = conditional;
+  latch.set_is_latch_data_arc(true);
+  cell.get_cell_arc_list().push_back(latch);
+  Arc latch_data = data;
+  latch_data.set_sink_pin("u:Q");
+  latch_data.set_library_sink_port("Q");
+  latch_data.setLibertyArcId(LibertyArcId{"cell", 1});
+  db.graph().arcs().push_back(latch_data);
 
   db.sdc().get_case_analysis_map()["u:EN"] = TimingCaseValue::kZero;
   propagate(db);
   require(db.graph().arcs()[0].get_is_case_analysis_disable(), "false when condition left arc enabled");
   require(!db.graph().arcs()[1].get_is_case_analysis_disable(), "sequential state function disabled clock-to-Q");
+  require(db.graph().arcs()[2].get_is_case_analysis_disable(), "false latch enable left data-to-Q enabled");
   db.sdc().get_case_analysis_map()["u:EN"] = TimingCaseValue::kOne;
   propagate(db);
   require(!db.graph().arcs()[0].get_is_case_analysis_disable(), "changed condition retained disabled arc");
+  require(!db.graph().arcs()[2].get_is_case_analysis_disable(), "latch state function disabled transparent data-to-Q");
 
   Sdc other_sdc;
   other_sdc.get_case_analysis_map()["u:A"] = TimingCaseValue::kStatic;

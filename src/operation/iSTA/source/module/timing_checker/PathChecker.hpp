@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,11 +35,21 @@ class PathChecker
 {
  public:
   PathChecker(Database& database, DelayCalculator& delay_calculator) : _database(database), _delay_calculator(delay_calculator), _query(database) {}
+  // Return every legal capture/check candidate for this propagated path. The
+  // winner-only checkPath() API remains the reduction used by setup analysis;
+  // min/hold exporters use this API to preserve launch/capture context.
+  std::vector<PathEnd> checkPathCandidates(const TimingPathState& path, const std::string& end_point, AnalysisType analysis);
   std::optional<PathEnd> checkPath(const TimingPathState& path, const std::string& end_point, AnalysisType analysis);
   double calcPathSlack(const TimingPathState& path, double required, AnalysisType analysis);
 
  private:
-  double checkTime(const TimingPathState& path, TimingCheckArc& arc, AnalysisType analysis, std::string_view clock, TransType source);
+  struct CheckTimeResult
+  {
+    double value = 0.0;
+    int32_t selected_arc_idx = -1;
+  };
+
+  CheckTimeResult checkTime(const TimingPathState& path, TimingCheckArc& arc, AnalysisType analysis, std::string_view clock, TransType source);
   Database& _database;
   DelayCalculator& _delay_calculator;
   TimingStateQuery _query;

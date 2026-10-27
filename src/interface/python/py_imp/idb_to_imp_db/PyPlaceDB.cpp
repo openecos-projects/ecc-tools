@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
+#include <chrono>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -80,10 +81,18 @@ bool getConnectedPadCoordinate(IdbPin* io_pin, int32_t& x, int32_t& y)
 }
 
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density)
+                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only)
 {
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
+  auto phase_started = std::chrono::steady_clock::now();
+  auto mark_phase = [&](const char* phase) {
+    const auto now = std::chrono::steady_clock::now();
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB phase ", phase, ", seconds ",
+                std::chrono::duration<double>(now - phase_started).count());
+    std::cout.flush();
+    phase_started = now;
+  };
   num_routing_grids_x = numRoutingGridsX;
   num_routing_grids_y = numRoutingGridsY;
   _db = db;
@@ -433,6 +442,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
               gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
               gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
               total_fixed_terminal_area, ", synthetic_rectangles ", ext_blockage_num, ".");
+  mark_phase("geometry_and_obstacles");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
@@ -473,6 +483,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     count += pin_num;
   }
   flat_node2pin_start_map.append(count);
+  mark_phase("node_pin_map");
 
   num_movable_pins = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
@@ -522,6 +533,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   }
 
+  mark_phase("pin_geometry");
   count = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
     if (isInvailidNet(net, with_sta)) {
@@ -581,6 +593,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     count += pin_num;
   }
   flat_net2pin_start_map.append(count);
+  mark_phase("net_pin_map");
 
   for (IdbRow* idb_row : db->get_idb_layout()->get_rows()->get_row_list()) {
     IdbRect* row_rect = idb_row->get_bounding_box();
@@ -637,11 +650,21 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   site_width = db->get_idb_layout()->get_rows()->get_row_list().at(0)->get_site()->get_width();
 #if 1
 
+  mark_phase("regions_and_rows");
   if (with_routability) {
     init_routability(db, inst_resort_list);
   }
   if (with_sta) {
-    init_timing(ista::STAInterface::getInst().exportTimingData(), db);
+    timing_preparation_mode = timing_model_only ? "model_only" : "complete";
+    mark_phase("before_timing_snapshot");
+    const auto snapshot = timing_model_only ? ista::STAInterface::getInst().exportTimingModel() : ista::STAInterface::getInst().exportTimingData();
+    mark_phase("timing_snapshot");
+    init_timing(snapshot, db);
+    mark_phase("timing_remap");
+    init_min_timing(snapshot);
+    mark_phase("min_timing_remap");
+    init_sparse_timing(snapshot);
+    mark_phase("sparse_timing_remap");
   }
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 

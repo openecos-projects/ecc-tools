@@ -176,8 +176,9 @@ void LogicSimulator::disableInsensitiveArcs()
       arc.set_is_case_analysis_disable(true);
       continue;
     }
-    // A sequential output function names its state, not the triggering clock.
-    if (arc.get_is_clock_arc())
+    // Sequential output functions name internal state. Liberty timing arcs
+    // define both clock-to-Q and transparent latch data-to-Q sensitivity.
+    if (arc.get_is_clock_arc() || (cell_arc != nullptr && cell_arc->get_is_latch_data_arc()))
       continue;
     const auto output = cell->second.get_port_map().find(arc.get_library_sink_port());
     if (output == cell->second.get_port_map().end() || output->second.get_function_expression().get_is_empty())

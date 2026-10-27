@@ -34,6 +34,7 @@ bool isDisableArc(const Arc& arc)
 }  // namespace
 std::vector<ClockSource> ClockNetworkBuilder::build()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kClockNetwork);
   std::vector<ClockSource> sources;
   orderSources(sources);
   markClockPoints(sources);

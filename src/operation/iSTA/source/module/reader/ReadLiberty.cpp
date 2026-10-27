@@ -243,6 +243,20 @@ void ReadLiberty::readCell(idb::LibCell* lib_cell)
     readCellArcs(timing_cell, lib_arc_set.get());
   }
 
+  // Preserve the Liberty latch data identity for the early/min consumer.
+  // A latch's data_in expression names the transparent data source; its
+  // non-clock timing arc is the only cell arc that may remain transparent
+  // during an early latch propagation.  Keep this identity attached to the
+  // arc instead of asking the consumer to infer it from master or pin names.
+  for (const auto& latch : lib_cell->get_latches()) {
+    if (latch.data_in.empty())
+      continue;
+    for (auto& arc : timing_cell.get_cell_arc_list()) {
+      if (!arc.get_is_clock_arc() && arc.get_source_port() == latch.data_in)
+        arc.set_is_latch_data_arc(true);
+    }
+  }
+
   readCellInfo(timing_cell);
   _liberty.get_cell_map()[timing_cell.get_cell_name()] = timing_cell;
 }
@@ -251,6 +265,7 @@ void ReadLiberty::readPort(LibertyCell& timing_cell, idb::LibPort* lib_port)
 {
   LibertyPort timing_cell_port;
   timing_cell_port.set_port_name(lib_port->get_port_name());
+  timing_cell_port.set_declaration_index(static_cast<int32_t>(timing_cell.get_port_map().size()));
   timing_cell_port.set_capacitance(lib_port->get_port_cap());
   timing_cell_port.set_drive_resistance(lib_port->driveResistance());
   idb::LibLibrary* library = lib_port->get_ower_cell()->get_owner_lib();
@@ -421,6 +436,11 @@ TimingCellArc ReadLiberty::readDelayArc(idb::LibArcSet* lib_arc_set)
   timing_cell_arc.set_timing_arc_list(readArcs(lib_arc_set));
   timing_cell_arc.set_is_clock_arc(lib_arc->isRisingTriggerArc() || lib_arc->isFallingTriggerArc());
   timing_cell_arc.set_is_disable_arc(lib_arc->isDisableArc());
+  // Three-state enable/disable arcs are represented as SDF delay arcs, but
+  // Liberty does not classify them as ordinary delay arcs.  Keep that role
+  // explicit so the graph builder can retain the enable path (OE -> PAD)
+  // while still excluding the disable path from data propagation.
+  timing_cell_arc.set_is_control_arc(!lib_arc->isDelayArc() && !lib_arc->isClearPresetArc());
   return timing_cell_arc;
 }
 

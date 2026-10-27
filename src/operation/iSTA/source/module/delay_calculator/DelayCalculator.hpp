@@ -39,9 +39,12 @@ namespace ista {
 // Evaluates explicit arc/cell/check requests. Owns one set of calculation caches; traversal lives elsewhere.
 class DelayCalculator
 {
+  friend class SparseTimingExportAdapter;
+
  public:
   DelayCalculator(Database& database, const Config& config)
-      : _pin_capacitance(database),
+      : _execution_stats(database.timingExecutionStats()),
+        _pin_capacitance(database),
         _rc(database, _pin_capacitance),
         _load(database, _pin_capacitance, _rc),
         _models(database, config, _rc),
@@ -90,6 +93,7 @@ class DelayCalculator
   double calcCellArcDelay(Arc& arc, AnalysisType analysis_type);
   double calcCellArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);
   double calcArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double input_slew);
+  TimingExecutionStats& _execution_stats;
   PinCapacitanceCalculator _pin_capacitance;
   RcTreeAnalyzer _rc;
   LoadCalculator _load;

@@ -119,7 +119,11 @@ double StartpointInitializer::getStartPointArrival(std::string& start_point, Ana
         has_arrival = true;
       }
     }
-    std::optional<DelayResult> driving_cell_timing = getDrivingCellTiming(start_point, analysis_type, trans_type);
+    // set_driving_cell contributes its load-dependent delay after the input
+    // delay at the port.  calculateDrivingCell returns only this incremental
+    // delay (the intrinsic part is removed), so adding it here does not
+    // duplicate the physical PAD input arc propagated afterward.
+    const std::optional<DelayResult> driving_cell_timing = getDrivingCellTiming(start_point, analysis_type, trans_type);
     return driving_cell_timing ? arrival + driving_cell_timing->get_delay() : arrival;
   }
   if (database.network().instances().count(pin.get_instance_name()) == 0) {
@@ -560,7 +564,7 @@ void StartpointInitializer::seedInputPathState(std::string& start_point, Analysi
     const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
     for (size_t index = first; index < count; index += 2) {
       const double offset = clock == _database.sdc().get_clock_map().end() ? 0. : clock->second.edge(index).time - clock->second.edge(first).time;
-      seedPathState(start_point, analysis_type, trans_type, clock_name, launch + offset + delay.get_delay() + (driver ? driver->get_delay() : 0.),
+      seedPathState(start_point, analysis_type, trans_type, clock_name, launch + offset + delay.get_delay() + (driver ? driver->get_delay() : 0.0),
                     getStartPointSlew(start_point, analysis_type, trans_type), launch + offset, local, false, delay.get_delay(), source_latency, index,
                     delay.get_reference_pin());
     }

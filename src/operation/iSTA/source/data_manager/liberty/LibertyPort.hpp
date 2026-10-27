@@ -33,6 +33,7 @@ class LibertyPort
   ~LibertyPort() = default;
   // getter
   std::string& get_port_name() { return _port_name; }
+  int32_t get_declaration_index() const { return _declaration_index; }
   double get_capacitance() const { return _capacitance; }
   double get_drive_resistance() const { return _drive_resistance; }
   std::map<AnalysisType, std::map<TransType, double>>& get_trans_capacitance_map() { return _trans_capacitance_map; }
@@ -53,6 +54,7 @@ class LibertyPort
   // setter
   void set_three_state_expression(const LogicExpression& expression) { _three_state_expression = expression; }
   void set_port_name(const std::string& port_name) { _port_name = port_name; }
+  void set_declaration_index(int32_t index) { _declaration_index = index; }
   void set_capacitance(const double capacitance) { _capacitance = capacitance; }
   void set_drive_resistance(const double drive_resistance) { _drive_resistance = drive_resistance; }
   void set_trans_capacitance_map(const std::map<AnalysisType, std::map<TransType, double>>& trans_capacitance_map)
@@ -71,6 +73,7 @@ class LibertyPort
 
  private:
   std::string _port_name;
+  int32_t _declaration_index = 0;
   double _capacitance = 0.0;
   double _drive_resistance = 0.0;
   std::map<AnalysisType, std::map<TransType, double>> _trans_capacitance_map;

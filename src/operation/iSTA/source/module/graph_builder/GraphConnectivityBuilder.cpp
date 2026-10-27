@@ -87,7 +87,8 @@ bool GraphConnectivityBuilder::buildLibraryCellArcs(Instance& instance)
   auto& cell_arcs = timing_cell.get_cell_arc_list();
   for (std::size_t index = 0; index < cell_arcs.size(); ++index) {
     TimingCellArc& timing_cell_arc = cell_arcs[index];
-    if (!timing_cell_arc.get_is_timing_graph_arc()) {
+    if (!timing_cell_arc.get_is_timing_graph_arc()
+        && (!timing_cell_arc.get_is_control_arc() || timing_cell_arc.get_is_disable_arc())) {
       continue;
     }
     addCellArc(instance, timing_cell_arc, index);

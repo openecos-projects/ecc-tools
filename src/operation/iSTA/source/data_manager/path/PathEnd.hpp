@@ -29,6 +29,11 @@ struct PathCheck
   std::string common_pin;
   std::optional<double> output_delay;
   bool level_sensitive = false;
+  // The selected Liberty check-arc variant at this base point.  A single
+  // TimingCheckArc can contain multiple conditional/table variants; retaining
+  // only the scalar check value is insufficient for sparse export because
+  // the exporter must bind the same LUT identity.
+  int32_t selected_check_arc_idx = -1;
 };
 
 // Borrows a propagated path only during synchronous PathSearcher.
