@@ -1,6 +1,8 @@
 // Adapted from the frozen paper manuscript rank3 collector (2026-10-09).
 #pragma once
 #include <atomic>
+#include <array>
+#include <memory>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <cmath>
@@ -15,6 +17,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "PrebuiltPatternModel.hpp"
 #include "RankedNeighbors.hpp"
 #include "TopoPool.hpp"
 namespace ircx::pattern {
@@ -45,6 +48,9 @@ class MultiNeighborCache
   std::mutex mutex_;
   bool active_ = false, collect_ = false, grid_ = false;
   int rank_ = 3;
+  std::unique_ptr<const prebuilt::Model> model_;
+  mutable std::array<std::atomic<std::int64_t>, 3> model_queries_{};
+  mutable std::array<std::atomic<std::int64_t>, 3> model_dbu_{};
   static std::size_t owner(const ircx::TopoEdge& e) { return (std::size_t(e.get_is_special_net()) << 32) | std::uint32_t(e.get_net_idx()); }
   static std::filesystem::path outputPath(const char* name)
   {
@@ -68,7 +74,7 @@ class MultiNeighborCache
     active_ = true;
     collect_ = std::string(mode) == "collect";
     grid_ = std::string(mode) == "grid";
-    if (!collect_ && !grid_ && std::string(mode) != "apply")
+    if (!collect_ && !grid_ && std::string(mode) != "apply" && std::string(mode) != "prebuilt")
       throw std::runtime_error("invalid multi mode");
     const char* rank = std::getenv("IRCX_MULTI_RANK");
     if (rank)
@@ -110,7 +116,16 @@ class MultiNeighborCache
       }
       index.spatial = SpatialIndex(values.begin(), values.end());
     }
-    if (!collect_ && !grid_) {
+    if (std::string(mode) == "prebuilt") {
+      const char* path = std::getenv("IRCX_PATTERN_MODEL");
+      const char* grid = std::getenv("IRCX_PATTERN_GRID");
+      if (!path || !*path)
+        throw std::runtime_error("missing prebuilt pattern model");
+      if (!grid || !*grid)
+        throw std::runtime_error("prebuilt mode requires independent grid fallback");
+      model_ = std::make_unique<const prebuilt::Model>(path);
+    }
+    if (!collect_ && !grid_ && !model_) {
       const char* path = std::getenv("IRCX_MULTI_TABLE");
       if (!path)
         throw std::runtime_error("missing multi table");
@@ -140,6 +155,15 @@ class MultiNeighborCache
   {
     if (!active_)
       return;
+    if (model_) {
+      std::ofstream report(outputPath("prebuilt_stats.txt"));
+      const char* names[] = {"supported", "geometry_fallback", "domain_fallback"};
+      for (std::size_t i = 0; i < 3; ++i)
+        report << names[i] << "_queries " << model_queries_[i] << '\n'
+               << names[i] << "_dbu " << model_dbu_[i] << '\n';
+      if (!report)
+        std::abort();
+    }
     if (collect_) {
       std::ofstream out(outputPath("multi_requests.txt"));
       for (const auto& k : requests_)
@@ -168,13 +192,22 @@ class MultiNeighborCache
   bool active() const { return active_; }
   bool collecting() const { return collect_; }
   bool gridded() const { return grid_; }
-  const std::vector<double>& caps(const std::string& key) const
+  bool modeled() const { return bool(model_); }
+  // Each caller owns its result: concurrent and consecutive queries cannot alias.
+  std::vector<double> caps(const std::string& key, std::int64_t length = 0) const
   {
     static const std::vector<double> zero{0.}, fallback{};
     if (key == "__ZERO")
       return zero;
     if (key == "__FALLBACK")
       return fallback;
+    if (model_) {
+      auto result = model_->query(key);
+      const auto status = static_cast<std::size_t>(result.status);
+      ++model_queries_[status];
+      model_dbu_[status] += length;
+      return result.caps;
+    }
     auto it = caps_.find(key);
     if (it == caps_.end())
       throw std::runtime_error("missing multi geometry: " + key);

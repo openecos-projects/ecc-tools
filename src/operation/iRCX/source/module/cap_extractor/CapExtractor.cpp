@@ -58,10 +58,10 @@ void CapExtractor::extract()
   if (_multi->active() && !_multi->collecting() && RCXDM.getDatabase().get_corner_data_list().size() != 1) {
     throw std::runtime_error("multi-neighbor apply currently requires exactly one process corner");
   }
-  if (_multi->gridded()) {
+  if (_multi->gridded() || _multi->modeled()) {
     const char* path = std::getenv("IRCX_PATTERN_GRID");
     if (!path) {
-      throw std::runtime_error("grid mode requires IRCX_PATTERN_GRID");
+      throw std::runtime_error("grid and prebuilt modes require IRCX_PATTERN_GRID");
     }
     _grid = std::make_unique<pattern::PatternGrid>(path);
   }
@@ -178,22 +178,26 @@ void CapExtractor::extractCapacitanceSpan(int32_t corner_idx, int32_t net_idx, i
         if (part.key == "__ZERO") {
           continue;
         }
-        if (_grid && part.key != "__FALLBACK") {
+        const auto caps = _multi->gridded() ? std::vector<double>{} : _multi->caps(part.key, part.hi - part.lo);
+        // Prebuilt failures use the independent grid, including explicit overlap
+        // fallbacks. Keep the historical grid/apply modes' fallback behavior.
+        if (_grid && (_multi->modeled() ? caps.empty() : part.key != "__FALLBACK")) {
+          if (_multi->modeled())
+            _multi->recordFieldFallback(part.hi - part.lo);
           const auto sides = pattern::fallbackSides(edge, part, unit);
-          const auto caps = _grid->query(conductor->get_layer_name(), pattern_below, pattern_above, edge.get_width() * unit,
+          const auto grid_caps = _grid->query(conductor->get_layer_name(), pattern_below, pattern_above, edge.get_width() * unit,
                                          sides.lower ? sides.lower_spacing : -1., sides.upper ? sides.upper_spacing : -1.);
-          _multi->recordGridCoverage(part.hi - part.lo, caps.width_clamped, caps.gap_clamped);
+          _multi->recordGridCoverage(part.hi - part.lo, grid_caps.width_clamped, grid_caps.gap_clamped);
           const double length = unit * (part.hi - part.lo);
-          ground[edge_idx] += length * caps.ground;
+          ground[edge_idx] += length * grid_caps.ground;
           if (sides.lower) {
-            addDirectedCoupling(corner_idx, net_idx, edge_idx, sides.lower, part.lo, part.hi, length * caps.left);
+            addDirectedCoupling(corner_idx, net_idx, edge_idx, sides.lower, part.lo, part.hi, length * grid_caps.left);
           }
           if (sides.upper) {
-            addDirectedCoupling(corner_idx, net_idx, edge_idx, sides.upper, part.lo, part.hi, length * caps.right);
+            addDirectedCoupling(corner_idx, net_idx, edge_idx, sides.upper, part.lo, part.hi, length * grid_caps.right);
           }
           continue;
         }
-        const auto& caps = _multi->caps(part.key);
         if (caps.empty()) {
           _multi->recordFieldFallback(part.hi - part.lo);
           extractCapacitanceSpan(corner_idx, net_idx, edge_idx, interval_idx, part.lo, part.hi, false, &part);
