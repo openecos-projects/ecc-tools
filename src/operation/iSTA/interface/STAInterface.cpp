@@ -37,6 +37,7 @@
 #include "SDFWriter.hpp"
 #include "STAHeader.hpp"
 #include "SdcCommand.hpp"
+#include "SdcWriter.hpp"
 #include "TCModel.hpp"
 #include "TimingAnalyzer.hpp"
 #include "TimingCharacterizer.hpp"
@@ -111,6 +112,13 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   _timing_ready = false;
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void STAInterface::outputSDC(const std::string& file_path)
+{
+  if (!_initialized)
+    throw std::runtime_error("STA must be initialized before output_sdc");
+  sdc::writeSdcFile(STADM.getDatabase(), file_path);
 }
 
 void STAInterface::runSTA()
@@ -721,7 +729,8 @@ void STAInterface::wrapTimingCell(idb::LibCell* lib_cell)
           ++positive_count;
         }
       }
-      if (positive_count > 0) leakage_mw = positive_sum / positive_count;
+      if (positive_count > 0)
+        leakage_mw = positive_sum / positive_count;
     }
     timing_cell.set_leakage_power(leakage_mw / power_scale);
   }

@@ -48,7 +48,7 @@ class AntennaReportingTest
     idb::IdbDesign* design = dmInst->get_idb_design();
     idb::IdbNet* net = design->get_net_list()->find_net("violating");
     require(dmInst->saveDef((_output / "before.def").string()), "save input design");
-    MJI.checkAntenna({});
+    MJI.checkAntenna({{"-step_json", (_output / "antennaCheck.step.json").string()}});
     require(dmInst->get_idb_design() == design, "checker replaced the design");
     require(design->get_net_list()->find_net("violating") == net, "checker replaced a net");
     require(dmInst->saveDef((_output / "after.def").string()), "save checked design");
@@ -59,6 +59,11 @@ class AntennaReportingTest
     require(report.find("Net: clean ") == std::string::npos, "clean component reported");
     require(report.find("Net: missing ") == std::string::npos, "missing gate data used as a gate");
     require(report.find("Net: power ") == std::string::npos, "power net checked as a signal");
+    std::string step_json = readText(_output / "antennaCheck.step.json");
+    require(step_json.find("\"schema_version\": 1") != std::string::npos, "missing antenna step schema");
+    require(step_json.find("\"step\": \"antennaCheck\"") != std::string::npos, "missing antenna step name");
+    require(step_json.find("\"violation_count\": 10") != std::string::npos, "wrong structured violation count");
+    require(step_json.find("\"net\": \"violating\"") != std::string::npos, "missing structured violation");
     require(report.find("Gate pin: driver/Y") == std::string::npos, "diffusion-only output reported as a gate");
     require(report.find("Gate pin: isolated/A") == std::string::npos, "disconnected gate selected");
 

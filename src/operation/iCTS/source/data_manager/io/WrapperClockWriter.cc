@@ -131,6 +131,14 @@ auto ResolveIdbPin(idb::IdbDesign* idb_design, const ClockTreeIdbPinKey& key) ->
   return FindIdbInstPinByCtsPinName(idb_inst, key.pin_name);
 }
 
+// A placement status only counts as resolved when it names where the instance really is.
+// kNone, kUnplaced and kMax all mean the design has not placed it yet, so the clock tree still
+// has to: those are the only cases where CTS may choose a coordinate.
+auto IsIdbPlacementResolved(idb::IdbPlacementStatus status) -> bool
+{
+  return status == idb::IdbPlacementStatus::kFixed || status == idb::IdbPlacementStatus::kCover || status == idb::IdbPlacementStatus::kPlaced;
+}
+
 auto CollectClockTreeIdbNetPins(idb::IdbNet* idb_net) -> ClockTreeIdbNetPins
 {
   ClockTreeIdbNetPins pins;
@@ -182,7 +190,7 @@ class Wrapper::CtsClockIdbWriter
       if (clock == nullptr) {
         continue;
       }
-      if (!writeClockToIdb(*clock, scope)) {
+      if (!writeClockToIdb(*clock, scope, restore_data)) {
         result.success = false;
         result.failed_clock = clock->get_clock_name();
         result.failed_net = _failed_net_name.empty() ? clock->get_clock_net_name() : _failed_net_name;
@@ -298,9 +306,9 @@ class Wrapper::CtsClockIdbWriter
     return restore_data;
   }
 
-  auto writeClockToIdb(Clock& clock, const ClockTreeIdbMaterializationScope& scope) -> bool
+  auto writeClockToIdb(Clock& clock, const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data) -> bool
   {
-    if (!writeClockTreeInstsToIdb(clock)) {
+    if (!writeClockTreeInstsToIdb(clock, restore_data)) {
       if (_failed_net_name.empty()) {
         _failed_net_name = clock.get_clock_net_name();
       }
@@ -330,13 +338,13 @@ class Wrapper::CtsClockIdbWriter
     return true;
   }
 
-  auto writeClockTreeInstsToIdb(Clock& clock) -> bool
+  auto writeClockTreeInstsToIdb(Clock& clock, const ClockTreeIdbPreexistingObjects& restore_data) -> bool
   {
     for (auto* inst : clock.get_insts()) {
       if (inst == nullptr) {
         continue;
       }
-      if (createOrUpdateClockTreeInst(inst) == nullptr) {
+      if (createOrUpdateClockTreeInst(inst, restore_data) == nullptr) {
         _failure_reason = "create_or_update_clock_tree_inst_failed";
         _failed_net_name = clock.get_clock_net_name();
         return false;
@@ -345,7 +353,34 @@ class Wrapper::CtsClockIdbWriter
     return true;
   }
 
-  auto createOrUpdateClockTreeInst(Inst* inst) -> idb::IdbInstance*
+  // CTS owns where a clock-tree object sits and nothing else about an object the design
+  // already had. A pre-existing instance that is already placed therefore keeps its
+  // orientation, its placement status, its instance type and its coordinate untouched: a
+  // fixed pad stays fixed and a mirrored cell stays mirrored, because re-declaring those
+  // attributes would silently discard constraints the input DEF carried. An unplaced
+  // instance is the opposite case, the clock tree still has to route through it, so placing
+  // it completes the input rather than editing it.
+  auto applyClockTreeInstPlacement(idb::IdbInstance* idb_inst, Inst* inst, const ClockTreeIdbPreexistingObjects& restore_data) -> bool
+  {
+    if (idb_inst == nullptr || inst == nullptr) {
+      return false;
+    }
+    const bool preexisting = restore_data.inst_names.contains(inst->get_name());
+    if (preexisting && IsIdbPlacementResolved(idb_inst->get_status())) {
+      return true;
+    }
+    const auto orient = idb_inst->get_orient() == idb::IdbOrient::kNone ? idb::IdbOrient::kN_R0 : idb_inst->get_orient();
+    if (!_wrapper->_idb_design->placeInstance(inst->get_name(), inst->get_location().get_x(), inst->get_location().get_y(), orient,
+                                              idb::IdbPlacementStatus::kPlaced)) {
+      return false;
+    }
+    if (!preexisting) {
+      idb_inst->set_type(idb::IdbInstanceType::kTiming);
+    }
+    return true;
+  }
+
+  auto createOrUpdateClockTreeInst(Inst* inst, const ClockTreeIdbPreexistingObjects& restore_data) -> idb::IdbInstance*
   {
     if (inst == nullptr) {
       return nullptr;
@@ -388,12 +423,10 @@ class Wrapper::CtsClockIdbWriter
           return nullptr;
         }
       }
-      if (!_wrapper->_idb_design->placeInstance(inst->get_name(), inst->get_location().get_x(), inst->get_location().get_y(), idb::IdbOrient::kN_R0,
-                                                idb::IdbPlacementStatus::kPlaced)) {
+      if (!applyClockTreeInstPlacement(idb_inst, inst, restore_data)) {
         CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed: cannot place mapped iDB inst \"", inst->get_name(), "\".");
         return nullptr;
       }
-      idb_inst->set_type(idb::IdbInstanceType::kTiming);
       bindClockTreeInstPins(idb_inst, inst);
       return idb_inst;
     }
@@ -411,15 +444,12 @@ class Wrapper::CtsClockIdbWriter
                     inst->get_cell_master(), "\".");
         return nullptr;
       }
-      idb_inst->set_type(idb::IdbInstanceType::kTiming);
     }
 
-    if (!_wrapper->_idb_design->placeInstance(inst->get_name(), inst->get_location().get_x(), inst->get_location().get_y(), idb::IdbOrient::kN_R0,
-                                              idb::IdbPlacementStatus::kPlaced)) {
+    if (!applyClockTreeInstPlacement(idb_inst, inst, restore_data)) {
       CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed: cannot place iDB inst \"", inst->get_name(), "\".");
       return nullptr;
     }
-    idb_inst->set_type(idb::IdbInstanceType::kTiming);
     _wrapper->crossRef(idb_inst, inst);
     bindClockTreeInstPins(idb_inst, inst);
     return idb_inst;

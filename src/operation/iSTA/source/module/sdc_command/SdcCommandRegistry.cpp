@@ -19,12 +19,14 @@
 #include "delay/DelayCommands.hpp"
 #include "design_rule/DesignRuleCommands.hpp"
 #include "exception/PathExceptionCommand.hpp"
-#include "logic/LogicCommands.hpp"
 #include "frontend/SdcTclCmd.hpp"
 #include "frontend/SetUnits.hpp"
-#include "object/GetFan.hpp"
-#include "object/GetName.hpp"
+#include "logic/LogicCommands.hpp"
 #include "object/ObjectCommands.hpp"
+#include "tcl/CollectionCommands.hpp"
+#include "tcl/GetFan.hpp"
+#include "tcl/GetName.hpp"
+#include "tcl/ToolCommands.hpp"
 
 namespace ista::sdc {
 
@@ -36,11 +38,25 @@ void registerCommand(SdcCommand& interpreter, const char* name)
   interpreter.createCmd(name, &executeTclCommand<Command>);
 }
 
-void registerCollectionCommands(SdcCommand& interpreter)
+void registerToolCommands(SdcCommand& interpreter)
 {
-  // Collection operations are tool commands exposed through Tcl; they are not
-  // part of the Tcl language itself.
+  // Tool source-script extensions, separate from SDC constraint commands.
+  // These commands are not built-in Tcl language commands.
   registerCommand<TclRemoveFromCollection>(interpreter, "remove_from_collection");
+  registerCommand<TclGetFullName>(interpreter, "get_full_name");
+  registerCommand<TclGetFullName>(interpreter, "get_object_name");
+  registerCommand<TclGetName>(interpreter, "get_name");
+  registerCommand<TclGetFan>(interpreter, "get_fanin");
+  registerCommand<TclGetFan>(interpreter, "get_fanout");
+  registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
+  registerCommand<TclRemoveClockLatency>(interpreter, "remove_clock_latency");
+  registerCommand<TclRemoveClockLatency>(interpreter, "unset_clock_latency");
+  registerCommand<TclRemoveClockUncertainty>(interpreter, "remove_clock_uncertainty");
+  registerCommand<TclRemoveClockUncertainty>(interpreter, "unset_clock_uncertainty");
+  registerCommand<TclRemovePropagatedClock>(interpreter, "remove_propagated_clock");
+  registerCommand<TclRemovePropagatedClock>(interpreter, "unset_propagated_clock");
+  registerCommand<TclResetPath>(interpreter, "reset_path");
+  registerCommand<TclResetPath>(interpreter, "unset_path_exceptions");
 }
 
 void registerObjectQueryCommands(SdcCommand& interpreter)
@@ -49,14 +65,8 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclAllInputs>(interpreter, "all_inputs");
   registerCommand<TclAllOutputs>(interpreter, "all_outputs");
   registerCommand<TclAllClocks>(interpreter, "all_clocks");
-  registerCommand<TclGetFullName>(interpreter, "get_full_name");
-  registerCommand<TclGetFullName>(interpreter, "get_object_name");
-  registerCommand<TclGetName>(interpreter, "get_name");
-  registerCommand<TclGetFan>(interpreter, "get_fanin");
-  registerCommand<TclGetFan>(interpreter, "get_fanout");
   registerCommand<TclGetClocks>(interpreter, "get_clock");
   registerCommand<TclGetClocks>(interpreter, "get_clocks");
-  registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
   registerCommand<TclGetLibs>(interpreter, "get_lib");
   registerCommand<TclGetLibs>(interpreter, "get_libs");
   registerCommand<TclGetLibCells>(interpreter, "get_lib_cell");
@@ -78,15 +88,9 @@ void registerClockConstraintCommands(SdcCommand& interpreter)
   registerCommand<TclCreateGeneratedClock>(interpreter, "create_generated_clock");
   registerCommand<TclSetClockGroups>(interpreter, "set_clock_groups");
   registerCommand<TclSetClockLatency>(interpreter, "set_clock_latency");
-  registerCommand<TclRemoveClockLatency>(interpreter, "remove_clock_latency");
-  registerCommand<TclRemoveClockLatency>(interpreter, "unset_clock_latency");
   registerCommand<TclSetClockTransition>(interpreter, "set_clock_transition");
   registerCommand<TclSetClockUncertainty>(interpreter, "set_clock_uncertainty");
-  registerCommand<TclRemoveClockUncertainty>(interpreter, "remove_clock_uncertainty");
-  registerCommand<TclRemoveClockUncertainty>(interpreter, "unset_clock_uncertainty");
   registerCommand<TclSetPropagatedClock>(interpreter, "set_propagated_clock");
-  registerCommand<TclRemovePropagatedClock>(interpreter, "remove_propagated_clock");
-  registerCommand<TclRemovePropagatedClock>(interpreter, "unset_propagated_clock");
 }
 
 void registerDelayConstraintCommands(SdcCommand& interpreter)
@@ -114,8 +118,6 @@ void registerPathExceptionCommands(SdcCommand& interpreter)
   registerCommand<TclSetMaxDelay>(interpreter, "set_max_delay");
   registerCommand<TclSetMinDelay>(interpreter, "set_min_delay");
   registerCommand<TclSetMulticyclePath>(interpreter, "set_multicycle_path");
-  registerCommand<TclResetPath>(interpreter, "reset_path");
-  registerCommand<TclResetPath>(interpreter, "unset_path_exceptions");
 }
 
 }  // namespace
@@ -123,7 +125,7 @@ void registerPathExceptionCommands(SdcCommand& interpreter)
 void registerSdcCommands(SdcCommand& interpreter)
 {
   registerCommand<TclSetUnits>(interpreter, "set_units");
-  registerCollectionCommands(interpreter);
+  registerToolCommands(interpreter);
   registerObjectQueryCommands(interpreter);
   registerClockConstraintCommands(interpreter);
   registerDelayConstraintCommands(interpreter);

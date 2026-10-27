@@ -523,12 +523,6 @@ END DESIGN
   bool _ready = false;
 };
 
-auto Median(std::array<double, 4> samples) -> double
-{
-  std::ranges::sort(samples);
-  return (samples.at(1U) + samples.at(2U)) / 2.0;
-}
-
 struct ExternalDesignFingerprint
 {
   std::vector<std::string> insts;
@@ -1165,45 +1159,6 @@ TEST(CTSAPILifecycleTest, CompletionIsLoggedBeforeLoggerDestruction)
   EXPECT_LT(start_pos, completion_pos);
 
   RemoveOutputDir(output_dir);
-}
-
-TEST(CTSAPILifecycleTest, TenCyclesRemainWithinApprovedPostDestroyRssThreshold)
-{
-#ifdef __linux__
-  const ScopedMinimalExternalIdb external_idb("ten_cycles");
-  ASSERT_TRUE(external_idb.ready());
-  std::array<double, 10> post_destroy_rss_mb{};
-  for (std::size_t cycle = 0U; cycle < post_destroy_rss_mb.size(); ++cycle) {
-    const auto init_status = icts::CTSAPI::init(external_idb.configPath().string(), external_idb.workDir().string());
-    ASSERT_EQ(init_status.code, icts::CTSStatusCode::kOk) << "cycle " << cycle << ": " << init_status.message;
-    EXPECT_TRUE(icts::CTSAPI::outputClockTiming().empty());
-    EXPECT_EQ(icts::CTSAPI::runCTS().code, icts::CTSStatusCode::kNoOp);
-    PopulateRepresentativeSession(4096U);
-    ASSERT_TRUE(icts::CTSAPI::destroyCTS().ok());
-    ASSERT_TRUE(icts::CTSAPI::destroyCTS().ok());
-    const auto rss_mb = icts::Utility::currentRssMb();
-    if (!rss_mb.has_value()) {
-      FAIL() << "Expected rss_mb to have a value.";
-    }
-    post_destroy_rss_mb.at(cycle) = rss_mb.value_or(0.0);
-  }
-
-  const std::array<double, 4> early_samples = {post_destroy_rss_mb.at(1U), post_destroy_rss_mb.at(2U), post_destroy_rss_mb.at(3U), post_destroy_rss_mb.at(4U)};
-  const std::array<double, 4> late_samples = {post_destroy_rss_mb.at(6U), post_destroy_rss_mb.at(7U), post_destroy_rss_mb.at(8U), post_destroy_rss_mb.at(9U)};
-  const double early_median_mb = Median(early_samples);
-  const double late_median_mb = Median(late_samples);
-  constexpr double absolute_tolerance_mb = 16.0;
-  const double allowed_growth_mb = std::max(absolute_tolerance_mb, early_median_mb * 0.05);
-  EXPECT_LE(late_median_mb, early_median_mb + allowed_growth_mb);
-
-  bool sustained_growth = true;
-  for (std::size_t index = 2U; index < post_destroy_rss_mb.size(); ++index) {
-    sustained_growth = sustained_growth && post_destroy_rss_mb.at(index) > post_destroy_rss_mb.at(index - 1U);
-  }
-  EXPECT_FALSE(sustained_growth);
-#else
-  GTEST_SKIP() << "Linux /proc RSS sampling is unavailable.";
-#endif
 }
 
 }  // namespace

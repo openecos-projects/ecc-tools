@@ -89,8 +89,11 @@ ACModel AntennaChecker::initACModel(std::map<std::string, std::any>& config_map)
 {
   ACModel ac_model;
   ac_model.get_report_dir() = MJDM.getConfig().ac_temp_directory_path;
+  if (Utility::exist(config_map, std::string("-step_json"))) {
+    ac_model.get_step_json_path() = Utility::getConfigValue<std::string>(config_map, "-step_json", "");
+  }
 
-  if (!config_map.empty()) {
+  if (!config_map.empty() && ac_model.get_step_json_path().empty()) {
     MJLOG.warn(Loc::current(), "The checkAntenna config has not been consumed yet!");
   }
 
@@ -1685,6 +1688,49 @@ void AntennaChecker::writeReport(const ACModel& ac_model) const
       }
     }
     MJUTIL.closeFileStream(stream);
+  }
+
+  if (!ac_model.get_step_json_path().empty()) {
+    const std::filesystem::path json_path(ac_model.get_step_json_path());
+    if (!json_path.parent_path().empty()) {
+      std::filesystem::create_directories(json_path.parent_path());
+    }
+    nlohmann::json payload = {
+        {"schema_version", 1},
+        {"step", "antennaCheck"},
+        {"antenna_check",
+         {{"violation_count", ac_model.get_violation_num()},
+          {"signal_net_count", ac_model.get_signal_net_cnt()},
+          {"pins_missing_antenna_info", ac_model.get_pins_missing_antenna_info().load()},
+          {"pins_with_gate_area", ac_model.get_pins_with_gate_area().load()},
+          {"components_without_gate", ac_model.get_comps_without_gate().load()},
+          {"skipped_segments", ac_model.get_skipped_segments().load()},
+          {"conductors_out_of_range", ac_model.get_conductors_out_of_range().load()},
+          {"partial_areas_dropped", ac_model.get_partial_areas_dropped().load()}}},
+        {"violations", nlohmann::json::array()}};
+    for (const ACViolation& violation : ac_model.get_violation_list()) {
+      payload["violations"].push_back({
+          {"net", violation.net_name},
+          {"layer", violation.layer_name},
+          {"type", GetACViolationTypeName()(violation.type)},
+          {"pin", violation.pin_name},
+          {"instance", violation.instance_name},
+          {"ratio", violation.ratio},
+          {"threshold", violation.threshold},
+          {"gate_area", violation.gate_area},
+          {"diffusion_area", violation.diff_area},
+          {"metal_area", violation.metal_area},
+          {"side_area", violation.side_area},
+          {"cut_area", violation.cut_area},
+          {"location", {{"lx", violation.lx}, {"ly", violation.ly}, {"hx", violation.hx}, {"hy", violation.hy}}},
+      });
+    }
+    std::ofstream output(json_path);
+    if (!output.is_open()) {
+      MJLOG.error(Loc::current(), "Failed to write antenna step JSON: ", json_path.string());
+      return;
+    }
+    output << payload.dump(2) << '\n';
   }
 }
 

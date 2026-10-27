@@ -27,6 +27,7 @@ int registerCmdSTA()
   // sta
   registerTclCmd(TclInitSTA, "init_sta");
   registerTclCmd(TclRunSTA, "run_sta");
+  registerTclCmd(TclOutputSDC, "output_sdc");
   registerTclCmd(TclExtractLib, "extract_lib");
   registerTclCmd(TclDestroySTA, "destroy_sta");
   return EXIT_SUCCESS;

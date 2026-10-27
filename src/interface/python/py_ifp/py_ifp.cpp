@@ -23,10 +23,10 @@
 
 namespace python_interface {
 
-bool init_fp(const std::string& config)
+bool init_fp(const std::filesystem::path& config)
 {
   std::map<std::string, std::any> config_map;
-  config_map["-config"] = config;
+  config_map["-config"] = config.string();
   FPI.initFP(config_map);
   return true;
 }

@@ -17,6 +17,7 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_imj.h"
 
@@ -25,13 +26,13 @@ namespace py = pybind11;
 
 void register_imj(py::module& m)
 {
-  m.def("init_mj", initMJ, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
-  m.def("insert_filler", insertFiller, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
-  m.def("check_antenna", checkAntenna, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
-  m.def("insert_metal", insertMetal, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
-  m.def("flatten_def", defFlatten, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("init_mj", initMJ, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("insert_filler", insertFiller, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("check_antenna", checkAntenna, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("insert_metal", insertMetal, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("flatten_def", defFlatten, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
   m.def("analyze_driver", analyzeDriver);
-  m.def("cut_def", cutDEF, py::arg("config") = "", py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("cut_def", cutDEF, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
   m.def("destroy_mj", destroyMJ);
 }
 

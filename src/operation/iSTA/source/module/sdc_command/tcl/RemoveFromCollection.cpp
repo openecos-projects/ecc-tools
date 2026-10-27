@@ -16,7 +16,7 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 #include "object/ObjectQuery.hpp"
-#include "object/ObjectCommands.hpp"
+#include "tcl/CollectionCommands.hpp"
 
 namespace ista::sdc {
 

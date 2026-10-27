@@ -167,8 +167,8 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
     if (net != database.get_net_map().end()) {
       for (const std::string& other_name : net->second.get_pin_name_list()) {
         auto other = database.get_pin_map().find(other_name);
-        if (other != database.get_pin_map().end() && other_name != pin.get_full_name()
-            && (fanin ? isDriver(other->second) : isLoad(other->second)) && isSearchPin(other->second)) {
+        if (other != database.get_pin_map().end() && other_name != pin.get_full_name() && (fanin ? isDriver(other->second) : isLoad(other->second))
+            && isSearchPin(other->second)) {
           adjacent.push_back(other_name);
         }
       }
@@ -185,8 +185,7 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
   for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
     // Fanin includes clock-to-Q up to the register clock pin. Fanout never
     // crosses a sequential element; reset and check arcs are not data paths.
-    if (!arc.get_is_timing_graph_arc() || arc.get_is_disable_arc() || arc.get_is_clear_preset_arc()
-        || (!_is_fanin && arc.get_is_clock_arc())) {
+    if (!arc.get_is_timing_graph_arc() || arc.get_is_disable_arc() || arc.get_is_clear_preset_arc() || (!_is_fanin && arc.get_is_clock_arc())) {
       continue;
     }
     if (pin.get_pin_name() != (fanin ? arc.get_sink_port() : arc.get_source_port())) {
@@ -205,8 +204,8 @@ bool TclGetFan::isSearchPin(Pin& pin)
 {
   std::map<std::string, TimingCaseValue>& values = STADM.getDatabase().get_timing_constraint().get_case_analysis_map();
   auto value = values.find(pin.get_full_name());
-  return value == values.end() || (value->second != TimingCaseValue::kZero && value->second != TimingCaseValue::kOne
-                                  && value->second != TimingCaseValue::kStatic);
+  return value == values.end()
+         || (value->second != TimingCaseValue::kZero && value->second != TimingCaseValue::kOne && value->second != TimingCaseValue::kStatic);
 }
 
 bool TclGetFan::isDriver(Pin& pin)

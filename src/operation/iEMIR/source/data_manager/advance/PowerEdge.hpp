@@ -17,6 +17,7 @@
 #pragma once
 
 #include "EMIRHeader.hpp"
+#include "EMEvaluation.hpp"
 #include "PowerEdgeType.hpp"
 
 namespace iemir {
@@ -34,6 +35,7 @@ class PowerEdge
   int32_t get_layer_idx() { return _layer_idx; }
   std::string& get_layer_name() { return _layer_name; }
   std::string& get_via_name() { return _via_name; }
+  std::string& get_cut_layer_name() { return _cut_layer_name; }
   int32_t get_width() { return _width; }
   int32_t get_length() { return _length; }
   int32_t get_cut_num() { return _cut_num; }
@@ -51,6 +53,7 @@ class PowerEdge
   bool get_has_em_limit() { return _has_em_limit; }
   bool get_is_violation() { return _is_violation; }
   bool get_is_em_checkable() { return _is_em_checkable; }
+  EMEvaluation& get_em_evaluation() { return _em_evaluation; }
   // setter
   void set_edge_id(std::size_t edge_id) { _edge_id = edge_id; }
   void set_type(PowerEdgeType type) { _type = type; }
@@ -59,6 +62,7 @@ class PowerEdge
   void set_layer_idx(int32_t layer_idx) { _layer_idx = layer_idx; }
   void set_layer_name(const std::string& layer_name) { _layer_name = layer_name; }
   void set_via_name(const std::string& via_name) { _via_name = via_name; }
+  void set_cut_layer_name(const std::string& name) { _cut_layer_name = name; }
   void set_width(int32_t width) { _width = width; }
   void set_length(int32_t length) { _length = length; }
   void set_cut_num(int32_t cut_num) { _cut_num = cut_num; }
@@ -79,6 +83,7 @@ class PowerEdge
   // function
 
  private:
+  EMEvaluation _em_evaluation;
   std::size_t _edge_id = 0;
   PowerEdgeType _type = PowerEdgeType::kNone;
   std::size_t _first_node_id = 0;
@@ -86,6 +91,7 @@ class PowerEdge
   int32_t _layer_idx = -1;
   std::string _layer_name;
   std::string _via_name;
+  std::string _cut_layer_name;
   int32_t _width = 0;
   int32_t _length = 0;
   int32_t _cut_num = 0;

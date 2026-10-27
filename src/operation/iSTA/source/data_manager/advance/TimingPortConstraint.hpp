@@ -167,6 +167,8 @@ class TimingPortConstraint
     }
     return getLoadValue(_pin_load_map, analysis_type, trans_type) + getLoadValue(_wire_load_map, analysis_type, trans_type);
   }
+  const auto& get_pin_load_map() const { return _pin_load_map; }
+  const auto& get_wire_load_map() const { return _wire_load_map; }
   // setter
   void set_port_name(const std::string& port_name) { _port_name = port_name; }
   void set_clock_name(const std::string& clock_name) { _clock_name = clock_name; }
@@ -240,9 +242,8 @@ class TimingPortConstraint
       for (const TimingIoDelay& delay : incoming) {
         replaced.emplace(delay.get_analysis_type(), delay.get_trans_type());
       }
-      current.erase(std::remove_if(current.begin(), current.end(), [&](const TimingIoDelay& delay) {
-                      return replaced.contains({delay.get_analysis_type(), delay.get_trans_type()});
-                    }),
+      current.erase(std::remove_if(current.begin(), current.end(),
+                                   [&](const TimingIoDelay& delay) { return replaced.contains({delay.get_analysis_type(), delay.get_trans_type()}); }),
                     current.end());
     }
 

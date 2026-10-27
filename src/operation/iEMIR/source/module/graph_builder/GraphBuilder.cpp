@@ -663,7 +663,10 @@ void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net
         = getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_top_x(), power_via.get_top_y(), PowerNodeType::kVia);
     auto rule_iter = via_rules.find(power_via.get_cut_layer_name());
     double resistance = power_via.get_resistance();
-    if (rule_iter != via_rules.end() && rule_iter->second.get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
+    // SPEF/extracted resistance is authoritative. Technology resistance is
+    // only a fallback for geometry-built networks.
+    if (!power_net.get_has_explicit_parasitics() && rule_iter != via_rules.end()
+        && rule_iter->second.get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
       resistance = rule_iter->second.get_resistance_per_cut() / power_via.get_cut_num();
     }
     if (!power_net.get_has_explicit_parasitics()
@@ -675,10 +678,11 @@ void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net
     }
     PowerEdge* power_edge
         = addPowerEdge(power_graph, PowerEdgeType::kVia, bottom_node_id, top_node_id, power_via.get_bottom_layer_idx(), 0, 0,
-                       resistance, power_net.get_has_explicit_parasitics());
+                       resistance, true);
     if (power_edge != nullptr) {
       power_edge->set_layer_name(power_via.get_bottom_layer_name());
       power_edge->set_via_name(power_via.get_via_name());
+      power_edge->set_cut_layer_name(power_via.get_cut_layer_name());
       power_edge->set_cut_num(power_via.get_cut_num());
       power_edge->set_cut_area_um2(power_via.get_cut_area_um2());
       power_edge->set_cut_low_x(power_via.get_cut_low_x());
@@ -695,11 +699,13 @@ PowerEdge* GraphBuilder::addPowerEdge(PowerGraph& power_graph, PowerEdgeType pow
   if (first_node_id == second_node_id) {
     return nullptr;
   }
-  for (PowerEdge& power_edge : power_graph.get_edge_list()) {
-    bool is_same_node_pair = (power_edge.get_first_node_id() == first_node_id && power_edge.get_second_node_id() == second_node_id)
-                             || (power_edge.get_first_node_id() == second_node_id && power_edge.get_second_node_id() == first_node_id);
-    if (!allow_parallel && is_same_node_pair && power_edge.get_type() == power_edge_type) {
-      return &power_edge;
+  if (!allow_parallel) {
+    for (PowerEdge& power_edge : power_graph.get_edge_list()) {
+      bool is_same_node_pair = (power_edge.get_first_node_id() == first_node_id && power_edge.get_second_node_id() == second_node_id)
+                               || (power_edge.get_first_node_id() == second_node_id && power_edge.get_second_node_id() == first_node_id);
+      if (is_same_node_pair && power_edge.get_type() == power_edge_type) {
+        return &power_edge;
+      }
     }
   }
   PowerEdge power_edge;

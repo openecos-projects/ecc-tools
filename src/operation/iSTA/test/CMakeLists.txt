@@ -2,7 +2,7 @@ add_executable(test_ista_sdc_compatibility EXCLUDE_FROM_ALL
     sdc_compatibility_test.cpp
 )
 
-target_link_libraries(test_ista_sdc_compatibility PRIVATE ista_sdc_command ista_data_manager)
+target_link_libraries(test_ista_sdc_compatibility PRIVATE ista_sdc_command ista_data_manager ista_output_sdc)
 
 add_test(NAME ista_sdc_compatibility COMMAND test_ista_sdc_compatibility)
 set_tests_properties(ista_sdc_compatibility PROPERTIES TIMEOUT 30)
@@ -20,3 +20,8 @@ add_executable(test_ista_bidirectional_graph EXCLUDE_FROM_ALL bidirectional_grap
 target_link_libraries(test_ista_bidirectional_graph PRIVATE ista_interface ista_source liberty)
 add_test(NAME ista_bidirectional_graph COMMAND test_ista_bidirectional_graph ${CMAKE_CURRENT_SOURCE_DIR}/bidirectional.lib.in)
 set_tests_properties(ista_bidirectional_graph PROPERTIES TIMEOUT 60)
+
+add_executable(test_ista_sdc_output EXCLUDE_FROM_ALL sdc_output_test.cpp)
+target_link_libraries(test_ista_sdc_output PRIVATE ista_output_sdc ista_sdc_command tcl_ista)
+add_test(NAME ista_sdc_output COMMAND test_ista_sdc_output)
+set_tests_properties(ista_sdc_output PROPERTIES TIMEOUT 30)

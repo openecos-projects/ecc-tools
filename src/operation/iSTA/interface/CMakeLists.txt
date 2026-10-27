@@ -9,6 +9,7 @@ target_link_libraries(ista_interface
     PRIVATE
     ista_source
     ista_sdc_command
+    ista_output_sdc
     idm
     verilog_builder
     verilog

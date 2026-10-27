@@ -17,6 +17,7 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include <iostream>
 
@@ -48,7 +49,7 @@ void register_idb(py::module& m)
   m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("layer_map_path"));
   m.def("json_save", saveJson, py::arg("path"));
   m.def("geometry_snapshot_save", saveGeometrySnapshot, py::arg("output_dir"), py::arg("include_drc") = false,
-        py::arg("thumbnail_path") = "");
+        py::arg("thumbnail_path") = py::none());
   m.def("place_instance", placeInstance, py::arg("inst_name"), py::arg("llx"), py::arg("lly"), py::arg("orient"), py::arg("cellmaster"),
         py::arg("source") = "", py::arg("placement_status") = "fixed", py::arg("create_if_missing") = true);
   m.def("initialize_geometry_session", initializeGeometrySession);
@@ -66,7 +67,7 @@ void register_idb_op(pybind11::module& m)
   m.def("set_net", setNet, py::arg("net_name"), py::arg("net_type"));
   m.def("remove_except_pg_net", removeExceptPgNet);
   m.def("clear_blockage", clearBlockage, py::arg("type"));
-  m.def("idb_get", idbGet, py::arg("inst_name") = "", py::arg("net_name") = "", py::arg("file_name") = "");
+  m.def("idb_get", idbGet, py::arg("inst_name") = "", py::arg("net_name") = "", py::arg("file_name") = py::none());
   m.def("delete_inst", idbDeleteInstance, py::arg("inst_name"));
   m.def("delete_net", idbDeleteNet, py::arg("net_name"));
   m.def("create_inst", idbCreateInstance, py::arg("inst_name"), py::arg("cell_master"), py::arg("coord_x") = 0, py::arg("coord_y") = 0,

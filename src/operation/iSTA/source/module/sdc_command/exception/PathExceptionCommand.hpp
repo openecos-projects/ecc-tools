@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
-#include "frontend/SdcTclCmd.hpp"
 #include "TimingException.hpp"
+#include "frontend/SdcTclCmd.hpp"
 
 namespace ista {
 class Database;
@@ -72,14 +72,6 @@ class TclSetMulticyclePath : public TclPathException
 {
  public:
   TclSetMulticyclePath(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
-
-class TclResetPath : public TclPathException
-{
- public:
-  TclResetPath(const char* cmd_name, ClientData client_data);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };

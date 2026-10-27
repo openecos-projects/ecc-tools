@@ -46,11 +46,10 @@ void removeClockSourcesFromOtherClocks(std::map<std::string, TimingClock>& clock
       continue;
     }
     std::vector<std::string> other_sources = other_clock.get_source_objects();
-    other_sources.erase(std::remove_if(other_sources.begin(), other_sources.end(),
-                                       [&](const std::string& source) {
-                                         return std::find(source_list.begin(), source_list.end(), source) != source_list.end();
-                                       }),
-                        other_sources.end());
+    other_sources.erase(
+        std::remove_if(other_sources.begin(), other_sources.end(),
+                       [&](const std::string& source) { return std::find(source_list.begin(), source_list.end(), source) != source_list.end(); }),
+        other_sources.end());
     setClockSources(STADM.getDatabase(), other_clock, other_sources);
   }
 }
@@ -121,7 +120,7 @@ unsigned TclCreateClock::exec()
   std::vector<std::string> source_list;
   if (object_option->is_set_val()) {
     try {
-      source_list = findClockSources(database, object_option->getStringList());
+      source_list = findClockSources(database, getOptionObjectNames("objects"));
     } catch (const std::exception& error) {
       setTclError(error.what());
       return 0;

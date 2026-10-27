@@ -21,14 +21,14 @@
 #include "CTSAPI.hh"
 
 namespace python_interface {
-bool CtsAutoRun(const std::string& cts_config, const std::string& cts_work_dir)
+bool CtsAutoRun(const std::filesystem::path& cts_config, const std::filesystem::path& cts_work_dir)
 {
-  return CTS_API_INST.runCTS(cts_config, cts_work_dir).ok();
+  return CTS_API_INST.runCTS(cts_config.string(), cts_work_dir.string()).ok();
 }
 
-bool CtsReport(const std::string& path)
+bool CtsReport(const std::filesystem::path& path)
 {
-  return CTS_API_INST.report(path).ok();
+  return CTS_API_INST.report(path.string()).ok();
 }
 
 bool CtsDestroy()

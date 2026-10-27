@@ -18,6 +18,7 @@
 
 #include <string>
 
+#include "py_path_utils.h"
 #include "MJInterface.hpp"
 
 namespace python_interface {
@@ -35,10 +36,11 @@ void initDefFlattenConfigMapByDict(std::map<std::string, std::string>& config_di
 bool initDEFCutConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initDEFCutConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
-bool initMJ(std::string& config, std::map<std::string, std::string>& config_dict)
+bool initMJ(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
-  bool pass = config.empty() ? true : initMJConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initMJConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -47,10 +49,11 @@ bool initMJ(std::string& config, std::map<std::string, std::string>& config_dict
   return true;
 }
 
-bool insertFiller(std::string& config, std::map<std::string, std::string>& config_dict)
+bool insertFiller(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
-  bool pass = config.empty() ? true : initFillerConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initFillerConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -59,10 +62,11 @@ bool insertFiller(std::string& config, std::map<std::string, std::string>& confi
   return true;
 }
 
-bool checkAntenna(std::string& config, std::map<std::string, std::string>& config_dict)
+bool checkAntenna(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
-  bool pass = config.empty() ? true : initAntennaConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initAntennaConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -71,10 +75,11 @@ bool checkAntenna(std::string& config, std::map<std::string, std::string>& confi
   return true;
 }
 
-bool insertMetal(std::string& config, std::map<std::string, std::string>& config_dict)
+bool insertMetal(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
-  bool pass = config.empty() ? true : initMetalConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initMetalConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -83,10 +88,11 @@ bool insertMetal(std::string& config, std::map<std::string, std::string>& config
   return true;
 }
 
-bool defFlatten(std::string& config, std::map<std::string, std::string>& config_dict)
+bool defFlatten(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
-  bool pass = config.empty() ? true : initDefFlattenConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initDefFlattenConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -101,10 +107,11 @@ bool analyzeDriver()
   return true;
 }
 
-bool cutDEF(std::string& config, std::map<std::string, std::string>& config_dict)
+bool cutDEF(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
-  if (!config.empty() && !initDEFCutConfigMapByJSON(config, config_map)) {
+  if (!config_.empty() && !initDEFCutConfigMapByJSON(config_, config_map)) {
     return false;
   }
   initDEFCutConfigMapByDict(config_dict, config_map);

@@ -16,12 +16,15 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
+
 #include <tcl_util.h>
 
 namespace python_interface {
 
-bool initRT(std::string& config, std::map<std::string, std::string>& config_dict);
-bool runERT(std::string& config, std::map<std::string, std::string>& config_dict);
+bool initRT(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool runERT(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool runRT();
 bool destroyRT();
 
