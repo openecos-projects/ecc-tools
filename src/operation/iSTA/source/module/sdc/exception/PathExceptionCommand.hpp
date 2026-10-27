@@ -33,6 +33,10 @@ class TclPathException : public SdcTclCmd
  protected:
   TimingException parsePathSelector(Database& database, bool require_selector);
   void applyAnalysisQualifiers(TimingException& exception);
+  bool hasEmptySelector() const { return _empty_selector; }
+
+ private:
+  bool _empty_selector = false;
 };
 
 class TclSetFalsePath : public TclPathException

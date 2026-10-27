@@ -22,7 +22,7 @@ int main()
   auto& instance = network.instances()["ff"];
   instance.set_instance_name("ff");
   instance.set_cell_name("DFF");
-  for (const auto* name : {"CK", "D", "Q"}) {
+  for (const auto* name : {"CK", "D", "Q", "QN"}) {
     auto& pin = network.pins()[std::string("ff:") + name];
     pin.set_instance_name("ff");
     pin.set_pin_name(name);
@@ -32,6 +32,8 @@ int main()
   auto& net = network.nets()["data"];
   net.get_pin_name_list() = {"in", "ff:D", "ff:D"};
   net.set_driver_pin("stale");
+  auto& output_net = network.nets()["output"];
+  output_net.get_pin_name_list() = {"ff:QN"};
   auto& cell = db.liberty().get_cell_map()["DFF"];
   cell.set_is_sequential(true);
   TimingCellArc clock_arc;
@@ -40,6 +42,9 @@ int main()
   clock_arc.set_is_clock_arc(true);
   clock_arc.set_delay(0.125);
   cell.get_cell_arc_list().push_back(clock_arc);
+  TimingCellArc inverted_clock_arc = clock_arc;
+  inverted_clock_arc.set_sink_port("QN");
+  cell.get_cell_arc_list().push_back(inverted_clock_arc);
   for (auto type : {TimingCheckType::kHold, TimingCheckType::kSetup}) {
     TimingCheckArc check;
     check.set_clock_port("CK");
@@ -54,10 +59,10 @@ int main()
   LinkNetwork linker(network, db.liberty());
   linker.link();
   linker.link();
-  require(instance.get_pin_name_list().size() == 3, "repeat link duplicated instance pins");
+  require(instance.get_pin_name_list().size() == 4, "repeat link duplicated instance pins");
   require(net.get_load_pin_list().size() == 2 && net.get_driver_pin().empty(), "net reconstruction changed");
   require(network.pins().at("in").get_net_name() == "data", "pin net identity was not rebound");
-  require(instance.get_is_sequential() && instance.get_output_pin_name() == "ff:Q", "clock-to-Q binding lost");
+  require(instance.get_is_sequential() && instance.get_output_pin_name() == "ff:QN", "connected clock-to-output binding lost");
   require(instance.get_check_arc_list().size() == 2 && instance.get_clock_pin_name() == "ff:CK" && instance.get_data_pin_name() == "ff:D",
           "instance check binding lost");
   require(instance.get_check_arc_list().front().get_clock_port() == "ff:CK", "check port was not qualified");

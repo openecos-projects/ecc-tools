@@ -67,6 +67,7 @@ class TimingPoint
     const auto state = _clock_state_map.find(std::string(clock_name));
     return state == _clock_state_map.end() ? nullptr : &state->second;
   }
+  std::map<std::string, ClockState>& get_clock_state_map() { return _clock_state_map; }
   const std::map<std::string, ClockState>& get_clock_state_map() const { return _clock_state_map; }
   const ClockState* findDefaultClockState() const
   {

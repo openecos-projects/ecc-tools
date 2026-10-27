@@ -119,7 +119,11 @@ double StartpointInitializer::getStartPointArrival(std::string& start_point, Ana
         has_arrival = true;
       }
     }
-    std::optional<DelayResult> driving_cell_timing = _delay.inputPortTiming(start_point, analysis_type, trans_type);
+    // set_driving_cell contributes its load-dependent delay after the input
+    // delay at the port.  calculateDrivingCell returns only this incremental
+    // delay (the intrinsic part is removed), so adding it here does not
+    // duplicate the physical PAD input arc propagated afterward.
+    const std::optional<DelayResult> driving_cell_timing = getDrivingCellTiming(start_point, analysis_type, trans_type);
     return driving_cell_timing ? arrival + driving_cell_timing->get_delay() : arrival;
   }
   if (database.network().instances().count(pin.get_instance_name()) == 0) {
@@ -262,7 +266,23 @@ double StartpointInitializer::getStartPointSlew(std::string& start_point, Analys
   Database& database = _database;
   Pin& pin = database.network().pins()[start_point];
   if (pin.get_is_port()) {
-    return _delay.inputPortSlew(start_point, analysis_type, trans_type);
+    std::map<std::string, TimingPortConstraint>& port_constraint_map = database.sdc().get_port_constraint_map();
+    if (port_constraint_map.count(start_point) == 0) {
+      return 0.0;
+    }
+    TimingPortConstraint& port_constraint = port_constraint_map[start_point];
+    // Explicit port transition waveforms override cell output slew, including
+    // default zero on an unspecified edge. The cell still supplies delay.
+    if (port_constraint.get_has_input_transition())
+      return port_constraint.get_input_transition(analysis_type, trans_type);
+    if (port_constraint.get_has_driving_cell(analysis_type, trans_type)) {
+      std::optional<DelayResult> driving_cell_timing = getDrivingCellTiming(start_point, analysis_type, trans_type);
+      return driving_cell_timing ? driving_cell_timing->get_slew() : 0.0;
+    }
+    if (port_constraint.get_has_input_transition(analysis_type, trans_type)) {
+      return port_constraint.get_input_transition(analysis_type, trans_type);
+    }
+    return 0.0;
   }
   if (database.network().instances().count(pin.get_instance_name()) == 0) {
     return 0.0;
@@ -304,6 +324,37 @@ double StartpointInitializer::getStartPointSlew(std::string& start_point, std::s
   return dc_result.has_value() ? dc_result->get_slew() : clock_slew;
 }
 
+std::optional<DelayResult> StartpointInitializer::getDrivingCellTiming(std::string& start_point, AnalysisType analysis_type, TransType trans_type)
+{
+  Database& database = _database;
+  std::map<std::string, TimingPortConstraint>& port_constraint_map = database.sdc().get_port_constraint_map();
+  if (!port_constraint_map.contains(start_point)) {
+    return std::nullopt;
+  }
+  TimingDrivingCell* driving_cell = port_constraint_map.at(start_point).get_driving_cell(analysis_type, trans_type);
+  if (driving_cell == nullptr) {
+    return std::nullopt;
+  }
+  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  if (!timing_cell_map.contains(driving_cell->get_cell_name())) {
+    return std::nullopt;
+  }
+  LibertyCell& timing_cell = timing_cell_map.at(driving_cell->get_cell_name());
+  if (timing_cell.get_library_name() != driving_cell->get_library_name()) {
+    return std::nullopt;
+  }
+  for (TimingCellArc& timing_cell_arc : timing_cell.get_cell_arc_list()) {
+    if (timing_cell_arc.get_source_port() != driving_cell->get_from_pin() || timing_cell_arc.get_sink_port() != driving_cell->get_to_pin()) {
+      continue;
+    }
+    DelayResult timing_result;
+    if (_delay.calculateDrivingCell(start_point, timing_cell_arc, analysis_type, trans_type, driving_cell->get_input_transition_rise(),
+                                    driving_cell->get_input_transition_fall(), timing_result)) {
+      return timing_result;
+    }
+  }
+  return std::nullopt;
+}
 
 double StartpointInitializer::getStartPointLaunchTime(std::string& start_point, AnalysisType analysis_type)
 {
@@ -502,7 +553,7 @@ void StartpointInitializer::seedInputPathState(std::string& start_point, Analysi
   const auto local = delay.get_clock_trans_type();
   const auto origins = delay.get_reference_pin().empty() ? std::vector<TransType>{local}
                                                          : clockSourceTransitions(_database, delay.get_reference_pin(), clock_name, analysis_type, local);
-  const auto driver = _delay.inputPortTiming(start_point, analysis_type, trans_type);
+  const auto driver = getDrivingCellTiming(start_point, analysis_type, trans_type);
   const auto clock = _database.sdc().get_clock_map().find(clock_name);
   for (auto source : origins) {
     const double launch = getInputDelayClockTime(delay, analysis_type, source);
@@ -513,7 +564,7 @@ void StartpointInitializer::seedInputPathState(std::string& start_point, Analysi
     const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
     for (size_t index = first; index < count; index += 2) {
       const double offset = clock == _database.sdc().get_clock_map().end() ? 0. : clock->second.edge(index).time - clock->second.edge(first).time;
-      seedPathState(start_point, analysis_type, trans_type, clock_name, launch + offset + delay.get_delay() + (driver ? driver->get_delay() : 0.),
+      seedPathState(start_point, analysis_type, trans_type, clock_name, launch + offset + delay.get_delay() + (driver ? driver->get_delay() : 0.0),
                     getStartPointSlew(start_point, analysis_type, trans_type), launch + offset, local, false, delay.get_delay(), source_latency, index,
                     delay.get_reference_pin());
     }
@@ -550,8 +601,7 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   const std::vector<int32_t> exception_state_list
       = ExceptionMatcher(database.sdc(), database.network()).advanceState(_through_index, initial_exception_state_list, start_point, trans_type);
   const std::string crpr_pin = reference_pin.empty() ? getStartPointCrprClockPin(start_point) : std::string(reference_pin);
-  const double crpr_bound = _path_query.clockPathBound(crpr_pin, clock_name, clock_trans_type, launch_transition);
-  const bool preserve_crpr = crpr_bound > 0.;
+  const bool preserve_crpr = _path_query.clockPathHasVariation(crpr_pin, clock_name, clock_trans_type, launch_transition);
   const std::string path_state_tag
       = ExceptionMatcher(database.sdc(), database.network())
             .makePathStateTag(clock_name, launch_transition, exception_state_list, clock_source_path, preserve_crpr ? crpr_pin : "", edge_index);
@@ -580,7 +630,6 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   path_state.set_is_clock_source_path(clock_source_path);
   path_state.set_crpr_clock_pin(crpr_pin);
   path_state.set_preserve_crpr_path(preserve_crpr);
-  path_state.setClockPathBound(crpr_bound);
   path_state.set_path_state_tag(path_state_tag);
   path_state.set_predecessor_path_state_tag("");
   path_state.set_exception_state_list(exception_state_list);

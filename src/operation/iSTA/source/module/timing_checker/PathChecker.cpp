@@ -87,12 +87,13 @@ double PathChecker::getClockUncertainty(std::string_view launch_clock, TransType
   if (pair_uncertainty.has_value()) {
     return *pair_uncertainty;
   }
-  return _clock_pin_values.values(capture_pin, capture_clock, getCaptureAnalysisType(analysis_type), local.value_or(capture_trans_type), analysis_type,
+  return clockPinValues(_database, capture_pin, capture_clock, getCaptureAnalysisType(analysis_type), local.value_or(capture_trans_type), analysis_type,
                         capture_trans_type)
       .uncertainty;
 }
 
-std::optional<PathEnd> PathChecker::checkPath(const TimingPathState& path, const std::string& end_point, AnalysisType analysis, bool include_reconvergence)
+std::vector<PathEnd> PathChecker::checkPathCandidates(const TimingPathState& path, const std::string& end_point, AnalysisType analysis,
+                                                      bool include_reconvergence)
 {
   std::vector<PathCheck> checks;
   const bool is_output = _database.network().pins().at(end_point).get_is_port();
@@ -111,7 +112,7 @@ std::optional<PathEnd> PathChecker::checkPath(const TimingPathState& path, const
       }
     }
   }
-  std::optional<PathEnd> worst;
+  std::vector<PathEnd> candidates;
   const ExceptionMatcher matcher(_database.sdc(), _database.network());
   if (checks.empty()) {
     // A path-delay exception can constrain an otherwise unconstrained endpoint.
@@ -141,10 +142,25 @@ std::optional<PathEnd> PathChecker::checkPath(const TimingPathState& path, const
                             check.capture_transition, path.get_exception_state_list()))
       continue;
     const double required = calcPathRequiredTime(end_point, path, analysis, check);
-    PathEnd candidate(path, std::move(check), required, calcPathSlack(path, required, analysis));
-    // Preserve the inner capture reduction independently of path ordering.
+    candidates.emplace_back(path, std::move(check), required, calcPathSlack(path, required, analysis));
+  }
+  return candidates;
+}
+
+std::optional<PathEnd> PathChecker::checkPath(const TimingPathState& path, const std::string& end_point, AnalysisType analysis,
+                                               bool include_reconvergence)
+{
+  auto candidates = checkPathCandidates(path, end_point, analysis, include_reconvergence);
+  if (candidates.empty())
+    return std::nullopt;
+
+  const bool is_output = _database.network().pins().at(end_point).get_is_port();
+  std::optional<PathEnd> worst;
+  for (const auto& candidate : candidates) {
+    // Preserve the previous inner capture reduction independently of path
+    // ordering. Candidate enumeration is now shared with min/hold export.
     if (!worst || candidate.slack() < worst->slack() - (is_output ? 0.0 : kTimingTolerance))
-      worst = std::move(candidate);
+      worst = candidate;
   }
   return worst;
 }
@@ -161,7 +177,9 @@ PathCheck PathChecker::evaluateRegister(const TimingPathState& path, TimingCheck
   result.capture_edge_index = capture_index;
   result.capture_pin = arc.get_clock_port();
   const auto capture_mode = getCaptureAnalysisType(analysis_type);
-  result.check_time = checkTime(path, arc, analysis_type, capture_clock, result.capture_transition);
+  const auto check = checkTime(path, arc, analysis_type, capture_clock, result.capture_transition);
+  result.check_time = check.value;
+  result.selected_check_arc_idx = check.selected_arc_idx;
   if (include_reconvergence)
     result.reconvergence = getClockReconvergencePessimism(path, result, analysis_type);
   if (analysis_type == AnalysisType::kMin)
@@ -172,7 +190,7 @@ PathCheck PathChecker::evaluateRegister(const TimingPathState& path, TimingCheck
   const auto clock = _database.sdc().get_clock_map().find(std::string(capture_clock));
   if (clock != _database.sdc().get_clock_map().end())
     result.source_latency = _clock_pin_values.values(result.capture_pin, capture_clock, capture_mode, result.capture_pin_transition, AnalysisType::kNone,
-                                           result.capture_transition)
+                                                     result.capture_transition)
                                 .source_latency;
   result.network_delay = arrival - result.source_latency;
   result.capture_time = getEndPointCaptureTime(path, capture_clock, result.capture_transition, analysis_type, capture_index) + arrival + result.reconvergence;
@@ -182,7 +200,8 @@ PathCheck PathChecker::evaluateRegister(const TimingPathState& path, TimingCheck
   return result;
 }
 
-double PathChecker::checkTime(const TimingPathState& path, TimingCheckArc& arc, AnalysisType analysis, std::string_view clock, TransType source)
+PathChecker::CheckTimeResult PathChecker::checkTime(const TimingPathState& path, TimingCheckArc& arc, AnalysisType analysis, std::string_view clock,
+                                                    TransType source)
 {
   // Graph-based checks use the extrema of the physical waveform range.
   // A smaller slew may produce a larger check in a non-monotonic Liberty
@@ -208,15 +227,34 @@ double PathChecker::checkTime(const TimingPathState& path, TimingCheckArc& arc, 
   };
   deduplicate(data_slews);
   deduplicate(clock_slews);
-  std::optional<double> result;
+  std::optional<CheckTimeResult> result;
   for (double data_slew : data_slews)
     for (double clock_slew : clock_slews) {
-      const double nominal = _delay_calculator.checkDelay(arc, analysis, arc.get_clock_trans_type(), path.get_trans_type(), clock_slew, data_slew);
+      // Keep the same candidate reduction as CheckDelayCalculator, but also
+      // retain the Liberty variant that produced the reduced value.  The
+      // outer reduction over data/clock slew extrema is intentionally still
+      // max-of-check, matching the existing PathChecker semantics for both
+      // setup/recovery and hold/removal.
+      std::optional<CheckTimeResult> candidate_result;
+      for (TimingArc& timing_arc : arc.get_timing_arc_list()) {
+        const auto table = timing_arc.get_check_table_map().find(path.get_trans_type());
+        if (table == timing_arc.get_check_table_map().end())
+          continue;
+        const double nominal
+            = table->second.findValue(clock_slew * timing_arc.get_time_unit_scale(), data_slew * timing_arc.get_time_unit_scale())
+              / timing_arc.get_time_unit_scale();
+        if (!candidate_result
+            || (analysis == AnalysisType::kMin ? nominal < candidate_result->value : nominal > candidate_result->value)) {
+          candidate_result = CheckTimeResult{nominal, timing_arc.get_arc_idx()};
+        }
+      }
+
+      const double nominal = candidate_result ? candidate_result->value : arc.get_check_time();
       const double check = _query.deratedDelay(nominal, analysis, false, path.get_trans_type(), DerateDelay::kCheck, arc.get_data_port());
-      if (!result || check > *result)
-        result = check;
+      if (!result || check > result->value)
+        result = CheckTimeResult{check, candidate_result ? candidate_result->selected_arc_idx : -1};
     }
-  return result.value_or(_query.deratedDelay(arc.get_check_time(), analysis, false, path.get_trans_type(), DerateDelay::kCheck, arc.get_data_port()));
+  return result.value_or(CheckTimeResult{_query.deratedDelay(arc.get_check_time(), analysis, false, path.get_trans_type(), DerateDelay::kCheck, arc.get_data_port()), -1});
 }
 
 bool PathChecker::isMatchCheckTransType(TimingCheckArc& timing_check_arc, TransType data_trans_type)
@@ -314,7 +352,7 @@ std::vector<PathCheck> PathChecker::evaluateOutput(const TimingPathState& path, 
       if (!delay->get_reference_pin().empty()) {
         candidate.capture_pin = delay->get_reference_pin();
         const auto mode = getCaptureAnalysisType(analysis_type);
-        const auto& values = _clock_pin_values.values(candidate.capture_pin, candidate.capture_clock, mode, local, AnalysisType::kNone, source);
+        const auto values = _clock_pin_values.values(candidate.capture_pin, candidate.capture_clock, mode, local, AnalysisType::kNone, source);
         candidate.source_latency = values.source_latency;
         candidate.network_delay
             = values.propagated ? _query.getClockArrival(candidate.capture_pin, candidate.capture_clock, mode, local, source) - values.source_latency : 0.;
@@ -372,8 +410,8 @@ double PathChecker::getClockReconvergencePessimism(const TimingPathState& path, 
   if (launch_transition == TransType::kNone)
     launch_transition = TransType::kRise;
   return _reconvergence.correction(launch_pin, launch_transition, path.get_clock_name(), check.capture_pin,
-                                                            check.capture_pin_transition, check.capture_clock, analysis, check.common_pin,
-                                                            path.get_launch_clock_trans_type(), check.capture_transition);
+                                   check.capture_pin_transition, check.capture_clock, analysis, check.common_pin,
+                                   path.get_launch_clock_trans_type(), check.capture_transition);
 }
 
 std::vector<TimingCheckArc*> PathChecker::getCheckArcs(const std::string& end_point, AnalysisType analysis)
@@ -436,8 +474,8 @@ double PathChecker::calcPathDelayRequiredTime(const std::string& end_point, cons
 
   double anchor = end_path_state.get_launch_time();
   if (exception.get_ignore_clock_latency()) {
-    // A clock-independent path budget retains the endpoint's library check
-    // or output delay, but no clock uncertainty, latency or reconvergence.
+    // A clock-independent path budget excludes capture clock latency and
+    // uncertainty, while retaining the endpoint check or output-delay margin.
     endpoint_margin = check.output_delay ? -*check.output_delay : (analysis_type == AnalysisType::kMin ? check.check_time : -check.check_time);
   } else {
     const auto clock = database.sdc().get_clock_map().find(end_path_state.get_clock_name());
@@ -450,7 +488,7 @@ double PathChecker::calcPathDelayRequiredTime(const std::string& end_point, cons
 }
 
 double PathChecker::multicycleAdjustment(const TimingPathState& path, AnalysisType analysis, const ResolvedTimingExceptions& exceptions,
-                                               const PathCheck& check)
+                                         const PathCheck& check)
 {
   double adjustment = 0.0;
   if (exceptions.setup_multicycle && exceptions.setup_multicycle->get_setup_multiplier()) {

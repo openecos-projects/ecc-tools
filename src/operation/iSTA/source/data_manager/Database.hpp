@@ -6,6 +6,7 @@
 #include "check/ClockCheck.hpp"
 #include "check/ElectricalCheck.hpp"
 #include "check/FanoutCheck.hpp"
+#include "common/TimingExecutionStats.hpp"
 #include "graph/Graph.hpp"
 #include "liberty/LibertyLibrary.hpp"
 #include "network/Network.hpp"
@@ -41,6 +42,8 @@ class Database
 
   std::vector<ClockCheck>& clockChecks() { return _clock_checks; }
   const std::vector<ClockCheck>& clockChecks() const { return _clock_checks; }
+  TimingExecutionStats& timingExecutionStats() { return _timing_execution_stats; }
+  const TimingExecutionStats& timingExecutionStats() const { return _timing_execution_stats; }
 
  private:
   Network _network;
@@ -53,5 +56,6 @@ class Database
   std::vector<FanoutCheck> _fanout_checks;
   std::vector<ElectricalCheck> _electrical_checks;
   std::vector<ClockCheck> _clock_checks;
+  TimingExecutionStats _timing_execution_stats;
 };
 }  // namespace ista

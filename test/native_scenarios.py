@@ -625,6 +625,10 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     if {pin: pin_nets.get(pin) for pin in expected_connections} != expected_connections:
         raise AssertionError("native Segment chain lost its ancestor/child connectivity")
 
+    from data.buffer_port_mutation import assert_output_port_buffering
+
+    port_commit = assert_output_port_buffering(chain_db, action, _buffer_action_digest)
+
     fresh_spef = _run_rcx(manifest)
     _load_sta_inputs(manifest, spef_path=fresh_spef)
     _require(
@@ -658,6 +662,7 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
                 "rollback": dict(rollback),
                 "committed": dict(committed),
                 "segment_chain": dict(chain),
+                "output_port_commit": port_commit,
                 "timing_schema_version": int(timing_db.timing_schema_version),
                 "timing_pin_count": timing_pin_count,
                 "source_net": net_name,

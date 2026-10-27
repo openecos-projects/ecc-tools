@@ -24,6 +24,7 @@
 namespace ista {
 void PathAnalyzer::analyze()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kPathAnalysis);
   const ExceptionThroughIndex through_index(_database.sdc(), _database.network());
   PathSearcher search(_database, _check, through_index);
   PathGroupBuilder groups(_database);

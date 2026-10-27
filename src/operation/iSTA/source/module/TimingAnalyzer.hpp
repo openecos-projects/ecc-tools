@@ -25,7 +25,9 @@ class TimingAnalyzer
 {
  public:
   TimingAnalyzer(Database& database, DelayCalculator& delay) : _database(database), _delay(delay) {}
-  void analyze();
+  void prepareStructure();
+  void analyze(bool reuse_structure = false);
+  bool isStructureCurrent() const;
 
  private:
   Database& _database;
