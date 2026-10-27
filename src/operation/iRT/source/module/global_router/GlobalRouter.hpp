@@ -62,7 +62,6 @@ class GlobalRouter
   void patternRoute();
   void detourRoute();
   std::vector<size_t> getOverflowNetIndexList() const;
-  void mazeRoute();
   void mazeRouteFailedNets();
   void mazeRerouteOverflowNets();
   double getTotalRoutingCost() const;

@@ -80,7 +80,6 @@ void GlobalRouter::route()
   RTLOG.info(Loc::current(), "Starting...");
 
   RTDM.getDatabase().get_net_global_result_map().clear();
-  params_.cost_weight = params_.initial_cost_weight;
   initGridGraph();
 
   analyzeSupply();
@@ -88,7 +87,8 @@ void GlobalRouter::route()
 
   patternRoute();
   detourRoute();
-  mazeRoute();
+  mazeRouteFailedNets();
+  mazeRerouteOverflowNets();
   fallbackRoute();
   // debugPlot("after_route");
 
@@ -344,12 +344,6 @@ std::vector<size_t> GlobalRouter::getOverflowNetIndexList() const
     }
   }
   return net_idx_list;
-}
-
-void GlobalRouter::mazeRoute()
-{
-  mazeRouteFailedNets();
-  mazeRerouteOverflowNets();
 }
 
 void GlobalRouter::mazeRouteFailedNets()

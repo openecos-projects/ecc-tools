@@ -170,20 +170,7 @@ double treeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& param
 
 double treeOverflow(const GRGridGraph& grid, const GRNet& net, const GRTree& tree)
 {
-  double total_overflow = 0.0;
-  std::set<GRWireEdgeId> edge_set;
-  for (const GRWireSegment& wire_segment : tree.wire_list) {
-    for (GRWireEdgeIter iter(grid, wire_segment.first, wire_segment.second); iter.isValid(); iter.next()) {
-      const GRWireEdgeId& edge_id = iter.getEdgeId();
-      if (!grid.hasWireEdge(edge_id) || net.isExempt(edge_id)) {
-        continue;
-      }
-      if (edge_set.insert(edge_id).second) {
-        total_overflow += grid.getWireEdge(edge_id).getOverflow();
-      }
-    }
-  }
-  return total_overflow;
+  return net.getOverflow(grid, tree);
 }
 
 bool isBetter(double old_overflow, double old_cost, double new_overflow, double new_cost)

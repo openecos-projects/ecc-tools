@@ -79,17 +79,19 @@ class GRNet
   void commitUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const;
   void ripupUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const;
   bool hasOverflow(const GRGridGraph& grid) const;
+  double getOverflow(const GRGridGraph& grid, const GRTree& tree) const;
 
  private:
   void buildExemptEdgeSet(const GRGridGraph& grid);
   void addPinEscapeCorridor(const GRGridGraph& grid, const GRPin& gr_pin, bool is_horizontal, int32_t direction);
   GRWireEdgeId getEscapeEdgeId(int32_t x, int32_t y, bool is_horizontal, int32_t direction, int32_t layer_idx) const;
 
+  void updateUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree, double sign) const;
   void buildPlanarEdgeSet(const GRGridGraph& grid, const GRTree& tree, std::set<GRWireEdgeId>& planar_edge_set) const;
-  void addWireDemand(GRGridGraph& grid, const GRTree& tree, std::set<GRWireEdgeId>& charged_edge_set, double delta) const;
-  void addViaDemand(GRGridGraph& grid, const GRViaStack& via_stack, const std::set<GRWireEdgeId>& planar_edge_set, std::set<GRWireEdgeId>& charged_edge_set,
-                    double delta) const;
-  bool hasPlanarEdgeOrAP(const GRGridGraph& grid, const std::set<GRWireEdgeId>& planar_edge_set, const PlanarCoord& coord, int32_t layer_idx) const;
+  void buildOccupiedCoordSet(const GRGridGraph& grid, const std::set<GRWireEdgeId>& planar_edge_set,
+                             std::set<LayerCoord, CmpLayerCoordByXASC>& occupied_coord_set) const;
+  void buildViaEdgeList(const GRGridGraph& grid, const GRTree& tree, const std::set<LayerCoord, CmpLayerCoordByXASC>& occupied_coord_set,
+                        std::vector<GRWireEdgeId>& via_edge_list) const;
 
   Net* origin_net_ = nullptr;
   BoundingBox bbox_;
