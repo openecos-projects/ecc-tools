@@ -1000,7 +1000,12 @@ auto RecoverSinkLoadRegionGroup(const std::vector<Pin*>& loads, const Point<int>
   auto electrical_config
       = FastClustering::buildElectricalBaseConfig(input.max_fanout, input.has_max_cap ? input.max_cap_pf : std::numeric_limits<double>::infinity());
   electrical_config.clock_route_segment_rc = input.clock_route_segment_rc;
-  electrical_config.sink_pin_cap_pf_by_pin = input.sink_pin_cap_pf_by_pin;
+  // Electrical evaluation below only visits this group and its subsets.
+  // Avoid copying the whole design's capacitance table for every group.
+  electrical_config.sink_pin_cap_pf_by_pin.reserve(ordered_loads.size());
+  for (const auto* load : ordered_loads) {
+    electrical_config.sink_pin_cap_pf_by_pin.emplace(load, input.sink_pin_cap_pf_by_pin.at(load));
+  }
   electrical_config.enable_exact_cap = true;
   electrical_config.always_build_exact_cap = true;
   electrical_config.scoring_strategy = ClusterScoringStrategy::kTotalWirelength;
