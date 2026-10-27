@@ -47,7 +47,7 @@ target_include_directories(tcl
         ${ECC_TCL_INCLUDE_DIR}
 )
 if(ECC_TCL_INCLUDE_DIR)
-  target_compile_options(tcl PUBLIC "-isystem${ECC_TCL_INCLUDE_DIR}")
+  target_include_directories(tcl SYSTEM PUBLIC ${ECC_TCL_INCLUDE_DIR})
 endif()
 
 install(TARGETS tcl

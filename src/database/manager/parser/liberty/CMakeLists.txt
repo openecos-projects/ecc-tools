@@ -14,7 +14,7 @@ target_link_libraries(liberty PUBLIC ecc_logger tcl dl ZLIB::ZLIB)
 
 get_property(ECC_ZLIB_INCLUDE_DIR CACHE ZLIB_INCLUDE_DIR PROPERTY VALUE)
 if(ECC_ZLIB_INCLUDE_DIR)
-    target_compile_options(liberty PUBLIC "-isystem${ECC_ZLIB_INCLUDE_DIR}")
+    target_include_directories(liberty SYSTEM PUBLIC ${ECC_ZLIB_INCLUDE_DIR})
 endif()
 
 target_include_directories(liberty PUBLIC
