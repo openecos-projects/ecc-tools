@@ -17,56 +17,25 @@
 #pragma once
 
 #include <algorithm>
-#include <climits>
 #include <cstdint>
 #include <set>
+#include <utility>
 #include <vector>
 
 #include "BoundingBox.hpp"
 #include "GRGridGraph.hpp"
 #include "LayerCoord.hpp"
-#include "Net.hpp"
-#include "Pin.hpp"
 
 namespace irt {
+
+class Net;
+class Pin;
 
 struct GRPin
 {
   Pin* pin = nullptr;
   PlanarCoord grid_coord;
   int32_t layer_idx = -1;
-};
-
-struct GRTopoNode
-{
-  PlanarCoord coord;
-  int32_t fixed_low = INT_MAX;
-  int32_t fixed_high = INT_MIN;
-  int32_t parent = -1;
-  bool is_bend = false;
-  std::vector<int32_t> child_list;
-  std::vector<std::vector<int32_t>> child_bend_list;  // parallel to child_list, stores the first node of each candidate pattern chain
-};
-
-struct GRTopoTree
-{
-  std::vector<GRTopoNode> node_list;
-  int32_t root_idx = -1;
-};
-
-struct GRSkeletonNode
-{
-  PlanarCoord coord;
-  int32_t fixed_low = INT_MAX;
-  int32_t fixed_high = INT_MIN;
-  int32_t parent = -1;
-  std::vector<int32_t> child_list;
-};
-
-struct GRSkeletonTree
-{
-  std::vector<GRSkeletonNode> node_list;
-  int32_t root_idx = -1;
 };
 
 struct GRWireSegment
@@ -88,30 +57,59 @@ struct GRTree
   std::vector<GRViaStack> via_list;
 };
 
-struct GRNet
+class GRNet
 {
-  Net* origin_net = nullptr;
-  BoundingBox bbox;
-  std::vector<GRPin> pin_list;
-  std::set<GRWireEdgeId> exempt_edge_set;
-  GRTopoTree topology;
-  GRTree routing_tree;
+ public:
+  GRNet() = default;
+
+  void init(Net& net, const GRGridGraph& grid);
+
+  Net* get_origin_net() const { return origin_net_; }
+  const BoundingBox& get_bbox() const { return bbox_; }
+  const std::vector<GRPin>& get_pin_list() const { return pin_list_; }
+  bool isClock() const { return is_clock_; }
+  const GRTree& get_tree() const { return tree_; }
+  void set_tree(GRTree tree) { tree_ = std::move(tree); }
+  // 取走已提交结果, 供单网协议在 ripup 之后暂存; 取走后 tree_ 为空
+  GRTree release_tree() { return std::move(tree_); }
+
+  bool isExempt(const GRWireEdgeId& edge_id) const { return exempt_edge_set_.contains(edge_id); }
+  bool isAPViaSide(const PlanarCoord& coord, int32_t layer_idx) const;
+
+  void commitUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const;
+  void ripupUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const;
+  bool hasOverflow(const GRGridGraph& grid) const;
+
+ private:
+  void buildExemptEdgeSet(const GRGridGraph& grid);
+  void addPinEscapeCorridor(const GRGridGraph& grid, const GRPin& gr_pin, bool is_horizontal, int32_t direction);
+  GRWireEdgeId getEscapeEdgeId(int32_t x, int32_t y, bool is_horizontal, int32_t direction, int32_t layer_idx) const;
+
+  void buildPlanarEdgeSet(const GRGridGraph& grid, const GRTree& tree, std::set<GRWireEdgeId>& planar_edge_set) const;
+  void addWireDemand(GRGridGraph& grid, const GRTree& tree, std::set<GRWireEdgeId>& charged_edge_set, double delta) const;
+  void addViaDemand(GRGridGraph& grid, const GRViaStack& via_stack, const std::set<GRWireEdgeId>& planar_edge_set, std::set<GRWireEdgeId>& charged_edge_set,
+                    double delta) const;
+  bool hasPlanarEdgeOrAP(const GRGridGraph& grid, const std::set<GRWireEdgeId>& planar_edge_set, const PlanarCoord& coord, int32_t layer_idx) const;
+
+  Net* origin_net_ = nullptr;
+  BoundingBox bbox_;
+  std::vector<GRPin> pin_list_;
+  bool is_clock_ = false;
+  std::set<GRWireEdgeId> exempt_edge_set_;
+  GRTree tree_;
 };
 
+// 线网调度顺序, 只读 GRNet 自己保存的字段
 struct CmpGRNet
 {
   bool operator()(const GRNet& first, const GRNet& second) const
   {
-    Net& first_net = *(first.origin_net);
-    Net& second_net = *(second.origin_net);
-    BoundingBox& first_bbox = first_net.get_bounding_box();
-    BoundingBox& second_bbox = second_net.get_bounding_box();
     // 时钟线网优先
-    bool first_is_clock = first_net.get_connect_type() == ConnectType::kClock;
-    bool second_is_clock = second_net.get_connect_type() == ConnectType::kClock;
-    if (first_is_clock != second_is_clock) {
-      return first_is_clock;
+    if (first.isClock() != second.isClock()) {
+      return first.isClock();
     }
+    const BoundingBox& first_bbox = first.get_bbox();
+    const BoundingBox& second_bbox = second.get_bbox();
     // BoundingBox 大小升序
     double first_total_size = first_bbox.getTotalSize();
     double second_total_size = second_bbox.getTotalSize();
@@ -131,7 +129,7 @@ struct CmpGRNet
       return first_length_width_ratio > second_length_width_ratio;
     }
     // Pin 数降序
-    return first_net.get_pin_list().size() > second_net.get_pin_list().size();
+    return first.get_pin_list().size() > second.get_pin_list().size();
   }
 };
 
