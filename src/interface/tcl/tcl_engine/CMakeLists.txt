@@ -12,6 +12,7 @@ endif(TCL_FOUND)
 
 aux_source_directory(./ SRC)
 get_property(ECC_TCL_LIBRARY CACHE TCL_LIBRARY PROPERTY VALUE)
+get_filename_component(ECC_TCL_LIBRARY_DIR "${ECC_TCL_LIBRARY}" DIRECTORY)
 find_library(TCL_STATIC_LIB
   NAMES libtcl8.6.a
   PATHS /usr/lib/x86_64-linux-gnu
@@ -24,11 +25,18 @@ else()
   add_library(tcl SHARED ${SRC})
 endif()
 
+# Keep the embedded Tcl command wrapper distinct from the Tcl runtime library.
+# Both otherwise use libtcl.so, which makes ld.bfd treat the wrapper and the
+# runtime as the same SONAME and leaves the wrapper's Tcl_* references unresolved.
+if(NOT BUILD_STATIC_LIB)
+  set_target_properties(tcl PROPERTIES OUTPUT_NAME ecc_tcl)
+endif()
+
 target_link_libraries(tcl PUBLIC ecc_logger)
 if(BUILD_STATIC_LIB AND TCL_STATIC_LIB)
   target_link_libraries(tcl PUBLIC ${TCL_STATIC_LIB})
 elseif(ECC_TCL_LIBRARY)
-  target_link_options(tcl PUBLIC "${ECC_TCL_LIBRARY}")
+  target_link_libraries(tcl PUBLIC "-L${ECC_TCL_LIBRARY_DIR}" "${ECC_TCL_LIBRARY}")
 else()
   target_link_libraries(tcl PUBLIC tcl8.6)
 endif()
