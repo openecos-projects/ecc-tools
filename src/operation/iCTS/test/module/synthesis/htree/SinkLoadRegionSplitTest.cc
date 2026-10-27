@@ -414,5 +414,79 @@ TEST(SinkLoadRegionSplitTest, BufferInputCapNoProgressIsTyped)
   EXPECT_NE(plan.failure_reason.find("split_root_cap_violation"), std::string::npos);
 }
 
+auto expectEquivalentRecovery(const icts::htree::SinkLoadRegionSplitPlan& actual, const icts::htree::SinkLoadRegionSplitPlan& reference) -> void
+{
+  EXPECT_EQ(actual.feasible, reference.feasible);
+  EXPECT_EQ(actual.required, reference.required);
+  EXPECT_EQ(actual.failure, reference.failure);
+  EXPECT_EQ(actual.failure_reason, reference.failure_reason);
+  EXPECT_EQ(actual.original_loads, reference.original_loads);
+  EXPECT_EQ(actual.subgroups, reference.subgroups);
+  EXPECT_EQ(actual.centers, reference.centers);
+  EXPECT_EQ(actual.buffer_count, reference.buffer_count);
+  EXPECT_EQ(actual.local_depth, reference.local_depth);
+  EXPECT_EQ(actual.leaf_group_count, reference.leaf_group_count);
+  EXPECT_EQ(actual.triggered_by_fanout, reference.triggered_by_fanout);
+  EXPECT_EQ(actual.triggered_by_capacitance, reference.triggered_by_capacitance);
+  EXPECT_EQ(actual.used_cap_fallback, reference.used_cap_fallback);
+  EXPECT_DOUBLE_EQ(actual.root_cap_pf, reference.root_cap_pf);
+  EXPECT_DOUBLE_EQ(actual.cap_overrun_pf, reference.cap_overrun_pf);
+  EXPECT_EQ(collectLeafGroups(actual.children), collectLeafGroups(reference.children));
+  EXPECT_EQ(countTreeNodes(actual.children), countTreeNodes(reference.children));
+}
+
+TEST(SinkLoadRegionSplitTest, UnrelatedPinCapsPreserveLegalAndSplitRecovery)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads;
+  for (int index = 0; index < 16; ++index) {
+    loads.push_back(factory.make(index * 10, 0));
+  }
+  for (const bool split : {false, true}) {
+    const auto local = makeRecoveryInput(loads, 0.02, split ? 4U : 64U, split ? 0.15 : 1.0);
+    const auto reference = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), local);
+    ASSERT_TRUE(reference.feasible) << reference.failure_reason;
+    auto global = local;
+    for (int index = 0; index < 4096; ++index) {
+      global.sink_pin_cap_pf_by_pin.emplace(factory.make(100000 + index, 100000), 100.0);
+    }
+    const auto actual = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), global);
+    expectEquivalentRecovery(actual, reference);
+  }
+}
+
+TEST(SinkLoadRegionSplitTest, UnrelatedPinCapsDoNotMaskMissingLocalCap)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(10, 0), factory.make(20, 0)};
+  auto input = makeRecoveryInput(loads, 0.01, 32U, 0.1);
+  input.sink_pin_cap_pf_by_pin.erase(loads.back());
+  for (int index = 0; index < 4096; ++index) {
+    input.sink_pin_cap_pf_by_pin.emplace(factory.make(100000 + index, 100000), 100.0);
+  }
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_FALSE(plan.feasible);
+  EXPECT_EQ(plan.failure, icts::htree::SinkLoadRegionRecoveryFailure::kPinCapUnavailable);
+  EXPECT_NE(plan.failure_reason.find("pin_cap_unavailable"), std::string::npos);
+}
+
+TEST(SinkLoadRegionSplitTest, UnrelatedPinCapsPreserveCapFailureAndFallback)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(10, 0)};
+  for (const bool fallback : {false, true}) {
+    auto local = makeRecoveryInput(loads, 0.04, 32U, 0.05);
+    local.split_buffer_input_cap_pf = 0.04;
+    local.allow_cap_fallback = fallback;
+    const auto reference = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(5, 0), local);
+    auto global = local;
+    for (int index = 0; index < 128; ++index) {
+      global.sink_pin_cap_pf_by_pin.emplace(factory.make(100000 + index, 100000), 100.0);
+    }
+    const auto actual = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(5, 0), global);
+    expectEquivalentRecovery(actual, reference);
+  }
+}
+
 }  // namespace
 }  // namespace icts_test
