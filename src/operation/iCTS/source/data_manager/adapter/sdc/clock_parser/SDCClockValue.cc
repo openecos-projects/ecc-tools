@@ -222,6 +222,15 @@ auto ParseIntValue(const std::string& text, int& value) -> bool
   return true;
 }
 
+auto ParseCaseAnalysisValue(const std::string& text, int& value) -> SdcConstraintStatusCode
+{
+  if (ParseIntValue(text, value) && (value == 0 || value == 1)) {
+    return SdcConstraintStatusCode::kOk;
+  }
+  return text == "rise" || text == "fall" || text == "rising" || text == "falling" ? SdcConstraintStatusCode::kUnsupported
+                                                                                   : SdcConstraintStatusCode::kMalformed;
+}
+
 auto TimeUnitToNs(const std::string& unit) -> double
 {
   const auto normalized = ToLower(Trim(unit));

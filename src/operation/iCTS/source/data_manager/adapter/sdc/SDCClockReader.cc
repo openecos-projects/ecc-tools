@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "Logger.hh"
+#include "SDCCaseAnalysis.hh"
 #include "SdcCommand.hpp"
 #include "clock_parser/SDCClockParser.hh"
 #include "clock_trace/ClockTraceResolver.hh"
@@ -110,13 +111,16 @@ auto SdcClockReader::readClockData() const -> SdcClockData
   ista::SdcCommand interpreter;
   ista::sdc::registerSdcCommands(interpreter);
   interpreter.setIgnoreUnknownCommands(true);
-  if (interpreter.evalScriptFile(_sdc_path) != TCL_OK) {
-    data.status = SdcConstraintStatusCode::kFileError;
-    const auto& errors = interpreter.getErrors();
-    const std::string detail = errors.empty() ? "ista_sdc_parse_failed" : errors.front().message;
-    data.issues.push_back({data.status, "read_sdc", detail});
-    data.diagnostics.emplace_back("read_sdc:" + detail);
-    CTSLOG.warn(Loc::current(), "SdcClockReader: iSTA rejected SDC: ", detail);
+  sdc_reader::RegisterCaseAnalysisRecorder(interpreter, data);
+  if (interpreter.evalScriptFile(_sdc_path) != TCL_OK || !data.ok()) {
+    if (data.ok()) {
+      data.status = SdcConstraintStatusCode::kFileError;
+      const auto& errors = interpreter.getErrors();
+      const std::string detail = errors.empty() ? "ista_sdc_parse_failed" : errors.front().message;
+      data.issues.push_back({data.status, "read_sdc", detail});
+      data.diagnostics.emplace_back("read_sdc:" + detail);
+    }
+    CTSLOG.warn(Loc::current(), "SdcClockReader: SDC rejected: ", data.diagnostics.front());
     return data;
   }
   for (const auto& command : interpreter.getIgnoredCommands()) {
