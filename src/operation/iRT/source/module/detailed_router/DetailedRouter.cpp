@@ -160,6 +160,7 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
     setDRIterParam(dr_model, iter, dr_iter_param_list[i]);
     initDRBoxMap(dr_model);
     buildBoxSchedule(dr_model);
+    pruneAbnormalPatch(dr_model);
     splitNetResult(dr_model);
     // debugPlotDRModel(dr_model, "middle");
     routeDRBoxMap(dr_model);
@@ -327,6 +328,45 @@ void DetailedRouter::buildBoxSchedule(DRModel& dr_model)
       }
     }
   }
+}
+
+void DetailedRouter::pruneAbnormalPatch(DRModel& dr_model)
+{
+  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
+  int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+  size_t removed_patch_num = 0;
+  for (auto& [net_idx, patch_list] : dr_model.get_curr_result().get_net_detailed_patch_map()) {
+    if (!region_route.isActiveNet(net_idx)) {
+      continue;
+    }
+    std::vector<EXTLayerRect> kept_patch_list;
+    kept_patch_list.reserve(patch_list.size());
+    for (EXTLayerRect& patch : patch_list) {
+      if (!isAbnormalPatch(patch)) {
+        kept_patch_list.push_back(patch);
+        continue;
+      }
+      PlanarRect dirty_rect = RTUTIL.getEnlargedRect(patch.get_real_rect(), detection_distance);
+      for (const DRBoxId& dr_box_id : getDRBoxIdSet(dr_model, dirty_rect)) {
+        dr_model.get_dr_box_map()[dr_box_id.get_x()][dr_box_id.get_y()].set_dirty(true);
+      }
+      removed_patch_num++;
+    }
+    patch_list = std::move(kept_patch_list);
+  }
+  if (removed_patch_num > 0) {
+    RTLOG.info(Loc::current(), "Removed ", removed_patch_num, " abnormal patches");
+  }
+}
+
+bool DetailedRouter::isAbnormalPatch(const EXTLayerRect& patch)
+{
+  RoutingLayer& routing_layer = RTDM.getDatabase().get_routing_layer_list()[patch.get_layer_idx()];
+  const PlanarRect& real_rect = patch.get_real_rect();
+  if (real_rect.getWidth() != routing_layer.get_min_width()) {
+    return true;
+  }
+  return real_rect.getRectDirection(routing_layer.get_prefer_direction()) != routing_layer.get_prefer_direction();
 }
 
 void DetailedRouter::splitNetResultByGCell(DRModel& dr_model)
@@ -3242,7 +3282,7 @@ void DetailedRouter::repairViolation(DRModel& dr_model, std::vector<DRIterParam>
       initDRTaskList(dr_model, dr_box);
       updateBestResult(dr_box);
       routeDRBox(dr_model, dr_box);
-      updateRepairDRModel(dr_model, dr_box);
+      updateRepairDRModel(dr_model, dr_box.get_curr_result());
       repaired_box_num++;
       RTLOG.info(Loc::current(), "Repaired ", repaired_box_num, "/", repair_box_rect_list.size(), "(",
                  RTUTIL.getPercentage(repaired_box_num, repair_box_rect_list.size()), ") boxes", box_monitor.getStatsInfo());
@@ -3415,10 +3455,9 @@ void DetailedRouter::buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box)
   }
 }
 
-void DetailedRouter::updateRepairDRModel(DRModel& dr_model, DRBox& dr_box)
+void DetailedRouter::updateRepairDRModel(DRModel& dr_model, DRBoxResult& box_result)
 {
   DRModelResult& model_result = dr_model.get_curr_result();
-  DRBoxResult& box_result = dr_box.get_curr_result();
   for (auto& [net_idx, segment_list] : box_result.get_net_own_result_map()) {
     std::vector<Segment<LayerCoord>>& model_segment_list = model_result.get_net_detailed_result_map()[net_idx];
     model_segment_list.insert(model_segment_list.end(), std::make_move_iterator(segment_list.begin()), std::make_move_iterator(segment_list.end()));
@@ -3447,29 +3486,37 @@ void DetailedRouter::patchFinalMinArea(DRModel& dr_model)
     return;
   }
 
-  int32_t expand_size = std::max(1, dr_model.get_dr_iter_param().get_size() / 2);
+  int32_t expand_size = 1;
   std::vector<PlanarRect> patch_box_rect_list = getRepairBoxRectList(min_area_violation_list, expand_size);
-  RTLOG.info(Loc::current(), "Patching ", patch_box_rect_list.size(), " minimum-area boxes with ", expand_size, " GCells expansion");
+  std::vector<std::vector<size_t>> patch_box_wave_list = buildPatchBoxWaveList(patch_box_rect_list);
+  RTLOG.info(Loc::current(), "Patching ", patch_box_rect_list.size(), " minimum-area boxes in ", patch_box_wave_list.size(), " waves with ",
+             expand_size, " GCell expansion");
 
   size_t new_patch_num = 0;
-  for (size_t box_idx = 0; box_idx < patch_box_rect_list.size(); box_idx++) {
-    Monitor box_monitor;
-    DRBox dr_box;
-    initRepairDRBox(dr_model, dr_box, patch_box_rect_list[box_idx], dr_model.get_iter(), static_cast<int32_t>(box_idx));
-    // Original segments and patches remain in the model and are borrowed for this box.
-    buildRepairNetEnvironment(dr_model, dr_box);
-    buildFinalPatchBox(dr_model, dr_box, min_area_violation_list);
-    if (!dr_box.get_dr_task_list().empty()) {
-      buildFixedRect(dr_box);
-      buildDRBoxGraph(dr_box);
-      patchFinalMinArea(dr_box);
+  for (std::vector<size_t>& patch_box_idx_list : patch_box_wave_list) {
+    std::vector<DRBoxResult> box_result_list(patch_box_idx_list.size());
+#pragma omp parallel for schedule(dynamic, 1)
+    for (size_t box_pos = 0; box_pos < patch_box_idx_list.size(); box_pos++) {
+      size_t box_idx = patch_box_idx_list[box_pos];
+      DRBox dr_box;
+      initRepairDRBox(dr_model, dr_box, patch_box_rect_list[box_idx], dr_model.get_iter(), static_cast<int32_t>(box_idx));
+      // Original segments and patches remain in the model and are borrowed for this box.
+      buildRepairNetEnvironment(dr_model, dr_box);
+      buildFinalPatchBox(dr_model, dr_box, min_area_violation_list);
+      if (!dr_box.get_dr_task_list().empty()) {
+        buildFixedRect(dr_box);
+        buildDRBoxGraph(dr_box);
+        patchFinalMinArea(dr_box);
+      }
+      box_result_list[box_pos] = std::move(dr_box.get_curr_result());
+      freeDRBox(dr_box);
     }
-    for (const auto& [net_idx, patch_list] : dr_box.get_curr_result().get_net_own_patch_map()) {
-      new_patch_num += patch_list.size();
+    for (DRBoxResult& box_result : box_result_list) {
+      for (const auto& [net_idx, patch_list] : box_result.get_net_own_patch_map()) {
+        new_patch_num += patch_list.size();
+      }
+      updateRepairDRModel(dr_model, box_result);
     }
-    // Release all references before appending patches can reallocate model vectors.
-    freeDRBox(dr_box);
-    updateRepairDRModel(dr_model, dr_box);
   }
 
   if (new_patch_num > 0) {
@@ -3477,6 +3524,39 @@ void DetailedRouter::patchFinalMinArea(DRModel& dr_model)
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+std::vector<std::vector<size_t>> DetailedRouter::buildPatchBoxWaveList(const std::vector<PlanarRect>& patch_box_rect_list)
+{
+  std::vector<std::vector<size_t>> patch_box_wave_list;
+  std::vector<std::vector<PlanarRect>> wave_box_rect_list;
+  for (size_t box_idx = 0; box_idx < patch_box_rect_list.size(); box_idx++) {
+    const PlanarRect& box_rect = patch_box_rect_list[box_idx];
+    bool is_inserted = false;
+    for (size_t wave_idx = 0; wave_idx < patch_box_wave_list.size(); wave_idx++) {
+      bool is_overlapped = false;
+      for (const PlanarRect& other_box_rect : wave_box_rect_list[wave_idx]) {
+        if (RTUTIL.isClosedOverlap(box_rect, other_box_rect)) {
+          is_overlapped = true;
+          break;
+        }
+      }
+      if (is_overlapped) {
+        continue;
+      }
+      patch_box_wave_list[wave_idx].push_back(box_idx);
+      wave_box_rect_list[wave_idx].push_back(box_rect);
+      is_inserted = true;
+      break;
+    }
+    if (!is_inserted) {
+      patch_box_wave_list.emplace_back();
+      wave_box_rect_list.emplace_back();
+      patch_box_wave_list.back().push_back(box_idx);
+      wave_box_rect_list.back().push_back(box_rect);
+    }
+  }
+  return patch_box_wave_list;
 }
 
 void DetailedRouter::patchFinalMinArea(DRBox& dr_box)

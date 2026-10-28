@@ -62,6 +62,8 @@ class DetailedRouter
   void setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param);
   void initDRBoxMap(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
+  void pruneAbnormalPatch(DRModel& dr_model);
+  bool isAbnormalPatch(const EXTLayerRect& patch);
   void splitNetResultByGCell(DRModel& dr_model);
   void splitNetResult(DRModel& dr_model);
   std::set<DRBoxId, CmpDRBoxId> getDRBoxIdSet(DRModel& dr_model, PlanarRect real_rect);
@@ -167,8 +169,9 @@ class DetailedRouter
   void splitRepairBoxResult(DRModel& dr_model, DRBox& dr_box);
   void buildRepairNetEnvironment(DRModel& dr_model, DRBox& dr_box);
   void buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box);
-  void updateRepairDRModel(DRModel& dr_model, DRBox& dr_box);
+  void updateRepairDRModel(DRModel& dr_model, DRBoxResult& box_result);
   void patchFinalMinArea(DRModel& dr_model);
+  std::vector<std::vector<size_t>> buildPatchBoxWaveList(const std::vector<PlanarRect>& patch_box_rect_list);
   void patchFinalMinArea(DRBox& dr_box);
   void buildFinalPatchBox(DRModel& dr_model, DRBox& dr_box, const std::vector<Violation>& violation_list);
   void uploadDRModel(DRModel& dr_model);
