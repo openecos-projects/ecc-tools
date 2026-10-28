@@ -39,7 +39,7 @@
 
 #include "FastSTACondition.hh"
 #include "Logger.hh"
-#include "SDCClockReader.hh"
+#include "SDCGeneratedClockResolver.hh"
 #include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALibertyModel.hh"
@@ -482,7 +482,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     }
     declaration.master_clock_name = master;
   }
-  SdcClockReader::resolveGeneratedClocks(context.constraints);
+  SDCGeneratedClockResolver::resolve(context.constraints);
   for (const auto& declaration : context.constraints.clocks) {
     if (!declaration.period_resolved || !std::isfinite(declaration.period_ns) || declaration.period_ns <= 0.0 || !declaration.waveform_resolved
         || declaration.waveform_ns.size() != 2U) {

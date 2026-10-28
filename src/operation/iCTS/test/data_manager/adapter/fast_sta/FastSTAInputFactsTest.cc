@@ -232,7 +232,7 @@ TEST_F(FastSTAInputFactsTestInterface, ExplicitSdcUnitsCannotSupplyMissingLibert
 {
   const ScopedTimingInput sdc("set_units -time ns -capacitance pf\ncreate_clock -name clk -period 10\n");
   ASSERT_TRUE(sdc.ready());
-  const auto constraints = icts::SdcClockReader(sdc.path(), {.time_unit_ns = 0.0, .capacitance_unit_pf = 0.0}).readClockData();
+  const auto constraints = icts::SdcClockReader(sdc.path()).readClockData();
   ASSERT_EQ(constraints.clocks.size(), 1U);
   EXPECT_DOUBLE_EQ(constraints.clocks.front().period_ns, 10.0);
   EXPECT_FALSE(loadModel(ReplaceInput(_library, "time_unit : \"1ns\";", "")).has_value());

@@ -15,11 +15,15 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @file SDCGeneratedClocks.cc
+ * @file SDCGeneratedClockResolver.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
- * @date 2026-09-05
- * @brief Resolves generated waveforms when source declarations identify their master.
+ * @date 2026-10-28
+ * @brief Derives unresolved generated clocks without parsing SDC text.
  */
+
+#include "SDCGeneratedClockResolver.hh"
+
+#include <fnmatch.h>
 
 #include <algorithm>
 #include <cmath>
@@ -27,33 +31,35 @@
 #include <optional>
 #include <ranges>
 #include <string>
-#include <utility>
 #include <vector>
 
-#include "SDCClockParser.hh"
-#include "SDCClockReader.hh"
-#include "TimingConstraints.hh"
+#include "timing/TimingConstraints.hh"
 
-namespace icts::sdc_reader {
+namespace icts {
 namespace {
 
-auto SourceMatchesClock(const SdcClockDecl& generated, const SdcClockDecl& master) -> bool
+auto objectPatternMatches(const std::string& pattern, const std::string& name) -> bool
+{
+  return pattern == name || fnmatch(pattern.c_str(), name.c_str(), 0) == 0;
+}
+
+auto sourceMatchesClock(const SdcClockDecl& generated, const SdcClockDecl& master) -> bool
 {
   if (!generated.master_clock_name.empty()) {
     return generated.master_clock_name == master.clock_name;
   }
   return std::ranges::any_of(generated.generated_sources, [&](const auto& source) -> bool {
     if (source.kind == SdcObjectKind::kClock) {
-      return ObjectPatternMatches(source.pattern, master.clock_name);
+      return objectPatternMatches(source.pattern, master.clock_name);
     }
     return std::ranges::any_of(master.targets, [&](const auto& target) -> bool {
       return (source.kind == target.kind || source.kind == SdcObjectKind::kUnknown || target.kind == SdcObjectKind::kUnknown)
-             && (source.pattern == target.pattern || ObjectPatternMatches(source.pattern, target.pattern));
+             && (source.pattern == target.pattern || objectPatternMatches(source.pattern, target.pattern));
     });
   });
 }
 
-auto DeriveWaveform(SdcClockDecl& generated, const SdcClockDecl& master) -> bool
+auto deriveWaveform(SdcClockDecl& generated, const SdcClockDecl& master) -> bool
 {
   if (master.waveform_ns.size() < 2U || master.waveform_ns.size() % 2U != 0U || !std::isfinite(master.period_ns) || master.period_ns <= 0.0
       || generated.divide_by < 1 || generated.multiply_by < 1) {
@@ -80,8 +86,6 @@ auto DeriveWaveform(SdcClockDecl& generated, const SdcClockDecl& master) -> bool
   } else {
     const double scale = static_cast<double>(generated.divide_by) / static_cast<double>(generated.multiply_by);
     generated.period_ns = master.period_ns * scale;
-    // A power-of-two divider produces equal high/low intervals. Explicit
-    // multiplication scales the source edges and optionally sets duty cycle.
     const bool divider = generated.divide_by_explicit && generated.divide_by > 1 && (generated.divide_by & (generated.divide_by - 1)) == 0;
     if (divider) {
       generated.waveform_ns = {master.waveform_ns.front(), master.waveform_ns.front() + generated.period_ns / 2.0};
@@ -114,56 +118,33 @@ auto DeriveWaveform(SdcClockDecl& generated, const SdcClockDecl& master) -> bool
 
 }  // namespace
 
-auto SdcSubsetEvaluator::storeClock(SdcClockDecl clock) -> void
+auto SDCGeneratedClockResolver::resolve(SdcClockData& data) -> void
 {
-  std::erase_if(_data.clocks, [&](const auto& previous) -> bool { return previous.clock_name == clock.clock_name; });
-  if (!clock.add) {
-    for (auto& previous : _data.clocks) {
-      if (previous.is_virtual) {
-        continue;
-      }
-      std::erase_if(previous.targets, [&](const auto& previous_target) -> bool {
-        return std::ranges::any_of(clock.targets, [&](const auto& target) -> bool {
-          return (target.kind == previous_target.kind || target.kind == SdcObjectKind::kUnknown || previous_target.kind == SdcObjectKind::kUnknown)
-                 && target.pattern == previous_target.pattern;
-        });
-      });
-    }
-    std::erase_if(_data.clocks, [](const auto& previous) -> bool { return !previous.is_virtual && previous.targets.empty(); });
+  if (!data.ok()) {
+    return;
   }
-  _data.clocks.push_back(std::move(clock));
-  for (auto& generated : _data.clocks) {
-    if (generated.kind == SdcClockDecl::Kind::kGenerated) {
-      generated.period_resolved = false;
-      generated.waveform_resolved = false;
-      generated.period_ns = 0.0;
-      generated.waveform_ns.clear();
-    }
-  }
-  resolveGeneratedClocks();
-}
-
-auto SdcSubsetEvaluator::resolveGeneratedClocks() -> void
-{
-  for (std::size_t pass = 0U; pass < _data.clocks.size(); ++pass) {
+  for (std::size_t pass = 0U; pass < data.clocks.size(); ++pass) {
     bool progress = false;
-    for (auto& generated : _data.clocks) {
+    for (auto& generated : data.clocks) {
       if (generated.kind != SdcClockDecl::Kind::kGenerated || generated.waveform_resolved) {
         continue;
       }
       std::vector<const SdcClockDecl*> masters;
-      for (const auto& candidate : _data.clocks) {
-        if (&candidate != &generated && SourceMatchesClock(generated, candidate)) {
+      for (const auto& candidate : data.clocks) {
+        if (&candidate != &generated && sourceMatchesClock(generated, candidate)) {
           masters.push_back(&candidate);
         }
       }
-      // Physical source pins can be downstream of any declaration. Their
-      // master must be resolved on the timing graph, never guessed here.
+      // Physical sources need their unique master identified on the timing
+      // graph. Do not guess a master from an ambiguous declaration match.
       if (masters.size() != 1U || !masters.front()->waveform_resolved || masters.front()->waveform_ns.empty()) {
         continue;
       }
-      if (!DeriveWaveform(generated, *masters.front())) {
-        reportIssue(SdcConstraintStatusCode::kMalformed, "create_generated_clock", "invalid_generated_waveform:" + generated.clock_name);
+      if (!deriveWaveform(generated, *masters.front())) {
+        const std::string detail = "invalid_generated_waveform:" + generated.clock_name;
+        data.issues.push_back({SdcConstraintStatusCode::kMalformed, "create_generated_clock", detail});
+        data.diagnostics.push_back("create_generated_clock:" + detail);
+        data.status = SdcConstraintStatusCode::kMalformed;
         return;
       }
       generated.period_resolved = true;
@@ -174,26 +155,6 @@ auto SdcSubsetEvaluator::resolveGeneratedClocks() -> void
       return;
     }
   }
-}
-
-auto SdcSubsetEvaluator::resolveGeneratedClockData(SdcClockData& data) -> void
-{
-  if (!data.ok()) {
-    return;
-  }
-  SdcSubsetEvaluator evaluator;
-  evaluator._data = std::move(data);
-  evaluator.resolveGeneratedClocks();
-  data = std::move(evaluator._data);
-}
-
-}  // namespace icts::sdc_reader
-
-namespace icts {
-
-auto SdcClockReader::resolveGeneratedClocks(SdcClockData& clock_data) -> void
-{
-  sdc_reader::SdcSubsetEvaluator::resolveGeneratedClockData(clock_data);
 }
 
 }  // namespace icts

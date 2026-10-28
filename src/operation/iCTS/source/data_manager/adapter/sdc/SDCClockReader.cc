@@ -18,23 +18,28 @@
  * @file SDCClockReader.cc
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-15
- * @brief Side-effect-free SDC clock subset reader implementation for iCTS.
+ * @brief Shared SDC frontend adapter implementation for iCTS.
  */
 
 #include "SDCClockReader.hh"
 
-#include <filesystem>
-#include <ostream>
-#include <string>
-#include <tuple>
-#include <utility>
-#include <variant>
-#include <vector>
+#if __has_include(<tcl8.6/tcl.h>)
+#include <tcl8.6/tcl.h>
+#else
+#include <tcl.h>
+#endif
 
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <string>
+#include <utility>
+
+#include "Database.hpp"
 #include "Logger.hh"
 #include "SDCCaseAnalysis.hh"
 #include "SdcCommand.hpp"
-#include "clock_parser/SDCClockParser.hh"
+#include "TimingConstraints.hh"
 #include "clock_trace/ClockTraceResolver.hh"
 #include "common/AnalysisType.hpp"
 #include "common/TransType.hpp"
@@ -71,7 +76,7 @@ SdcClockReader::SdcClockReader() : SdcClockReader(configuredSdcPath())
 {
 }
 
-SdcClockReader::SdcClockReader(std::string sdc_path, SdcUnits units) : _sdc_path(std::move(sdc_path)), _units(units)
+SdcClockReader::SdcClockReader(std::string sdc_path) : _sdc_path(std::move(sdc_path))
 {
 }
 
@@ -182,17 +187,6 @@ auto SdcClockReader::readClockData() const -> SdcClockData
     CTSLOG.warn(Loc::current(), "SdcClockReader: ignoring SDC construct outside iCTS scope: ", ignored);
   }
   return data;
-}
-
-auto SdcClockReader::readDeclarationsOnly() const -> std::vector<std::tuple<std::string, std::string, double, bool>>
-{
-  std::vector<std::tuple<std::string, std::string, double, bool>> declarations;
-  const auto data = readClockData();
-  declarations.reserve(data.clocks.size());
-  for (const auto& clock : data.clocks) {
-    declarations.emplace_back(clock.clock_name, sdc_reader::PrimarySourceExpression(clock), clock.period_ns, clock.period_resolved);
-  }
-  return declarations;
 }
 
 auto SdcClockReader::traceClockTargets(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup,

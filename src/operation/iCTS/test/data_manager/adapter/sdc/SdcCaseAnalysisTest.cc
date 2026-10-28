@@ -1,27 +1,57 @@
-// SPDX-License-Identifier: MulanPSL-2.0
+// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+/**
+ * @file SdcCaseAnalysisTest.cc
+ * @author Dawn Li (dawnli619215645@gmail.com)
+ * @date 2026-10-28
+ * @brief Shared-frontend case recording and error-boundary regressions.
+ */
+#if __has_include(<tcl8.6/tcl.h>)
+#include <tcl8.6/tcl.h>
+#else
+#include <tcl.h>
+#endif
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <initializer_list>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "DataManager.hpp"
+#include "Database.hpp"
 #include "SDCClockReader.hh"
 #include "SdcCommand.hpp"
 #include "TimingConstraints.hh"
+#include "sdc/Sdc.hpp"
 #include "toolkit/io/TestArtifactIO.hh"
 
 namespace icts_test {
 namespace {
 
-class SdcCaseAnalysisTest : public ::testing::Test
+class SdcCaseAnalysisTestInterface : public ::testing::Test
 {
  protected:
   void SetUp() override
   {
-    using namespace toolkit::io;
-    _directory = PrepareCleanOutputDir(ResolveOutputDir() / "sdc_case_analysis" / ::testing::UnitTest::GetInstance()->current_test_info()->name());
+    _directory = toolkit::io::PrepareCleanOutputDir(toolkit::io::ResolveOutputDir() / "sdc_case_analysis"
+                                                    / ::testing::UnitTest::GetInstance()->current_test_info()->name());
   }
 
   auto read(const std::string& script) const -> icts::SdcClockData
@@ -34,7 +64,7 @@ class SdcCaseAnalysisTest : public ::testing::Test
   std::filesystem::path _directory;
 };
 
-TEST_F(SdcCaseAnalysisTest, RetainsUnboundPortAndPinIdentities)
+TEST_F(SdcCaseAnalysisTestInterface, RetainsUnboundPortAndPinIdentities)
 {
   const auto data = read(
       "create_clock -name clk_sys -period 4 [get_ports clk_i]\n"
@@ -52,7 +82,7 @@ TEST_F(SdcCaseAnalysisTest, RetainsUnboundPortAndPinIdentities)
   EXPECT_DOUBLE_EQ(data.clocks.front().period_ns, 4.0);
 }
 
-TEST_F(SdcCaseAnalysisTest, PreservesTypedCollectionsAndLiteralNames)
+TEST_F(SdcCaseAnalysisTestInterface, PreservesTypedCollectionsAndLiteralNames)
 {
   const auto data = read(
       "set_case_analysis 1 [list [get_ports clk_i] [list [get_pins pad/mode/C] [get_nets tie_low]]]\n"
@@ -65,7 +95,7 @@ TEST_F(SdcCaseAnalysisTest, PreservesTypedCollectionsAndLiteralNames)
   EXPECT_EQ(data.case_analyses, expected);
 }
 
-TEST_F(SdcCaseAnalysisTest, RecordsExecutedTclControlFlow)
+TEST_F(SdcCaseAnalysisTestInterface, RecordsExecutedTclControlFlow)
 {
   const auto data = read(R"(
 set calls 0
@@ -90,7 +120,7 @@ create_clock -name clk_sys -period 4 [get_ports clk_i]
   EXPECT_EQ(data.clocks.front().clock_name, "clk_sys");
 }
 
-TEST_F(SdcCaseAnalysisTest, RecordsSourcedConstraintsInTheSameInterpreter)
+TEST_F(SdcCaseAnalysisTestInterface, RecordsSourcedConstraintsInTheSameInterpreter)
 {
   ASSERT_TRUE(toolkit::io::WriteTextArtifact(_directory / "modes.tcl", "incr source_count\nset_case_analysis $mode [get_ports testmode_i]\n"));
   const auto data = read("set mode 0\nset source_count 0\nsource {" + (_directory / "modes.tcl").string()
@@ -102,7 +132,7 @@ TEST_F(SdcCaseAnalysisTest, RecordsSourcedConstraintsInTheSameInterpreter)
   ASSERT_EQ(data.clocks.size(), 1U);
 }
 
-TEST_F(SdcCaseAnalysisTest, RejectsInvalidAndUnsupportedValues)
+TEST_F(SdcCaseAnalysisTestInterface, RejectsInvalidAndUnsupportedValues)
 {
   using Code = icts::SdcConstraintStatusCode;
   const std::vector<std::pair<std::string, Code>> cases{
@@ -119,7 +149,7 @@ TEST_F(SdcCaseAnalysisTest, RejectsInvalidAndUnsupportedValues)
   }
 }
 
-TEST_F(SdcCaseAnalysisTest, RejectsMissingAndExtraArguments)
+TEST_F(SdcCaseAnalysisTestInterface, RejectsMissingAndExtraArguments)
 {
   for (const auto& command : {"set_case_analysis 0", "set_case_analysis 0 mode extra"}) {
     SCOPED_TRACE(command);
@@ -131,7 +161,7 @@ TEST_F(SdcCaseAnalysisTest, RejectsMissingAndExtraArguments)
   }
 }
 
-TEST_F(SdcCaseAnalysisTest, RejectsEmptyCollectionsWithoutFabricatingObjects)
+TEST_F(SdcCaseAnalysisTestInterface, RejectsEmptyCollectionsWithoutFabricatingObjects)
 {
   for (const auto& command : {"set_case_analysis 0 [get_ports -quiet missing*]", "set_case_analysis 0 {}"}) {
     SCOPED_TRACE(command);
@@ -143,7 +173,7 @@ TEST_F(SdcCaseAnalysisTest, RejectsEmptyCollectionsWithoutFabricatingObjects)
   }
 }
 
-TEST_F(SdcCaseAnalysisTest, RejectsEmptyObjectNames)
+TEST_F(SdcCaseAnalysisTestInterface, RejectsEmptyObjectNames)
 {
   const auto data = read("set_case_analysis 0 [list {}]\n");
   const std::vector<icts::SdcConstraintIssue> expected{{icts::SdcConstraintStatusCode::kUnresolvedReference, "set_case_analysis", "empty_object_name"}};
@@ -152,7 +182,7 @@ TEST_F(SdcCaseAnalysisTest, RejectsEmptyObjectNames)
   EXPECT_EQ(data.case_analyses, std::vector<icts::SdcCaseAnalysis>{});
 }
 
-TEST_F(SdcCaseAnalysisTest, RejectsMalformedCollectionsAtTheTclBoundary)
+TEST_F(SdcCaseAnalysisTestInterface, RejectsMalformedCollectionsAtTheTclBoundary)
 {
   const auto data = read("set bad [format %c 123]\nset_case_analysis 0 $bad\n");
   const std::vector<icts::SdcConstraintIssue> expected{{icts::SdcConstraintStatusCode::kMalformed, "set_case_analysis", "invalid object collection"}};
@@ -161,7 +191,7 @@ TEST_F(SdcCaseAnalysisTest, RejectsMalformedCollectionsAtTheTclBoundary)
   EXPECT_EQ(data.case_analyses, std::vector<icts::SdcCaseAnalysis>{});
 }
 
-TEST_F(SdcCaseAnalysisTest, DoesNotAppendPartialConstraintsWithInvalidObjectKinds)
+TEST_F(SdcCaseAnalysisTestInterface, DoesNotAppendPartialConstraintsWithInvalidObjectKinds)
 {
   const auto data = read(
       "create_clock -name clk_sys -period 4 [get_ports clk_i]\n"
@@ -172,7 +202,7 @@ TEST_F(SdcCaseAnalysisTest, DoesNotAppendPartialConstraintsWithInvalidObjectKind
   EXPECT_EQ(data.case_analyses, std::vector<icts::SdcCaseAnalysis>{});
 }
 
-TEST_F(SdcCaseAnalysisTest, DoesNotHideCaseErrorsInsideControlFlow)
+TEST_F(SdcCaseAnalysisTestInterface, DoesNotHideCaseErrorsInsideControlFlow)
 {
   const auto data = read(
       "foreach pin {pad/C} {set_case_analysis rise [get_pins $pin]}\n"
@@ -184,7 +214,7 @@ TEST_F(SdcCaseAnalysisTest, DoesNotHideCaseErrorsInsideControlFlow)
   EXPECT_EQ(data.case_analyses, std::vector<icts::SdcCaseAnalysis>{});
 }
 
-TEST_F(SdcCaseAnalysisTest, DoesNotRelaxNormalStaOrLeakItsDatabase)
+TEST_F(SdcCaseAnalysisTestInterface, DoesNotRelaxNormalStaOrLeakItsDatabase)
 {
   const auto data = read("set_case_analysis 0 [get_ports testmode_i]\n");
   ASSERT_TRUE(data.ok());
@@ -198,6 +228,58 @@ TEST_F(SdcCaseAnalysisTest, DoesNotRelaxNormalStaOrLeakItsDatabase)
   ista::sdc::registerSdcCommands(interpreter);
   EXPECT_EQ(interpreter.evalString("set_case_analysis 0 testmode_i"), TCL_ERROR);
   EXPECT_TRUE(ista::DataManager::getInst().getDatabase().sdc().get_case_analysis_map().empty());
+}
+
+TEST_F(SdcCaseAnalysisTestInterface, PreservesExistingNumericConstantForms)
+{
+  const std::vector<std::pair<std::string, int>> cases{{"+1", 1}, {"01", 1}, {"-0", 0}, {" 0 ", 0}, {"00", 0}};
+  for (const auto& [text, value] : cases) {
+    SCOPED_TRACE(text);
+    const auto data = read("set_case_analysis {" + text + "} [get_ports testmode_i]");
+    ASSERT_TRUE(data.ok());
+    const std::vector<icts::SdcCaseAnalysis> expected{{value, {{icts::SdcObjectKind::kPort, "testmode_i", true}}}};
+    EXPECT_EQ(data.case_analyses, expected);
+  }
+}
+
+TEST_F(SdcCaseAnalysisTestInterface, DoesNotHideCollectionErrorsInsideControlFlow)
+{
+  const auto data = read(R"(
+set bad [format %c 123]
+foreach pin {pad/C} {set_case_analysis 0 $bad}
+create_clock -name clk_sys -period 4 [get_ports clk_i]
+)");
+  icts::SdcClockData expected;
+  expected.diagnostics = {"set_case_analysis:invalid object collection"};
+  expected.status = icts::SdcConstraintStatusCode::kMalformed;
+  expected.issues = {{icts::SdcConstraintStatusCode::kMalformed, "set_case_analysis", "invalid object collection"}};
+  EXPECT_EQ(data, expected);
+}
+
+TEST_F(SdcCaseAnalysisTestInterface, DoesNotHideCollectionErrorsCaughtByTcl)
+{
+  const auto data = read(R"(
+set bad [format %c 123]
+catch {set_case_analysis 0 $bad}
+create_clock -name clk_sys -period 4 [get_ports clk_i]
+)");
+  icts::SdcClockData expected;
+  expected.diagnostics = {"set_case_analysis:invalid object collection"};
+  expected.status = icts::SdcConstraintStatusCode::kMalformed;
+  expected.issues = {{icts::SdcConstraintStatusCode::kMalformed, "set_case_analysis", "invalid object collection"}};
+  EXPECT_EQ(data, expected);
+}
+
+TEST_F(SdcCaseAnalysisTestInterface, DoesNotRetainCasesAcrossReaderSessions)
+{
+  const auto first = read("set_case_analysis 0 [get_ports mode_a]");
+  const auto second = read("set_case_analysis 1 [get_ports mode_b]");
+  ASSERT_TRUE(first.ok());
+  ASSERT_TRUE(second.ok());
+  const std::vector<icts::SdcCaseAnalysis> first_expected{{0, {{icts::SdcObjectKind::kPort, "mode_a", true}}}};
+  const std::vector<icts::SdcCaseAnalysis> second_expected{{1, {{icts::SdcObjectKind::kPort, "mode_b", true}}}};
+  EXPECT_EQ(first.case_analyses, first_expected);
+  EXPECT_EQ(second.case_analyses, second_expected);
 }
 
 }  // namespace

@@ -358,11 +358,10 @@ auto DataManager::input(const DataManagerInput& input_data) -> DataManagerStatus
 
 auto DataManager::readClockData() -> DataManagerStatus
 {
-  const auto sdc_units = _wrapper.querySdcUnits().value_or(SdcUnits{.time_unit_ns = 0.0, .capacitance_unit_pf = 0.0});
   SdcClockData sdc_clock_data;
   const auto sdc_path = dmInst->get_config().get_sdc_path();
   if (!sdc_path.empty()) {
-    sdc_clock_data = SdcClockReader(sdc_path, sdc_units).readClockData();
+    sdc_clock_data = SdcClockReader(sdc_path).readClockData();
     if (!sdc_clock_data.ok()) {
       auto status = failureStatus(DataManagerStatusCode::kExternalDataError, "sdc_constraints_rejected");
       status.diagnostics = std::move(sdc_clock_data.diagnostics);

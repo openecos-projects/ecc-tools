@@ -41,7 +41,6 @@
 #include "IdbUnits.h"
 #include "Logger.hh"
 #include "Monitor.hh"
-#include "TimingConstraints.hh"
 #include "Type.hh"
 #include "Wrapper.hh"
 #include "config/Config.hh"
@@ -459,29 +458,6 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
   CTSLOG.info(Loc::current(), "Wrapper: indexed central Liberty generation: libraries=", _liberty_generation->get_libraries().size(),
               ", configured_workers=", _liberty_generation->get_configured_workers(), ", active_workers=", _liberty_generation->get_active_workers(),
               ", cells=", cell_count, ", index_seconds=", index_seconds, index_monitor.getStatsInfo());
-}
-
-auto Wrapper::querySdcUnits() const -> std::optional<SdcUnits>
-{
-  loadLibertyIfNeeded();
-  if (_liberty_generation == nullptr) {
-    return std::nullopt;
-  }
-  std::optional<SdcUnits> units;
-  for (const auto& library : _liberty_generation->get_libraries()) {
-    if (library == nullptr || !library->has_cap_unit() || !library->has_time_unit()) {
-      return std::nullopt;
-    }
-    const SdcUnits candidate{.time_unit_ns = library->convert_time_unit_to_ns(1.0),
-                             .capacitance_unit_pf = idb::ConvertCapUnit(library->get_cap_unit(), idb::CapacitiveUnit::kPF, 1.0)};
-    if (!std::isfinite(candidate.time_unit_ns) || candidate.time_unit_ns <= 0.0 || !std::isfinite(candidate.capacitance_unit_pf)
-        || candidate.capacitance_unit_pf <= 0.0
-        || (units.has_value() && (units->time_unit_ns != candidate.time_unit_ns || units->capacitance_unit_pf != candidate.capacitance_unit_pf))) {
-      return std::nullopt;
-    }
-    units = candidate;
-  }
-  return units;
 }
 
 auto Wrapper::queryLibertyRevision() const -> std::uint64_t

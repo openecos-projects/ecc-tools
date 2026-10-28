@@ -18,7 +18,7 @@
  * @file SDCClockReader.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-15
- * @brief Side-effect-free SDC clock subset reader for iCTS.
+ * @brief Shared SDC frontend adapter for iCTS.
  */
 
 #pragma once
@@ -26,7 +26,6 @@
 #include <cstddef>
 #include <functional>
 #include <string>
-#include <tuple>
 #include <vector>
 
 #include "timing/TimingConstraints.hh"
@@ -133,19 +132,14 @@ class SdcClockReader
 {
  public:
   SdcClockReader();
-  explicit SdcClockReader(std::string sdc_path, SdcUnits units = {});
+  explicit SdcClockReader(std::string sdc_path);
 
   auto readClockData() const -> SdcClockData;
-  auto readDeclarationsOnly() const -> std::vector<std::tuple<std::string, std::string, double, bool>>;
-  // Derive only unresolved generated declarations after the caller identifies
-  // their unique master on its graph. All input/output quantities are already ns.
-  static auto resolveGeneratedClocks(SdcClockData& clock_data) -> void;
   static auto traceClockTargets(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup,
                                 std::size_t max_fanout) -> ClockTraceBuild;
 
  private:
   std::string _sdc_path;
-  SdcUnits _units;
 };
 
 }  // namespace icts
