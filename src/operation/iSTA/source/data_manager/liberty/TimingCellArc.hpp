@@ -38,6 +38,7 @@ class TimingCellArc
   const std::vector<TimingArc>& get_timing_arc_list() const { return _timing_arc_list; }
   bool get_is_timing_graph_arc() const { return _is_timing_graph_arc; }
   bool get_is_clock_arc() const { return _is_clock_arc; }
+  bool get_is_control_arc() const { return _is_control_arc; }
   bool get_is_disable_arc() const { return _is_disable_arc; }
   bool get_is_clear_preset_arc() const { return _is_clear_preset_arc; }
   bool isThreeStateArc() const
@@ -47,6 +48,7 @@ class TimingCellArc
         return true;
     return false;
   }
+  bool get_is_latch_data_arc() const { return _is_latch_data_arc; }
   // setter
   void set_source_port(const std::string& source_port) { _source_port = source_port; }
   void set_sink_port(const std::string& sink_port) { _sink_port = sink_port; }
@@ -56,8 +58,10 @@ class TimingCellArc
   void set_timing_arc_list(const std::vector<TimingArc>& timing_arc_list) { _timing_arc_list = timing_arc_list; }
   void set_is_timing_graph_arc(const bool is_timing_graph_arc) { _is_timing_graph_arc = is_timing_graph_arc; }
   void set_is_clock_arc(const bool is_clock_arc) { _is_clock_arc = is_clock_arc; }
+  void set_is_control_arc(const bool is_control_arc) { _is_control_arc = is_control_arc; }
   void set_is_disable_arc(const bool is_disable_arc) { _is_disable_arc = is_disable_arc; }
   void set_is_clear_preset_arc(const bool is_clear_preset_arc) { _is_clear_preset_arc = is_clear_preset_arc; }
+  void set_is_latch_data_arc(const bool is_latch_data_arc) { _is_latch_data_arc = is_latch_data_arc; }
   // function
 
  private:
@@ -69,8 +73,13 @@ class TimingCellArc
   std::vector<TimingArc> _timing_arc_list;
   bool _is_timing_graph_arc = true;
   bool _is_clock_arc = false;
+  // Three-state enable/disable arcs are data-path control arcs. They must
+  // participate in propagation, but their source is not a Boolean input of
+  // the driven output function (for example OE -> PAD).
+  bool _is_control_arc = false;
   bool _is_disable_arc = false;
   bool _is_clear_preset_arc = false;
+  bool _is_latch_data_arc = false;
 };
 
 }  // namespace ista

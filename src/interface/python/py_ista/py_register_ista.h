@@ -28,9 +28,13 @@ namespace py = pybind11;
 void register_ista(py::module& m)
 {
   m.def("init_sta", initSTA, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("prepare_timing_model", prepareTimingModel);
+  m.def("export_timing_model", exportTimingModel);
   m.def("run_sta", runSTA);
   m.def("extract_lib", extractLib);
   m.def("destroy_sta", destroySTA);
+  m.def("is_model_ready", isModelReady);
+  m.def("is_timing_ready", isTimingReady);
 }
 
 }  // namespace python_interface

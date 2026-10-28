@@ -39,6 +39,7 @@ bool DataSlewPropagator::shouldStopDataSlewPropagation(Arc& arc)
 
 void DataSlewPropagator::propagate()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kDataSlew);
   Database& database = _database;
   for (int32_t vertex_idx : database.graph().vertexOrder()) {
     for (std::size_t arc_idx : database.graph().vertices()[vertex_idx].get_outgoing_arc_list()) {

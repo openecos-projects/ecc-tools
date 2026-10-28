@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -39,11 +40,23 @@ class PathChecker
       : _database(database), _delay_calculator(delay_calculator), _query(database), _clock_pin_values(database, clock_cache), _reconvergence(database, clock_cache)
   {
   }
-  std::optional<PathEnd> checkPath(const TimingPathState& path, const std::string& end_point, AnalysisType analysis, bool include_reconvergence = true);
+  // Return every legal capture/check candidate for this propagated path. The
+  // winner-only checkPath() API remains the reduction used by setup analysis;
+  // min/hold exporters use this API to preserve launch/capture context.
+  std::vector<PathEnd> checkPathCandidates(const TimingPathState& path, const std::string& end_point, AnalysisType analysis,
+                                           bool include_reconvergence = true);
+  std::optional<PathEnd> checkPath(const TimingPathState& path, const std::string& end_point, AnalysisType analysis,
+                                   bool include_reconvergence = true);
   double calcPathSlack(const TimingPathState& path, double required, AnalysisType analysis);
 
  private:
-  double checkTime(const TimingPathState& path, TimingCheckArc& arc, AnalysisType analysis, std::string_view clock, TransType source);
+  struct CheckTimeResult
+  {
+    double value = 0.0;
+    int32_t selected_arc_idx = -1;
+  };
+
+  CheckTimeResult checkTime(const TimingPathState& path, TimingCheckArc& arc, AnalysisType analysis, std::string_view clock, TransType source);
   Database& _database;
   DelayCalculator& _delay_calculator;
   TimingStateQuery _query;

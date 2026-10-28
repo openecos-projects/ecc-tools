@@ -49,7 +49,8 @@ class Graph
  public:
   Graph() = default;
   Graph(const Graph& other)
-      : _sim_values(other._sim_values),
+      : _structure_signature(other._structure_signature),
+        _sim_values(other._sim_values),
         _vertices(other._vertices),
         _vertex_order(other._vertex_order),
         _driver_points(other._driver_points),
@@ -84,6 +85,8 @@ class Graph
 
   SimValues& simValues() { return _sim_values; }
   const SimValues& simValues() const { return _sim_values; }
+  std::uint64_t structureSignature() const { return _structure_signature; }
+  void setStructureSignature(std::uint64_t signature) { _structure_signature = signature; }
   std::vector<GraphVertex>& vertices() { return _vertices; }
   const std::vector<GraphVertex>& vertices() const { return _vertices; }
   std::vector<int32_t>& vertexOrder() { return _vertex_order; }
@@ -155,6 +158,7 @@ class Graph
   }
 
  private:
+  std::uint64_t _structure_signature = 0;
   SimValues _sim_values;
   std::vector<GraphVertex> _vertices;
   std::vector<int32_t> _vertex_order;

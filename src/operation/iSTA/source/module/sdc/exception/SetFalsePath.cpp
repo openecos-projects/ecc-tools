@@ -32,6 +32,8 @@ unsigned TclSetFalsePath::exec()
 {
   Database& database = STADM.getDatabase();
   TimingException exception = parsePathSelector(database, true);
+  if (hasEmptySelector())
+    return 1;
   exception.set_type(TimingExceptionType::kFalsePath);
   applyAnalysisQualifiers(exception);
   if (getOptionOrArg("-reset_path")->is_set_val()) {

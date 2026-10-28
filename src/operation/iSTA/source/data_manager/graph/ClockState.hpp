@@ -74,6 +74,10 @@ struct ClockWaveform
 struct ClockState : ClockWaveform
 {
   bool is_source_path_only = false;
+  // Structural model preparation records logical clock reachability before
+  // numeric clock propagation has run.  It is consumed only by queries that
+  // need legal source-edge identity, never as a numeric arrival/slew value.
+  bool is_structural = false;
   std::map<TransType, ClockWaveform> waveforms;
 
   const ClockWaveform* waveform(std::optional<TransType> source = std::nullopt) const

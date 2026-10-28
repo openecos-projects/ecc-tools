@@ -50,7 +50,7 @@ void LinkNetwork::linkInstance(Instance& instance)
   instance.set_is_clock_gating(timing_cell.get_is_clock_gating());
   instance.set_has_clear_arc(timing_cell.get_has_clear_arc());
   instance.set_has_preset_arc(timing_cell.get_has_preset_arc());
-  TimingCellArc* clock_to_q_arc = findClockToQArc(timing_cell);
+  TimingCellArc* clock_to_q_arc = findClockToQArc(instance, timing_cell);
   if (clock_to_q_arc != nullptr) {
     instance.set_output_pin_name(instancePinName(instance, clock_to_q_arc->get_sink_port()));
     instance.set_clock_to_q_delay(clock_to_q_arc->get_delay());
@@ -90,14 +90,23 @@ TimingCheckArc LinkNetwork::instanceCheck(Instance& instance, TimingCheckArc& ti
   return instance_timing_check_arc;
 }
 
-TimingCellArc* LinkNetwork::findClockToQArc(LibertyCell& timing_cell)
+TimingCellArc* LinkNetwork::findClockToQArc(Instance& instance, LibertyCell& timing_cell)
 {
+  TimingCellArc* first_clock_arc = nullptr;
   for (TimingCellArc& timing_cell_arc : timing_cell.get_cell_arc_list()) {
-    if (timing_cell_arc.get_is_clock_arc()) {
+    if (!timing_cell_arc.get_is_clock_arc())
+      continue;
+    if (first_clock_arc == nullptr)
+      first_clock_arc = &timing_cell_arc;
+    const std::string sink_pin = instancePinName(instance, timing_cell_arc.get_sink_port());
+    const auto pin = _network.pins().find(sink_pin);
+    // A sequential master can expose both Q and QN.  The DEF may connect only
+    // one of them; bind the clock-to-output metadata to that physical output
+    // instead of whichever Liberty arc happens to be listed first.
+    if (pin != _network.pins().end() && !pin->second.get_net_name().empty())
       return &timing_cell_arc;
-    }
   }
-  return nullptr;
+  return first_clock_arc;
 }
 
 std::string LinkNetwork::instancePinName(Instance& instance, std::string& port_name)

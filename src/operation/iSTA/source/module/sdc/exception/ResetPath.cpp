@@ -29,6 +29,8 @@ unsigned TclResetPath::exec()
 {
   Database& database = STADM.getDatabase();
   TimingException filter = parsePathSelector(database, true);
+  if (hasEmptySelector())
+    return 1;
   applyAnalysisQualifiers(filter);
   database.sdc().resetPathExceptions(filter);
   return 1;

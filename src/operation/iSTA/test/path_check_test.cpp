@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <algorithm>
 #include <cmath>
+#include <set>
 #include <stdexcept>
 
 #include "DelayCalculator.hpp"
@@ -73,6 +74,14 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
   PathChecker checker(db, delay);
   const auto result = checker.checkPath(path, "ff:D", mode);
   require(result.has_value(), "first check arc hid another valid data transition");
+  const auto candidates = checker.checkPathCandidates(path, "ff:D", mode);
+  require(candidates.size() >= (split_tables ? 1U : 2U), "candidate API lost a legal capture/check context");
+  if (!split_tables) {
+    std::set<std::string> capture_pins;
+    for (const auto& candidate : candidates)
+      capture_pins.insert(candidate.check().capture_pin);
+    require(capture_pins == std::set<std::string>{"ff:CK", "ff:CK2"}, "candidate API omitted a capture pin");
+  }
   const bool second = split_tables || mode == AnalysisType::kMax;
   const double expected = mode == AnalysisType::kMax ? 4.7 : second ? -3.3 : 1.4;
   require(std::abs(result->required() - expected) < 1e-8 && result->check().capture_clock == (second ? "b" : "a")

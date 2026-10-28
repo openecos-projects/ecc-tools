@@ -11,6 +11,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -103,11 +104,28 @@ double mapValue(const std::map<AnalysisType, std::map<TransType, double>>& value
   return trans_it == analysis_it->second.end() ? fallback : trans_it->second;
 }
 
-void addDiagnostic(TimingData& snapshot, std::string message)
+// A Liberty timing-cell arc may contain several conditional variants.  The
+// native graph keeps the arc set as one object, while the sparse runtime needs
+// the same active variant selection that CellDelayCalculator uses.  Known
+// case values select one variant; unresolved inputs deliberately keep the
+// variant because the native calculator must still reduce the candidates.
+bool isActiveTimingVariant(Database& database, const TimingArc& timing_arc, const std::string& output_pin)
 {
-  if (std::find(snapshot.diagnostics.begin(), snapshot.diagnostics.end(), message) == snapshot.diagnostics.end()) {
-    snapshot.diagnostics.push_back(std::move(message));
+  if (timing_arc.get_when_expression().get_is_empty())
+    return true;
+  const auto pin = database.network().pins().find(output_pin);
+  if (pin == database.network().pins().end() || pin->second.get_is_port())
+    return true;
+
+  std::map<std::string, bool> values;
+  for (const auto& term : timing_arc.get_when_expression().get_term_list()) {
+    if (term.get_operation_type() != LogicOperationType::kPort)
+      continue;
+    const auto value = database.graph().simValues().value(pin->second.get_instance_name() + ":" + term.get_port_name());
+    if (value && (*value == TimingCaseValue::kZero || *value == TimingCaseValue::kOne))
+      values[term.get_port_name()] = *value == TimingCaseValue::kOne;
   }
+  return timing_arc.get_when_expression().evaluate_constant(values) != std::optional<bool>(false);
 }
 
 double normalizedTime(double value, TimingTimeUnit unit, double fallback, bool& used_fallback)
@@ -194,6 +212,17 @@ int32_t checkArcIndex(LibertyCell& cell, TimingCheckArc& check, const TimingArc&
 TimingData TimingDataExporter::exportData(Database& database, const Config& config)
 {
   TimingData snapshot;
+  std::unordered_set<std::string> diagnostics;
+  auto addDiagnostic = [&](std::string message) {
+    if (diagnostics.insert(message).second)
+      snapshot.diagnostics.push_back(std::move(message));
+  };
+  const auto& statistics = database.timingExecutionStats().values();
+  for (std::size_t index = 0; index < statistics.size(); ++index) {
+    const std::string name(TimingExecutionStats::names[index]);
+    snapshot.phase_calls.emplace(name, statistics[index].calls);
+    snapshot.phase_seconds.emplace(name, statistics[index].seconds);
+  }
   LibertyLibrary& library = database.liberty();
   const TimingTimeUnit time_unit = library.get_time_unit();
   const TimingCapacitiveUnit cap_unit = library.get_cap_unit();
@@ -334,7 +363,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     const auto source_it = pin_ids.find(arc.get_source_pin());
     const auto sink_it = pin_ids.find(arc.get_sink_pin());
     if (source_it == pin_ids.end() || sink_it == pin_ids.end()) {
-      addDiagnostic(snapshot, "unsupported arc with missing pin identity");
+      addDiagnostic("unsupported arc with missing pin identity");
       continue;
     }
     TimingGraphArcData exported;
@@ -350,7 +379,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (!arc.get_owner_name().empty() && owner_it != database.network().instances().end()) {
       exported.library_cell = owner_it->second.get_cell_name();
     } else if (arc.get_type() == ArcType::kCell && !arc.get_owner_name().empty()) {
-      addDiagnostic(snapshot, "unsupported arc owner identity: " + arc.get_owner_name());
+      addDiagnostic("unsupported arc owner identity: " + arc.get_owner_name());
     }
     TimingCellArc* cell_arc = arc.libertyArcId() ? library.findCellArc(*arc.libertyArcId()) : nullptr;
     if (cell_arc != nullptr) {
@@ -359,28 +388,32 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
         const auto& cell = snapshot.lib_cells.at(cell_it->second);
         auto library_cell = library.get_cell_map().find(exported.library_cell);
         std::size_t index = 0;
-        bool mapped = false;
+        bool matched_cell_arc = false;
         if (library_cell != library.get_cell_map().end()) {
           for (TimingCellArc& candidate : library_cell->second.get_cell_arc_list()) {
             if (&candidate == cell_arc) {
+              matched_cell_arc = true;
               for (TimingArc& timing_arc : candidate.get_timing_arc_list()) {
-                if (index >= cell.arcs.size())
-                  break;
-                TimingGraphArcData variant = exported;
-                variant.library_arc_id = static_cast<int32_t>(index++);
-                variant.sense = senseCode(timing_arc.get_sense());
-                variant.timing_type = transCode(timing_arc.get_trigger_trans_type());
-                snapshot.graph_arcs.push_back(std::move(variant));
-                mapped = true;
+                if (index < cell.arcs.size() && isActiveTimingVariant(database, timing_arc, arc.get_sink_pin())) {
+                  TimingGraphArcData variant = exported;
+                  variant.library_arc_id = static_cast<int32_t>(index);
+                  variant.sense = senseCode(timing_arc.get_sense());
+                  variant.timing_type = transCode(timing_arc.get_trigger_trans_type());
+                  snapshot.graph_arcs.push_back(std::move(variant));
+                }
+                // The flattened Liberty ID remains the identity of the
+                // original variant even when an inactive conditional row is
+                // omitted from the runtime graph.
+                ++index;
               }
               break;
             }
             index += candidate.get_timing_arc_list().size();
           }
         }
-        if (mapped)
+        if (matched_cell_arc)
           continue;
-        addDiagnostic(snapshot, "unmapped instance timing arc: " + exported.owner_name);
+        addDiagnostic("unmapped instance timing arc: " + exported.owner_name);
       }
     }
     snapshot.graph_arcs.push_back(std::move(exported));
@@ -390,8 +423,21 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   // through level-0 clock-to-Q arcs and treats Q as the launch startpoint.
   std::unordered_map<std::string, std::string> clock_outputs;
   for (const auto& arc : snapshot.graph_arcs) {
-    if (arc.is_clock_arc && arc.library_arc_id >= 0)
+    if (!arc.is_clock_arc || arc.library_arc_id < 0)
+      continue;
+    const auto sink = database.network().pins().find(arc.sink_pin);
+    if (sink == database.network().pins().end())
+      continue;
+    const auto current = clock_outputs.find(arc.source_pin);
+    if (current == clock_outputs.end()) {
       clock_outputs.emplace(arc.source_pin, arc.sink_pin);
+      continue;
+    }
+    const auto current_pin = database.network().pins().find(current->second);
+    if ((current_pin == database.network().pins().end() || current_pin->second.get_net_name().empty())
+        && !sink->second.get_net_name().empty()) {
+      current->second = arc.sink_pin;
+    }
   }
   for (std::string& name : snapshot.start_points) {
     const auto it = clock_outputs.find(name);
@@ -401,7 +447,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
 
   for (auto& [net_name, net] : database.network().nets()) {
     if (net.get_driver_pin_list().empty()) {
-      addDiagnostic(snapshot, "net without a resolved driver: " + net_name);
+      addDiagnostic("net without a resolved driver: " + net_name);
       continue;
     }
     for (const std::string& driver : net.get_driver_pin_list()) {
@@ -422,7 +468,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
       const std::string& source_pin = check_arc.get_clock_port();
       const std::string& sink_pin = check_arc.get_data_port();
       if (!pin_ids.contains(source_pin) || !pin_ids.contains(sink_pin)) {
-        addDiagnostic(snapshot, "timing check arc with missing pin identity");
+        addDiagnostic("timing check arc with missing pin identity");
         continue;
       }
       for (TimingArc& timing_arc : check_arc.get_timing_arc_list()) {
@@ -433,7 +479,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
         auto& cell = library.get_cell_map().at(instance.get_cell_name());
         exported.library_arc_id = checkArcIndex(cell, check_arc, timing_arc);
         if (exported.library_arc_id < 0)
-          addDiagnostic(snapshot, "unmapped or ambiguous timing check: " + source_pin + " -> " + sink_pin);
+          addDiagnostic("unmapped or ambiguous timing check: " + source_pin + " -> " + sink_pin);
         exported.sense = senseCode(timing_arc.get_sense());
         exported.timing_type = transCode(timing_arc.get_trigger_trans_type());
         exported.check_type = static_cast<int32_t>(check_arc.get_check_type());
@@ -456,13 +502,13 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   }
 
   if (used_non_finite_fallback) {
-    addDiagnostic(snapshot, "non-finite timing values use finite AAT/RAT sentinels (-9e7/9e7 ps)");
+    addDiagnostic("non-finite timing values use finite AAT/RAT sentinels (-9e7/9e7 ps)");
   }
   if (used_missing_timing_point_fallback) {
-    addDiagnostic(snapshot, "pins without a timing point use zero slew/AAT and a finite RAT sentinel");
+    addDiagnostic("pins without a timing point use zero slew/AAT and a finite RAT sentinel");
   }
   if (used_min_analysis_fallback) {
-    addDiagnostic(snapshot, "min analysis AAT/RAT use max-analysis TimingPoint fallback");
+    addDiagnostic("min analysis AAT/RAT use max-analysis TimingPoint fallback");
   }
 
   std::sort(snapshot.start_points.begin(), snapshot.start_points.end());
@@ -487,11 +533,11 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   std::sort(snapshot.timing_check_arcs.begin(), snapshot.timing_check_arcs.end(), endpoint_arc_less);
 
   if (snapshot.start_points.empty())
-    addDiagnostic(snapshot, "no constrained start points exported");
+    addDiagnostic("no constrained start points exported");
   if (snapshot.end_points.empty())
-    addDiagnostic(snapshot, "no constrained end points exported");
+    addDiagnostic("no constrained end points exported");
   if (snapshot.clock_pins.empty())
-    addDiagnostic(snapshot, "no sequential clock pins exported");
+    addDiagnostic("no sequential clock pins exported");
   return snapshot;
 }
 
