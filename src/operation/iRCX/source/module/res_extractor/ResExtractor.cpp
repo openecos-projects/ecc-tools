@@ -80,6 +80,10 @@ void ResExtractor::extractResistance()
 
 void ResExtractor::extractCornerResistance(int32_t corner_idx)
 {
+  const double scale = RCXDM.getDatabase().get_corner_data_list()[corner_idx].get_half_node_scale_factor();
+  if (!std::isfinite(scale) || scale <= 0.0) {
+    throw std::runtime_error("invalid resistance HALF_NODE_SCALE_FACTOR");
+  }
   int32_t net_num = RCXDM.getDatabase().get_layout_data().get_regular_net_num();
   int32_t thread_num = RCXUTIL.getThreadNum(net_num, RCXDM.getConfig().thread_number);
 #pragma omp parallel for schedule(dynamic) num_threads(thread_num)
@@ -130,16 +134,38 @@ double ResExtractor::extractWireResistance(CornerData& corner_data, ProcessCondu
     std::swap(segment_start, segment_end);
   }
 
+  const double scale = corner_data.get_half_node_scale_factor();
+  segment_start *= scale;
+  segment_end *= scale;
   double resistance = 0.0;
-  for (EdgeEtchInterval& edge_interval : edge_interval_list) {
-    double overlap_start = std::max(edge_interval.get_start_coord(), segment_start);
-    double overlap_end = std::min(edge_interval.get_end_coord(), segment_end);
+  for (const EdgeEtchInterval& edge_interval : edge_interval_list) {
+    double overlap_start = std::max(edge_interval.get_start_coord() * scale, segment_start);
+    double overlap_end = std::min(edge_interval.get_end_coord() * scale, segment_end);
     if (overlap_end <= overlap_start) {
       continue;
     }
 
     double length = overlap_end - overlap_start;
     double width = edge_interval.get_width();
+    if (scale != 1.0) {
+      // Reconstruct physical wire width before applying physical etch values.
+      // The shared interval remains unchanged for capacitance extraction.
+      width = edge.get_width() * micron_per_dbu * scale;
+      const double lo_gap = edge_interval.get_lower_spacing() < 0.0
+                                ? edge_interval.get_lower_spacing() : edge_interval.get_lower_spacing() * scale;
+      const double hi_gap = edge_interval.get_upper_spacing() < 0.0
+                                ? edge_interval.get_upper_spacing() : edge_interval.get_upper_spacing() * scale;
+      for (const auto& etch : conductor.get_etch_table_list()) {
+        const double lo = etch.get_table().query(width, lo_gap).value_or(0.0);
+        const double hi = etch.get_table().query(width, hi_gap).value_or(0.0);
+        const double adjusted = width - lo - hi;
+        if (adjusted <= 0.0) {
+          RCXLOG.warn(Loc::current(), "resistance skipped etch that would collapse wire width");
+          continue;
+        }
+        width = adjusted;
+      }
+    }
     double thickness = edge_interval.get_thickness();
     if (width <= 0.0 || thickness <= 0.0) {
       continue;

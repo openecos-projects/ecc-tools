@@ -56,9 +56,9 @@ void CapExtractor::extract()
 
   _multi = std::make_unique<pattern::MultiNeighborCache>(RCXDM.getDatabase().get_topo_pool());
   if (_multi->active() && !_multi->collecting() && RCXDM.getDatabase().get_corner_data_list().size() != 1) {
-    throw std::runtime_error("multi-neighbor apply currently requires exactly one process corner");
+    throw std::runtime_error("multi-neighbor extraction currently requires exactly one process corner");
   }
-  if (_multi->gridded() || _multi->modeled()) {
+  if (_multi->gridded() || _multi->tabulated()) {
     const char* path = std::getenv("IRCX_PATTERN_GRID");
     if (!path) {
       throw std::runtime_error("grid and prebuilt modes require IRCX_PATTERN_GRID");
@@ -181,8 +181,8 @@ void CapExtractor::extractCapacitanceSpan(int32_t corner_idx, int32_t net_idx, i
         const auto caps = _multi->gridded() ? std::vector<double>{} : _multi->caps(part.key, part.hi - part.lo);
         // Prebuilt failures use the independent grid, including explicit overlap
         // fallbacks. Keep the historical grid/apply modes' fallback behavior.
-        if (_grid && (_multi->modeled() ? caps.empty() : part.key != "__FALLBACK")) {
-          if (_multi->modeled())
+        if (_grid && (_multi->tabulated() ? caps.empty() : part.key != "__FALLBACK")) {
+          if (_multi->tabulated())
             _multi->recordFieldFallback(part.hi - part.lo);
           const auto sides = pattern::fallbackSides(edge, part, unit);
           const auto grid_caps = _grid->query(conductor->get_layer_name(), pattern_below, pattern_above, edge.get_width() * unit,
