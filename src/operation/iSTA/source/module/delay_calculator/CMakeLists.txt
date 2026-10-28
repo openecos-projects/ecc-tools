@@ -29,7 +29,7 @@ target_include_directories(ista_parasitic_delay PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/interconnect ${CMAKE_CURRENT_SOURCE_DIR}/dmp ${CMAKE_CURRENT_SOURCE_DIR}/arnoldi)
 
 # Arc selection and cell/check evaluation share the calculator's request boundary.
-add_library(ista_delay_calculator DelayCalculator.cpp
+add_library(ista_delay_calculator DelayCalculator.cpp NetThresholdAdjustment.cpp
     cell/LibertyArcSelector.cpp cell/CellDelayCalculator.cpp cell/CheckDelayCalculator.cpp)
 target_link_libraries(ista_delay_calculator PUBLIC ista_delay_data ista_parasitic_delay PRIVATE ista_data_manager)
 target_include_directories(ista_delay_calculator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/cell)

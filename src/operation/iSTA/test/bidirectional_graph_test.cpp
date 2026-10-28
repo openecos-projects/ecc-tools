@@ -23,6 +23,8 @@
 #include "RequiredPropagator.hpp"
 #include "STAInterface.hpp"
 #include "SdcCommand.hpp"
+#include "SparseTimingSnapshot.hpp"
+#include "TimingDataExporter.hpp"
 
 using namespace ista;
 
@@ -230,6 +232,25 @@ void checkMode(int32_t output_enable, bool clock_mode, bool constant_data = fals
     require(&receiver != &driver, "arrival/slew storage aliases INOUT states");
     require(database.graph().points().at("buffer:sense").get_data_slew_map()[AnalysisType::kMax][TransType::kRise] < 1.0,
             "disabled conditional table affected timing");
+    auto snapshot = TimingDataExporter::exportData(database, STADM.getConfig());
+    SparseTimingExportAdapter::compileModel(snapshot);
+    for (const auto* view : {&snapshot.sparse, &snapshot.sparse_min}) {
+      require(view->unsupported.empty(), "sparse export rejected the bidirectional fixture");
+      bool input_edge = false;
+      bool output_edge = false;
+      for (const auto& edge : view->net_edges) {
+        const auto& arc = snapshot.net_arcs.at(edge.base_arc);
+        if (arc.source_pin == "external" && arc.sink_pin == "buffer:contact") {
+          input_edge = true;
+          require(view->states[edge.sink].role == 0, "inout net missed its receiver role");
+        }
+        if (arc.source_pin == "buffer:contact" && arc.sink_pin == "external") {
+          output_edge = true;
+          require(view->states[edge.source].role == 1, "inout net missed its driver role");
+        }
+      }
+      require(input_edge && output_edge == (output_enable != 0 && !constant_data), "sparse inout cache changed legal net edges");
+    }
   }
   DelayCalculator::destroyInst();
   DataManager::destroyInst();

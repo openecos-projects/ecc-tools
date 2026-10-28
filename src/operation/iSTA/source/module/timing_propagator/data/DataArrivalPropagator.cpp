@@ -34,6 +34,7 @@
 namespace ista {
 void DataArrivalPropagator::propagate()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kDataArrival);
   Database& database = _database;
   _through_index.rebuild(database.sdc(), database.network());
   bool prune = _path_query.canPrunePathStates();

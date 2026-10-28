@@ -33,6 +33,11 @@ struct PathCheck
   // Preserve the second rounding step of a resolved multicycle adjustment.
   bool has_required_adjustment = false;
   double required_adjustment = 0.0;
+  // The selected Liberty check-arc variant at this base point.  A single
+  // TimingCheckArc can contain multiple conditional/table variants; retaining
+  // only the scalar check value is insufficient for sparse export because
+  // the exporter must bind the same LUT identity.
+  int32_t selected_check_arc_idx = -1;
 };
 
 // Borrows a propagated path only during synchronous PathSearcher.

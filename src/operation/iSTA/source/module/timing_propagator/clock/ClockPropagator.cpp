@@ -31,6 +31,7 @@
 namespace ista {
 void ClockPropagator::propagate()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kClockPropagation);
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
   auto sources = ClockNetworkBuilder(_database).build();

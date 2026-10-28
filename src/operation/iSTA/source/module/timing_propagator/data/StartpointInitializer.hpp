@@ -54,6 +54,7 @@ class StartpointInitializer
   bool isClockSourceStartPoint(std::string& start_point);
   TimingClock* getStartPointClock(std::string& start_point);
   double getStartPointClockEdge(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
+  std::optional<DelayResult> getDrivingCellTiming(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   double getStartPointLaunchTime(std::string& start_point, AnalysisType analysis_type);
   double getStartPointLaunchTime(std::string& start_point, AnalysisType analysis_type, TransType trans_type);
   double getStartPointLaunchTime(std::string& start_point, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,

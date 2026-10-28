@@ -21,7 +21,7 @@ class LinkNetwork
   void linkInstances();
   void linkInstance(Instance& instance);
   TimingCheckArc instanceCheck(Instance& instance, TimingCheckArc& timing_check_arc);
-  TimingCellArc* findClockToQArc(LibertyCell& timing_cell);
+  TimingCellArc* findClockToQArc(Instance& instance, LibertyCell& timing_cell);
   std::string instancePinName(Instance& instance, std::string& port_name);
   std::string findOutputPinName(Instance& instance, LibertyCell& timing_cell);
   bool isInstancePin(Pin& pin);

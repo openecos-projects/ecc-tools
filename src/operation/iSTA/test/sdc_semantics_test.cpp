@@ -114,6 +114,19 @@ int main(int argc, char** argv)
     const auto period = sdc.get_clock_map().at("M").get_period();
     require(interp.evalString("create_clock -name M -period -1 [get_ports in]") == TCL_ERROR, "invalid period silently succeeded");
     require(sdc.get_clock_map().at("M").get_period() == period, "failed command changed the old clock");
+  } else if (mode == "empty_collection") {
+    const std::vector<std::string> commands = {
+        "set_false_path -to [get_pins -quiet no_such_pin]",
+        "set_max_delay 1 -to [get_pins -quiet no_such_pin]",
+        "set_min_delay 1 -through [get_pins -quiet no_such_pin]",
+        "set_multicycle_path 2 -setup -from [get_pins -quiet no_such_pin]",
+        "reset_path -to [get_pins -quiet no_such_pin]",
+    };
+    for (const auto& command : commands) {
+      require(interp.evalString(command) == TCL_OK, "empty SDC collection was rejected: " + command);
+      require(std::string(Tcl_GetStringResult(interp.getInterp())) == "1", "empty SDC collection returned no status: " + command);
+    }
+    require(sdc.get_path_exception_list().empty(), "empty SDC collection created a timing exception");
   } else if (mode == "units") {
     require(interp.evalString("set_units -capacitance 0.5pF") == TCL_OK, "positive unit multiplier rejected as syntax");
     require(std::string(Tcl_GetStringResult(interp.getInterp())) == "0", "unit mismatch did not return zero");

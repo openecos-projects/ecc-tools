@@ -77,6 +77,7 @@ std::optional<DelayResult> DelayCalculator::inputPortTiming(std::string& start_p
 
 void DelayCalculator::initialize(Graph& graph)
 {
+  auto measurement = _execution_stats.measure(TimingPhase::kDelayGraphInitialization);
   for (Arc& arc : graph.arcs()) {
     initialize(arc);
   }

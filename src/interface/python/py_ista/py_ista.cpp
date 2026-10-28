@@ -45,6 +45,21 @@ bool runSTA()
   return true;
 }
 
+bool prepareTimingModel()
+{
+  STAI.prepareTimingModel();
+  return true;
+}
+
+bool exportTimingModel()
+{
+  // The value is consumed through the PyPlaceDB model-only constructor. Keep
+  // this binding as a readiness operation so Python callers can validate the
+  // lifecycle without copying a large native snapshot through pybind.
+  (void) STAI.exportTimingModel();
+  return true;
+}
+
 bool extractLib()
 {
   STAI.extractLib();
@@ -55,6 +70,16 @@ bool destroySTA()
 {
   STAI.destroySTA();
   return true;
+}
+
+bool isModelReady()
+{
+  return STAI.isModelReady();
+}
+
+bool isTimingReady()
+{
+  return STAI.isTimingReady();
 }
 
 }  // namespace python_interface

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
 #include "TimingEndpointQualification.hpp"
+#include "TimingMinData.hpp"
+#include "SparseTimingSnapshot.hpp"
 
 namespace ista {
 
@@ -26,6 +30,8 @@ struct LibertyPortData
   double capacitance_pf = 0.0;
   double rise_capacitance_pf = 0.0;
   double fall_capacitance_pf = 0.0;
+  double min_rise_capacitance_pf = 0.0;
+  double min_fall_capacitance_pf = 0.0;
   double max_capacitance_pf = 0.0;
   double max_slew_ps = 0.0;
   bool is_input = false;
@@ -40,6 +46,7 @@ struct LibertyArcData
   int32_t sense = 0;
   int32_t trigger = 0;
   int32_t check_type = 0;
+  bool is_latch_data_arc = false;
   LibertyTableData rise_delay;
   LibertyTableData fall_delay;
   LibertyTableData rise_slew;
@@ -68,6 +75,7 @@ struct LibertyCellData
 struct TimingPinData
 {
   TimingMaxQualification max_qualification;
+  TimingMinQualification min_qualification;
   std::string name;
   std::string net_name;
   std::string instance_name;
@@ -92,6 +100,9 @@ struct TimingPinData
   double max_fall_slew_ps = 0.0;
   double min_rise_slew_ps = 0.0;
   double min_fall_slew_ps = 0.0;
+  double min_output_rise_load_pf = 0.0;
+  double min_output_fall_load_pf = 0.0;
+  std::array<bool, 2> min_path_valid{false, false};
   int32_t level = 0;
 };
 
@@ -120,6 +131,7 @@ struct TimingNetArcData
 struct TimingEndpointArcData
 {
   TimingMaxQualification max_qualification;
+  TimingMinQualification min_qualification;
   std::string source_pin;
   std::string sink_pin;
   std::string library_cell;
@@ -157,11 +169,15 @@ struct TimingData
   std::string parasitic_resistance_unit;
   std::string parasitics_initialization;
   std::vector<std::string> diagnostics;
+  std::map<std::string, int64_t> phase_calls;
+  std::map<std::string, double> phase_seconds;
   std::vector<TimingPinData> pins;
   std::vector<TimingGraphArcData> graph_arcs;
   std::vector<TimingNetArcData> net_arcs;
   std::vector<TimingEndpointArcData> constraint_arcs;
   std::vector<TimingEndpointArcData> timing_check_arcs;
+  std::vector<TimingMinLaunchData> min_launches;
+  std::vector<TimingMinContextData> min_contexts;
   std::vector<std::string> start_points;
   std::vector<std::string> end_points;
   std::vector<std::string> clock_pins;
@@ -169,6 +185,8 @@ struct TimingData
   std::vector<TimingClockData> clock_metadata;
   std::vector<LibertyCellData> lib_cells;
   std::vector<std::string> clock_names;
+  SparseTimingSnapshot sparse;
+  SparseTimingSnapshot sparse_min;
 };
 
 }  // namespace ista

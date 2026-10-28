@@ -48,6 +48,8 @@ unsigned TclSetMulticyclePath::exec()
 
   Database& database = STADM.getDatabase();
   TimingException exception = parsePathSelector(database, false);
+  if (hasEmptySelector())
+    return 1;
   exception.set_type(TimingExceptionType::kMulticycle);
   const bool setup = getOptionOrArg("-setup")->is_set_val();
   const bool hold = getOptionOrArg("-hold")->is_set_val();

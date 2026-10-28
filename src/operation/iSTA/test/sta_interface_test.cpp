@@ -2,9 +2,11 @@
 #include <unistd.h>
 
 #include <any>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <stdexcept>
 #include <string>
 
@@ -38,7 +40,7 @@ struct DesignFixture
     auto* design = service.get_design();
     design->set_design_name("interface_contract");
     auto* net = design->get_net_list()->add_net("wire", idb::IdbConnectType::kSignal);
-    for (const auto* name : {"in", "out"}) {
+    for (const auto* name : {"in", "out", "other"}) {
       auto* pin = design->get_io_pin_list()->add_pin_list(name);
       pin->set_as_io();
       auto* term = pin->set_term();
@@ -73,12 +75,50 @@ int main()
               && STADM.getDatabase().sdc().get_port_constraint_map().at("in").get_input_transition(AnalysisType::kMax, TransType::kRise) == 0.1,
           "session did not read the configured SDC path");
   require(SdcCommand::getInst().evalString("create_clock -name clock -period 10; set_input_delay -clock clock 1 [get_ports in]; "
-                                           "set_output_delay -clock clock 2 [get_ports out]")
+                                           "set_output_delay -clock clock 2 [get_ports {out other}]; "
+                                           "set_load -min 0.1 [get_ports out]; set_load -min 0.2 [get_ports other]")
               == TCL_OK,
           "constraint setup failed");
+  require(!sta.isModelReady() && !sta.isTimingReady(), "initialized session published a stale timing state");
+  sta.prepareTimingModel();
+  require(sta.isModelReady() && !sta.isTimingReady(), "structural model preparation published the wrong ready state");
+  const auto structural_model = sta.exportTimingModel();
+  require(structural_model.phase_calls == std::map<std::string, int64_t>{
+              {"structural_preparation", 1}, {"clock_network", 1}, {"clock_propagation", 0},
+              {"data_slew", 0}, {"data_arrival", 0}, {"required", 0}, {"path_analysis", 0}, {"delay_graph_initialization", 0}},
+          "model preparation executed a full numeric timing phase");
+  require(structural_model.sparse.enabled && !structural_model.pins.empty(),
+          "model-only export did not publish the structural sparse model");
+  require(structural_model.min_launches.size() == 2 && structural_model.min_contexts.size() == 4,
+          "model-only export lost the min launch/endpoint rules");
+  for (const auto& seed : structural_model.min_launches)
+    require(seed.start_point == "in" && seed.arrival_ps == structural_model.time_unit_ps,
+            "model-only min seed lost the SDC input delay");
+  for (const auto& pin : structural_model.pins) {
+    const double expected = pin.name == "out" ? 0.1 : pin.name == "other" ? 0.2 : 0.0;
+    require(std::abs(pin.min_output_rise_load_pf - expected * structural_model.capacitance_unit_pf) < 1E-12
+                && std::abs(pin.min_output_fall_load_pf - expected * structural_model.capacitance_unit_pf) < 1E-12,
+            "min endpoint external load includes another pin's load on the same net");
+  }
+  require(!sta.isTimingReady(), "model-only export published numeric timing as ready");
   sta.runSTA();
   require(sta.isTimingReady(), "successful analysis is not ready");
-  require(!sta.exportTimingData().pins.empty(), "successful export is empty");
+  const auto complete = sta.exportTimingData();
+  require(complete.phase_calls == std::map<std::string, int64_t>{
+              {"structural_preparation", 1}, {"clock_network", 2}, {"clock_propagation", 1},
+              {"data_slew", 1}, {"data_arrival", 1}, {"required", 1}, {"path_analysis", 1}, {"delay_graph_initialization", 1}},
+          "complete STA did not record its actual numeric phases");
+  require(!complete.pins.empty(), "successful export is empty");
+  require(complete.min_launches.size() == structural_model.min_launches.size()
+              && complete.min_contexts.size() == structural_model.min_contexts.size(),
+          "model-only and complete preparation produced different min domains");
+  for (std::size_t index = 0; index < complete.min_contexts.size(); ++index) {
+    const auto& expected = complete.min_contexts[index];
+    const auto& actual = structural_model.min_contexts[index];
+    require(actual.end_point == expected.end_point && actual.path_tag == expected.path_tag
+                && actual.required_ps - actual.check_time_ps == expected.required_ps - expected.check_time_ps,
+            "model-only and complete preparation produced different min required rules");
+  }
 
   tcl::registerCmdSTA();
   auto* engine = ecc::ScriptEngine::getOrCreateInstance();
