@@ -1,6 +1,7 @@
 add_library(
   icts_source_data_manager_adapter_sdc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCClockReader.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCCaseAnalysis.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockParser.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockCommands.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockEvaluator.cc

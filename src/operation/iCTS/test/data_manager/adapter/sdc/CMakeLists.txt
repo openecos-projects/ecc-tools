@@ -3,8 +3,11 @@ icts_add_test_executable(
   SOURCES
     ${ICTS_TEST}/data_manager/adapter/sdc/ClockTraceTest.cc
     ${ICTS_TEST}/data_manager/adapter/sdc/SdcConstraintStatusTest.cc
+    ${ICTS_TEST}/data_manager/adapter/sdc/SdcCaseAnalysisTest.cc
   LIBS
     icts_source_data_manager_adapter_sdc
+    ista_sdc_frontend
+    ista_data_manager
 )
 
 target_include_directories(

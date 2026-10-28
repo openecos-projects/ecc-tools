@@ -153,6 +153,7 @@ auto MakeObjectValue(SdcObjectKind kind, const std::vector<std::string>& pattern
 auto AppendRefsFromValue(std::vector<SdcObjectRef>& refs, const SdcValue& value, SdcObjectKind default_kind) -> void;
 auto ParseDoubleValue(const std::string& text, double& value) -> bool;
 auto ParseIntValue(const std::string& text, int& value) -> bool;
+auto ParseCaseAnalysisValue(const std::string& text, int& value) -> SdcConstraintStatusCode;
 auto TimeUnitToNs(const std::string& unit) -> double;
 auto CapacitanceUnitToPf(const std::string& unit) -> double;
 auto OptionTransition(const SdcCommandOptions& options) -> SdcTransition;
