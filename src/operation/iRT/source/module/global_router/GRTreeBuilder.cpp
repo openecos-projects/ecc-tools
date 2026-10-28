@@ -40,7 +40,6 @@ struct SteinerNode
   PlanarCoord coord;
   int32_t fixed_low = INT_MAX;
   int32_t fixed_high = INT_MIN;
-  int32_t parent = -1;
   std::vector<int32_t> child_list;
 };
 
@@ -139,6 +138,8 @@ bool buildFluteSteinerTree(const GRNet& net, const std::vector<PlanarCoord>& coo
       steiner_tree.root_idx = node_idx;
     }
   }
+  std::vector<bool> attached(steiner_tree.node_list.size(), false);
+  attached[steiner_tree.root_idx] = true;
   for (size_t i = 1; i < branch_order_list.size(); i++) {
     int32_t child_branch_idx = branch_order_list[i];
     int32_t parent_branch_idx = parent_branch_list[child_branch_idx];
@@ -149,10 +150,10 @@ bool buildFluteSteinerTree(const GRNet& net, const std::vector<PlanarCoord>& coo
     }
     int32_t parent_node_idx = coord_node_map[parent_coord];
     int32_t child_node_idx = coord_node_map[child_coord];
-    if (steiner_tree.node_list[child_node_idx].parent != -1) {
+    if (attached[child_node_idx]) {
       continue;
     }
-    steiner_tree.node_list[child_node_idx].parent = parent_node_idx;
+    attached[child_node_idx] = true;
     steiner_tree.node_list[parent_node_idx].child_list.push_back(child_node_idx);
   }
 
@@ -163,7 +164,7 @@ bool buildFluteSteinerTree(const GRNet& net, const std::vector<PlanarCoord>& coo
     return false;
   }
   for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(steiner_tree.node_list.size()); node_idx++) {
-    if (node_idx != steiner_tree.root_idx && steiner_tree.node_list[node_idx].parent == -1) {
+    if (!attached[node_idx]) {
       return false;
     }
   }
@@ -205,7 +206,7 @@ struct PathNode
   PlanarCoord coord;
   int32_t fixed_low = INT_MAX;
   int32_t fixed_high = INT_MIN;
-  int32_t parent = -1;
+  bool attached = false;
   bool is_bend = false;
   std::vector<int32_t> child_list;
   std::vector<std::vector<int32_t>> child_bend_list;  // parallel to child_list, stores the first node of each candidate pattern chain
@@ -231,11 +232,10 @@ int32_t getOrCreatePathNode(PathTree& path_tree, std::map<PlanarCoord, int32_t, 
   return node_idx;
 }
 
-int32_t addBendNode(PathTree& path_tree, int32_t parent_idx, int32_t child_idx, const PlanarCoord& coord)
+int32_t addBendNode(PathTree& path_tree, int32_t child_idx, const PlanarCoord& coord)
 {
   PathNode bend_node;
   bend_node.coord = coord;
-  bend_node.parent = parent_idx;
   bend_node.is_bend = true;
   bend_node.child_list.push_back(child_idx);
   bend_node.child_bend_list.emplace_back();
@@ -245,11 +245,11 @@ int32_t addBendNode(PathTree& path_tree, int32_t parent_idx, int32_t child_idx, 
 }
 
 // add bend node from candidate path
-int32_t addPatternPath(PathTree& path_tree, int32_t parent_idx, int32_t child_idx, const std::vector<PlanarCoord>& path)
+int32_t addPatternPath(PathTree& path_tree, int32_t child_idx, const std::vector<PlanarCoord>& path)
 {
   int32_t next_idx = child_idx;
   for (int32_t i = static_cast<int32_t>(path.size()) - 1; i >= 0; i--) {
-    next_idx = addBendNode(path_tree, parent_idx, next_idx, path[i]);
+    next_idx = addBendNode(path_tree, next_idx, path[i]);
   }
   return next_idx;
 }
@@ -261,10 +261,10 @@ void addPathEdge(PathTree& path_tree, int32_t parent_idx, int32_t child_idx, std
     return;
   }
   PathNode& child_node = path_tree.node_list[child_idx];
-  if (child_node.parent != -1) {
+  if (child_node.attached) {
     return;
   }
-  child_node.parent = parent_idx;
+  child_node.attached = true;
   PathNode& parent_node = path_tree.node_list[parent_idx];
   parent_node.child_list.push_back(child_idx);
   parent_node.child_bend_list.push_back(std::move(bend_idx_list));
@@ -302,25 +302,17 @@ void buildPatternPathList(const GRGridGraph& grid, const PlanarCoord& parent_coo
 
   // Z-pattern
   constexpr double kFractionList[] = {1.0 / 8.0, 1.0 / 4.0, 3.0 / 8.0, 1.0 / 2.0, 5.0 / 8.0, 3.0 / 4.0, 7.0 / 8.0};
-  std::set<int32_t> used_x;
   for (double fraction : kFractionList) {
     int32_t x = parent_coord.get_x() + static_cast<int32_t>(std::lround((child_coord.get_x() - parent_coord.get_x()) * fraction));
     if (x < 0 || x >= grid.getXSize() || x == parent_coord.get_x() || x == child_coord.get_x()) {
       continue;
     }
-    if (!used_x.insert(x).second) {
-      continue;
-    }
     addPathCandidate(grid, path_list, {PlanarCoord(x, parent_coord.get_y()), PlanarCoord(x, child_coord.get_y())});
   }
 
-  std::set<int32_t> used_y;
   for (double fraction : kFractionList) {
     int32_t y = parent_coord.get_y() + static_cast<int32_t>(std::lround((child_coord.get_y() - parent_coord.get_y()) * fraction));
     if (y < 0 || y >= grid.getYSize() || y == parent_coord.get_y() || y == child_coord.get_y()) {
-      continue;
-    }
-    if (!used_y.insert(y).second) {
       continue;
     }
     addPathCandidate(grid, path_list, {PlanarCoord(parent_coord.get_x(), y), PlanarCoord(child_coord.get_x(), y)});
@@ -394,6 +386,7 @@ bool attachPinLayerRange(const GRNet& net, const std::map<PlanarCoord, int32_t, 
   for (const GRPin& gr_pin : net.get_pin_list()) {
     auto iter = coord_node_map.find(gr_pin.grid_coord);
     if (iter == coord_node_map.end()) {
+      RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " pin coordinate is not in the path tree!");
       return false;
     }
     PathNode& node = path_tree.node_list[iter->second];
@@ -406,9 +399,13 @@ bool attachPinLayerRange(const GRNet& net, const std::map<PlanarCoord, int32_t, 
 bool buildPathTreeFromPaths(const GRNet& net, const std::vector<std::vector<PlanarCoord>>& path_list, PathTree& path_tree)
 {
   path_tree = PathTree();
+  if (net.get_pin_list().empty()) {
+    RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " has no pin!");
+    return false;
+  }
   std::map<PlanarCoord, int32_t, CmpPlanarCoordByXASC> coord_node_map;
   std::vector<std::set<int32_t>> adjacency;
-  // build DAG
+  // build undirected graph
   for (const std::vector<PlanarCoord>& path : path_list) {
     int32_t prev_idx = -1;
     for (const PlanarCoord& coord : path) {
@@ -424,9 +421,6 @@ bool buildPathTreeFromPaths(const GRNet& net, const std::vector<std::vector<Plan
     }
   }
   if (path_tree.node_list.empty()) {
-    if (net.get_pin_list().empty()) {
-      return false;
-    }
     getOrCreatePathNode(path_tree, coord_node_map, net.get_pin_list().front().grid_coord);
     adjacency.resize(path_tree.node_list.size());
   }
@@ -434,6 +428,7 @@ bool buildPathTreeFromPaths(const GRNet& net, const std::vector<std::vector<Plan
   // get root and build tree
   auto root_iter = coord_node_map.find(net.get_pin_list().front().grid_coord);
   if (root_iter == coord_node_map.end()) {
+    RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " root coordinate is not in the maze path!");
     return false;
   }
   int32_t root_idx = root_iter->second;
@@ -479,79 +474,59 @@ bool buildPathTree(const GRNet& net, const GRGridGraph& grid, const GRParams& pa
   }
   path_tree.root_idx = steiner_tree.root_idx;
 
-  for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(steiner_tree.node_list.size()); node_idx++) {
-    if (node_idx == steiner_tree.root_idx) {
-      continue;
-    }
-    int32_t parent_idx = steiner_tree.node_list[node_idx].parent;
-    if (parent_idx < 0) {
-      return false;
-    }
+  int32_t node_num = static_cast<int32_t>(steiner_tree.node_list.size());
+  for (int32_t parent_idx = 0; parent_idx < node_num; parent_idx++) {
     const PlanarCoord& parent_coord = steiner_tree.node_list[parent_idx].coord;
-    const PlanarCoord& child_coord = steiner_tree.node_list[node_idx].coord;
-    std::vector<std::vector<PlanarCoord>> path_list;
-    if (detour_grid == nullptr) {
-      buildPatternPathList(grid, parent_coord, child_coord, path_list);
-    } else {
-      buildDetourPathList(grid, params, *detour_grid, parent_coord, child_coord, path_list);
-    }
+    for (int32_t child_idx : steiner_tree.node_list[parent_idx].child_list) {
+      const PlanarCoord& child_coord = steiner_tree.node_list[child_idx].coord;
+      std::vector<std::vector<PlanarCoord>> path_list;
+      if (detour_grid == nullptr) {
+        buildPatternPathList(grid, parent_coord, child_coord, path_list);
+      } else {
+        buildDetourPathList(grid, params, *detour_grid, parent_coord, child_coord, path_list);
+      }
 
-    // child bend list
-    std::vector<int32_t> candidate_list;
-    candidate_list.reserve(path_list.size() + 1);
-    for (const std::vector<PlanarCoord>& path : path_list) {
-      candidate_list.push_back(addPatternPath(path_tree, parent_idx, node_idx, path));
+      // child bend list
+      std::vector<int32_t> candidate_list;
+      candidate_list.reserve(path_list.size() + 1);
+      for (const std::vector<PlanarCoord>& path : path_list) {
+        candidate_list.push_back(addPatternPath(path_tree, child_idx, path));
+      }
+      bool is_collinear = parent_coord.get_x() == child_coord.get_x() || parent_coord.get_y() == child_coord.get_y();
+      if (is_collinear) {
+        candidate_list.insert(candidate_list.begin(), -1);
+      }
+      if (candidate_list.empty()) {
+        RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " has no pattern candidate!");
+        return false;
+      }
+      addPathEdge(path_tree, parent_idx, child_idx, std::move(candidate_list));
     }
-    bool is_collinear = parent_coord.get_x() == child_coord.get_x() || parent_coord.get_y() == child_coord.get_y();
-    if (is_collinear) {
-      candidate_list.insert(candidate_list.begin(), -1);
-    }
-    if (candidate_list.empty()) {
-      RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " has no pattern candidate!");
+  }
+  for (int32_t node_idx = 0; node_idx < node_num; node_idx++) {
+    if (node_idx != path_tree.root_idx && !path_tree.node_list[node_idx].attached) {
+      RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " steiner tree is disconnected!");
       return false;
     }
-    addPathEdge(path_tree, parent_idx, node_idx, std::move(candidate_list));
   }
   return true;
 }
 
 struct DpState
 {
-  struct NodeWorkspace
-  {
-    std::vector<double> via_cost;
-    std::vector<double> phi;              // via_cost 前缀和
-    std::vector<int32_t> blocked_prefix;  // 不可用层数前缀和
-    std::vector<double> child_g;          // [child_pos][layer]
-    std::vector<int32_t> child_bend;      // [child_pos][layer] 取到该代价的折线链首节点
-    std::vector<double> child_range_min;  // [child_pos][begin][end]
-    std::vector<int32_t> child_range_argmin;
-    std::vector<double> sum_min;  // [begin][end]
-
-    void reset(int32_t child_num, int32_t layer_num)
-    {
-      via_cost.assign(layer_num, 0.0);
-      phi.assign(layer_num + 1, 0.0);
-      blocked_prefix.assign(layer_num + 1, 0);
-      child_g.assign(child_num * layer_num, GRParams::kInf);
-      child_bend.assign(child_num * layer_num, -1);
-      child_range_min.assign(child_num * layer_num * layer_num, GRParams::kInf);
-      child_range_argmin.assign(child_num * layer_num * layer_num, -1);
-      sum_min.assign(layer_num * layer_num, GRParams::kInf);
-    }
-  };
-
   const PathTree& path_tree;
   int32_t layer_num;
   int32_t bottom_layer_idx;
   int32_t top_layer_idx;
+  // d[node][layer]: 父边以 layer 到达 node 时, node 及其子树的最小代价
   std::vector<std::vector<double>> d;
+  // best_b/best_t[node][layer]: 取到 d 时 node 上 via 栈的起止层 [begin, end]
   std::vector<std::vector<int32_t>> best_b;
   std::vector<std::vector<int32_t>> best_t;
+  // best_child_layer/best_child_bend[node][layer][child_pos]: 取到 d 时孩子接入的层与候选折线链头
   std::vector<std::vector<std::vector<int32_t>>> best_child_layer;
   std::vector<std::vector<std::vector<int32_t>>> best_child_bend;
   std::vector<bool> computed;
-  NodeWorkspace work;
 
   DpState(const PathTree& tree, int32_t node_num, int32_t layer_num_, int32_t bottom_, int32_t top_)
       : path_tree(tree),
@@ -566,10 +541,6 @@ struct DpState
         computed(node_num, false)
   {
   }
-
-  int32_t childOffset(int32_t child_pos) const { return child_pos * layer_num; }
-  int32_t rangeOffset(int32_t child_pos, int32_t begin_layer, int32_t end_layer) const { return (child_pos * layer_num + begin_layer) * layer_num + end_layer; }
-  int32_t sumOffset(int32_t begin_layer, int32_t end_layer) const { return begin_layer * layer_num + end_layer; }
 };
 
 void getPostorder(int32_t node_idx, const PathTree& path_tree, std::vector<int32_t>& postorder)
@@ -580,44 +551,21 @@ void getPostorder(int32_t node_idx, const PathTree& path_tree, std::vector<int32
   postorder.push_back(node_idx);
 }
 
-void prepareViaCost(const GRNet& net, const GRGridGraph& grid, const GRParams& params, DpState& state, int32_t node_idx)
+// d[child][layer] + segmentCost
+void fillChildCost(const GRNet& net, const GRGridGraph& grid, const GRParams& params, const DpState& state, const PathNode& node, std::vector<double>& child_g,
+                   std::vector<int32_t>& child_bend)
 {
-  const PlanarCoord& coord = state.path_tree.node_list[node_idx].coord;
-  DpState::NodeWorkspace& work = state.work;
-  for (int32_t layer_idx = state.bottom_layer_idx; layer_idx < state.top_layer_idx; layer_idx++) {
-    work.via_cost[layer_idx] = viaCost(grid, net, params, coord, layer_idx);
-  }
-  for (int32_t layer_idx = 0; layer_idx < state.layer_num; layer_idx++) {
-    if (work.via_cost[layer_idx] >= GRParams::kInf) {
-      work.phi[layer_idx + 1] = work.phi[layer_idx];
-      work.blocked_prefix[layer_idx + 1] = work.blocked_prefix[layer_idx] + 1;
-    } else {
-      work.phi[layer_idx + 1] = work.phi[layer_idx] + work.via_cost[layer_idx];
-      work.blocked_prefix[layer_idx + 1] = work.blocked_prefix[layer_idx];
-    }
-  }
-}
-
-void computeChildCost(const GRNet& net, const GRGridGraph& grid, const GRParams& params, DpState& state, int32_t node_idx)
-{
-  const PathNode& node = state.path_tree.node_list[node_idx];
-  DpState::NodeWorkspace& work = state.work;
+  static const std::vector<int32_t> kDirectBendList = {-1};
   for (int32_t child_pos = 0; child_pos < static_cast<int32_t>(node.child_list.size()); child_pos++) {
     int32_t child_idx = node.child_list[child_pos];
     const PathNode& child_node = state.path_tree.node_list[child_idx];
     const std::vector<int32_t>& bend_idx_list = node.child_bend_list[child_pos];
-    int32_t child_offset = state.childOffset(child_pos);
-    if (bend_idx_list.empty()) {
-      for (int32_t layer_idx = state.bottom_layer_idx; layer_idx <= state.top_layer_idx; layer_idx++) {
-        double wire_cost = segmentCost(grid, net, params, layer_idx, node.coord, child_node.coord);
-        work.child_g[child_offset + layer_idx] = addCost(state.d[child_idx][layer_idx], wire_cost);
-      }
-      continue;
-    }
+    const std::vector<int32_t>& candidate_list = bend_idx_list.empty() ? kDirectBendList : bend_idx_list;
+    int32_t child_offset = child_pos * state.layer_num;
     for (int32_t layer_idx = state.bottom_layer_idx; layer_idx <= state.top_layer_idx; layer_idx++) {
       double best_cost = GRParams::kInf;
       int32_t best_bend_idx = -1;
-      for (int32_t bend_idx : bend_idx_list) {
+      for (int32_t bend_idx : candidate_list) {
         double cost = GRParams::kInf;
         if (bend_idx < 0) {
           double wire_cost = segmentCost(grid, net, params, layer_idx, node.coord, child_node.coord);
@@ -632,97 +580,8 @@ void computeChildCost(const GRNet& net, const GRGridGraph& grid, const GRParams&
           best_bend_idx = bend_idx;
         }
       }
-      work.child_g[child_offset + layer_idx] = best_cost;
-      work.child_bend[child_offset + layer_idx] = best_bend_idx;
-    }
-  }
-}
-
-void buildChildRangeMin(DpState& state, int32_t child_num)
-{
-  DpState::NodeWorkspace& work = state.work;
-  for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
-    int32_t child_offset = state.childOffset(child_pos);
-    for (int32_t begin_layer = 0; begin_layer < state.layer_num; begin_layer++) {
-      double min_cost = GRParams::kInf;
-      int32_t min_layer = -1;
-      for (int32_t end_layer = begin_layer; end_layer < state.layer_num; end_layer++) {
-        if (work.child_g[child_offset + end_layer] < min_cost) {
-          min_cost = work.child_g[child_offset + end_layer];
-          min_layer = end_layer;
-        }
-        int32_t range_offset = state.rangeOffset(child_pos, begin_layer, end_layer);
-        work.child_range_min[range_offset] = min_cost;
-        work.child_range_argmin[range_offset] = min_layer;
-      }
-    }
-  }
-}
-
-void sumChildRangeMin(DpState& state, int32_t child_num)
-{
-  DpState::NodeWorkspace& work = state.work;
-  for (int32_t begin_layer = state.bottom_layer_idx; begin_layer <= state.top_layer_idx; begin_layer++) {
-    for (int32_t end_layer = begin_layer; end_layer <= state.top_layer_idx; end_layer++) {
-      double sum = 0.0;
-      bool is_valid = true;
-      for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
-        double child_min = work.child_range_min[state.rangeOffset(child_pos, begin_layer, end_layer)];
-        if (child_min >= GRParams::kInf) {
-          is_valid = false;
-          break;
-        }
-        sum += child_min;
-      }
-      if (is_valid) {
-        work.sum_min[state.sumOffset(begin_layer, end_layer)] = sum;
-      }
-    }
-  }
-}
-
-void selectLayerWindow(DpState& state, int32_t node_idx)
-{
-  const PathNode& node = state.path_tree.node_list[node_idx];
-  DpState::NodeWorkspace& work = state.work;
-  int32_t child_num = static_cast<int32_t>(node.child_list.size());
-  for (int32_t layer_idx = state.bottom_layer_idx; layer_idx <= state.top_layer_idx; layer_idx++) {
-    int32_t begin_limit = node.fixed_low == INT_MAX ? layer_idx : std::min(node.fixed_low, layer_idx);
-    int32_t end_start = node.fixed_high == INT_MIN ? layer_idx : std::max(node.fixed_high, layer_idx);
-    begin_limit = std::min(begin_limit, state.top_layer_idx);
-    end_start = std::max(end_start, state.bottom_layer_idx);
-
-    double best_cost = GRParams::kInf;
-    int32_t best_begin = -1;
-    int32_t best_end = -1;
-    for (int32_t begin_layer = state.bottom_layer_idx; begin_layer <= begin_limit; begin_layer++) {
-      for (int32_t end_layer = end_start; end_layer <= state.top_layer_idx; end_layer++) {
-        if (work.blocked_prefix[end_layer] != work.blocked_prefix[begin_layer]) {
-          continue;
-        }
-        double stack_cost = work.phi[end_layer] - work.phi[begin_layer];
-        double total_cost = addCost(stack_cost, work.sum_min[state.sumOffset(begin_layer, end_layer)]);
-        if (total_cost < best_cost) {
-          best_cost = total_cost;
-          best_begin = begin_layer;
-          best_end = end_layer;
-        }
-      }
-    }
-    if (best_begin < 0) {
-      continue;
-    }
-    state.d[node_idx][layer_idx] = best_cost;
-    state.best_b[node_idx][layer_idx] = best_begin;
-    state.best_t[node_idx][layer_idx] = best_end;
-    state.best_child_layer[node_idx][layer_idx].assign(child_num, -1);
-    state.best_child_bend[node_idx][layer_idx].assign(child_num, -1);
-    for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
-      int32_t best_child_layer_idx = work.child_range_argmin[state.rangeOffset(child_pos, best_begin, best_end)];
-      state.best_child_layer[node_idx][layer_idx][child_pos] = best_child_layer_idx;
-      if (best_child_layer_idx >= 0) {
-        state.best_child_bend[node_idx][layer_idx][child_pos] = work.child_bend[state.childOffset(child_pos) + best_child_layer_idx];
-      }
+      child_g[child_offset + layer_idx] = best_cost;
+      child_bend[child_offset + layer_idx] = best_bend_idx;
     }
   }
 }
@@ -734,8 +593,6 @@ void computeNodeDP(const GRNet& net, const GRGridGraph& grid, const GRParams& pa
   }
   const PathNode& node = state.path_tree.node_list[node_idx];
   int32_t child_num = static_cast<int32_t>(node.child_list.size());
-
-  // 临时空间只有一份, 必须先把子节点递归算完
   for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
     int32_t child_idx = node.child_list[child_pos];
     if (!state.computed[child_idx]) {
@@ -748,12 +605,63 @@ void computeNodeDP(const GRNet& net, const GRGridGraph& grid, const GRParams& pa
     }
   }
 
-  state.work.reset(child_num, state.layer_num);
-  prepareViaCost(net, grid, params, state, node_idx);
-  computeChildCost(net, grid, params, state, node_idx);
-  buildChildRangeMin(state, child_num);
-  sumChildRangeMin(state, child_num);
-  selectLayerWindow(state, node_idx);
+  std::vector<double> phi(state.layer_num + 1, 0.0);
+  for (int32_t layer_idx = 0; layer_idx < state.layer_num; layer_idx++) {
+    double via_cost = 0.0;
+    if (layer_idx >= state.bottom_layer_idx && layer_idx < state.top_layer_idx) {
+      // 在DP中直接使用viaCost计算并不合理，edge未被确定和豁免，导致via demand和cost过大
+      via_cost = viaCost(grid, net, params, node.coord, layer_idx);
+    }
+    phi[layer_idx + 1] = phi[layer_idx] + via_cost;
+  }
+
+  // child_g[child_pos * L + layer]: 该孩子在该层接入的最小代价
+  // child_bend[child_pos * L + layer]: 取到该代价的候选折线链头
+  std::vector<double> child_g(child_num * state.layer_num, GRParams::kInf);
+  std::vector<int32_t> child_bend(child_num * state.layer_num, -1);
+  fillChildCost(net, grid, params, state, node, child_g, child_bend);
+
+  // child_min/child_arg: 当前窗口内每个孩子的最优接入代价与层
+  std::vector<double> child_min(child_num, GRParams::kInf);
+  std::vector<int32_t> child_arg(child_num, -1);
+  for (int32_t begin_layer = state.bottom_layer_idx; begin_layer <= state.top_layer_idx; begin_layer++) {
+    if (node.fixed_low != INT_MAX && begin_layer > node.fixed_low) {
+      continue;
+    }
+    std::fill(child_min.begin(), child_min.end(), GRParams::kInf);
+    std::fill(child_arg.begin(), child_arg.end(), -1);
+    for (int32_t end_layer = begin_layer; end_layer <= state.top_layer_idx; end_layer++) {
+      double child_sum = 0.0;
+      for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
+        double child_cost = child_g[child_pos * state.layer_num + end_layer];
+        if (child_cost < child_min[child_pos]) {
+          child_min[child_pos] = child_cost;
+          child_arg[child_pos] = end_layer;
+        }
+        child_sum += child_min[child_pos];
+      }
+      if (node.fixed_high != INT_MIN && end_layer < node.fixed_high) {
+        continue;
+      }
+      if (child_sum >= GRParams::kInf) {
+        continue;
+      }
+      double total_cost = addCost(phi[end_layer] - phi[begin_layer], child_sum);
+      for (int32_t layer_idx = begin_layer; layer_idx <= end_layer; layer_idx++) {
+        if (total_cost >= state.d[node_idx][layer_idx]) {
+          continue;
+        }
+        state.d[node_idx][layer_idx] = total_cost;
+        state.best_b[node_idx][layer_idx] = begin_layer;
+        state.best_t[node_idx][layer_idx] = end_layer;
+        state.best_child_layer[node_idx][layer_idx] = child_arg;
+        state.best_child_bend[node_idx][layer_idx].resize(child_num);
+        for (int32_t child_pos = 0; child_pos < child_num; child_pos++) {
+          state.best_child_bend[node_idx][layer_idx][child_pos] = child_bend[child_pos * state.layer_num + child_arg[child_pos]];
+        }
+      }
+    }
+  }
   state.computed[node_idx] = true;
 }
 
@@ -787,7 +695,6 @@ void reconstructTree(const DpState& state, int32_t node_idx, int32_t layer_idx, 
   }
 }
 
-// 层分配 DP: 后序求每个节点在各层的子树最优代价
 bool assignLayers(const GRNet& net, const GRGridGraph& grid, const GRParams& params, const PathTree& path_tree, GRTree& routing_tree)
 {
   int32_t node_num = static_cast<int32_t>(path_tree.node_list.size());
@@ -850,53 +757,100 @@ double getPathLength(const std::vector<PlanarCoord>& path)
   return length;
 }
 
-bool isStraightSteinerChain(const SteinerTree& steiner_tree, const std::vector<int32_t>& chain)
+bool isAxisAligned(const PlanarCoord& first_coord, const PlanarCoord& second_coord)
 {
-  if (chain.size() < 2) {
-    return false;
-  }
-  const PlanarCoord& first_coord = steiner_tree.node_list[chain[0]].coord;
-  const PlanarCoord& second_coord = steiner_tree.node_list[chain[1]].coord;
-  bool is_horizontal = first_coord.get_y() == second_coord.get_y();
-  int32_t direction = 0;
-  for (size_t i = 1; i < chain.size(); i++) {
-    const PlanarCoord& prev_coord = steiner_tree.node_list[chain[i - 1]].coord;
-    const PlanarCoord& curr_coord = steiner_tree.node_list[chain[i]].coord;
-    if (is_horizontal) {
-      if (prev_coord.get_y() != curr_coord.get_y() || prev_coord.get_x() == curr_coord.get_x()) {
-        return false;
-      }
-      int32_t sign = curr_coord.get_x() > prev_coord.get_x() ? 1 : -1;
-      if (direction != 0 && direction != sign) {
-        return false;
-      }
-      direction = sign;
-    } else {
-      if (prev_coord.get_x() != curr_coord.get_x() || prev_coord.get_y() == curr_coord.get_y()) {
-        return false;
-      }
-      int32_t sign = curr_coord.get_y() > prev_coord.get_y() ? 1 : -1;
-      if (direction != 0 && direction != sign) {
-        return false;
-      }
-      direction = sign;
-    }
-  }
-  return true;
+  return first_coord.get_x() == second_coord.get_x() || first_coord.get_y() == second_coord.get_y();
 }
 
-int32_t getCongestionPrefixSum(const GridMap<int32_t>& prefix_map, int32_t begin_x, int32_t begin_y, int32_t end_x, int32_t end_y)
+bool isSameDirection(const PlanarCoord& prev_coord, const PlanarCoord& curr_coord, const PlanarCoord& next_coord)
 {
-  if (begin_x < 0 || begin_y < 0 || end_x < begin_x || end_y < begin_y || end_x + 1 >= prefix_map.get_x_size() || end_y + 1 >= prefix_map.get_y_size()) {
-    return 0;
+  int32_t prev_dx = curr_coord.get_x() - prev_coord.get_x();
+  int32_t prev_dy = curr_coord.get_y() - prev_coord.get_y();
+  int32_t next_dx = next_coord.get_x() - curr_coord.get_x();
+  int32_t next_dy = next_coord.get_y() - curr_coord.get_y();
+  bool is_prev_horizontal = (prev_dy == 0 && prev_dx != 0);
+  bool is_next_horizontal = (next_dy == 0 && next_dx != 0);
+  if (is_prev_horizontal && is_next_horizontal) {
+    return (prev_dx > 0) == (next_dx > 0);
   }
-  return prefix_map[end_x + 1][end_y + 1] - prefix_map[begin_x][end_y + 1] - prefix_map[end_x + 1][begin_y] + prefix_map[begin_x][begin_y];
+  bool is_prev_vertical = (prev_dx == 0 && prev_dy != 0);
+  bool is_next_vertical = (next_dx == 0 && next_dy != 0);
+  return is_prev_vertical && is_next_vertical && ((prev_dy > 0) == (next_dy > 0));
+}
+
+void tryAddDetourChain(const GRParams& params, const SteinerTree& steiner_tree, const GRDetourGrid& detour_grid, int32_t begin_idx,
+                       const std::vector<int32_t>& chain, std::vector<DetourChain>& chain_list)
+{
+  if (chain.size() < 3 || begin_idx > chain.back()) {
+    return;
+  }
+  // 中间节点必须是虚拟节点, 否则平移会带走 pin
+  for (size_t i = 1; i + 1 < chain.size(); i++) {
+    if (steiner_tree.node_list[chain[i]].fixed_low != INT_MAX) {
+      return;
+    }
+  }
+
+  DetourChain detour_chain;
+  detour_chain.node_idx_list = chain;
+  detour_chain.coord_list.reserve(chain.size());
+  for (int32_t node_idx : chain) {
+    detour_chain.coord_list.push_back(steiner_tree.node_list[node_idx].coord);
+  }
+  detour_chain.congestion_num = detour_grid.getPathCongestionNum(detour_chain.coord_list);
+  if (detour_chain.congestion_num <= 0) {
+    return;
+  }
+  double original_length = getPathLength(detour_chain.coord_list);
+  detour_chain.max_length = original_length + std::max(2.0, original_length * params.max_detour_length_ratio);
+  detour_chain.is_horizontal = detour_chain.coord_list.front().get_y() == detour_chain.coord_list[1].get_y();
+  chain_list.push_back(std::move(detour_chain));
+}
+
+void extendDetourChain(const GRParams& params, const SteinerTree& steiner_tree, const GRDetourGrid& detour_grid,
+                       const std::vector<std::vector<int32_t>>& adjacency, int32_t begin_idx, std::vector<int32_t>& chain, std::vector<DetourChain>& chain_list)
+{
+  tryAddDetourChain(params, steiner_tree, detour_grid, begin_idx, chain, chain_list);
+  int32_t prev_idx = chain[chain.size() - 2];
+  int32_t curr_idx = chain.back();
+  for (int32_t next_idx : adjacency[curr_idx]) {
+    if (next_idx == prev_idx) {
+      continue;
+    }
+    if (!isSameDirection(steiner_tree.node_list[prev_idx].coord, steiner_tree.node_list[curr_idx].coord, steiner_tree.node_list[next_idx].coord)) {
+      continue;
+    }
+    chain.push_back(next_idx);
+    extendDetourChain(params, steiner_tree, detour_grid, adjacency, begin_idx, chain, chain_list);
+    chain.pop_back();
+  }
+}
+
+void collectDetourChains(const GRParams& params, const SteinerTree& steiner_tree, const GRDetourGrid& detour_grid, std::vector<DetourChain>& chain_list)
+{
+  int32_t node_num = static_cast<int32_t>(steiner_tree.node_list.size());
+  std::vector<std::vector<int32_t>> adjacency(node_num);
+  for (int32_t node_idx = 0; node_idx < node_num; node_idx++) {
+    for (int32_t child_idx : steiner_tree.node_list[node_idx].child_list) {
+      adjacency[node_idx].push_back(child_idx);
+      adjacency[child_idx].push_back(node_idx);
+    }
+  }
+
+  for (int32_t begin_idx = 0; begin_idx < node_num; begin_idx++) {
+    for (int32_t next_idx : adjacency[begin_idx]) {
+      if (!isAxisAligned(steiner_tree.node_list[begin_idx].coord, steiner_tree.node_list[next_idx].coord)) {
+        continue;
+      }
+      std::vector<int32_t> chain{begin_idx, next_idx};
+      extendDetourChain(params, steiner_tree, detour_grid, adjacency, begin_idx, chain, chain_list);
+    }
+  }
 }
 
 double evaluateShift(const GRDetourGrid& detour_grid, const std::set<PlanarCoord, CmpPlanarCoordByXASC>& coord_set, const DetourChain& chain, int32_t offset)
 {
   std::vector<PlanarCoord> shifted_coord_list = chain.coord_list;
-  std::set<PlanarCoord, CmpPlanarCoordByXASC> shifted_coord_set;
   for (size_t i = 1; i + 1 < shifted_coord_list.size(); i++) {
     PlanarCoord shifted_coord = shifted_coord_list[i];
     if (chain.is_horizontal) {
@@ -907,7 +861,7 @@ double evaluateShift(const GRDetourGrid& detour_grid, const std::set<PlanarCoord
     if (shifted_coord.get_x() < 0 || shifted_coord.get_x() >= detour_grid.x_size || shifted_coord.get_y() < 0 || shifted_coord.get_y() >= detour_grid.y_size) {
       return GRParams::kInf;
     }
-    if (coord_set.find(shifted_coord) != coord_set.end() || !shifted_coord_set.insert(shifted_coord).second) {
+    if (coord_set.find(shifted_coord) != coord_set.end()) {
       return GRParams::kInf;
     }
     shifted_coord_list[i] = shifted_coord;
@@ -923,76 +877,6 @@ double evaluateShift(const GRDetourGrid& detour_grid, const std::set<PlanarCoord
   return shifted_congestion * 1000000.0 + shifted_length;
 }
 
-void collectDetourChains(const GRParams& params, const SteinerTree& steiner_tree, const GRDetourGrid& detour_grid, std::vector<DetourChain>& chain_list)
-{
-  int32_t node_num = static_cast<int32_t>(steiner_tree.node_list.size());
-  std::vector<std::vector<int32_t>> adjacency(node_num);
-  for (int32_t node_idx = 0; node_idx < node_num; node_idx++) {
-    for (int32_t child_idx : steiner_tree.node_list[node_idx].child_list) {
-      adjacency[node_idx].push_back(child_idx);
-      adjacency[child_idx].push_back(node_idx);
-    }
-  }
-
-  for (int32_t begin_idx = 0; begin_idx < node_num; begin_idx++) {
-    for (int32_t end_idx = begin_idx + 1; end_idx < node_num; end_idx++) {
-      std::vector<int32_t> parent_list(node_num, -1);
-      std::queue<int32_t> node_queue;
-      parent_list[begin_idx] = begin_idx;
-      node_queue.push(begin_idx);
-      while (!node_queue.empty() && parent_list[end_idx] == -1) {
-        int32_t node_idx = node_queue.front();
-        node_queue.pop();
-        for (int32_t neighbor_idx : adjacency[node_idx]) {
-          if (parent_list[neighbor_idx] != -1) {
-            continue;
-          }
-          parent_list[neighbor_idx] = node_idx;
-          node_queue.push(neighbor_idx);
-        }
-      }
-      if (parent_list[end_idx] == -1) {
-        continue;
-      }
-      std::vector<int32_t> chain;
-      for (int32_t node_idx = end_idx; node_idx != begin_idx; node_idx = parent_list[node_idx]) {
-        chain.push_back(node_idx);
-      }
-      chain.push_back(begin_idx);
-      std::reverse(chain.begin(), chain.end());
-      if (chain.size() < 3 || !isStraightSteinerChain(steiner_tree, chain)) {
-        continue;
-      }
-      // 中间节点必须是虚拟节点, 否则平移会带走 pin
-      bool has_fixed_node = false;
-      for (size_t i = 1; i + 1 < chain.size(); i++) {
-        if (steiner_tree.node_list[chain[i]].fixed_low != INT_MAX) {
-          has_fixed_node = true;
-          break;
-        }
-      }
-      if (has_fixed_node) {
-        continue;
-      }
-
-      DetourChain detour_chain;
-      detour_chain.node_idx_list = chain;
-      detour_chain.coord_list.reserve(chain.size());
-      for (int32_t node_idx : chain) {
-        detour_chain.coord_list.push_back(steiner_tree.node_list[node_idx].coord);
-      }
-      detour_chain.congestion_num = detour_grid.getPathCongestionNum(detour_chain.coord_list);
-      if (detour_chain.congestion_num <= 0) {
-        continue;
-      }
-      double original_length = getPathLength(detour_chain.coord_list);
-      detour_chain.max_length = original_length + std::max(2.0, original_length * params.max_detour_length_ratio);
-      detour_chain.is_horizontal = detour_chain.coord_list.front().get_y() == detour_chain.coord_list[1].get_y();
-      chain_list.push_back(std::move(detour_chain));
-    }
-  }
-}
-
 void applyShift(const DetourChain& chain, int32_t offset, SteinerTree& detour_steiner_tree)
 {
   for (size_t i = 1; i + 1 < chain.node_idx_list.size(); i++) {
@@ -1005,6 +889,16 @@ void applyShift(const DetourChain& chain, int32_t offset, SteinerTree& detour_st
   }
 }
 
+bool hasMovedInnerNode(const DetourChain& chain, const std::set<int32_t>& moved_node_set)
+{
+  for (size_t i = 1; i + 1 < chain.node_idx_list.size(); i++) {
+    if (moved_node_set.find(chain.node_idx_list[i]) != moved_node_set.end()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // detour: 把压过拥堵的直线骨架段整体侧移
 bool shiftSteinerTree(const SteinerTree& steiner_tree, const GRDetourGrid& detour_grid, const GRParams& params, SteinerTree& detour_steiner_tree)
 {
@@ -1012,35 +906,46 @@ bool shiftSteinerTree(const SteinerTree& steiner_tree, const GRDetourGrid& detou
   if (steiner_tree.node_list.size() < 3) {
     return false;
   }
-  std::set<PlanarCoord, CmpPlanarCoordByXASC> coord_set;
-  for (const SteinerNode& node : steiner_tree.node_list) {
-    coord_set.insert(node.coord);
-  }
+  std::set<int32_t> moved_node_set;
+  bool shifted = false;
+  for (int32_t round = 0; round < params.max_shift_round; round++) {
+    std::set<PlanarCoord, CmpPlanarCoordByXASC> coord_set;
+    for (const SteinerNode& node : detour_steiner_tree.node_list) {
+      coord_set.insert(node.coord);
+    }
 
-  // 分数按 (拥堵数, 长度) 字典序
-  std::vector<DetourChain> chain_list;
-  collectDetourChains(params, steiner_tree, detour_grid, chain_list);
-  const DetourChain* best_chain = nullptr;
-  int32_t best_offset = 0;
-  double best_score = GRParams::kInf;
-  for (const DetourChain& chain : chain_list) {
-    for (int32_t offset = -params.max_detour_offset; offset <= params.max_detour_offset; offset++) {
-      if (offset == 0) {
+    // 分数按 (拥堵数, 长度) 字典序
+    std::vector<DetourChain> chain_list;
+    collectDetourChains(params, detour_steiner_tree, detour_grid, chain_list);
+    const DetourChain* best_chain = nullptr;
+    int32_t best_offset = 0;
+    double best_score = GRParams::kInf;
+    for (const DetourChain& chain : chain_list) {
+      if (hasMovedInnerNode(chain, moved_node_set)) {
         continue;
       }
-      double score = evaluateShift(detour_grid, coord_set, chain, offset);
-      if (score < best_score) {
-        best_score = score;
-        best_chain = &chain;
-        best_offset = offset;
+      for (int32_t offset = -params.max_detour_offset; offset <= params.max_detour_offset; offset++) {
+        if (offset == 0) {
+          continue;
+        }
+        double score = evaluateShift(detour_grid, coord_set, chain, offset);
+        if (score < best_score) {
+          best_score = score;
+          best_chain = &chain;
+          best_offset = offset;
+        }
       }
     }
+    if (best_chain == nullptr) {
+      break;
+    }
+    applyShift(*best_chain, best_offset, detour_steiner_tree);
+    for (size_t i = 1; i + 1 < best_chain->node_idx_list.size(); i++) {
+      moved_node_set.insert(best_chain->node_idx_list[i]);
+    }
+    shifted = true;
   }
-  if (best_chain == nullptr) {
-    return false;
-  }
-  applyShift(*best_chain, best_offset, detour_steiner_tree);
-  return true;
+  return shifted;
 }
 
 void addDirectConnectVia(GRTree& routing_tree, const PlanarCoord& coord, int32_t first_layer_idx, int32_t second_layer_idx)
@@ -1172,14 +1077,12 @@ GRDetourGrid GRDetourGrid::build(const GRGridGraph& grid)
     }
   }
 
-  detour_grid.horizontal_prefix.init(x_size + 1, y_size + 1, 0);
-  detour_grid.vertical_prefix.init(x_size + 1, y_size + 1, 0);
+  detour_grid.horizontal_prefix.init(x_size + 1, y_size, 0);
+  detour_grid.vertical_prefix.init(x_size, y_size + 1, 0);
   for (int32_t x = 0; x < x_size; x++) {
     for (int32_t y = 0; y < y_size; y++) {
-      detour_grid.horizontal_prefix[x + 1][y + 1]
-          = horizontal_map[x][y] + detour_grid.horizontal_prefix[x][y + 1] + detour_grid.horizontal_prefix[x + 1][y] - detour_grid.horizontal_prefix[x][y];
-      detour_grid.vertical_prefix[x + 1][y + 1]
-          = vertical_map[x][y] + detour_grid.vertical_prefix[x][y + 1] + detour_grid.vertical_prefix[x + 1][y] - detour_grid.vertical_prefix[x][y];
+      detour_grid.horizontal_prefix[x + 1][y] = detour_grid.horizontal_prefix[x][y] + horizontal_map[x][y];
+      detour_grid.vertical_prefix[x][y + 1] = detour_grid.vertical_prefix[x][y] + vertical_map[x][y];
     }
   }
   return detour_grid;
@@ -1196,7 +1099,7 @@ int32_t GRDetourGrid::getSegmentCongestionNum(const PlanarCoord& first_coord, co
     if (end_x < begin_x) {
       return 0;
     }
-    return getCongestionPrefixSum(horizontal_prefix, begin_x, first_coord.get_y(), end_x, first_coord.get_y());
+    return horizontal_prefix[end_x + 1][first_coord.get_y()] - horizontal_prefix[begin_x][first_coord.get_y()];
   }
   if (first_coord.get_x() == second_coord.get_x()) {
     int32_t begin_y = std::min(first_coord.get_y(), second_coord.get_y());
@@ -1204,7 +1107,7 @@ int32_t GRDetourGrid::getSegmentCongestionNum(const PlanarCoord& first_coord, co
     if (end_y < begin_y) {
       return 0;
     }
-    return getCongestionPrefixSum(vertical_prefix, first_coord.get_x(), begin_y, first_coord.get_x(), end_y);
+    return vertical_prefix[first_coord.get_x()][end_y + 1] - vertical_prefix[first_coord.get_x()][begin_y];
   }
   PlanarCoord first_mid(first_coord.get_x(), second_coord.get_y());
   PlanarCoord second_mid(second_coord.get_x(), first_coord.get_y());

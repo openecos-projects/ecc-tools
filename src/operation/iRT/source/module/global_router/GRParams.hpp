@@ -34,6 +34,7 @@ struct GRParams
   double via_demand = 0.5;
   int32_t max_detour_offset = 8;
   double max_detour_length_ratio = 0.25;
+  int32_t max_shift_round = 3;
 };
 
 }  // namespace irt
