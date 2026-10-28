@@ -49,7 +49,6 @@ struct GRWireEdge
   double supply = 0.0;
   double fixed_demand = 0.0;
   double routing_demand = 0.0;
-  double congestion_cost = 0.0;
 
   // fixed_demand is already removed from usable supply, so demand only counts routing demand.
   double getDemand() const { return routing_demand; }
@@ -84,7 +83,6 @@ class GRGridGraph
   void init(const GRGridShape& shape);
   void setSupply(const GRWireEdgeId& edge_id, int32_t supply_num, int32_t usable_num);
   void addDemand(const GRWireEdgeId& edge_id, double delta, const char* demand_type);
-  void updateCongestionCost(const GRParams& params);
 
   int32_t getXSize() const { return x_size_; }
   int32_t getYSize() const { return y_size_; }

@@ -32,10 +32,6 @@ struct GRParams
   double congestion_hotspot_ratio = 0.9;
   double via_base_cost = 2.0;
   double via_demand = 0.5;
-  int32_t congestion_radius = 1;
-  double congestion_decay = 0.5;
-  double congestion_threshold = 0.8;
-  double congestion_cost_scale = 0.1;
   int32_t max_detour_offset = 8;
   double max_detour_length_ratio = 0.25;
 };

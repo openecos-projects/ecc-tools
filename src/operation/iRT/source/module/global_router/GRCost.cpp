@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <set>
 
 #include "Logger.hpp"
 
@@ -40,7 +39,7 @@ double edgeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& param
   if (usable_supply <= GRParams::kEpsilon) {
     return GRParams::kInf;
   }
-  return amount * (params.unit_wire_cost + params.cost_weight * congestionCost(params, usable_supply, edge.getDemand(), amount) + edge.congestion_cost);
+  return amount * (params.unit_wire_cost + params.cost_weight * congestionCost(params, usable_supply, edge.getDemand(), amount));
 }
 
 double congestionCost(const GRParams& params, double supply, double demand, double amount)
@@ -125,7 +124,6 @@ double segmentCost(const GRGridGraph& grid, const GRNet& net, const GRParams& pa
   }
   GRWireEdgeIter iter(grid, LayerCoord(first_coord, layer_idx), LayerCoord(second_coord, layer_idx));
   if (!iter.isLegal()) {
-    // 线段方向与该层首选方向不一致
     return GRParams::kInf;
   }
   double total_cost = 0.0;
@@ -137,6 +135,33 @@ double segmentCost(const GRGridGraph& grid, const GRNet& net, const GRParams& pa
     total_cost += one_edge_cost;
   }
   return total_cost;
+}
+
+double wireMoveCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, int32_t x, int32_t y, bool is_horizontal)
+{
+  double total_supply = 0.0;
+  double total_demand = 0.0;
+  bool has_edge = false;
+  for (int32_t layer_idx = grid.getBottomLayerIdx(); layer_idx <= grid.getTopLayerIdx(); layer_idx++) {
+    if (grid.isHorizontalLayer(layer_idx) != is_horizontal) {
+      continue;
+    }
+    GRWireEdgeId edge_id{x, y, layer_idx};
+    if (!grid.hasWireEdge(edge_id)) {
+      continue;
+    }
+    if (net.isExempt(edge_id)) {
+      return params.unit_wire_cost;
+    }
+    const GRWireEdge& edge = grid.getWireEdge(edge_id);
+    has_edge = true;
+    total_supply += edge.getUsableSupply();
+    total_demand += edge.getDemand();
+  }
+  if (!has_edge || total_supply <= GRParams::kEpsilon) {
+    return GRParams::kInf;
+  }
+  return params.unit_wire_cost + params.cost_weight * congestionCost(params, total_supply, total_demand, 1.0);
 }
 
 double treeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, const GRTree& tree)
@@ -173,7 +198,7 @@ double treeOverflow(const GRGridGraph& grid, const GRNet& net, const GRTree& tre
   return net.getOverflow(grid, tree);
 }
 
-bool isBetter(double old_overflow, double old_cost, double new_overflow, double new_cost)
+bool isBetterResult(double old_overflow, double old_cost, double new_overflow, double new_cost)
 {
   if (new_overflow < old_overflow - GRParams::kEpsilon) {
     return true;

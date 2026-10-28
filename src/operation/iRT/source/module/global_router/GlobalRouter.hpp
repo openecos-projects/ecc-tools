@@ -77,8 +77,7 @@ class GlobalRouter
   GRParams params_;
   GRGridGraph grid_graph_;
   std::vector<GRNet> net_list_;
-  GRTreeBuilder tree_builder_;
-  GRMaze maze_;
+  GRMazeWorkspace maze_workspace_;
   std::vector<size_t> pattern_failed_net_idx_list_;
   std::vector<size_t> unrouted_net_idx_list_;
 };

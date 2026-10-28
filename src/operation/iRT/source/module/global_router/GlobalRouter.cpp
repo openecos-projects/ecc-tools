@@ -114,6 +114,7 @@ void GlobalRouter::initGridGraph()
     shape.is_horizontal_layer[layer_idx] = database.get_routing_layer_list()[layer_idx].isPreferH();
   }
   grid_graph_.init(shape);
+  maze_workspace_.init(grid_graph_.getXSize(), grid_graph_.getYSize());
 }
 
 void GlobalRouter::analyzeSupply()
@@ -257,7 +258,7 @@ void GlobalRouter::patternRoute()
     net.ripupUsage(grid_graph_, params_, old_tree);
 
     GRTree new_tree;
-    if (tree_builder_.buildPattern(net, grid_graph_, params_, new_tree)) {
+    if (buildPatternTree(net, grid_graph_, params_, new_tree)) {
       net.commitUsage(grid_graph_, params_, new_tree);
       net.set_tree(std::move(new_tree));
     } else {
@@ -285,7 +286,7 @@ void GlobalRouter::detourRoute()
     RTLOG.info(Loc::current(), "Pattern detour: no overflow net");
     return;
   }
-  tree_builder_.prepareDetour(grid_graph_);
+  GRDetourGrid detour_grid = GRDetourGrid::build(grid_graph_);
   std::sort(overflow_net_list.begin(), overflow_net_list.end(),
             [](const std::pair<double, size_t>& first, const std::pair<double, size_t>& second) { return first.first > second.first; });
   double before_overflow = grid_graph_.getTotalOverflow();
@@ -305,8 +306,9 @@ void GlobalRouter::detourRoute()
     net.ripupUsage(grid_graph_, params_, old_tree);
 
     GRTree new_tree;
-    bool is_built = tree_builder_.buildDetour(net, grid_graph_, params_, new_tree);
-    if (is_built && tree_builder_.wasDetourShifted()) {
+    bool detour_shifted = false;
+    bool is_built = buildDetourTree(net, grid_graph_, params_, detour_grid, new_tree, detour_shifted);
+    if (is_built && detour_shifted) {
       scaffold_num++;
     }
     bool is_accepted = false;
@@ -314,7 +316,7 @@ void GlobalRouter::detourRoute()
       net.commitUsage(grid_graph_, params_, new_tree);
       double new_overflow = treeOverflow(grid_graph_, net, new_tree);
       double new_cost = treeCost(grid_graph_, net, params_, new_tree);
-      is_accepted = isBetter(old_overflow, old_cost, new_overflow, new_cost);
+      is_accepted = isBetterResult(old_overflow, old_cost, new_overflow, new_cost);
       if (is_accepted) {
         net.set_tree(std::move(new_tree));
         accepted_num++;
@@ -386,7 +388,7 @@ void GlobalRouter::mazeRerouteOverflowNets()
     double after_overflow = grid_graph_.getTotalOverflow();
     double after_cost = getTotalRoutingCost();
     // Overflow is the primary reroute objective; cost only breaks ties when overflow is unchanged.
-    bool is_accepted = isBetter(before_overflow, before_cost, after_overflow, after_cost);
+    bool is_accepted = isBetterResult(before_overflow, before_cost, after_overflow, after_cost);
     RTLOG.info(Loc::current(), "Maze reroute iteration ", iteration, ": nets ", net_idx_list.size(), ", overflow ", before_overflow, " -> ", after_overflow,
                ", cost ", before_cost, " -> ", after_cost, ", cost_weight ", params_.cost_weight, is_accepted ? " (accepted)" : " (rolled back)");
     if (!is_accepted) {
@@ -399,7 +401,6 @@ void GlobalRouter::mazeRerouteOverflowNets()
       break;
     }
     params_.cost_weight *= 2.0;
-    grid_graph_.updateCongestionCost(params_);
   }
 }
 
@@ -423,9 +424,9 @@ bool GlobalRouter::routeNetByMaze(GRNet& net)
 
   std::vector<std::vector<PlanarCoord>> path_list;
   GRTree new_tree;
-  bool is_built = maze_.buildPathList(net, grid_graph_, params_, path_list);
+  bool is_built = buildMazePathList(net, grid_graph_, params_, maze_workspace_, path_list);
   if (is_built) {
-    is_built = tree_builder_.buildFromPaths(net, grid_graph_, params_, path_list, new_tree);
+    is_built = buildTreeFromPaths(net, grid_graph_, params_, path_list, new_tree);
   }
   if (!is_built) {
     net.commitUsage(grid_graph_, params_, old_tree);
@@ -449,7 +450,7 @@ void GlobalRouter::fallbackRoute()
     GRTree old_tree = net.release_tree();
     net.ripupUsage(grid_graph_, params_, old_tree);
     GRTree new_tree;
-    tree_builder_.buildDirect(net, grid_graph_, new_tree);
+    buildDirectTree(net, grid_graph_, new_tree);
     net.commitUsage(grid_graph_, params_, new_tree);
     net.set_tree(std::move(new_tree));
     RTLOG.warn(Loc::current(), "Net ", net.get_origin_net()->get_net_name(), " has no maze path, connected by straight lines ignoring supply.");
@@ -681,8 +682,7 @@ void GlobalRouter::debugPlot(const std::string& flag) const
           std::vector<std::string> info_line_list;
           info_line_list.push_back(
               RTUTIL.getString(is_horizontal ? "H" : "V", " (", x, ",", y, ")-(", second_grid_coord.get_x(), ",", second_grid_coord.get_y(), ")"));
-          info_line_list.push_back(RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(), ", demand: ", edge.getDemand(),
-                                                    ", congestion_cost: ", edge.congestion_cost));
+          info_line_list.push_back(RTUTIL.getString("overflow: ", edge.getOverflow(), ", supply: ", edge.getUsableSupply(), ", demand: ", edge.getDemand()));
           info_line_list.push_back(RTUTIL.getString("fixed_demand: ", edge.fixed_demand));
           int32_t line_spacing = std::max(1, edge_rect.getYSpan() / 8);
           int32_t text_y = edge_rect.get_ur_y();

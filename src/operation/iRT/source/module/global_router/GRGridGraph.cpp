@@ -62,45 +62,6 @@ void GRGridGraph::addDemand(const GRWireEdgeId& edge_id, double delta, const cha
   }
 }
 
-void GRGridGraph::updateCongestionCost(const GRParams& params)
-{
-  for (int32_t layer_idx = bottom_layer_idx_; layer_idx <= top_layer_idx_; layer_idx++) {
-    const GridMap<GRWireEdge>& edge_map = edge_map_[layer_idx];
-#pragma omp parallel for collapse(2)
-    for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
-      for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
-        double total_usage_ratio = 0.0;
-        int32_t neighbor_num = 0;
-        for (int32_t neighbor_x = std::max(0, x - params.congestion_radius); neighbor_x <= std::min(edge_map.get_x_size() - 1, x + params.congestion_radius);
-             neighbor_x++) {
-          for (int32_t neighbor_y = std::max(0, y - params.congestion_radius); neighbor_y <= std::min(edge_map.get_y_size() - 1, y + params.congestion_radius);
-               neighbor_y++) {
-            GRWireEdgeId neighbor_id{neighbor_x, neighbor_y, layer_idx};
-            if (!hasWireEdge(neighbor_id)) {
-              continue;
-            }
-            const GRWireEdge& neighbor_edge = getWireEdge(neighbor_id);
-            double neighbor_supply = neighbor_edge.getUsableSupply();
-            if (neighbor_supply <= GRParams::kEpsilon) {
-              continue;
-            }
-            total_usage_ratio += neighbor_edge.getDemand() / neighbor_supply;
-            neighbor_num++;
-          }
-        }
-        GRWireEdge& edge = getWireEdge(GRWireEdgeId{x, y, layer_idx});
-        double supply = edge.getUsableSupply();
-        double usage_ratio = supply <= GRParams::kEpsilon ? 0.0 : edge.getDemand() / supply;
-        usage_ratio = std::max(0.0, usage_ratio - params.congestion_threshold);
-        double average_usage_ratio = neighbor_num == 0 ? 0.0 : total_usage_ratio / neighbor_num;
-        double congestion_ratio = average_usage_ratio + usage_ratio;
-        double new_congestion_cost = params.congestion_cost_scale * params.cost_weight * congestion_ratio * congestion_ratio;
-        edge.congestion_cost = edge.congestion_cost * params.congestion_decay + new_congestion_cost;
-      }
-    }
-  }
-}
-
 bool GRGridGraph::hasWireEdge(const GRWireEdgeId& edge_id) const
 {
   if (edge_id.layer_idx < 0 || edge_id.layer_idx >= layer_num_) {
