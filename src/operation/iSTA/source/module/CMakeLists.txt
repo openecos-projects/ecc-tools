@@ -10,7 +10,7 @@ add_subdirectory(path_analyzer)
 add_subdirectory(timing_reporter)
 add_subdirectory(model_extractor)
 
-add_library(ista_timing_analyzer TimingAnalyzer.cpp)
+add_library(ista_timing_analyzer TimingAnalyzer.cpp StructuralTimingStateBuilder.cpp)
 target_include_directories(ista_timing_analyzer PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ista_timing_analyzer PRIVATE
     ista_graph_builder ista_clock_propagator ista_data_propagator ista_required_propagator

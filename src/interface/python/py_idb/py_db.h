@@ -45,6 +45,7 @@ bool saveGDSII(const std::filesystem::path& gds_name, const std::filesystem::pat
 bool saveJson(const std::filesystem::path& path);
 bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_drc = false,
                           const std::optional<std::filesystem::path>& thumbnail_path = std::nullopt);
+std::size_t canonicalizeNetNames();
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
                    const std::string& source = "", const std::string& placement_status = "fixed", bool create_if_missing = true);
 bool initializeGeometrySession();

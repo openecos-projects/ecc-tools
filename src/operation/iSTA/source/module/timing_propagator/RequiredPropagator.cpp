@@ -37,6 +37,7 @@ namespace ista {
 
 void RequiredPropagator::propagate()
 {
+  auto measurement = _database.timingExecutionStats().measure(TimingPhase::kRequired);
   Database& database = _database;
   _required.clear();
   _setup_checks.clear();

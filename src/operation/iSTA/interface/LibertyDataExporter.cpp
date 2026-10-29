@@ -58,7 +58,10 @@ LibertyTableData copyTable(TimingTable& table, double time_scale, double cap_sca
     for (double& value : result.axes[0])
       value *= first_is_cap ? cap_scale : time_scale;
   }
-  if (result.axes.size() > 1) {
+  if (result.axes.size() == 1 && (first_is_cap || table.get_variable_type1() == TimingTableVariableType::kConstrainedTransition)) {
+    // Keep a 1D load/data-slew table in the second canonical input slot.
+    result.axes.insert(result.axes.begin(), std::vector<double>{});
+  } else if (result.axes.size() > 1) {
     for (double& value : result.axes[1])
       value *= second_is_cap ? cap_scale : time_scale;
     if (first_is_cap || table.get_variable_type1() == TimingTableVariableType::kConstrainedTransition) {
@@ -197,12 +200,20 @@ std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& li
       exported_port.capacitance_pf = port.get_capacitance();
       exported_port.rise_capacitance_pf = exported_port.capacitance_pf;
       exported_port.fall_capacitance_pf = exported_port.capacitance_pf;
+      exported_port.min_rise_capacitance_pf = exported_port.capacitance_pf;
+      exported_port.min_fall_capacitance_pf = exported_port.capacitance_pf;
       auto& caps = port.get_trans_capacitance_map();
       if (const auto it = caps.find(AnalysisType::kMax); it != caps.end()) {
         if (const auto rise = it->second.find(TransType::kRise); rise != it->second.end())
           exported_port.rise_capacitance_pf = rise->second;
         if (const auto fall = it->second.find(TransType::kFall); fall != it->second.end())
           exported_port.fall_capacitance_pf = fall->second;
+      }
+      if (const auto it = caps.find(AnalysisType::kMin); it != caps.end()) {
+        if (const auto rise = it->second.find(TransType::kRise); rise != it->second.end())
+          exported_port.min_rise_capacitance_pf = rise->second;
+        if (const auto fall = it->second.find(TransType::kFall); fall != it->second.end())
+          exported_port.min_fall_capacitance_pf = fall->second;
       }
       exported_port.max_capacitance_pf = port.get_max_capacitance().value_or(0.0);
       exported_port.max_slew_ps = port.get_max_transition().value_or(0.0) * 1000.0;

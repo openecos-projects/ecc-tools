@@ -94,6 +94,23 @@ void checkRectangularTableExport()
   require(source_table.get_axis_list() == std::vector<std::vector<double>>{{2.0, 4.0}, {10.0, 20.0, 30.0}}, "export mutated source LUT axes");
   require(source_table.get_value_list() == std::vector<double>{1.0, 2.0, 3.0, 4.0, 5.0, 6.0}, "export mutated source LUT values");
 }
+void checkTransitionCapacitanceExport()
+{
+  LibertyLibrary library;
+  auto& cell = library.get_cell_map()["sample"];
+  cell.set_cell_name("sample");
+  auto& pin = cell.get_port_map()["A"];
+  pin.set_capacitance(0.002);
+  pin.get_trans_capacitance_map()[AnalysisType::kMax] = {{TransType::kRise, 0.006}, {TransType::kFall, 0.007}};
+  pin.get_trans_capacitance_map()[AnalysisType::kMin] = {{TransType::kRise, 0.0018}, {TransType::kFall, 0.0017}};
+  const auto cells = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF);
+  const auto& port = cells.at(0).ports.at(0);
+  require(std::vector<double>{port.capacitance_pf, port.rise_capacitance_pf, port.fall_capacitance_pf,
+                              port.min_rise_capacitance_pf, port.min_fall_capacitance_pf}
+              == std::vector<double>{0.002, 0.006, 0.007, 0.0018, 0.0017},
+          "min pin capacitance was substituted with the max transition range");
+}
+
 void checkEndpointIdentity()
 {
   for (bool reverse : {false, true}) {
@@ -150,6 +167,23 @@ void checkEndpointIdentity()
     require(values == std::set<double>{1000, 2000, 3000, 4000}, "conditional check mapped to another LUT");
   }
 }
+
+void checkDiagnosticOrder()
+{
+  Database database;
+  Config config;
+  // Repeated malformed graph arcs share one message; undriven nets produce
+  // distinct messages that must retain network traversal order.
+  database.graph().arcs().resize(3);
+  for (const auto* name : {"z", "a", "m"})
+    database.network().nets()[name].set_net_name(name);
+  const auto result = TimingDataExporter::exportData(database, config);
+  require(result.diagnostics == std::vector<std::string>{
+              "unsupported arc with missing pin identity", "net without a resolved driver: a",
+              "net without a resolved driver: m", "net without a resolved driver: z",
+              "no constrained start points exported", "no constrained end points exported", "no sequential clock pins exported"},
+          "diagnostic deduplication lost first-occurrence order or distinct messages");
+}
 }  // namespace
 
 int main()
@@ -157,4 +191,6 @@ int main()
   checkEndpointIdentity();
   checkUnreadyExport();
   checkRectangularTableExport();
+  checkTransitionCapacitanceExport();
+  checkDiagnosticOrder();
 }

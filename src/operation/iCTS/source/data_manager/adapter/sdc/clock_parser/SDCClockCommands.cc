@@ -370,11 +370,9 @@ auto SdcSubsetEvaluator::evaluateSetCaseAnalysis(const std::vector<SdcValue>& ar
     return;
   }
   SdcCaseAnalysis analysis;
-  if (!ParseIntValue(ValueToString(args.front()), analysis.value) || (analysis.value != 0 && analysis.value != 1)) {
-    const auto value = ValueToString(args.front());
-    reportIssue(value == "rise" || value == "fall" || value == "rising" || value == "falling" ? SdcConstraintStatusCode::kUnsupported
-                                                                                              : SdcConstraintStatusCode::kMalformed,
-                "set_case_analysis", "only_constant_zero_or_one_case_values_supported");
+  const auto status = ParseCaseAnalysisValue(ValueToString(args.front()), analysis.value);
+  if (status != SdcConstraintStatusCode::kOk) {
+    reportIssue(status, "set_case_analysis", "only_constant_zero_or_one_case_values_supported");
     return;
   }
   if (!readRefs("set_case_analysis", args[1], SdcObjectKind::kUnknown, analysis.objects)) {

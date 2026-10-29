@@ -52,6 +52,8 @@ unsigned TclSetPathDelay::executePathDelay(TimingExceptionType type)
   }
   Database& database = STADM.getDatabase();
   TimingException exception = parsePathSelector(database, false);
+  if (hasEmptySelector())
+    return 1;
   exception.set_type(type);
   exception.set_setup(type == TimingExceptionType::kMaxDelay);
   exception.set_hold(type == TimingExceptionType::kMinDelay);

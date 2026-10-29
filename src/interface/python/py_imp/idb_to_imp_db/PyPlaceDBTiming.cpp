@@ -2,6 +2,7 @@
 #include <cmath>
 #include <map>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -66,6 +67,8 @@ void appendQualification(pybind11::list& valid, pybind11::list& reasons, const i
 
 void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
 {
+  timing_preparation["phase_calls"] = snapshot.phase_calls;
+  timing_preparation["phase_seconds"] = snapshot.phase_seconds;
   timing_schema_version = snapshot.schema_version;
   timing_source_time_unit_ps = snapshot.time_unit_ps;
   timing_source_capacitance_unit_pf = snapshot.capacitance_unit_pf;
@@ -132,9 +135,11 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
 
   std::unordered_map<std::string, int32_t> clock_pin_indices;
 
-  std::unordered_map<std::string, TimingPinData> timing_pins;
+  std::unordered_map<std::string_view, const TimingPinData*> timing_pins;
+  timing_pins.reserve(snapshot.pins.size());
+  const TimingPinData empty_pin;
   for (const TimingPinData& pin : snapshot.pins)
-    timing_pins.emplace(pin.name, pin);
+    timing_pins.emplace(pin.name, &pin);
   for (const std::string& name : snapshot.clock_pins) {
     const int32_t id = mapId(pin_ids, name);
     if (id >= 0) {
@@ -142,7 +147,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
       clock_pins.append(id);
       clk_pin_names.append(name);
       const auto pin_it = timing_pins.find(name);
-      const TimingPinData& pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
+      const TimingPinData& pin = pin_it == timing_pins.end() ? empty_pin : *pin_it->second;
       clk_pin_r_aat.append(pin.max_rise_aat_ps);
       clk_pin_f_aat.append(pin.max_fall_aat_ps);
       clk_pin_rtran.append(pin.max_rise_slew_ps);
@@ -163,7 +168,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     }
     start_points.append(id);
     const auto pin_it = timing_pins.find(name);
-    const TimingPinData pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
+    const TimingPinData& pin = pin_it == timing_pins.end() ? empty_pin : *pin_it->second;
     inrdelays.append(pin.max_rise_aat_ps);
     infdelays.append(pin.max_fall_aat_ps);
     inrtrans.append(pin.max_rise_slew_ps);
@@ -177,7 +182,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     }
     end_points.append(id);
     const auto pin_it = timing_pins.find(name);
-    const TimingPinData pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
+    const TimingPinData& pin = pin_it == timing_pins.end() ? empty_pin : *pin_it->second;
     outcaps.append(0.0);
     appendQualification(endpoints_max_valid, endpoints_max_reason, pin.max_qualification);
     // Python subtracts setup at the current data slew. Restore the capture
@@ -282,7 +287,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     const auto timing_pin = timing_pins.find(name);
     if (timing_pin == timing_pins.end())
       continue;
-    const auto instance = instance_cells.find(timing_pin->second.instance_name);
+    const auto instance = instance_cells.find(timing_pin->second->instance_name);
     if (instance == instance_cells.end())
       continue;
     const auto& ports = snapshot.lib_cells[instance->second].ports;
@@ -303,6 +308,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
   for (const LibertyCellData& cell : snapshot.lib_cells) {
     auto* master = physical_masters == nullptr ? nullptr : physical_masters->find_cell_master(cell.name);
     for (const LibertyPortData& port : cell.ports) {
+      flat_lib_pin_names.append(port.name);
       auto* term = master == nullptr ? nullptr : master->findTerm(port.name);
       auto* box = term == nullptr || term->get_port_number() == 0 ? nullptr : term->get_bounding_box();
       flat_lib_pin_offset_x.append(box == nullptr ? 0 : (box->get_low_x() + box->get_high_x()) / 2);
@@ -311,6 +317,8 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
       flat_lib_pin_cap.append(port.capacitance_pf);
       flat_lib_pin_rcap.append(port.rise_capacitance_pf);
       flat_lib_pin_fcap.append(port.fall_capacitance_pf);
+      flat_lib_pin_min_rcap.append(port.min_rise_capacitance_pf);
+      flat_lib_pin_min_fcap.append(port.min_fall_capacitance_pf);
       flat_lib_pin_cap_limit.append(port.max_capacitance_pf);
       flat_lib_pin_slew_limit.append(port.max_slew_ps);
       ++flat_pin_id;
@@ -319,6 +327,8 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     for (const LibertyArcData& arc : cell.arcs) {
       flat_libarc_info.append(
           pybind11::make_tuple(arc.source_port, arc.sink_port, cell_ids[cell.name], local_arc_id, arc.sense, arc.trigger));
+      flat_libarc_check_types.append(arc.check_type);
+      flat_libarc_is_latch_data.append(arc.is_latch_data_arc);
       appendLut(f_delay_flat_luts_values, f_delay_flat_luts_trans_table, f_delay_flat_luts_cap_table, f_delay_flat_luts_dim,
                 arc.fall_delay);
       appendLut(r_delay_flat_luts_values, r_delay_flat_luts_trans_table, r_delay_flat_luts_cap_table, r_delay_flat_luts_dim,
@@ -387,7 +397,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     if (source < 0 || sink < 0)
       continue;
     const auto pin_it = timing_pins.find(arc.source_pin);
-    const int32_t net_id = pin_it == timing_pins.end() ? -1 : mapId(net_ids, pin_it->second.net_name);
+    const int32_t net_id = pin_it == timing_pins.end() ? -1 : mapId(net_ids, pin_it->second->net_name);
     if (net_id >= 0 && static_cast<std::size_t>(net_id) < net_rows.size())
       net_rows[net_id].emplace_back(source, sink);
   }
@@ -523,7 +533,7 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
 
   for (std::size_t i = 0; i < pin_names.size(); ++i) {
     const auto pin_it = timing_pins.find(pin_names[i].cast<std::string>());
-    const TimingPinData pin = pin_it == timing_pins.end() ? TimingPinData{} : pin_it->second;
+    const TimingPinData& pin = pin_it == timing_pins.end() ? empty_pin : *pin_it->second;
     if (pin_it == timing_pins.end())
       timing_diagnostics.append("PyPlaceDB pin missing from timing snapshot");
     if (i >= pin2net_map.size())
