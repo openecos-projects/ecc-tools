@@ -29,6 +29,7 @@ void register_icts(pybind11::module& m)
   m.def("cts_report", CtsReport, py::arg("path"));
   m.def("destroy_cts", CtsDestroy);
   m.def("cts_timing_feature", CtsTimingFeature);
+  m.def("cts_clock_graph", CtsClockGraph);
 }
 
 }  // namespace python_interface

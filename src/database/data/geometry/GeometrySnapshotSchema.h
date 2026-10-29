@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ClockTreeSchema.h"
 #include "OwnerRef.h"
 #include "ShapeRecord.h"
 
@@ -24,6 +25,11 @@ enum class GeometryFileKind : uint16_t
   kView = 9,
   kSidMap = 10,
   kDelta = 11,
+  kClockTreeMeta = 12,
+  kClockTreeNodes = 13,
+  kClockTreeEdges = 14,
+  kClockTreeTiming = 15,
+  kClockTreeStrings = 16,
 };
 
 struct GeometryFileHeader

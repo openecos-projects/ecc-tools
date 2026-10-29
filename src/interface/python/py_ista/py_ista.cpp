@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "py_ista.h"
 
+#include <unordered_map>
+
 #include "py_path_utils.h"
 #include "STAInterface.hpp"
 
@@ -80,6 +82,99 @@ bool isModelReady()
 bool isTimingReady()
 {
   return STAI.isTimingReady();
+}
+
+pybind11::dict staClockGraph()
+{
+  namespace py = pybind11;
+
+  const auto graph = STAI.exportClockTreeGraph();
+  py::dict result;
+  result["timing_source"] = "ista";
+  result["source_edge"] = "rise";
+  py::list diagnostics;
+  for (const auto& diagnostic : graph.diagnostics) {
+    diagnostics.append(diagnostic);
+  }
+  result["diagnostics"] = std::move(diagnostics);
+  py::list clocks;
+  for (const auto& clock : graph.clocks) {
+    py::dict item;
+    item["name"] = clock.name;
+    item["master_clock"] = clock.master_clock_name;
+    item["source_edge"] = clock.source_edge;
+    item["timing_available"] = clock.timing_available;
+    py::list clock_diagnostics;
+    for (const auto& diagnostic : clock.diagnostics) {
+      clock_diagnostics.append(diagnostic);
+    }
+    item["diagnostics"] = std::move(clock_diagnostics);
+    py::list nodes;
+    std::unordered_map<std::string, std::uint64_t> node_id_by_name;
+    node_id_by_name.reserve(clock.nodes.size());
+    for (std::size_t index = 0U; index < clock.nodes.size(); ++index) {
+      const auto& node = clock.nodes[index];
+      py::dict entry;
+      entry["id"] = static_cast<std::uint64_t>(index);
+      entry["name"] = node.name;
+      entry["instance_name"] = node.instance_name;
+      entry["pin_name"] = node.pin_name;
+      entry["master"] = node.master;
+      entry["kind"] = node.kind;
+      entry["cell_role"] = node.cell_role;
+      entry["x_dbu"] = node.x_dbu;
+      entry["y_dbu"] = node.y_dbu;
+      entry["position_valid"] = node.position_valid;
+      entry["sink"] = node.sink;
+      nodes.append(std::move(entry));
+      node_id_by_name.emplace(node.name, static_cast<std::uint64_t>(index));
+    }
+    for (std::size_t index = 0U; index < clock.nodes.size(); ++index) {
+      const auto& node = clock.nodes[index];
+      py::list states;
+      for (const auto& state : node.timing_states) {
+        py::dict timing;
+        timing["analysis"] = state.analysis;
+        timing["source_edge"] = state.source_edge;
+        timing["local_edge"] = state.local_edge;
+        const auto predecessor = node_id_by_name.find(state.predecessor);
+        timing["predecessor"] = predecessor == node_id_by_name.end() ? py::none() : py::cast(predecessor->second);
+        timing["arrival_ns"] = state.arrival_ns ? py::cast(*state.arrival_ns) : py::none();
+        timing["slew_ns"] = state.slew_ns ? py::cast(*state.slew_ns) : py::none();
+        states.append(std::move(timing));
+      }
+      py::cast<py::dict>(nodes[index])["timing_states"] = std::move(states);
+    }
+    item["nodes"] = std::move(nodes);
+    py::list roots;
+    for (const auto& root : clock.roots) {
+      const auto found = node_id_by_name.find(root);
+      if (found != node_id_by_name.end()) {
+        roots.append(found->second);
+      }
+    }
+    item["roots"] = std::move(roots);
+    py::list edges;
+    for (const auto& edge : clock.edges) {
+      const auto from = node_id_by_name.find(edge.from);
+      const auto to = node_id_by_name.find(edge.to);
+      if (from == node_id_by_name.end() || to == node_id_by_name.end()) {
+        continue;
+      }
+      py::dict entry;
+      entry["from"] = from->second;
+      entry["to"] = to->second;
+      entry["cell_arc"] = edge.cell_arc;
+      entry["negative_unate"] = edge.negative_unate;
+      entry["net_name"] = edge.net_name;
+      entry["cell_master"] = edge.cell_master;
+      edges.append(std::move(entry));
+    }
+    item["edges"] = std::move(edges);
+    clocks.append(std::move(item));
+  }
+  result["clocks"] = std::move(clocks);
+  return result;
 }
 
 }  // namespace python_interface

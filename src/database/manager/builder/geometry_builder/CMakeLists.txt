@@ -1,5 +1,6 @@
 add_library(geometry_builder
     BlockageEditAdapter.cpp
+    ClockTreeCollector.cpp
     GeometryBuilder.cpp
     GeometryEditSession.cpp
     GeometryEditApplier.cpp

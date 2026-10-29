@@ -23,7 +23,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <initializer_list>
 #include <optional>
@@ -384,6 +386,167 @@ auto FastSTA::collectClockPointFacts(FastStaContextId context_id) const -> std::
     }
   }
   return facts;
+}
+
+auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optional<FastStaClockGraph>
+{
+  const auto* context = queryContext(context_id);
+  if (context == nullptr || context->clock_trial_active) {
+    return std::nullopt;
+  }
+
+  FastStaClockGraph graph;
+  graph.clock_name = context->clock_name;
+  graph.clock_net_name = context->clock_net_name;
+  graph.timing_available = context->clock_timing_valid;
+  if (!context->clock_timing_valid) {
+    graph.diagnostic = "committed CTS FastSTA clock timing is unavailable";
+  }
+
+  const std::unordered_set<FastStaNodeId> owned(context->owned_clock_node_ids.begin(), context->owned_clock_node_ids.end());
+  const std::unordered_set<FastStaNodeId> owned_sinks(context->owned_clock_sink_node_ids.begin(), context->owned_clock_sink_node_ids.end());
+  std::vector<bool> included(context->nodes.size(), false);
+  std::unordered_map<FastStaNodeId, FastStaNodeId> graph_id_by_context_id;
+  std::vector<FastStaNodeId> context_id_by_graph_id;
+  std::vector<FastStaNodeId> fallback_parent(context->nodes.size(), kInvalidFastStaNodeId);
+
+  for (FastStaNodeId node_id = 0U; node_id < context->nodes.size(); ++node_id) {
+    const auto& node = context->nodes.at(node_id);
+    if (node.domain != FastStaNodeDomain::kClock || (context->owner_clock_scope_available && !owned.contains(node_id))) {
+      continue;
+    }
+    included.at(node_id) = true;
+    const auto graph_id = static_cast<FastStaNodeId>(graph.nodes.size());
+    graph_id_by_context_id.emplace(node_id, graph_id);
+    context_id_by_graph_id.push_back(node_id);
+
+    FastStaClockGraphNode fact;
+    fact.id = graph_id;
+    fact.name = node.name;
+    fact.instance_name = node.inst_name;
+    fact.pin_name = node.pin_name.empty() ? node.port_name : node.pin_name;
+    fact.cell_master = node.cell_master;
+    fact.kind = toClockPointKind(node.kind);
+    fact.location = node.location;
+    fact.position_valid = node.location.x_dbu >= 0 && node.location.y_dbu >= 0;
+    fact.sink = context->owner_clock_scope_available ? owned_sinks.contains(node_id) : node.kind == FastStaNodeKind::kSink;
+    fact.inactive = node.clock_inactive;
+
+    if (node.kind == FastStaNodeKind::kBufferOutput) {
+      const auto input = context->buffer_input_node_id_by_inst.find(node.inst_name);
+      if (input != context->buffer_input_node_id_by_inst.end()) {
+        fallback_parent.at(node_id) = input->second;
+      }
+    } else if (node.incoming_net_id < context->nets.size()) {
+      fallback_parent.at(node_id) = context->nets.at(node.incoming_net_id).driver_node_id;
+    }
+
+    if (context->clock_timing_valid) {
+      for (const auto analysis : {FastStaAnalysisKind::kEarly, FastStaAnalysisKind::kLate}) {
+        const auto& states = analysis == FastStaAnalysisKind::kEarly ? node.early_timing : node.late_timing;
+        for (std::size_t local_index = 0U; local_index < states.size(); ++local_index) {
+          const auto& point = states.at(local_index);
+          if (!point.valid || !std::isfinite(point.arrival_ns) || !std::isfinite(point.slew_ns)) {
+            continue;
+          }
+          FastStaClockGraphTimingState state;
+          state.analysis = analysis == FastStaAnalysisKind::kEarly ? FastStaClockGraphAnalysis::kEarly : FastStaClockGraphAnalysis::kLate;
+          state.source_transition = point.launch_clock_transition == FastStaTransition::kRise ? FastStaClockGraphTransition::kRise
+                                                                                             : FastStaClockGraphTransition::kFall;
+          state.local_transition = local_index == 0U ? FastStaClockGraphTransition::kRise : FastStaClockGraphTransition::kFall;
+          state.predecessor_node_id = point.stage_input_node_id;
+          if (state.predecessor_node_id == kInvalidFastStaNodeId) {
+            state.predecessor_node_id = fallback_parent.at(node_id);
+          }
+          state.arrival_ns = point.arrival_ns;
+          state.slew_ns = point.slew_ns;
+          fact.timing_states.push_back(state);
+
+          const bool source_rise_late = state.analysis == FastStaClockGraphAnalysis::kLate
+                                        && state.source_transition == FastStaClockGraphTransition::kRise;
+          if (source_rise_late && !fact.arrival_ns.has_value()) {
+            fact.arrival_ns = state.arrival_ns;
+            fact.slew_ns = state.slew_ns;
+          }
+        }
+      }
+      if (!fact.arrival_ns.has_value() && !fact.timing_states.empty()) {
+        const auto& fallback = fact.timing_states.front();
+        fact.arrival_ns = fallback.arrival_ns;
+        fact.slew_ns = fallback.slew_ns;
+      }
+    }
+    graph.nodes.push_back(std::move(fact));
+  }
+
+  for (auto& node : graph.nodes) {
+    for (auto& state : node.timing_states) {
+      const auto predecessor = graph_id_by_context_id.find(state.predecessor_node_id);
+      state.predecessor_node_id = predecessor == graph_id_by_context_id.end() ? kInvalidFastStaNodeId : predecessor->second;
+    }
+  }
+
+  std::unordered_set<std::uint64_t> cell_edge_keys;
+  for (FastStaNetId net_id = 0U; net_id < context->nets.size(); ++net_id) {
+    const auto& net = context->nets.at(net_id);
+    if (net.domain != FastStaNetDomain::kClock || net.driver_node_id >= included.size() || !included.at(net.driver_node_id)) {
+      continue;
+    }
+    const auto driver_graph_id = graph_id_by_context_id.at(net.driver_node_id);
+    for (const auto load_id : net.load_node_ids) {
+      if (load_id >= included.size() || !included.at(load_id)) {
+        continue;
+      }
+      graph.edges.push_back(FastStaClockGraphEdge{.from_node_id = driver_graph_id,
+                                                 .to_node_id = graph_id_by_context_id.at(load_id),
+                                                 .cell_arc = false,
+                                                 .negative_unate = false,
+                                                 .net_name = net.name,
+                                                 .cell_master = {}});
+    }
+  }
+
+  const auto append_cell_edge = [&](FastStaNodeId from_id, FastStaNodeId to_id, const std::string& cell_master, bool negative_unate) {
+    if (from_id >= included.size() || to_id >= included.size() || !included.at(from_id) || !included.at(to_id)) {
+      return;
+    }
+    const auto key = (static_cast<std::uint64_t>(from_id) << 32U) | static_cast<std::uint64_t>(to_id);
+    if (!cell_edge_keys.insert(key).second) {
+      return;
+    }
+    graph.edges.push_back(FastStaClockGraphEdge{.from_node_id = graph_id_by_context_id.at(from_id),
+                                               .to_node_id = graph_id_by_context_id.at(to_id),
+                                               .cell_arc = true,
+                                               .negative_unate = negative_unate,
+                                               .net_name = {},
+                                               .cell_master = cell_master});
+  };
+  for (const auto& arc : context->timing_arcs) {
+    append_cell_edge(arc.from_node_id, arc.to_node_id, arc.cell_master, arc.negative_unate);
+  }
+  for (const auto& [instance, output_id] : context->buffer_output_node_id_by_inst) {
+    const auto input = context->buffer_input_node_id_by_inst.find(instance);
+    if (input != context->buffer_input_node_id_by_inst.end() && output_id < context->nodes.size()) {
+      append_cell_edge(input->second, output_id, context->nodes.at(output_id).cell_master, false);
+    }
+  }
+
+  std::vector<std::size_t> incoming(graph.nodes.size(), 0U);
+  for (const auto& edge : graph.edges) {
+    if (edge.to_node_id < incoming.size()) {
+      ++incoming.at(edge.to_node_id);
+    }
+  }
+  for (FastStaNodeId graph_id = 0U; graph_id < incoming.size(); ++graph_id) {
+    const auto context_id = context_id_by_graph_id.at(graph_id);
+    if (incoming.at(graph_id) == 0U || context_id == context->source_node_id) {
+      graph.root_node_ids.push_back(graph_id);
+    }
+  }
+  if (graph.root_node_ids.empty() && !graph.nodes.empty()) {
+    graph.root_node_ids.push_back(0U);
+  }
+  return graph;
 }
 
 auto FastSTA::queryClockNodeArrival(FastStaContextId context_id, FastStaNodeId node_id) const -> std::optional<double>

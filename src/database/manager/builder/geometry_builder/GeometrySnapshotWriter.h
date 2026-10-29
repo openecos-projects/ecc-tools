@@ -4,6 +4,7 @@
 #include "GeometryDrc.h"
 #include "GeometryLayerMetadata.h"
 #include "GeometryStore.h"
+#include "ClockTreeSnapshot.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -26,6 +27,7 @@ struct SnapshotWriteOptions
   std::vector<GeometryBusMetadata> buses;
   std::vector<GeometryGroupMetadata> groups;
   std::optional<GeometryDrcDistribution> drc;
+  std::optional<ClockTreeSnapshot> clock_tree;
   std::string design_name;
   std::string design_version;
   int32_t dbu_per_micron = 0;
@@ -49,6 +51,10 @@ struct SnapshotWriteResult
   uint64_t net_count = 0;
   uint64_t bus_count = 0;
   uint64_t group_count = 0;
+  uint64_t clock_tree_clock_count = 0;
+  uint64_t clock_tree_node_count = 0;
+  uint64_t clock_tree_edge_count = 0;
+  uint64_t clock_tree_timing_count = 0;
   uint64_t dirty_lod_tile_count = 0;
   uint64_t dirty_lod_rebuild_candidate_count = 0;
   uint64_t written_side_file_count = 0;
