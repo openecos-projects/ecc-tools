@@ -1,5 +1,6 @@
 #include "GeometrySnapshotWriter.h"
 
+#include "ClockTreeSchema.h"
 #include "GeometrySnapshotSchema.h"
 #include "json.hpp"
 
@@ -39,6 +40,11 @@ struct SnapshotManifestPaths
   std::string nets;
   std::string buses;
   std::string groups;
+  std::string clock_tree_meta;
+  std::string clock_tree_nodes;
+  std::string clock_tree_edges;
+  std::string clock_tree_timing;
+  std::string clock_tree_strings;
 };
 
 std::vector<char> make_geometry_file_bytes(GeometryFileKind file_kind, uint32_t record_size, uint64_t record_count,
@@ -230,7 +236,79 @@ bool write_manifest(const std::filesystem::path& path, const SnapshotWriteResult
   if (options.drc) {
     file << "drc=" << paths.drc << '\n';
   }
+  if (options.clock_tree) {
+    file << "clock_tree_schema_version=" << kClockTreeSchemaVersion << '\n';
+    file << "clock_tree_meta=" << paths.clock_tree_meta << '\n';
+    file << "clock_tree_nodes=" << paths.clock_tree_nodes << '\n';
+    file << "clock_tree_edges=" << paths.clock_tree_edges << '\n';
+    file << "clock_tree_timing=" << paths.clock_tree_timing << '\n';
+    file << "clock_tree_strings=" << paths.clock_tree_strings << '\n';
+  }
   return static_cast<bool>(file);
+}
+
+bool string_reference_valid(const ClockTreeSnapshot& snapshot, uint32_t offset, uint32_t size)
+{
+  if (size == 0) {
+    return offset == 0;
+  }
+  return static_cast<uint64_t>(offset) + size <= snapshot.strings.size();
+}
+
+bool validate_clock_tree(const ClockTreeSnapshot& snapshot)
+{
+  const ClockTreeMetaRecord& meta = snapshot.meta;
+  if (meta.schema_version != kClockTreeSchemaVersion || meta.clock_count != snapshot.clocks.size()
+      || meta.node_count != snapshot.nodes.size() || meta.edge_count != snapshot.edges.size()
+      || meta.timing_count != snapshot.timing.size() || meta.string_size != snapshot.strings.size()
+      || meta.root_count != snapshot.roots.size()) {
+    return false;
+  }
+  if (!string_reference_valid(snapshot, meta.rc_corner_offset, meta.rc_corner_size)
+      || !string_reference_valid(snapshot, meta.liberty_corner_offset, meta.liberty_corner_size)
+      || !string_reference_valid(snapshot, meta.diagnostics_offset, meta.diagnostics_size)) {
+    return false;
+  }
+  for (uint32_t root : snapshot.roots) {
+    if (root >= snapshot.nodes.size()) {
+      return false;
+    }
+  }
+  for (const ClockRecord& clock : snapshot.clocks) {
+    if (clock.clock_id >= snapshot.clocks.size()
+        || (clock.master_clock_id != UINT32_MAX && clock.master_clock_id >= snapshot.clocks.size())
+        || static_cast<uint64_t>(clock.root_node_first) + clock.root_node_count > snapshot.roots.size()
+        || static_cast<uint64_t>(clock.node_first) + clock.node_count > snapshot.nodes.size()
+        || static_cast<uint64_t>(clock.edge_first) + clock.edge_count > snapshot.edges.size()
+        || !string_reference_valid(snapshot, clock.name_offset, clock.name_size)
+        || !string_reference_valid(snapshot, clock.diagnostics_offset, clock.diagnostics_size)) {
+      return false;
+    }
+  }
+  for (const ClockNodeRecord& node : snapshot.nodes) {
+    if (node.node_id >= snapshot.nodes.size() || node.clock_id >= snapshot.clocks.size()
+        || !string_reference_valid(snapshot, node.instance_offset, node.instance_size)
+        || !string_reference_valid(snapshot, node.pin_offset, node.pin_size)
+        || !string_reference_valid(snapshot, node.master_offset, node.master_size)) {
+      return false;
+    }
+  }
+  for (const ClockEdgeRecord& edge : snapshot.edges) {
+    if (edge.edge_id >= snapshot.edges.size() || edge.from_node >= snapshot.nodes.size()
+        || edge.to_node >= snapshot.nodes.size() || edge.from_node == edge.to_node
+        || !string_reference_valid(snapshot, edge.net_offset, edge.net_size)
+        || !string_reference_valid(snapshot, edge.cell_offset, edge.cell_size)) {
+      return false;
+    }
+  }
+  for (const ClockTimingRecord& timing : snapshot.timing) {
+    if (timing.node_id >= snapshot.nodes.size()
+        || (timing.predecessor_node != UINT32_MAX && timing.predecessor_node >= snapshot.nodes.size())
+        || !string_reference_valid(snapshot, timing.scenario_offset, timing.scenario_size)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 uint64_t create_epoch_directory(const std::filesystem::path& output_dir, std::filesystem::path& epoch_dir)
@@ -539,6 +617,30 @@ bool write_group_metadata_file(const std::filesystem::path& path, std::span<cons
   return static_cast<bool>(file);
 }
 
+std::vector<char> make_clock_tree_meta_bytes(const ClockTreeSnapshot& snapshot)
+{
+  GeometryFileHeader header;
+  header.file_kind = GeometryFileKind::kClockTreeMeta;
+  header.record_size = sizeof(ClockTreeMetaRecord);
+  header.record_count = 1;
+  const uint64_t clocks_size = snapshot.clocks.size() * sizeof(ClockRecord);
+  const uint64_t roots_size = snapshot.roots.size() * sizeof(uint32_t);
+  header.payload_size = sizeof(ClockTreeMetaRecord) + clocks_size + roots_size;
+
+  std::vector<char> bytes(sizeof(header) + header.payload_size);
+  std::memcpy(bytes.data(), &header, sizeof(header));
+  std::memcpy(bytes.data() + sizeof(header), &snapshot.meta, sizeof(ClockTreeMetaRecord));
+  if (!snapshot.clocks.empty()) {
+    std::memcpy(bytes.data() + sizeof(header) + sizeof(ClockTreeMetaRecord), snapshot.clocks.data(),
+                static_cast<size_t>(clocks_size));
+  }
+  if (!snapshot.roots.empty()) {
+    std::memcpy(bytes.data() + sizeof(header) + sizeof(ClockTreeMetaRecord) + clocks_size, snapshot.roots.data(),
+                static_cast<size_t>(roots_size));
+  }
+  return bytes;
+}
+
 }  // namespace
 
 SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const SnapshotWriteOptions& options) const
@@ -589,6 +691,15 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   result.net_count = static_cast<uint64_t>(options.nets.size());
   result.bus_count = static_cast<uint64_t>(options.buses.size());
   result.group_count = static_cast<uint64_t>(options.groups.size());
+  if (options.clock_tree) {
+    if (!validate_clock_tree(*options.clock_tree)) {
+      return result;
+    }
+    result.clock_tree_clock_count = static_cast<uint64_t>(options.clock_tree->clocks.size());
+    result.clock_tree_node_count = static_cast<uint64_t>(options.clock_tree->nodes.size());
+    result.clock_tree_edge_count = static_cast<uint64_t>(options.clock_tree->edges.size());
+    result.clock_tree_timing_count = static_cast<uint64_t>(options.clock_tree->timing.size());
+  }
 
   GeometryMetaRecord meta;
   meta.shape_count = result.shape_count;
@@ -663,6 +774,37 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   if (options.drc) {
     paths.drc = (std::filesystem::path(file_prefix) / "geometry.drc.json").generic_string();
   }
+  bool wrote_clock_tree = true;
+  if (options.clock_tree) {
+    const ClockTreeSnapshot& clock_tree = *options.clock_tree;
+    paths.clock_tree_meta = (std::filesystem::path(file_prefix) / "geometry.clock_tree.meta.bin").generic_string();
+    paths.clock_tree_nodes = (std::filesystem::path(file_prefix) / "geometry.clock_tree.nodes.bin").generic_string();
+    paths.clock_tree_edges = (std::filesystem::path(file_prefix) / "geometry.clock_tree.edges.bin").generic_string();
+    paths.clock_tree_timing = (std::filesystem::path(file_prefix) / "geometry.clock_tree.timing.bin").generic_string();
+    paths.clock_tree_strings = (std::filesystem::path(file_prefix) / "geometry.clock_tree.strings.bin").generic_string();
+    wrote_clock_tree =
+        write_file_bytes(output_dir / paths.clock_tree_meta, make_clock_tree_meta_bytes(clock_tree))
+        && write_file_bytes(
+            output_dir / paths.clock_tree_nodes,
+            make_geometry_file_bytes(GeometryFileKind::kClockTreeNodes, sizeof(ClockNodeRecord), clock_tree.nodes.size(),
+                                     clock_tree.nodes.data(), clock_tree.nodes.size() * sizeof(ClockNodeRecord)))
+        && write_file_bytes(
+            output_dir / paths.clock_tree_edges,
+            make_geometry_file_bytes(GeometryFileKind::kClockTreeEdges, sizeof(ClockEdgeRecord), clock_tree.edges.size(),
+                                     clock_tree.edges.data(), clock_tree.edges.size() * sizeof(ClockEdgeRecord)))
+        && write_file_bytes(
+            output_dir / paths.clock_tree_timing,
+            make_geometry_file_bytes(GeometryFileKind::kClockTreeTiming, sizeof(ClockTimingRecord),
+                                     clock_tree.timing.size(), clock_tree.timing.data(),
+                                     clock_tree.timing.size() * sizeof(ClockTimingRecord)))
+        && write_file_bytes(
+            output_dir / paths.clock_tree_strings,
+            make_geometry_file_bytes(GeometryFileKind::kClockTreeStrings, 1, clock_tree.strings.size(),
+                                     clock_tree.strings.data(), clock_tree.strings.size()));
+    if (!wrote_clock_tree) {
+      return result;
+    }
+  }
 
   const bool wrote_layers = write_layer_metadata_file(output_dir / paths.layers, layers);
   const bool wrote_sites = write_site_metadata_file(output_dir / paths.sites, options.sites);
@@ -678,14 +820,15 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   result.written_side_file_count +=
       static_cast<uint64_t>(wrote_layers) + static_cast<uint64_t>(wrote_sites) + static_cast<uint64_t>(wrote_masters)
       + static_cast<uint64_t>(wrote_vias) + static_cast<uint64_t>(wrote_grids) + static_cast<uint64_t>(wrote_connectivity)
-      + static_cast<uint64_t>(wrote_nets) + static_cast<uint64_t>(wrote_buses) + static_cast<uint64_t>(wrote_groups);
+      + static_cast<uint64_t>(wrote_nets) + static_cast<uint64_t>(wrote_buses) + static_cast<uint64_t>(wrote_groups)
+      + static_cast<uint64_t>(options.clock_tree.has_value()) * 5U;
   if (options.drc && wrote_drc) {
     ++result.written_side_file_count;
   }
   const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
                            && wrote_sidmap && wrote_delta && wrote_view && wrote_layers && wrote_sites && wrote_masters
                            && wrote_vias && wrote_grids && wrote_connectivity && wrote_nets && wrote_buses && wrote_groups
-                           && wrote_drc;
+                           && wrote_drc && wrote_clock_tree;
   const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, paths, options);
 
   result.ok = wrote_files && wrote_manifest;

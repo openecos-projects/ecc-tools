@@ -22,8 +22,10 @@
  */
 #include "CTSAPI.hh"
 
+#include <cmath>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -32,6 +34,8 @@
 #include "Monitor.hh"
 #include "Utility.hh"
 #include "data_manager/DataManager.hh"
+#include "design/Clock.hh"
+#include "design/Inst.hh"
 #include "evaluation/Evaluation.hh"
 #include "feature_icts.h"
 #include "instantiation/Instantiation.hh"
@@ -246,6 +250,142 @@ auto CTSAPI::outputClockTiming() -> std::vector<CTSTimingClock>
     });
   }
   return clock_timing;
+}
+
+namespace {
+
+auto clockPointKindName(FastStaClockPointKind kind) -> std::string
+{
+  switch (kind) {
+    case FastStaClockPointKind::kSource:
+      return "source";
+    case FastStaClockPointKind::kBufferInput:
+      return "buffer_input";
+    case FastStaClockPointKind::kBufferOutput:
+      return "buffer_output";
+    case FastStaClockPointKind::kSink:
+      return "sink";
+  }
+  return "sink";
+}
+
+auto clockCellRoleName(ClockPropagationKind kind) -> std::string
+{
+  switch (kind) {
+    case ClockPropagationKind::kBuffer:
+      return "buffer";
+    case ClockPropagationKind::kInverter:
+      return "inverter";
+    case ClockPropagationKind::kClockGate:
+      return "clock_gate";
+    case ClockPropagationKind::kIoPad:
+      return "io_pad";
+    case ClockPropagationKind::kClockMux:
+      return "clock_mux";
+  }
+  return "buffer";
+}
+
+auto clockTransitionName(FastStaClockGraphTransition transition) -> std::string
+{
+  return transition == FastStaClockGraphTransition::kRise ? "rise" : "fall";
+}
+
+auto clockAnalysisName(FastStaClockGraphAnalysis analysis) -> std::string
+{
+  return analysis == FastStaClockGraphAnalysis::kEarly ? "early" : "late";
+}
+
+}  // namespace
+
+auto CTSAPI::outputClockGraph() -> CTSClockGraph
+{
+  CTSClockGraph result;
+  if (!getInst()._initialized) {
+    return result;
+  }
+  for (const auto* clock : CTSDM.getDesign().get_clocks()) {
+    if (clock == nullptr) {
+      continue;
+    }
+    const auto context = CTSDM.getClockTimingContext(clock->get_clock_name(), clock->get_clock_net_name());
+    if (!context.has_value()) {
+      continue;
+    }
+    const auto graph = CTSDM.getFastSTA().collectClockGraph(*context);
+    if (!graph.has_value()) {
+      continue;
+    }
+
+    std::unordered_map<std::string, std::string> role_by_instance;
+    for (const auto& arc : clock->get_propagation_arcs()) {
+      if (arc.inst != nullptr) {
+        role_by_instance.emplace(arc.inst->get_name(), clockCellRoleName(arc.kind));
+      }
+    }
+
+    CTSClockNetwork network;
+    network.name = clock->get_clock_name();
+    network.net_name = clock->get_clock_net_name();
+    network.timing_available = graph->timing_available;
+    network.diagnostic = graph->diagnostic;
+    network.roots = graph->root_node_ids;
+    network.nodes.reserve(graph->nodes.size());
+    for (const auto& source : graph->nodes) {
+      CTSClockGraphNode node;
+      node.id = source.id;
+      node.name = source.name;
+      node.instance_name = source.instance_name;
+      node.pin_name = source.pin_name;
+      node.master = source.cell_master;
+      node.kind = clockPointKindName(source.kind);
+      node.x_dbu = source.location.x_dbu;
+      node.y_dbu = source.location.y_dbu;
+      node.position_valid = source.position_valid;
+      node.sink = source.sink;
+      node.inactive = source.inactive;
+      node.arrival_valid = source.arrival_ns.has_value();
+      node.slew_valid = source.slew_ns.has_value();
+      node.arrival_ns = source.arrival_ns.value_or(0.0);
+      node.slew_ns = source.slew_ns.value_or(0.0);
+      if (const auto role = role_by_instance.find(source.instance_name); role != role_by_instance.end()) {
+        node.cell_role = role->second;
+      } else if (source.kind == FastStaClockPointKind::kSource) {
+        node.cell_role = "source";
+      } else if (source.kind == FastStaClockPointKind::kSink) {
+        node.cell_role = "sink";
+      } else {
+        node.cell_role = "buffer";
+      }
+      node.timing_states.reserve(source.timing_states.size());
+      for (const auto& state : source.timing_states) {
+        node.timing_states.push_back(CTSClockGraphTimingState{
+            .analysis = clockAnalysisName(state.analysis),
+            .source_edge = clockTransitionName(state.source_transition),
+            .local_edge = clockTransitionName(state.local_transition),
+            .predecessor = state.predecessor_node_id,
+            .arrival_ns = state.arrival_ns,
+            .slew_ns = state.slew_ns,
+            .arrival_valid = std::isfinite(state.arrival_ns),
+            .slew_valid = std::isfinite(state.slew_ns),
+        });
+      }
+      network.nodes.push_back(std::move(node));
+    }
+    network.edges.reserve(graph->edges.size());
+    for (const auto& source : graph->edges) {
+      network.edges.push_back(CTSClockGraphEdge{
+          .from = source.from_node_id,
+          .to = source.to_node_id,
+          .cell_arc = source.cell_arc,
+          .negative_unate = source.negative_unate,
+          .net_name = source.net_name,
+          .cell_master = source.cell_master,
+      });
+    }
+    result.clocks.push_back(std::move(network));
+  }
+  return result;
 }
 
 }  // namespace icts

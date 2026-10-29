@@ -17,7 +17,10 @@
 #pragma once
 
 #include <filesystem>
+#include <map>
 #include <optional>
+
+#include <pybind11/pybind11.h>
 
 #include <tcl_util.h>
 
@@ -31,5 +34,7 @@ bool extractLib();
 bool destroySTA();
 bool isModelReady();
 bool isTimingReady();
+
+pybind11::dict staClockGraph();
 
 }  // namespace python_interface

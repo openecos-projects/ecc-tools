@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 
+#include "ClockTreeData.hpp"
 #include "TimingData.hpp"
 
 namespace ista {
@@ -37,6 +38,9 @@ class STAInterface
   // Export the structural model after prepareTimingModel() without running
   // numeric clock/data/required propagation.
   TimingData exportTimingModel();
+  // Export the clock network and source-rise late physical timing from the
+  // current completed timing run. The returned graph owns all strings.
+  ClockTreeGraphData exportClockTreeGraph();
 
  private:
   static STAInterface* _sta_interface_instance;

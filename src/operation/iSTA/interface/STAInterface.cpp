@@ -28,6 +28,7 @@
 #include "ReadLiberty.hpp"
 #include "ReadNetwork.hpp"
 #include "ReadParasitics.hpp"
+#include "ClockTreeGraphExporter.hpp"
 #include "SdcWriter.hpp"
 #include "TimingDataExporter.hpp"
 #include "MinTimingDataExporter.hpp"
@@ -355,6 +356,14 @@ TimingData STAInterface::exportTimingModel()
               "; phase ", monitor.getStatsInfo());
   snapshot.diagnostics.push_back("preparation_mode=model_only; numeric timing values are not reference data");
   return snapshot;
+}
+
+ClockTreeGraphData STAInterface::exportClockTreeGraph()
+{
+  if (!isTimingReady()) {
+    throw std::runtime_error("clock-tree graph export requires initialized and executed current-main STA");
+  }
+  return ista::exportClockTreeGraph(STADM.getDatabase());
 }
 
 void STAInterface::readDesign(std::map<std::string, std::any>& config_map)
