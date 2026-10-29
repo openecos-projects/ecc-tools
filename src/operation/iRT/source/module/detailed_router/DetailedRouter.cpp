@@ -3506,7 +3506,7 @@ void DetailedRouter::patchFinalMinArea(DRModel& dr_model)
       if (!dr_box.get_dr_task_list().empty()) {
         buildFixedRect(dr_box);
         buildDRBoxGraph(dr_box);
-        patchFinalMinArea(dr_box);
+        patchFinalMinArea(dr_box, min_area_violation_list);
       }
       box_result_list[box_pos] = std::move(dr_box.get_curr_result());
       freeDRBox(dr_box);
@@ -3559,14 +3559,37 @@ std::vector<std::vector<size_t>> DetailedRouter::buildPatchBoxWaveList(const std
   return patch_box_wave_list;
 }
 
-void DetailedRouter::patchFinalMinArea(DRBox& dr_box)
+void DetailedRouter::patchFinalMinArea(DRBox& dr_box, const std::vector<Violation>& min_area_violation_list)
 {
-  std::vector<LayerRect> check_region_list;
-  for (const RoutingLayer& routing_layer : RTDM.getDatabase().get_routing_layer_list()) {
-    check_region_list.emplace_back(dr_box.get_box_rect().get_real_rect(), routing_layer.get_layer_idx());
-  }
+  int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
   for (int32_t task_idx : dr_box.get_task_order_list()) {
     DRTask* dr_task = &dr_box.get_dr_task_list()[task_idx];
+    std::map<int32_t, PlanarRect> layer_region_map;
+    for (const Violation& violation : min_area_violation_list) {
+      if (!isBoxMinAreaViolation(dr_box, violation)) {
+        continue;
+      }
+      if (!RTUTIL.exist(violation.get_violation_net_set(), dr_task->get_net_idx())) {
+        continue;
+      }
+      const EXTLayerRect& violation_shape = violation.get_violation_shape();
+      PlanarRect region = RTUTIL.getEnlargedRect(violation_shape.get_real_rect(), detection_distance);
+      auto [iter, inserted] = layer_region_map.emplace(violation_shape.get_layer_idx(), region);
+      if (inserted) {
+        continue;
+      }
+      PlanarRect& bbox = iter->second;
+      bbox.set_ll(std::min(bbox.get_ll_x(), region.get_ll_x()), std::min(bbox.get_ll_y(), region.get_ll_y()));
+      bbox.set_ur(std::max(bbox.get_ur_x(), region.get_ur_x()), std::max(bbox.get_ur_y(), region.get_ur_y()));
+    }
+    if (layer_region_map.empty()) {
+      RTLOG.error(Loc::current(), "The final minimum-area patch task has no matching violation, net_idx: ", dr_task->get_net_idx());
+    }
+    std::vector<LayerRect> check_region_list;
+    check_region_list.reserve(layer_region_map.size());
+    for (auto& [layer_idx, bbox] : layer_region_map) {
+      check_region_list.emplace_back(bbox, layer_idx);
+    }
     // Recheck the actual box geometry, including model patches and earlier tasks' results.
     initSinglePatchTask(dr_box, dr_task, check_region_list);
     patchDRTask(dr_box);

@@ -172,7 +172,7 @@ class DetailedRouter
   void updateRepairDRModel(DRModel& dr_model, DRBoxResult& box_result);
   void patchFinalMinArea(DRModel& dr_model);
   std::vector<std::vector<size_t>> buildPatchBoxWaveList(const std::vector<PlanarRect>& patch_box_rect_list);
-  void patchFinalMinArea(DRBox& dr_box);
+  void patchFinalMinArea(DRBox& dr_box, const std::vector<Violation>& min_area_violation_list);
   void buildFinalPatchBox(DRModel& dr_model, DRBox& dr_box, const std::vector<Violation>& violation_list);
   void uploadDRModel(DRModel& dr_model);
 
