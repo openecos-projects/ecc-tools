@@ -77,7 +77,7 @@ void testGeneratedDefaultSdc()
       set_timing_derate -late 1.10 -clock -delay_corner [all_delay_corners]
       set_timing_derate -late 1.10 -data -delay_corner [all_delay_corners]
       set corners [all_delay_corners]
-      if {[llength $corners] != 0} {error "syntax-only query invented delay corners"}
+      if {$corners ne "default"} {error "default delay corner missing"}
       set_timing_derate -late 1.10 -data -delay_corner $corners
     )TCL");
 
@@ -124,7 +124,7 @@ void testCommandValidation()
         "set_load bad [get_ports out]"}) {
     require(Tcl_EvalEx(interp, script.c_str(), -1, TCL_EVAL_GLOBAL) == TCL_ERROR, "invalid syntax accepted: " + script);
   }
-  eval("if {[llength [all_delay_corners]] != 0} {error {empty result was not restored after an error}}");
+  eval(R"TCL(if {[all_delay_corners] ne "default"} {error {default corner was not restored after an error}})TCL");
   eval("set_input_transition 0.3 [get_ports in]");
   require(
       PWDM.getDatabase().get_timing_constraint().get_port_constraint_map()["in"].get_input_transition(
