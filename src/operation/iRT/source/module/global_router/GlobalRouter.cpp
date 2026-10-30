@@ -154,8 +154,13 @@ void GlobalRouter::analyzeSupply()
 
         int32_t supply_num = static_cast<int32_t>(wire_list.size());
         int32_t accessible_num = supply_num - blocked_wire_num;
-        // Reserve one accessible track; it and all inaccessible tracks become fixed demand.
+        // Reserve one accessible track for DR 
         int32_t usable_num = std::max(0, accessible_num - 1);
+        // Reserve more for high pin density
+        int32_t pa_layer = 1;
+        if (layer_idx == pa_layer && usable_num < supply_num * 0.4) {
+          usable_num = std::max(0, usable_num - 1);
+        }
         grid_graph_.setSupply(GRWireEdgeId{x, y, layer_idx}, supply_num, usable_num);
       }
     }
