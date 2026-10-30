@@ -304,21 +304,18 @@ void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
 
   auto [begin_scale, end_scale] = getEdgeScaleRange(ta_net, edge, is_horizontal, true);
 
-  std::vector<std::pair<int32_t, PlanarRect>> fixed_rect_list;
+  std::vector<std::tuple<int32_t, PlanarRect, PlanarRect>> fixed_rect_list;
   {
     EXTLayerRect query_rect;
     query_rect.set_real_rect(edge.guide_rect);
     query_rect.set_layer_idx(edge.layer_idx);
     std::map<int32_t, std::set<EXTLayerRect*>> fixed_rect_map = RTDM.getNetFixedRectMap(true, query_rect);
     for (auto& [net_idx, rect_set] : fixed_rect_map) {
-      if (net_idx == ta_net.net_idx) {
-        continue;
-      }
       for (EXTLayerRect* fixed_rect : rect_set) {
         PlanarRect fixed_shape = fixed_rect->get_real_rect();
         int32_t prl_spacing = routing_layer.getPRLSpacing(fixed_shape);
         PlanarRect enlarged_fixed_shape = RTUTIL.getEnlargedRect(fixed_shape, prl_spacing);
-        fixed_rect_list.emplace_back(net_idx, enlarged_fixed_shape);
+        fixed_rect_list.emplace_back(net_idx, fixed_shape, enlarged_fixed_shape);
       }
     }
   }
@@ -346,12 +343,19 @@ void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
       check_rect.set_ll(track_coord - half_width, edge.guide_rect.get_ll_y());
       check_rect.set_ur(track_coord + half_width, edge.guide_rect.get_ur_y());
     }
-    for (const auto& [fixed_net_idx, fixed_rect] : fixed_rect_list) {
-      if (!RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
+    for (const auto& [fixed_net_idx, fixed_rect, enlarged_fixed_rect] : fixed_rect_list) {
+      if (fixed_net_idx == ta_net.net_idx) {
+        if (!RTUTIL.isOpenOverlap(check_rect, enlarged_fixed_rect)) {
+          continue;
+        }
+        if (RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
+          continue;
+        }
+      } else if (!RTUTIL.isOpenOverlap(check_rect, enlarged_fixed_rect)) {
         continue;
       }
       // Use blocked track length, not overlap area, so fixed shapes and wires share one cost model.
-      PlanarRect overlap_rect = RTUTIL.getOverlap(check_rect, fixed_rect);
+      PlanarRect overlap_rect = RTUTIL.getOverlap(check_rect, enlarged_fixed_rect);
       int32_t blocked_length = is_horizontal ? overlap_rect.getXSpan() : overlap_rect.getYSpan();
       if (fixed_net_idx < 0) {
         // net = -1 is a hard obstacle, not a soft foreign-net shape.
