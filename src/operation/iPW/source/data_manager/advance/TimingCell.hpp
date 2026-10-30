@@ -31,6 +31,7 @@ class TimingCell
   TimingCell() = default;
   ~TimingCell() = default;
   // getter
+  double get_area() const { return _area; }
   std::vector<TimingSequential>& get_sequentials() { return _sequentials; }
   std::string& get_library_name() { return _library_name; }
   double get_nom_voltage() const { return _nom_voltage; }
@@ -57,6 +58,7 @@ class TimingCell
   double get_output_threshold_pct_fall() const { return _output_threshold_pct_fall; }
   double get_slew_derate_from_library() const { return _slew_derate_from_library; }
   // setter
+  void set_area(double area) { _area = area; }
   void set_library_name(const std::string& library_name) { _library_name = library_name; }
   void set_nom_voltage(const double nom_voltage) { _nom_voltage = nom_voltage; }
   void set_cell_leakage_power(const double cell_leakage_power) { _cell_leakage_power = cell_leakage_power; }
@@ -138,6 +140,7 @@ class TimingCell
   }
 
  private:
+  double _area = 0.0;
   std::vector<TimingSequential> _sequentials;
   std::string _library_name;
   double _nom_voltage = 0.0;

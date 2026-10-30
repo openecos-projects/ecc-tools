@@ -35,4 +35,19 @@ class TclSetLoad : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclSetInputDelay : public SdcTclCmd
+{
+ public:
+  TclSetInputDelay(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclSetOutputDelay : public SdcTclCmd
+{
+ public:
+  TclSetOutputDelay(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 }  // namespace ipw::sdc
