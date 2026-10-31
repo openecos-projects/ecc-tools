@@ -114,4 +114,26 @@ class TclAllOutputs : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclGetLibs : public SdcTclCmd
+{
+ public:
+  TclGetLibs(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclGetLibCells : public SdcTclCmd
+{
+ public:
+  TclGetLibCells(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclGetLibPins : public SdcTclCmd
+{
+ public:
+  TclGetLibPins(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 }  // namespace ipw::sdc

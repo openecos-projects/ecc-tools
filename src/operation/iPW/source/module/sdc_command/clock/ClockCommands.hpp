@@ -43,4 +43,47 @@ class TclSetPropagatedClock : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclSetClockLatency : public SdcTclCmd
+{
+ public:
+  TclSetClockLatency(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclRemoveClockLatency : public SdcTclCmd
+{
+ public:
+  TclRemoveClockLatency(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclSetClockUncertainty : public SdcTclCmd
+{
+ public:
+  TclSetClockUncertainty(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclRemoveClockUncertainty : public SdcTclCmd
+{
+ public:
+  TclRemoveClockUncertainty(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclSetClockGroups : public SdcTclCmd
+{
+ public:
+  TclSetClockGroups(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclRemovePropagatedClock : public SdcTclCmd
+{
+ public:
+  TclRemovePropagatedClock(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 }  // namespace ipw::sdc

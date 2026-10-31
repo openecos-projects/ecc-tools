@@ -15,6 +15,9 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "SdcCommand.hpp"
+#include "SetUnits.hpp"
+#include "environment/EnvironmentCommands.hpp"
+#include "writer/SdcWriter.hpp"
 #include "object/GetFan.hpp"
 
 #ifndef _WIN32
@@ -31,6 +34,8 @@
 #include "Logger.hpp"
 #include "PWHeader.hpp"
 #include "clock/ClockCommands.hpp"
+#include "design_rule/DesignRuleCommands.hpp"
+#include "exception/PathExceptionCommand.hpp"
 #include "delay/DelayCommands.hpp"
 #include "frontend/SdcTclCmd.hpp"
 #include "logic/LogicCommands.hpp"
@@ -466,29 +471,6 @@ int getDesigns(ClientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
   return TCL_OK;
 }
 
-int getLibraries(ClientData, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
-{
-  if (objc > 2) {
-    Tcl_SetObjResult(interp, Tcl_NewStringObj("get_libs accepts at most one pattern", -1));
-    return TCL_ERROR;
-  }
-  const char* pattern = objc == 2 ? Tcl_GetString(objv[1]) : "*";
-  // cell_map 只装设计用到的 cell（惰性 wrap），库名从 wrap 阶段记录的列表取（已排序去重）。
-  std::vector<std::string>& library_name_list = PWDM.getDatabase().get_timing_library().get_library_name_list();
-  Tcl_Obj* result = Tcl_NewListObj(0, nullptr);
-  for (const std::string& library_name : library_name_list) {
-    if (Tcl_StringMatch(library_name.c_str(), pattern) != 0) {
-      Tcl_ListObjAppendElement(
-          interp,
-          result,
-          Tcl_NewStringObj(library_name.c_str(), static_cast<int>(library_name.size()))
-      );
-    }
-  }
-  Tcl_SetObjResult(interp, result);
-  return TCL_OK;
-}
-
 int getEmptyObjectProperty(ClientData, Tcl_Interp* interp, int, Tcl_Obj* const[])
 {
   Tcl_ResetResult(interp);
@@ -512,6 +494,7 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclGetObjectName>(interpreter, "get_name");
   registerCommand<TclGetFan>(interpreter, "get_fanin");
   registerCommand<TclGetFan>(interpreter, "get_fanout");
+  registerCommand<TclGetObjectName>(interpreter, "get_full_name");
   registerCommand<TclGetClocks>(interpreter, "get_clock");
   registerCommand<TclGetClocks>(interpreter, "get_clocks");
   registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
@@ -523,8 +506,12 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclGetNets>(interpreter, "get_nets");
   registerCommand<TclGetPins>(interpreter, "get_pins");
   interpreter.createCmd("get_designs", &getDesigns);
-  interpreter.createCmd("get_lib", &getLibraries);
-  interpreter.createCmd("get_libs", &getLibraries);
+  registerCommand<TclGetLibs>(interpreter, "get_lib");
+  registerCommand<TclGetLibs>(interpreter, "get_libs");
+  registerCommand<TclGetLibCells>(interpreter, "get_lib_cell");
+  registerCommand<TclGetLibCells>(interpreter, "get_lib_cells");
+  registerCommand<TclGetLibPins>(interpreter, "get_lib_pin");
+  registerCommand<TclGetLibPins>(interpreter, "get_lib_pins");
   interpreter.createCmd("get_property", &getEmptyObjectProperty);
 }
 
@@ -552,25 +539,11 @@ void registerIgnoredTimingConstraintCommands(SdcCommand& interpreter)
        {"group_path",
         "set_all_input_output_delays",
         "set_clock_gating_check",
-        "set_clock_groups",
-        "set_clock_latency",
-        "set_clock_uncertainty",
-        "set_false_path",
-        "set_input_delay",
         "set_max_area",
-        "set_max_capacitance",
-        "set_max_delay",
-        "set_max_fanout",
-        "set_max_transition",
-        "set_min_delay",
-        "set_multicycle_path",
+
         "set_operating_conditions",
-        "set_output_delay",
-        "set_timing_derate",
-        "set_units",
-        "set_wire_load_mode",
-        "reset_path",
-        "unset_path_exceptions"}) {
+
+        "set_wire_load_mode"}) {
     interpreter.createCmd(command_name, &ignoreTimingConstraint);
   }
 }
@@ -585,6 +558,29 @@ void registerSdcCommands(SdcCommand& interpreter)
   registerSignalConstraintCommands(interpreter);
   registerCommand<TclSetCaseAnalysis>(interpreter, "set_case_analysis");
   registerIgnoredTimingConstraintCommands(interpreter);
+  registerCommand<TclSetUnits>(interpreter, "set_units");
+  registerCommand<TclSetElectricalLimit>(interpreter, "set_max_transition");
+  registerCommand<TclSetElectricalLimit>(interpreter, "set_max_capacitance");
+  registerCommand<TclSetTimingDerate>(interpreter, "set_timing_derate");
+  interpreter.createCmd("write_sdc", &writeSdcCommand);
+  registerCommand<TclSetClockLatency>(interpreter, "set_clock_latency");
+  registerCommand<TclRemoveClockLatency>(interpreter, "remove_clock_latency");
+  registerCommand<TclRemoveClockLatency>(interpreter, "unset_clock_latency");
+  registerCommand<TclSetClockUncertainty>(interpreter, "set_clock_uncertainty");
+  registerCommand<TclRemoveClockUncertainty>(interpreter, "remove_clock_uncertainty");
+  registerCommand<TclRemoveClockUncertainty>(interpreter, "unset_clock_uncertainty");
+  registerCommand<TclSetClockGroups>(interpreter, "set_clock_groups");
+  registerCommand<TclRemovePropagatedClock>(interpreter, "remove_propagated_clock");
+  registerCommand<TclRemovePropagatedClock>(interpreter, "unset_propagated_clock");
+  registerCommand<TclSetInputDelay>(interpreter, "set_input_delay");
+  registerCommand<TclSetOutputDelay>(interpreter, "set_output_delay");
+  registerCommand<TclSetMaxFanout>(interpreter, "set_max_fanout");
+  registerCommand<TclSetFalsePath>(interpreter, "set_false_path");
+  registerCommand<TclSetMaxDelay>(interpreter, "set_max_delay");
+  registerCommand<TclSetMinDelay>(interpreter, "set_min_delay");
+  registerCommand<TclSetMulticyclePath>(interpreter, "set_multicycle_path");
+  registerCommand<TclResetPath>(interpreter, "reset_path");
+  registerCommand<TclResetPath>(interpreter, "unset_path_exceptions");
 }
 
 }  // namespace sdc
@@ -729,6 +725,9 @@ unsigned TclCreateClock::exec()
   }
   TimingClock timing_clock;
   timing_clock.set_period(period);
+  timing_clock.set_waveform(waveform);
+  if (getOptionOrArg("-comment")->is_set_val())
+    timing_clock.set_comment(getOptionOrArg("-comment")->getStringVal());
   timing_clock.set_rise_edge(rise_edge);
   timing_clock.set_fall_edge(fall_edge);
   timing_clock.set_source_list(unique_source_list);
@@ -936,6 +935,27 @@ unsigned TclCreateGeneratedClock::exec()
       );
     }
   }
+  GeneratedClockDefinition definition;
+  definition.master_clock = master_name;
+  definition.master_source = sources.front();
+  definition.targets = targets;
+  if (getOptionOrArg("-divide_by")->is_set_val())
+    definition.divide_by = getOptionOrArg("-divide_by")->getDoubleVal();
+  if (getOptionOrArg("-multiply_by")->is_set_val())
+    definition.multiply_by = getOptionOrArg("-multiply_by")->getDoubleVal();
+  if (getOptionOrArg("-duty_cycle")->is_set_val())
+    definition.duty_cycle = getOptionOrArg("-duty_cycle")->getDoubleVal();
+  if (getOptionOrArg("-edges")->is_set_val())
+    definition.edges = getOptionOrArg("-edges")->getDoubleList();
+  if (getOptionOrArg("-edge_shift")->is_set_val())
+    definition.edge_shifts = getOptionOrArg("-edge_shift")->getDoubleList();
+  definition.invert = getOptionOrArg("-invert")->is_set_val();
+  definition.preinvert = getOptionOrArg("-preinvert")->is_set_val();
+  definition.combinational = getOptionOrArg("-combinational")->is_set_val();
+  generated.set_generated_clock_definition(std::move(definition));
+  generated.set_waveform({rise, fall});
+  if (getOptionOrArg("-comment")->is_set_val())
+    generated.set_comment(getOptionOrArg("-comment")->getStringVal());
   clocks[name] = std::move(generated);
   return 1;
 }
@@ -987,79 +1007,6 @@ unsigned TclSetClockTransition::exec()
         clock.get_transition_map()[analysis_type][TransType::kFall] = transition;
       }
     }
-  }
-  return 1;
-}
-
-}  // namespace ipw::sdc
-
-namespace ipw::sdc {
-
-namespace {
-
-std::set<std::string> findPropagatedClocks(Database& database, const std::vector<std::string>& objects)
-{
-  std::set<std::string> result;
-  for (const std::string& object : objects) {
-    const std::vector<std::string> direct_clocks = findObjects(database, {object}, QueryObjectType::kClock);
-    if (!direct_clocks.empty()) {
-      result.insert(direct_clocks.begin(), direct_clocks.end());
-      continue;
-    }
-
-    const std::vector<std::string> sources = findClockSources(database, {object});
-    for (const std::string& source : sources) {
-      for (auto& [clock_name, clock] : database.get_timing_constraint().get_clock_map()) {
-        if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), source)
-            != clock.get_source_list().end()) {
-          result.insert(clock_name);
-        }
-      }
-    }
-  }
-  if (result.empty()) {
-    throw std::invalid_argument("set_propagated_clock resolved to empty clock collection");
-  }
-  return result;
-}
-
-}  // namespace
-
-TclSetPropagatedClock::TclSetPropagatedClock(const char* cmd_name) : SdcTclCmd(cmd_name)
-{
-  addOption(new ecc::TclStringListOption("clocks", 1));
-}
-
-unsigned TclSetPropagatedClock::exec()
-{
-  ecc::TclOption* clock_option = getOptionOrArg("clocks");
-  if (!clock_option->is_set_val()) {
-    setTclError("set_propagated_clock requires a clock collection");
-    return 0;
-  }
-  const std::vector<std::string> clock_name_list = clock_option->getStringList();
-  if (clock_name_list.empty()) {
-    setTclError("set_propagated_clock requires at least one clock");
-    return 0;
-  }
-
-  Database& database = PWDM.getDatabase();
-  auto& clock_map = database.get_timing_constraint().get_clock_map();
-  std::set<std::string> resolved_clocks;
-  try {
-    resolved_clocks = findPropagatedClocks(database, clock_name_list);
-  } catch (const std::exception& error) {
-    setTclError(error.what());
-    return 0;
-  }
-  for (const std::string& clock_name : resolved_clocks) {
-    if (clock_map.at(clock_name).get_source_list().empty()) {
-      setTclError("set_propagated_clock cannot be applied to virtual clock: " + clock_name);
-      return 0;
-    }
-  }
-  for (const std::string& clock_name : resolved_clocks) {
-    clock_map.at(clock_name).set_is_propagated(true);
   }
   return 1;
 }
@@ -1596,6 +1543,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 
 void SdcTclCmd::setOptionValue(ecc::TclOption* option, const char* value)
 {
+  _option_value_list.emplace_back(option->get_option_name(), value);
   if (option->isDoubleOption()) {
     double number = 0.0;
     if (Tcl_GetDouble(nullptr, value, &number) != TCL_OK || !std::isfinite(number)) {
@@ -1625,6 +1573,19 @@ void SdcTclCmd::warn(const std::string& message) const
 
 void SdcTclCmd::setResult(std::vector<std::string> result, SdcObjectType type)
 {
+  if (type == SdcObjectType::kNone) {
+    const std::string_view name(get_cmd_name());
+    if (name == "get_clock" || name == "get_clocks" || name == "all_clocks" || name == "get_generated_clocks")
+      type = SdcObjectType::kClock;
+    else if (name == "get_pins")
+      type = SdcObjectType::kPin;
+    else if (name == "get_cell" || name == "get_cells")
+      type = SdcObjectType::kCell;
+    else if (name == "all_inputs" || name == "all_outputs")
+      type = SdcObjectType::kPort;
+    else if (name == "current_design")
+      type = SdcObjectType::kDesign;
+  }
   _list_result = std::move(result);
   _list_result_type = type;
   _has_list_result = true;
@@ -1655,6 +1616,7 @@ void SdcTclCmd::resetExecutionState()
   _list_result.clear();
   _list_result_type = SdcObjectType::kNone;
   _option_object_map.clear();
+  _option_value_list.clear();
   _has_list_result = false;
 }
 
@@ -1876,10 +1838,7 @@ TclAllDelayCorners::TclAllDelayCorners(const char* cmd_name) : SdcTclCmd(cmd_nam
 
 unsigned TclAllDelayCorners::exec()
 {
-  // Tcl evaluates this query even when its enclosing set_timing_derate command is ignored.
-  // iPW has no named delay-corner model; do not invent corners or apply derates here.
-  warn("all_delay_corners is accepted for SDC syntax compatibility only; returning an empty collection");
-  setResult(std::vector<std::string>());
+  setResult({"default"}, SdcObjectType::kDelayCorner);
   return 1;
 }
 
@@ -2313,6 +2272,46 @@ std::string escapeGlobBrackets(const std::string& pattern)
 std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectType type)
 {
   std::vector<ObjectMatch> matches;
+  TimingLibrary& library = database.get_timing_library();
+  if (type == QueryObjectType::kLibrary || type == QueryObjectType::kAny) {
+    std::set<std::string> names(library.get_library_name_list().begin(), library.get_library_name_list().end());
+    for (auto& [cell_name, cell] : library.get_cell_map())
+      names.insert(cell.get_library_name());
+    for (const std::string& name : names)
+      addObjectMatch(matches, name, name, "library");
+  }
+  if (type == QueryObjectType::kLibCell || type == QueryObjectType::kAny) {
+    for (auto& [cell_name, cell] : library.get_cell_map()) {
+      const std::string full_name = cell.get_library_name() + "/" + cell_name;
+      addObjectMatch(
+          matches,
+          full_name,
+          full_name,
+          "lib_cell",
+          {{"area", std::to_string(cell.get_area())}, {"is_sequential", cell.get_is_sequential() ? "true" : "false"}}
+      );
+    }
+  }
+  if (type == QueryObjectType::kLibPin || type == QueryObjectType::kAny) {
+    for (auto& [cell_name, cell] : library.get_cell_map()) {
+      for (auto& [pin_name, pin] : cell.get_port_map()) {
+        const std::string full_name = cell.get_library_name() + "/" + cell_name + "/" + pin_name;
+        addObjectMatch(
+            matches,
+            full_name,
+            full_name,
+            "lib_pin",
+            {{"direction",
+              pin.get_is_input()    ? "in"
+              : pin.get_is_output() ? "out"
+                                    : "internal"},
+             {"is_clock_pin", pin.get_is_clock() ? "true" : "false"}}
+        );
+        matches.back().names.push_back(cell_name + "/" + pin_name);
+      }
+    }
+  }
+
   if (type == QueryObjectType::kClock || type == QueryObjectType::kAny) {
     for (auto& [name, clock] : database.get_timing_constraint().get_clock_map()) {
       addObjectMatch(
@@ -2377,22 +2376,99 @@ QueryObjectType getObjectType(Database& database, const std::string& name)
     return QueryObjectType::kCell;
   if (database.get_net_map().contains(name))
     return QueryObjectType::kNet;
+  for (auto& [cell_name, cell] : database.get_timing_library().get_cell_map()) {
+    const std::string lib_cell = cell.get_library_name() + "/" + cell_name;
+    if (name == lib_cell)
+      return QueryObjectType::kLibCell;
+    if (name.rfind(lib_cell + "/", 0) == 0)
+      return QueryObjectType::kLibPin;
+  }
+  if (std::find(
+          database.get_timing_library().get_library_name_list().begin(),
+          database.get_timing_library().get_library_name_list().end(),
+          name
+      )
+      != database.get_timing_library().get_library_name_list().end())
+    return QueryObjectType::kLibrary;
+
   return QueryObjectType::kAny;
 }
 
 std::set<std::string> collectRelatedObjects(
     Database& database,
-    const std::vector<std::string>& objects,
+    const std::vector<Tcl_Obj*>& objects,
     QueryObjectType target
 )
 {
   std::set<std::string> result;
-  for (const std::string& object_pattern : objects) {
-    const std::vector<std::string> object_names = findObjects(database, {object_pattern}, QueryObjectType::kAny);
+  for (auto* object : objects) {
+    const std::string object_pattern = Tcl_GetString(object);
+    const auto tag = SdcObject::getType(object);
+    ObjectQueryOptions lookup;
+    lookup.exact = tag != SdcObjectType::kNone;
+    QueryObjectType source_type = QueryObjectType::kAny;
+    switch (tag) {
+      case SdcObjectType::kPort:
+        source_type = QueryObjectType::kPort;
+        break;
+      case SdcObjectType::kPin:
+        source_type = QueryObjectType::kPin;
+        break;
+      case SdcObjectType::kNet:
+        source_type = QueryObjectType::kNet;
+        break;
+      case SdcObjectType::kCell:
+        source_type = QueryObjectType::kCell;
+        break;
+      case SdcObjectType::kClock:
+        source_type = QueryObjectType::kClock;
+        break;
+      case SdcObjectType::kLibrary:
+        source_type = QueryObjectType::kLibrary;
+        break;
+      case SdcObjectType::kLibCell:
+        source_type = QueryObjectType::kLibCell;
+        break;
+      case SdcObjectType::kLibPin:
+        source_type = QueryObjectType::kLibPin;
+        break;
+      default:
+        break;
+    }
+    const std::vector<std::string> object_names = findObjects(database, {object_pattern}, source_type, lookup);
     for (const std::string& object_name : object_names) {
-      const QueryObjectType source = getObjectType(database, object_name);
+      const QueryObjectType source
+          = source_type == QueryObjectType::kAny ? getObjectType(database, object_name) : source_type;
       if (source == target)
         result.insert(object_name);
+      if (source == QueryObjectType::kCell && target == QueryObjectType::kLibCell) {
+        Instance& instance = database.get_instance_map().at(object_name);
+        auto cell = database.get_timing_library().get_cell_map().find(instance.get_cell_name());
+        if (cell != database.get_timing_library().get_cell_map().end())
+          result.insert(cell->second.get_library_name() + "/" + cell->first);
+      }
+      if (source == QueryObjectType::kPin && target == QueryObjectType::kLibPin) {
+        Pin& pin = database.get_pin_map().at(object_name);
+        auto instance = database.get_instance_map().find(pin.get_instance_name());
+        if (instance != database.get_instance_map().end()) {
+          auto cell = database.get_timing_library().get_cell_map().find(instance->second.get_cell_name());
+          if (cell != database.get_timing_library().get_cell_map().end())
+            result.insert(cell->second.get_library_name() + "/" + cell->first + "/" + pin.get_pin_name());
+        }
+      }
+      if (source == QueryObjectType::kLibPin && target == QueryObjectType::kLibCell)
+        result.insert(object_name.substr(0, object_name.rfind('/')));
+      if (source == QueryObjectType::kLibCell && target == QueryObjectType::kLibrary)
+        result.insert(object_name.substr(0, object_name.find('/')));
+      if (source == QueryObjectType::kLibCell && target == QueryObjectType::kLibPin) {
+        const std::size_t slash = object_name.find('/');
+        const std::string cell_name = object_name.substr(slash + 1);
+        auto cell = database.get_timing_library().get_cell_map().find(cell_name);
+        if (cell != database.get_timing_library().get_cell_map().end())
+          for (auto& [pin_name, pin] : cell->second.get_port_map())
+            result.insert(object_name + "/" + pin_name);
+      }
+
       if (source == QueryObjectType::kPin || source == QueryObjectType::kPort) {
         Pin& pin = database.get_pin_map().at(object_name);
         if (target == QueryObjectType::kCell && !pin.get_instance_name().empty())
@@ -2499,6 +2575,23 @@ std::vector<std::string> findObjects(
     const ObjectQueryOptions& options
 )
 {
+  if (type == QueryObjectType::kLibCell || type == QueryObjectType::kLibPin) {
+    auto& library = database.get_timing_library();
+    // Enumerating library objects must include cells not instantiated in the design.
+    // Normal design queries retain the existing lazy-loading behavior.
+    for (const auto& name : library.get_cell_name_list())
+      library.findOrWrapCell(name);
+    for (const auto& pattern : patterns) {
+      auto cell = pattern;
+      if (type == QueryObjectType::kLibPin)
+        cell = cell.substr(0, cell.rfind('/'));
+      if (const auto slash = cell.find('/'); slash != std::string::npos)
+        cell = cell.substr(slash + 1);
+      if (cell.find_first_of("*?[]\\") == std::string::npos)
+        library.findOrWrapCell(cell);
+    }
+  }
+
   if (options.regexp && options.exact)
     throw std::invalid_argument("-regexp and -exact are mutually exclusive");
   const std::set<std::string> of_objects = options.of_objects.empty()
@@ -2508,7 +2601,7 @@ std::vector<std::string> findObjects(
   std::set<std::string> found;
 
   auto isEligible = [&](const ObjectMatch& candidate) {
-    return (options.of_objects.empty() || of_objects.contains(candidate.object_name))
+    return (!options.has_of_objects || of_objects.contains(candidate.object_name))
            && matchesFilter(options.filter, candidate.attributes, options.regexp, options.nocase);
   };
   auto matches = [&](const ObjectMatch& candidate, const std::string& pattern, bool escape_brackets) {
@@ -2576,6 +2669,49 @@ std::set<std::string> findClocks(Database& database, const std::vector<std::stri
     throw std::invalid_argument("a non-empty clock collection is required");
   }
   return clocks;
+}
+
+std::set<std::string> findClocksFromObjects(Database& database, const std::vector<std::string>& objects)
+{
+  std::set<std::string> result;
+  for (const std::string& object : objects) {
+    const std::vector<std::string> direct_clocks = findObjects(database, {object}, QueryObjectType::kClock);
+    if (!direct_clocks.empty()) {
+      result.insert(direct_clocks.begin(), direct_clocks.end());
+      continue;
+    }
+    for (const std::string& source : findClockSources(database, {object})) {
+      for (auto& [clock_name, clock] : database.get_timing_constraint().get_clock_map()) {
+        if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), source)
+            != clock.get_source_list().end()) {
+          result.insert(clock_name);
+        }
+      }
+    }
+  }
+  if (result.empty()) {
+    throw std::invalid_argument("objects resolved to an empty clock collection");
+  }
+  return result;
+}
+
+std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects)
+{
+  std::set<std::string> result;
+  for (const std::string& object : objects) {
+    if (database.get_pin_map().contains(object) || database.get_instance_map().contains(object)
+        || database.get_net_map().contains(object)
+        || database.get_timing_constraint().get_clock_map().contains(object)) {
+      result.insert(object);
+      continue;
+    }
+    const std::vector<std::string> matches = findObjects(database, {object}, QueryObjectType::kAny);
+    if (matches.empty()) {
+      throw std::invalid_argument("exception object not found: " + object);
+    }
+    result.insert(matches.begin(), matches.end());
+  }
+  return result;
 }
 
 std::vector<std::string> getPortPinNames(Database& database, const std::vector<std::string>& object_list)
@@ -2694,7 +2830,8 @@ ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command)
   if (ecc::TclOption* filter = command.getOptionOrArg("-filter"); filter != nullptr && filter->is_set_val())
     options.filter = filter->getStringVal();
   if (ecc::TclOption* objects = command.getOptionOrArg("-of_objects"); objects != nullptr && objects->is_set_val()) {
-    options.of_objects = objects->getStringList();
+    options.has_of_objects = true;
+    options.of_objects = command.getOptionObjects("-of_objects");
   }
   return options;
 }
@@ -2705,9 +2842,9 @@ std::optional<std::string> getObjectQueryError(const ObjectQueryOptions& options
     return "-regexp and -exact are mutually exclusive";
   if (options.nocase && !options.regexp)
     return "-nocase requires -regexp";
-  if (has_patterns && !options.of_objects.empty())
+  if (has_patterns && options.has_of_objects)
     return "patterns and -of_objects are mutually exclusive";
-  if (options.hierarchical && !options.of_objects.empty())
+  if (options.hierarchical && options.has_of_objects)
     return "-hierarchical and -of_objects are mutually exclusive";
   return std::nullopt;
 }

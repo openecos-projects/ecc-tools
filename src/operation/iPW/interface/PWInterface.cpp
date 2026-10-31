@@ -535,9 +535,16 @@ void PWInterface::wrapTimingLibrary()
   library_name_list.erase(std::unique(library_name_list.begin(), library_name_list.end()), library_name_list.end());
   TimingLibrary& timing_library = PWDM.getDatabase().get_timing_library();
   timing_library.set_library_name_list(library_name_list);
-  timing_library.set_cell_wrap_resolver([this](const std::string& cell_name) {
-    return wrapTimingCellByName(cell_name);
-  });
+  std::vector<std::string> cell_names;
+  for (auto* lib : lib_list)
+    if (lib != nullptr)
+      for (const auto& cell : lib->get_cells())
+        cell_names.push_back(cell->get_cell_name());
+  std::sort(cell_names.begin(), cell_names.end());
+  cell_names.erase(std::unique(cell_names.begin(), cell_names.end()), cell_names.end());
+  timing_library.set_cell_name_list(std::move(cell_names));
+  timing_library.set_cell_wrap_resolver([this](const std::string& cell_name) { return wrapTimingCellByName(cell_name); }
+  );
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -645,6 +652,7 @@ void PWInterface::wrapTimingCell(idb::LibCell* lib_cell)
   idb::LibLibrary* lib_library = lib_cell->get_owner_lib();
   TimingCell timing_cell;
   timing_cell.set_library_name(lib_library->get_lib_name());
+  timing_cell.set_area(lib_cell->get_cell_area());
   timing_cell.set_nom_voltage(lib_library->get_nom_voltage());
   timing_cell.set_cell_leakage_power(lib_cell->get_cell_leakage_power() * 1E-3);
   // Timing uses check arcs to establish register clock/data pins. Importing
