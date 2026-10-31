@@ -62,6 +62,8 @@ class DetailedRouter
   void setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param);
   void initDRBoxMap(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
+  void pruneAbnormalPatch(DRModel& dr_model);
+  bool isAbnormalPatch(const EXTLayerRect& patch);
   void splitNetResultByGCell(DRModel& dr_model);
   void splitNetResult(DRModel& dr_model);
   std::set<DRBoxId, CmpDRBoxId> getDRBoxIdSet(DRModel& dr_model, PlanarRect real_rect);
@@ -91,6 +93,7 @@ class DetailedRouter
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
+  std::vector<Orientation> getExemptOrientationList(DRPin& dr_pin, bool prefer_horizontal);
   bool routeDRBox(DRBox& dr_box);
   std::vector<int32_t> initTaskSchedule(DRBox& dr_box, std::vector<int32_t>& net_route_order_list);
   void updateGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list,
@@ -167,9 +170,10 @@ class DetailedRouter
   void splitRepairBoxResult(DRModel& dr_model, DRBox& dr_box);
   void buildRepairNetEnvironment(DRModel& dr_model, DRBox& dr_box);
   void buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box);
-  void updateRepairDRModel(DRModel& dr_model, DRBox& dr_box);
+  void updateRepairDRModel(DRModel& dr_model, DRBoxResult& box_result);
   void patchFinalMinArea(DRModel& dr_model);
-  void patchFinalMinArea(DRBox& dr_box);
+  std::vector<std::vector<size_t>> buildPatchBoxWaveList(const std::vector<PlanarRect>& patch_box_rect_list);
+  void patchFinalMinArea(DRBox& dr_box, const std::vector<Violation>& min_area_violation_list);
   void buildFinalPatchBox(DRModel& dr_model, DRBox& dr_box, const std::vector<Violation>& violation_list);
   void uploadDRModel(DRModel& dr_model);
 
