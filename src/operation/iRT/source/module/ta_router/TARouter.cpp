@@ -19,7 +19,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <limits>
+#include <queue>
 #include <set>
 #include <utility>
 
@@ -262,50 +264,66 @@ void TARouter::attachPins(TANet& ta_net, NodeMap& node_map)
 
 void TARouter::assignTracks(TANet& ta_net)
 {
-  for (TAEdge& edge : ta_net.edge_list) {
-    if (edge.is_via) {
-      continue;
-    }
-    assignWireTrack(ta_net, edge);
+  for (const std::vector<int32_t>& run_edge_idx_list : buildStraightRunList(ta_net)) {
+    assignWireTrack(ta_net, run_edge_idx_list);
   }
   updateNodeAndViaCoords(ta_net);
   commitNetUsage(ta_net);
 }
 
-void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
+void TARouter::assignWireTrack(TANet& ta_net, const std::vector<int32_t>& run_edge_idx_list)
 {
-  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
-
-  RoutingLayer& routing_layer = routing_layer_list[edge.layer_idx];
-
-  Direction direction = getEdgeDirection(ta_net, edge);
-  if (direction != Direction::kHorizontal && direction != Direction::kVertical) {
+  if (run_edge_idx_list.empty()) {
     return;
   }
-  bool is_horizontal = (direction == Direction::kHorizontal);
 
-  // A pin edge should aim at the AP track; a normal edge stays near the guide center.
-  std::vector<int32_t> candidate_track_list;
-  int32_t desired_coord = 0;
-  if (is_horizontal) {
-    desired_coord = edge.guide_rect.getMidPoint().get_y();
-    candidate_track_list = RTUTIL.getScaleList(edge.guide_rect.get_ll_y(), edge.guide_rect.get_ur_y(), routing_layer.getYTrackGridList());
-  } else {
-    desired_coord = edge.guide_rect.getMidPoint().get_x();
-    candidate_track_list = RTUTIL.getScaleList(edge.guide_rect.get_ll_x(), edge.guide_rect.get_ur_x(), routing_layer.getXTrackGridList());
-  }
-  int32_t pin_track_target = getPinTrackTarget(ta_net, edge, is_horizontal);
-  if (pin_track_target != -1) {
-    desired_coord = pin_track_target;
-  }
-  if (candidate_track_list.empty()) {
-    candidate_track_list.push_back(desired_coord);
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
+  TAEdge& first_edge = ta_net.edge_list[run_edge_idx_list.front()];
+  RoutingLayer& routing_layer = routing_layer_list[first_edge.layer_idx];
+
+  Direction first_direction = getEdgeDirection(ta_net, first_edge);
+  if (first_direction != Direction::kHorizontal && first_direction != Direction::kVertical) {
+    return;
   }
 
-  auto [begin_scale, end_scale] = getEdgeScaleRange(ta_net, edge, is_horizontal, true);
-
-  std::vector<std::tuple<int32_t, PlanarRect, PlanarRect>> fixed_rect_list;
+  struct EdgeTrackContext
   {
+    int32_t edge_idx = -1;
+    bool is_horizontal = false;
+    int32_t desired_coord = 0;
+    int32_t begin_scale = 0;
+    int32_t end_scale = 0;
+    std::vector<int32_t> candidate_track_list;
+    std::vector<std::tuple<int32_t, PlanarRect, PlanarRect>> fixed_rect_list;
+  };
+
+  std::vector<EdgeTrackContext> context_list;
+  context_list.reserve(run_edge_idx_list.size());
+  for (int32_t edge_idx : run_edge_idx_list) {
+    TAEdge& edge = ta_net.edge_list[edge_idx];
+    EdgeTrackContext context;
+    context.edge_idx = edge_idx;
+    context.is_horizontal = (getEdgeDirection(ta_net, edge) == Direction::kHorizontal);
+    // A pin edge should aim at the AP track; a normal edge stays near the guide center.
+    context.desired_coord = context.is_horizontal ? edge.guide_rect.getMidPoint().get_y() : edge.guide_rect.getMidPoint().get_x();
+    int32_t pin_track_target = getPinTrackTarget(ta_net, edge, context.is_horizontal);
+    if (pin_track_target != -1) {
+      context.desired_coord = pin_track_target;
+    }
+    if (context.is_horizontal) {
+      context.candidate_track_list
+          = RTUTIL.getScaleList(edge.guide_rect.get_ll_y(), edge.guide_rect.get_ur_y(), routing_layer.getYTrackGridList());
+    } else {
+      context.candidate_track_list
+          = RTUTIL.getScaleList(edge.guide_rect.get_ll_x(), edge.guide_rect.get_ur_x(), routing_layer.getXTrackGridList());
+    }
+    if (context.candidate_track_list.empty()) {
+      context.candidate_track_list.push_back(context.desired_coord);
+    }
+    auto [begin_scale, end_scale] = getEdgeScaleRange(ta_net, edge, context.is_horizontal, true);
+    context.begin_scale = begin_scale;
+    context.end_scale = end_scale;
+
     EXTLayerRect query_rect;
     query_rect.set_real_rect(edge.guide_rect);
     query_rect.set_layer_idx(edge.layer_idx);
@@ -315,9 +333,25 @@ void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
         PlanarRect fixed_shape = fixed_rect->get_real_rect();
         int32_t prl_spacing = routing_layer.getPRLSpacing(fixed_shape);
         PlanarRect enlarged_fixed_shape = RTUTIL.getEnlargedRect(fixed_shape, prl_spacing);
-        fixed_rect_list.emplace_back(net_idx, fixed_shape, enlarged_fixed_shape);
+        context.fixed_rect_list.emplace_back(net_idx, fixed_shape, enlarged_fixed_shape);
       }
     }
+    context_list.push_back(std::move(context));
+  }
+
+  std::vector<int32_t> candidate_track_list = context_list.front().candidate_track_list;
+  for (size_t i = 1; i < context_list.size(); i++) {
+    std::vector<int32_t> intersection;
+    std::set_intersection(candidate_track_list.begin(), candidate_track_list.end(), context_list[i].candidate_track_list.begin(),
+                          context_list[i].candidate_track_list.end(), std::back_inserter(intersection));
+    candidate_track_list.swap(intersection);
+  }
+  if (candidate_track_list.empty()) {
+    std::set<int32_t> candidate_track_set;
+    for (const EdgeTrackContext& context : context_list) {
+      candidate_track_set.insert(context.candidate_track_list.begin(), context.candidate_track_list.end());
+    }
+    candidate_track_list.assign(candidate_track_set.begin(), candidate_track_set.end());
   }
 
   int32_t half_width = routing_layer.get_min_width() / 2;
@@ -331,58 +365,114 @@ void TARouter::assignWireTrack(TANet& ta_net, TAEdge& edge)
   double best_cost = std::numeric_limits<double>::max();
   double best_valid_cost = std::numeric_limits<double>::max();
   for (int32_t track_coord : candidate_track_list) {
-    TATrackTable::Key track_key{edge.layer_idx, track_coord};
-    TATrackTable::Overlap overlap = track_table_.getOverlap(track_key, begin_scale, end_scale, ta_net.net_idx);
-    double fixed_cost = 0.0;
-    double obstacle_length = 0.0;
-    PlanarRect check_rect;
-    if (is_horizontal) {
-      check_rect.set_ll(edge.guide_rect.get_ll_x(), track_coord - half_width);
-      check_rect.set_ur(edge.guide_rect.get_ur_x(), track_coord + half_width);
-    } else {
-      check_rect.set_ll(track_coord - half_width, edge.guide_rect.get_ll_y());
-      check_rect.set_ur(track_coord + half_width, edge.guide_rect.get_ur_y());
-    }
-    for (const auto& [fixed_net_idx, fixed_rect, enlarged_fixed_rect] : fixed_rect_list) {
-      if (fixed_net_idx == ta_net.net_idx) {
-        if (!RTUTIL.isOpenOverlap(check_rect, enlarged_fixed_rect)) {
-          continue;
-        }
-        if (RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
-          continue;
-        }
-      } else if (!RTUTIL.isOpenOverlap(check_rect, enlarged_fixed_rect)) {
-        continue;
-      }
-      // Use blocked track length, not overlap area, so fixed shapes and wires share one cost model.
-      PlanarRect overlap_rect = RTUTIL.getOverlap(check_rect, enlarged_fixed_rect);
-      int32_t blocked_length = is_horizontal ? overlap_rect.getXSpan() : overlap_rect.getYSpan();
-      if (fixed_net_idx < 0) {
-        // net = -1 is a hard obstacle, not a soft foreign-net shape.
-        obstacle_length += blocked_length;
+    double group_cost = 0.0;
+    double group_obstacle_length = 0.0;
+    for (const EdgeTrackContext& context : context_list) {
+      const TAEdge& edge = ta_net.edge_list[context.edge_idx];
+      PlanarRect check_rect;
+      if (context.is_horizontal) {
+        check_rect.set_ll(edge.guide_rect.get_ll_x(), track_coord - half_width);
+        check_rect.set_ur(edge.guide_rect.get_ur_x(), track_coord + half_width);
       } else {
-        fixed_cost += kOverlapFixedCost + kOverlapLengthCost * blocked_length;
+        check_rect.set_ll(track_coord - half_width, edge.guide_rect.get_ll_y());
+        check_rect.set_ur(track_coord + half_width, edge.guide_rect.get_ur_y());
       }
+      double fixed_cost = 0.0;
+      double obstacle_length = 0.0;
+      for (const auto& [fixed_net_idx, fixed_rect, enlarged_fixed_rect] : context.fixed_rect_list) {
+        if (fixed_net_idx == ta_net.net_idx) {
+          if (!RTUTIL.isOpenOverlap(check_rect, enlarged_fixed_rect)) {
+            continue;
+          }
+          if (RTUTIL.isOpenOverlap(check_rect, fixed_rect)) {
+            continue;
+          }
+        } else if (!RTUTIL.isOpenOverlap(check_rect, enlarged_fixed_rect)) {
+          continue;
+        }
+        // Use blocked track length, not overlap area, so fixed shapes and wires share one cost model.
+        PlanarRect overlap_rect = RTUTIL.getOverlap(check_rect, enlarged_fixed_rect);
+        int32_t blocked_length = context.is_horizontal ? overlap_rect.getXSpan() : overlap_rect.getYSpan();
+        if (fixed_net_idx < 0) {
+          // net = -1 is a hard obstacle, not a soft foreign-net shape.
+          obstacle_length += blocked_length;
+        } else {
+          fixed_cost += kOverlapFixedCost + kOverlapLengthCost * blocked_length;
+        }
+      }
+      TATrackTable::Key track_key{edge.layer_idx, track_coord};
+      TATrackTable::Overlap overlap = track_table_.getOverlap(track_key, context.begin_scale, context.end_scale, ta_net.net_idx);
+      double overlap_cost = overlap.interval_num * kOverlapFixedCost + overlap.length * kOverlapLengthCost;
+      group_cost += std::abs(track_coord - context.desired_coord) + overlap_cost + fixed_cost * 2;
+      group_obstacle_length += obstacle_length;
     }
-    double overlap_cost = overlap.interval_num * kOverlapFixedCost + overlap.length * kOverlapLengthCost;
-    double cost = std::abs(track_coord - desired_coord) + overlap_cost + fixed_cost * 2 + track_table_.getHistoryCost(track_key);
-    if (obstacle_length <= 0.0) {
-      if (cost < best_valid_cost) {
-        best_valid_cost = cost;
+    TATrackTable::Key track_key{first_edge.layer_idx, track_coord};
+    group_cost += track_table_.getHistoryCost(track_key);
+    if (group_obstacle_length <= 0.0) {
+      if (group_cost < best_valid_cost) {
+        best_valid_cost = group_cost;
         best_valid_track_coord = track_coord;
       }
     }
     // If every track is blocked, keep the least-bad one instead of dropping the net.
-    cost += obstacle_length * 1.0e9;
-    if (cost < best_cost) {
-      best_cost = cost;
+    group_cost += group_obstacle_length * 1.0e9;
+    if (group_cost < best_cost) {
+      best_cost = group_cost;
       best_track_coord = track_coord;
     }
   }
   if (best_valid_track_coord != -1) {
     best_track_coord = best_valid_track_coord;
   }
-  edge.track_coord = best_track_coord;
+  for (int32_t edge_idx : run_edge_idx_list) {
+    ta_net.edge_list[edge_idx].track_coord = best_track_coord;
+  }
+}
+
+std::vector<std::vector<int32_t>> TARouter::buildStraightRunList(const TANet& ta_net) const
+{
+  const std::vector<TAEdge>& edge_list = ta_net.edge_list;
+  std::vector<bool> visited(edge_list.size(), false);
+  std::vector<std::vector<int32_t>> run_list;
+  for (int32_t start_edge_idx = 0; start_edge_idx < static_cast<int32_t>(edge_list.size()); start_edge_idx++) {
+    const TAEdge& start_edge = edge_list[start_edge_idx];
+    if (visited[start_edge_idx] || start_edge.is_via) {
+      continue;
+    }
+    Direction start_direction = getEdgeDirection(ta_net, start_edge);
+    if (start_direction != Direction::kHorizontal && start_direction != Direction::kVertical) {
+      continue;
+    }
+    int32_t start_layer_idx = start_edge.layer_idx;
+    std::vector<int32_t> run_edge_idx_list;
+    std::queue<int32_t> edge_queue;
+    edge_queue.push(start_edge_idx);
+    visited[start_edge_idx] = true;
+    while (!edge_queue.empty()) {
+      int32_t edge_idx = edge_queue.front();
+      edge_queue.pop();
+      run_edge_idx_list.push_back(edge_idx);
+      const TAEdge& edge = edge_list[edge_idx];
+      for (int32_t node_idx : {edge.first_node_idx, edge.second_node_idx}) {
+        for (int32_t next_edge_idx : ta_net.node_list[node_idx].edge_idx_list) {
+          if (visited[next_edge_idx]) {
+            continue;
+          }
+          const TAEdge& next_edge = edge_list[next_edge_idx];
+          if (next_edge.is_via || next_edge.layer_idx != start_layer_idx) {
+            continue;
+          }
+          if (getEdgeDirection(ta_net, next_edge) != start_direction) {
+            continue;
+          }
+          visited[next_edge_idx] = true;
+          edge_queue.push(next_edge_idx);
+        }
+      }
+    }
+    run_list.push_back(std::move(run_edge_idx_list));
+  }
+  return run_list;
 }
 
 int32_t TARouter::getPinTrackTarget(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const
