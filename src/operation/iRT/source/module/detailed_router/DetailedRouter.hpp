@@ -93,6 +93,7 @@ class DetailedRouter
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
+  std::vector<Orientation> getExemptOrientationList(DRPin& dr_pin, bool prefer_horizontal);
   bool routeDRBox(DRBox& dr_box);
   std::vector<int32_t> initTaskSchedule(DRBox& dr_box, std::vector<int32_t>& net_route_order_list);
   void updateGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, std::vector<Segment<LayerCoord>>& segment_list,

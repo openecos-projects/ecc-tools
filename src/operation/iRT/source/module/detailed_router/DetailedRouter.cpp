@@ -1401,7 +1401,8 @@ void DetailedRouter::exemptPinShape(DRModel& dr_model, DRBox& dr_box)
   for (auto& [dr_net_idx, access_point_set] : dr_box.get_net_access_point_map()) {
     std::vector<DRPin>& dr_pin_list = dr_net_list[dr_net_idx].get_dr_pin_list();
     for (AccessPoint* access_point : access_point_set) {
-      if (dr_pin_list[access_point->get_pin_idx()].get_is_core()) {
+      DRPin& dr_pin = dr_pin_list[access_point->get_pin_idx()];
+      if (dr_pin.get_is_core()) {
         if (!RTUTIL.existTrackGrid(access_point->get_real_coord(), box_track_axis)) {
           continue;
         }
@@ -1418,6 +1419,7 @@ void DetailedRouter::exemptPinShape(DRModel& dr_model, DRBox& dr_box)
           }
         }
       } else {
+        std::vector<Orientation> exempt_orientation_list = getExemptOrientationList(dr_pin, routing_layer_list[access_point->get_layer_idx()].isPreferH());
         auto rtree_iter = routing_fixed_rect_rtree_map.find(access_point->get_layer_idx());
         PlanarRect real_rect = RTUTIL.getEnlargedRect(access_point->get_real_coord(), detection_distance);
         if (!RTUTIL.existTrackGrid(real_rect, box_track_axis)) {
@@ -1443,19 +1445,36 @@ void DetailedRouter::exemptPinShape(DRModel& dr_model, DRBox& dr_box)
             if (within_shape) {
               continue;
             }
-            bool prefer_horizontal = routing_layer_list[dr_node.get_layer_idx()].isPreferH();
-            if (prefer_horizontal) {
-              dr_node.delFixedRectNet(Orientation::kEast, -1);
-              dr_node.delFixedRectNet(Orientation::kWest, -1);
-            } else {
-              dr_node.delFixedRectNet(Orientation::kSouth, -1);
-              dr_node.delFixedRectNet(Orientation::kNorth, -1);
+            for (Orientation orientation : exempt_orientation_list) {
+              dr_node.delFixedRectNet(orientation, -1);
             }
           }
         }
       }
     }
   }
+}
+
+std::vector<Orientation> DetailedRouter::getExemptOrientationList(DRPin& dr_pin, bool prefer_horizontal)
+{
+  if (dr_pin.get_is_macro()) {
+    switch (dr_pin.get_macro_pin_edge()) {
+      case MacroPinEdge::kNorth:
+        return {Orientation::kNorth};
+      case MacroPinEdge::kSouth:
+        return {Orientation::kSouth};
+      case MacroPinEdge::kEast:
+        return {Orientation::kEast};
+      case MacroPinEdge::kWest:
+        return {Orientation::kWest};
+      default:
+        break;
+    }
+  }
+  if (prefer_horizontal) {
+    return {Orientation::kEast, Orientation::kWest};
+  }
+  return {Orientation::kSouth, Orientation::kNorth};
 }
 
 bool DetailedRouter::routeDRBox(DRBox& dr_box)
