@@ -18,19 +18,16 @@
 
 #include <cstdint>
 #include <map>
-#include <set>
 #include <tuple>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "DataManager.hpp"
-#include "Database.hpp"
 #include "LayerCoord.hpp"
 #include "Net.hpp"
 #include "PlanarRect.hpp"
 #include "RTHeader.hpp"
 #include "Segment.hpp"
+#include "TATrackTable.hpp"
 
 namespace irt {
 
@@ -49,10 +46,8 @@ class TARouter
   struct TANode
   {
     PlanarCoord grid_coord;
-    LayerCoord real_coord;
-    int32_t layer_idx = -1;
-    bool is_pin = false;
-    std::vector<PlanarCoord> pin_ap_list;
+    LayerCoord real_coord;                 // gcell center or via position or boundary coord
+    std::vector<PlanarCoord> pin_ap_list;  // non-empty when this node hosts pin access points
     std::vector<int32_t> edge_idx_list;
   };
 
@@ -62,9 +57,6 @@ class TARouter
     int32_t second_node_idx = -1;
     int32_t layer_idx = -1;
     PlanarRect guide_rect;
-    std::vector<int32_t> candidate_track_list;
-    int32_t begin_scale = 0;
-    int32_t end_scale = 0;
     int32_t track_coord = 0;
     bool is_via = false;
   };
@@ -77,23 +69,11 @@ class TARouter
     std::vector<TAEdge> edge_list;
   };
 
-  struct TrackInterval
-  {
-    int32_t begin = 0;
-    int32_t end = 0;
-    int32_t net_idx = -1;
-  };
-
-  struct TrackOverlap
-  {
-    int32_t interval_num = 0;
-    double length = 0.0;
-  };
-
+  // (gcell_x, gcell_y, layer) -> node_idx
   using NodeMap = std::map<std::tuple<int32_t, int32_t, int32_t>, int32_t>;
 
   // self
-  static TARouter* _ta_router_instance;
+  static TARouter* ta_router_instance_;
 
   TARouter() = default;
   TARouter(const TARouter& other) = delete;
@@ -118,15 +98,8 @@ class TARouter
   void commitNetUsage(TANet& ta_net);
   void addViaUsage(TANet& ta_net, const TAEdge& edge);
   void rerouteOverflowNets();
-  std::set<int32_t> updateOverflowNetSet();
-  double getTrackHistory(int32_t layer_idx, int32_t track_coord) const;
-  void ripupNet(const TANet& ta_net);
   Direction getEdgeDirection(const TANet& ta_net, const TAEdge& edge) const;
-  bool isHorizontalEdge(const TANet& ta_net, const TAEdge& edge) const;
-  bool isVerticalEdge(const TANet& ta_net, const TAEdge& edge) const;
-  std::pair<int32_t, int32_t> getEdgeScaleRange(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const;
-  TrackOverlap getTrackOverlap(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx) const;
-  void addTrackUsage(int32_t layer_idx, int32_t track_coord, int32_t begin, int32_t end, int32_t net_idx);
+  std::pair<int32_t, int32_t> getEdgeScaleRange(const TANet& ta_net, const TAEdge& edge, bool is_horizontal, bool use_pin_terminal) const;
   // output
   void outputNet(TANet& ta_net);
   void updateSummary();
@@ -134,12 +107,8 @@ class TARouter
   void addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& first_coord, const LayerCoord& second_coord);
 
   // resource
-  // key = (layer_idx << 32) | track_coord, 用扁平 key 避免双层 std::map 的指针追逐
-  std::unordered_map<int64_t, std::vector<TrackInterval>> _track_usage;
-  std::unordered_map<int64_t, double> _track_history;
-  // net_idx -> 该 net 占用过的 track key, 用于 ripup 时只访问自己的 track
-  std::unordered_map<int32_t, std::vector<int64_t>> _net_track_index;
-  std::vector<TANet> _ta_net_list;
+  TATrackTable track_table_;
+  std::vector<TANet> ta_net_list_;
 };
 
 }  // namespace irt

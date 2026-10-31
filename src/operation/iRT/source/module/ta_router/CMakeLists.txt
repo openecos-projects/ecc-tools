@@ -1,5 +1,6 @@
 add_library(irt_ta_router
     ${IRT_MODULE}/ta_router/TARouter.cpp
+    ${IRT_MODULE}/ta_router/TATrackTable.cpp
 )
 
 target_link_libraries(irt_ta_router
