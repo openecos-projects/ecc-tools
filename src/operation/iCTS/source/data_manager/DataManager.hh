@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <optional>
@@ -31,10 +32,13 @@
 #include <utility>
 #include <vector>
 
+#include "ClockDAG.hh"
+#include "TimingConstraints.hh"
 #include "adapter/fast_sta/FastSTA.hh"
 #include "config/Config.hh"
 #include "design/ClockLayout.hh"
 #include "design/Design.hh"
+#include "io/CtsDesignSource.hh"
 #include "io/Wrapper.hh"
 #include "stage/StageSummary.hh"
 
@@ -91,11 +95,7 @@ class DataManager final
   static auto getInst() -> DataManager&;
   static void destroyInst();
 
-  // Native callers borrow an EccDB service context.  The context and the
-  // external SDC/Liberty providers must outlive the active CTS session.
-  auto setDesignSource(eccdb::DatabaseContext* context) -> void;
-  auto setSdcPath(std::string sdc_path) -> void;
-  auto setLibertyCellLookup(Wrapper::LibertyCellLookup liberty_cell_lookup) -> void;
+  auto setDesignSource(std::shared_ptr<CtsDesignSource> source) -> void;
 
   auto input(const DataManagerInput& input) -> DataManagerStatus;
   void reset();
@@ -182,9 +182,7 @@ class DataManager final
   OptimizationSummary _optimization_summary;
   InstantiationSummary _instantiation_summary;
   EvaluationState _evaluation_state;
-  eccdb::DatabaseContext* _database_context = nullptr;
-  std::string _sdc_path;
-  Wrapper::LibertyCellLookup _liberty_cell_lookup;
+  std::shared_ptr<CtsDesignSource> _design_source;
   CTSRunState _state = CTSRunState::kEmpty;
 };
 

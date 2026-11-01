@@ -18,6 +18,7 @@
 
 #include <any>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -52,7 +53,12 @@ namespace spef {
 struct ConnEntry;
 struct Net;
 struct ResCap;
+class SpefReader;
 }  // namespace spef
+
+namespace vcd {
+class VcdReader;
+}  // namespace vcd
 
 struct LibertyExpr;
 
@@ -60,6 +66,7 @@ namespace ipw {
 class LogicExpression;
 class ParasiticNet;
 enum class PinDirection;
+enum class TimingCaseValue;
 class Net;
 class Pin;
 class TimingArc;
@@ -80,6 +87,17 @@ namespace ipw {
 
 #define PWI (ipw::PWInterface::getInst())
 
+// An external design source borrows analysis inputs from the surrounding flow.
+// The caller owns every pointer and must keep it valid for the PW session.
+struct NativePowerInputs
+{
+  std::vector<idb::LibLibrary*> liberty_libraries;
+  spef::SpefReader* spef_reader = nullptr;
+  vcd::VcdReader* vcd_reader = nullptr;
+  std::string sdc_path;
+  std::string spef_path;
+};
+
 class PWInterface
 {
  public:
@@ -90,10 +108,13 @@ class PWInterface
 
 #if 1  // iPW
   void initPW(std::map<std::string, std::any> config_map);
-  void runPW();
+  void runPW(bool is_peak = false, bool is_avg = false);
   void destroyPW();
+  // Releases an incomplete PW session without producing reports.
+  void abortPW() noexcept;
   void reportCellPower(const std::string& directory_path, const int32_t top_num, const bool is_all);
   void reportNetPower(const std::string& directory_path, const int32_t top_num, const bool is_all);
+  void reportPeakPowerWaveform(const std::string& file_path);
 #endif
 
 #endif
@@ -106,8 +127,13 @@ class PWInterface
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
+  // An empty wrapper restores the legacy iDB projection. The active analysis
+  // inputs are supplied at execution time so callers may update them between
+  // sessions without rebinding the source.
+  void setDatabaseWrapper(std::function<void(const NativePowerInputs&)> database_wrapper);
+  [[nodiscard]] bool hasDatabaseWrapper() const noexcept { return static_cast<bool>(_database_wrapper); }
+  void setPowerInputs(NativePowerInputs inputs);
   void wrapVcdActivity();
-  std::string wrapVcdPinName(std::string& vcd_signal_name);
   void wrapDBInfo();
   void wrapInstanceList();
   void wrapInstance(idb::IdbInstance* idb_instance);
@@ -116,10 +142,12 @@ class PWInterface
   bool wrapSignalConnectType(idb::IdbConnectType connect_type);
   std::string wrapInstancePinName(idb::IdbInstance* idb_instance, idb::IdbPin* idb_pin);
   PinDirection wrapPinDirection(idb::IdbConnectDirection idb_direction);
+  TimingCaseValue wrapConstantValue(idb::IdbPin* idb_pin);
   void wrapPortList();
   void wrapPortPin(idb::IdbPin* idb_pin);
   std::string wrapPinName(idb::IdbPin* idb_pin);
   void wrapNetList();
+  void wrapPowerIndex();
   void wrapNet(idb::IdbNet* idb_net);
   void wrapNetPinList(idb::IdbNet* idb_net, Net& net);
   void wrapNetPinList(idb::IdbPins* io_pin_list, idb::IdbPins* instance_pin_list, Net& net);
@@ -130,6 +158,10 @@ class PWInterface
   void wrapNetToDatabase(const std::string& net_name, Net& net);
   void wrapTimingLibrary();
   void wrapTimingCellMap(const std::vector<idb::LibLibrary*>& lib_list);
+  // 按需 wrap 一个库 cell（惰性 wrap 的兜底路径，供 SDC 命令使用）。
+  bool wrapTimingCellByName(const std::string& cell_name);
+  // 最近一次 wrapTimingLibrary 用到的库列表，供按需 wrap 反查。
+  std::vector<idb::LibLibrary*> _lib_list;
   void wrapTimingLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list);
   idb::LibLibrary* wrapReferenceLib(const std::vector<idb::LibLibrary*>& lib_list);
   void wrapTimingCell(idb::LibCell* lib_cell);
@@ -139,7 +171,11 @@ class PWInterface
   void wrapTimingCellLeakagePower(TimingCell& timing_cell, idb::LibCell* lib_cell);
   void wrapTimingCellPowerConditions(TimingCell& timing_cell);
   TimingPowerArc wrapTimingPowerArc(idb::LibPowerArc* lib_power_arc);
-  TimingPowerArc wrapTimingPortPowerArc(idb::LibInternalPowerInfo* internal_power_info, std::string& port_name, idb::LibLibrary* lib_library);
+  TimingPowerArc wrapTimingPortPowerArc(
+      idb::LibInternalPowerInfo* internal_power_info,
+      std::string& port_name,
+      idb::LibLibrary* lib_library
+  );
   void wrapTimingPowerArcTable(TimingPowerArc& timing_power_arc, idb::LibTableModel* power_table_model);
   TimingLeakagePower wrapTimingLeakagePower(idb::LibLeakagePower* lib_leakage_power);
   LogicExpression wrapLogicExpression(const std::string& expression_string);
@@ -175,7 +211,13 @@ class PWInterface
 #endif
 
  private:
+  bool resolvePeakFlow(const bool is_peak, const bool is_avg);
+  void runAveragedPower();
+  void runPeakPower();
+
   static PWInterface* _pw_interface_instance;
+  std::function<void(const NativePowerInputs&)> _database_wrapper;
+  NativePowerInputs _native_power_inputs;
 
   PWInterface() = default;
   PWInterface(const PWInterface& other) = delete;

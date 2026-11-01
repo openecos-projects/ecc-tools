@@ -47,6 +47,7 @@ add_library(verilog
   VerilogExpression.cc
   VerilogHierarchy.cc
   VerilogNetlist.cc
+  VerilogImportPlan.cc
   VerilogFrontend.cc
 )
 target_link_libraries(verilog PRIVATE ZLIB::ZLIB)
@@ -63,4 +64,8 @@ if(BUILD_TESTING)
   endforeach()
   target_link_libraries(verilog_input_test PRIVATE ZLIB::ZLIB)
   set_tests_properties(verilog_large_module_test PROPERTIES TIMEOUT 20)
+
+  add_executable(verilog_import_plan_test test/VerilogImportPlanTest.cpp)
+  target_link_libraries(verilog_import_plan_test PRIVATE verilog)
+  add_test(NAME verilog_import_plan_test COMMAND verilog_import_plan_test)
 endif()

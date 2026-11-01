@@ -17,6 +17,7 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_iemir.h"
 
@@ -26,9 +27,9 @@ namespace py = pybind11;
 
 void register_iemir(py::module& m)
 {
-  m.def("init_emir", init_emir, py::arg("temp_directory_path") = "", py::arg("instance_power_file_path") = "",
-        py::arg("thread_number") = 128, py::arg("technology_file_path") = "", py::arg("ploc_file_path") = "",
-        py::arg("pad_files") = std::vector<std::string>{}, py::arg("add_ploc_from_top_def") = false);
+  m.def("init_emir", init_emir, py::arg("temp_directory_path") = py::none(), py::arg("instance_power_file_path") = py::none(),
+        py::arg("thread_number") = 128, py::arg("technology_file_path") = py::none(), py::arg("ploc_file_path") = py::none(),
+        py::arg("pad_files") = std::vector<std::filesystem::path>{}, py::arg("add_ploc_from_top_def") = false);
   m.def("run_emir", run_emir);
   m.def("destroy_emir", destroy_emir);
 }

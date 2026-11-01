@@ -24,6 +24,19 @@ class NetlistData : public DesignData
 {
  public:
   NetlistData() = default;
+
+  // Provenance supplied by the logical importer. Keys are canonical logical
+  // net names; values are the original symbols safely folded into that net.
+  std::unordered_map<std::string, std::vector<std::string>>& get_net_alias_map() { return _net_alias_map; }
+  const std::unordered_map<std::string, std::vector<std::string>>& get_net_alias_map() const { return _net_alias_map; }
+  void reset()
+  {
+    DesignData::reset();
+    _net_alias_map.clear();
+  }
+
+ private:
+  std::unordered_map<std::string, std::vector<std::string>> _net_alias_map;
 };
 
 }  // namespace ilvs

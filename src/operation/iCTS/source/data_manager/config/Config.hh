@@ -54,6 +54,7 @@ class Config
     _has_max_buf_tran = false;
     _has_max_cap = false;
     _max_fanout = 32;
+    _routing_layer_1st.clear();
     _wirelength_unit_um = 0.0;
     _wirelength_iterations = 3;
     _routing_layers.clear();
@@ -89,6 +90,11 @@ class Config
   auto get_wire_width() const -> double { return _wire_width; }
   auto get_max_fanout() const -> unsigned { return _max_fanout; }
   auto get_routing_layers() const -> const std::vector<unsigned>& { return _routing_layers; }
+  // Named lower signal-routing anchor used by database adapters.  This is
+  // deliberately separate from routing_layer, whose numeric value belongs to
+  // the CTS characterization/configuration space and is not portable across
+  // technology layer registries.
+  auto get_routing_layer_1st() const -> const std::string& { return _routing_layer_1st; }
   auto get_buffer_types() const -> const std::vector<std::string>& { return _buffer_types; }
   auto get_char_buf_redundancy_pct() const -> double { return _char_buf_redundancy_pct; }
   auto is_force_branch_buffer() const -> bool { return _force_branch_buffer; }
@@ -126,6 +132,7 @@ class Config
   auto set_wire_width(double wire_width) -> void { _wire_width = wire_width; }
   auto set_max_fanout(unsigned max_fanout) -> void { _max_fanout = max_fanout; }
   auto set_routing_layers(const std::vector<unsigned>& routing_layers) -> void { _routing_layers = routing_layers; }
+  auto set_routing_layer_1st(const std::string& routing_layer) -> void { _routing_layer_1st = routing_layer; }
   auto set_buffer_types(const std::vector<std::string>& types) -> void { _buffer_types = types; }
   auto set_char_buf_redundancy_pct(double pct) -> void { _char_buf_redundancy_pct = pct; }
   auto set_force_branch_buffer(bool force_branch_buffer) -> void { _force_branch_buffer = force_branch_buffer; }
@@ -163,6 +170,7 @@ class Config
   double _wire_width = 0.0;
   unsigned _max_fanout = 32;
   std::vector<unsigned> _routing_layers;
+  std::string _routing_layer_1st;
   std::vector<std::string> _buffer_types;
   double _char_buf_redundancy_pct = 0.0;
   bool _force_branch_buffer = false;

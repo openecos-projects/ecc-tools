@@ -1,19 +1,7 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
 // Copyright (c) 2026 Peng Cheng Laboratory
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
 
-#include "STAInterface.hpp"
+#include "STAInterfaceEccdb.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -24,12 +12,15 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "DataManager.hpp"
-#include "Instance.hpp"
-#include "Net.hpp"
-#include "Pin.hpp"
-#include "PinDirection.hpp"
+#include "network/Instance.hpp"
+#include "network/Net.hpp"
+#include "network/Pin.hpp"
+#include "network/PinDirection.hpp"
+#include "ReadLiberty.hpp"
+#include "ReadParasitics.hpp"
 #include "spef/SpefParser.hh"
 #include "service/context/DatabaseContext.h"
 #include "service/geometry/PhysicalDesignService.h"
@@ -242,31 +233,26 @@ void setLocation(Pin& pin, const BoundsAccumulator& bounds, const eccdb::Point f
 
 }  // namespace
 
-void STAInterface::wrapDatabaseFromEccdb()
+namespace detail {
+
+void populateDatabaseFromEccdb(eccdb::DatabaseContext& context, const NativeTimingInputs& timing_inputs)
 {
-  if (_database_context == nullptr || _database_context->technology() == nullptr || _database_context->library() == nullptr) {
-    STALOG.error(Loc::current(), "Native iSTA requires EccDB Design, Tech, and Library stores.");
-    return;
+  if (context.technology() == nullptr || context.library() == nullptr) {
+    throw std::runtime_error("Native iSTA requires EccDB Design, Tech, and Library stores");
   }
 
-  const eccdb::PhysicalDesignService physical{*_database_context};
-  const auto& design = _database_context->design();
+  const eccdb::PhysicalDesignService physical{context};
+  const auto& design = context.design();
   const auto& netlist = design.netlistStorage();
-  const auto& library = *_database_context->library();
+  const auto& library = *context.library();
   auto& database = STADM.getDatabase();
-  database.get_instance_map().clear();
-  database.get_pin_map().clear();
-  database.get_net_map().clear();
-  database.get_arc_list().clear();
-  database.get_outgoing_arc_list_map().clear();
-  database.get_incoming_arc_list_map().clear();
-  database.get_start_point_list().clear();
-  database.get_end_point_list().clear();
-  database.get_timing_order_list().clear();
-  database.get_timing_point_map().clear();
-  database.get_timing_path_group_list().clear();
+  auto& network = database.network();
+  network = {};
+  database.graph() = {};
+  database.liberty() = {};
+  database.parasitics() = {};
 
-  const SpefTimingNameIndex spef_names{_native_timing_inputs.spef_reader};
+  const SpefTimingNameIndex spef_names{timing_inputs.spef_reader};
   std::unordered_map<std::string, std::string> instance_names;
   std::unordered_map<std::string, std::string> pin_names;
   std::unordered_map<std::string, std::string> net_names;
@@ -274,9 +260,8 @@ void STAInterface::wrapDatabaseFromEccdb()
   std::unordered_map<uint64_t, std::string> io_pin_names;
 
   if (physical.hasDesignInfo()) {
-    database.set_design_name(design.globalStorage().info().name);
+    network.setName(design.globalStorage().info().name);
   }
-  wrapConstraintFilePath();
 
   netlist.forEachInstance([&](const auto instance_id, const auto& instance, const auto instance_pins) {
     const auto& master = library.cellMasterStorage().cellMaster(instance.master);
@@ -305,7 +290,7 @@ void STAInterface::wrapDatabaseFromEccdb()
     target.set_instance_name(instance_name);
     target.set_cell_name(master.name);
     target.set_is_io_cell(isIoCell(master.type));
-    database.get_instance_map().try_emplace(instance_name, std::move(target));
+    network.instances().try_emplace(instance_name, std::move(target));
 
     for (const auto pin_id : instance_pins) {
       const auto& instance_pin = netlist.instancePin(pin_id);
@@ -330,7 +315,7 @@ void STAInterface::wrapDatabaseFromEccdb()
                      .polygon = [&](const auto& polygon) { bounds.add(polygon.points); }});
       }
       setLocation(target_pin, bounds, instance.origin);
-      database.get_pin_map().try_emplace(full_name, std::move(target_pin));
+      network.pins().try_emplace(full_name, std::move(target_pin));
       instance_pin_names.emplace(static_cast<uint64_t>(pin_id.packed()), full_name);
     }
   });
@@ -350,7 +335,7 @@ void STAInterface::wrapDatabaseFromEccdb()
     physical.forEachIoPinGeometry(pin_id, {.rectangle = [&](const auto& rectangle) { bounds.add(rectangle.rectangle); },
                                             .polygon = [&](const auto& polygon) { bounds.add(polygon.points); }});
     setLocation(target, bounds, {});
-    database.get_pin_map().try_emplace(pin_name, std::move(target));
+    network.pins().try_emplace(pin_name, std::move(target));
     io_pin_names.emplace(static_cast<uint64_t>(pin_id.packed()), pin_name);
   });
 
@@ -365,23 +350,42 @@ void STAInterface::wrapDatabaseFromEccdb()
     physical.forEachNetPin(net_id,
                            {.instance_pin = [&](const auto pin_id, const auto&, const auto&, const auto&) {
                               const auto name = instance_pin_names.find(static_cast<uint64_t>(pin_id.packed()));
-                              if (name != instance_pin_names.end() && database.get_pin_map().count(name->second) != 0u) {
+                              if (name != instance_pin_names.end() && network.pins().count(name->second) != 0u) {
                                 target.get_pin_name_list().push_back(name->second);
                               }
                             },
                             .io_pin = [&](const auto pin_id, const auto&) {
                               const auto name = io_pin_names.find(static_cast<uint64_t>(pin_id.packed()));
-                              if (name != io_pin_names.end() && database.get_pin_map().count(name->second) != 0u) {
+                              if (name != io_pin_names.end() && network.pins().count(name->second) != 0u) {
                                 target.get_pin_name_list().push_back(name->second);
                               }
                             }});
-    database.get_net_map().try_emplace(net_name, std::move(target));
+    network.nets().try_emplace(net_name, std::move(target));
   });
 
-  // These use only NativeTimingInputs when an EccDB source is active. They
-  // never dereference dmInst in the native branch.
-  wrapTimingLibrary();
-  wrapParasiticLibrary();
+  // These overloads use only the supplied native inputs and never dereference
+  // the legacy iDB data manager.
+  ReadLiberty(database.liberty(), network).read(timing_inputs.liberty_libraries);
+  ReadParasitics(database.parasitics()).read(timing_inputs.spef_reader, timing_inputs.spef_path);
 }
 
+}  // namespace detail
 }  // namespace ista
+
+namespace eccdb::adapters {
+
+void bindStaSource(ista::STAInterface& interface, DatabaseContext* context, ista::NativeTimingInputs inputs)
+{
+  if (context == nullptr) {
+    interface.setDatabaseWrapper({});
+    interface.setTimingInputs({});
+    return;
+  }
+
+  interface.setTimingInputs(std::move(inputs));
+  interface.setDatabaseWrapper([context](const ista::NativeTimingInputs& timing_inputs) {
+    ista::detail::populateDatabaseFromEccdb(*context, timing_inputs);
+  });
+}
+
+}  // namespace eccdb::adapters

@@ -1,15 +1,25 @@
 #include "GeometryEdit.h"
 #include "GeometryDelta.h"
+#include "GeometryLayerMetadata.h"
 #include "GeometrySpatialIndex.h"
 #include "GeometrySnapshotSchema.h"
 #include "GeometryStore.h"
+#include "GeometryThumbnail.h"
 #include "GeometryTilePyramid.h"
 #include "GeometryTypes.h"
 #include "ShapeId.h"
 #include "ShapeTable.h"
 
+#include <zlib.h>
+
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
 #include <cassert>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -776,6 +786,160 @@ void test_snapshot_header_has_stable_schema_identity()
   assert(header.record_count == 123);
 }
 
+void test_snapshot_rejects_wrapped_payload_range()
+{
+  ShapeTable table;
+  ShapeRecord original;
+  original.id = 7;
+  original.bbox = Rect32{1, 2, 3, 4};
+  table.insert(original, RectPayload{original.bbox});
+
+  ShapeRecord invalid;
+  invalid.id = 1;
+  invalid.payload_offset = std::numeric_limits<uint64_t>::max();
+  invalid.payload_size = 1;
+  assert(!table.replace_snapshot({invalid}, {}));
+  assert(table.size() == 1 && table.find(7) != nullptr);
+  assert(table.find(7)->bbox.lx == 1);
+}
+
+void test_geometry_indices_handle_extreme_tile_coordinates()
+{
+  GeometryStoreOptions options;
+  options.spatial_index.tile_size = 1;
+  options.lod_pyramid.base_tile_size = 1;
+  options.lod_pyramid.lod_level_count = 1;
+  GeometryStore store(options);
+  const int32_t min = std::numeric_limits<int32_t>::min();
+  const int32_t max = std::numeric_limits<int32_t>::max();
+  const Rect32 point{max, max, max, max};
+  const ShapeId large = store.add_rect(1, Rect32{min, min, max, max}, OwnerRef{OwnerType::kDie});
+  const ShapeId high = store.add_rect(1, point, OwnerRef{OwnerType::kCore});
+  store.rebuild_lod_tiles();
+
+  assert((store.query_intersect(1, point) == std::vector<ShapeId>{large, high}));
+  assert(store.query_lod_tiles(0, 1, point).size() == 2);
+  assert(store.delete_shape(high));
+  store.rebuild_dirty_lod_tiles();
+  assert((store.query_intersect(1, point) == std::vector<ShapeId>{large}));
+  assert(store.query_lod_tiles(0, 1, point).size() == 1);
+  assert(store.delete_shape(large));
+  assert(store.query_intersect(1, point).empty());
+
+  // Exercise multiple loop iterations before the maximum coordinate is reached.
+  const Rect32 high_area{max - 1, max - 1, max, max};
+  const ShapeId area = store.add_rect(1, high_area, OwnerRef{OwnerType::kCore});
+  store.rebuild_lod_tiles();
+  assert((store.query_intersect(1, high_area) == std::vector<ShapeId>{area}));
+  assert(store.query_lod_tiles(0, 1, high_area).size() == 4);
+
+  const Rect32 low_area{min, min, min + 1, min + 1};
+  assert(store.update_rect(area, low_area));
+  store.rebuild_dirty_lod_tiles();
+  assert(store.query_intersect(1, high_area).empty());
+  assert(store.query_lod_tiles(0, 1, high_area).empty());
+  assert((store.query_intersect(1, low_area) == std::vector<ShapeId>{area}));
+  assert(store.query_lod_tiles(0, 1, low_area).size() == 4);
+  assert(store.delete_shape(area));
+}
+
+uint32_t read_be32(const std::vector<uint8_t>& bytes, size_t offset)
+{
+  return (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1]) << 16)
+         | (static_cast<uint32_t>(bytes[offset + 2]) << 8) | static_cast<uint32_t>(bytes[offset + 3]);
+}
+
+void test_render_thumbnail_png_writes_valid_png()
+{
+  GeometryStore store;
+  store.add_rect(1, Rect32{0, 0, 800, 400}, OwnerRef{OwnerType::kDie});
+  store.add_rect(2, Rect32{100, 100, 300, 200}, OwnerRef{OwnerType::kCore});
+  store.add_rect(2, Rect32{400, 50, 700, 350}, OwnerRef{OwnerType::kCore});
+
+  LinePayload horizontal;
+  horizontal.begin = Point32{0, 390};
+  horizontal.end = Point32{800, 390};
+  horizontal.width = 10;
+  store.add_line(3, horizontal, OwnerRef{OwnerType::kNetWireSegment});
+
+  LinePayload vertical;
+  vertical.begin = Point32{390, 0};
+  vertical.end = Point32{390, 400};
+  vertical.width = 10;
+  store.add_line(3, vertical, OwnerRef{OwnerType::kNetWireSegment});
+
+  PointPayload point;
+  point.point = Point32{200, 300};
+  store.add_point(4, point, OwnerRef{OwnerType::kPinPortShape});
+
+  // Layer without metadata (structural background, drawn underneath).
+  store.add_rect(9, Rect32{0, 0, 800, 400}, OwnerRef{OwnerType::kDie});
+
+  std::vector<GeometryLayerMetadata> layers(3);
+  layers[0].layer_id = 1;
+  layers[0].name = "METAL1";
+  layers[1].layer_id = 2;
+  layers[1].name = "M2";
+  layers[2].layer_id = 3;
+  layers[2].name = "VIA1";
+  layers[2].type = "via";
+
+  const std::filesystem::path png_path = std::filesystem::temp_directory_path() / "geometry_thumbnail_test.png";
+  assert(render_thumbnail_png(store, layers, png_path, 256, 128));
+
+  std::ifstream in(png_path, std::ios::binary);
+  const std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  in.close();
+  assert(bytes.size() > 8 + 12 + 13);
+
+  static constexpr uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+  for (size_t i = 0; i < 8; ++i) {
+    assert(bytes[i] == kSignature[i]);
+  }
+
+  assert(read_be32(bytes, 8) == 13);
+  assert(bytes[12] == 'I' && bytes[13] == 'H' && bytes[14] == 'D' && bytes[15] == 'R');
+  assert(read_be32(bytes, 16) == 256);
+  assert(read_be32(bytes, 20) == 128);
+  assert(bytes[24] == 8);
+  assert(bytes[25] == 2);
+
+  std::vector<uint8_t> compressed;
+  size_t offset = 8;
+  while (offset + 12 <= bytes.size()) {
+    const uint32_t length = read_be32(bytes, offset);
+    const bool is_idat = bytes[offset + 4] == 'I' && bytes[offset + 5] == 'D' && bytes[offset + 6] == 'A'
+                         && bytes[offset + 7] == 'T';
+    if (is_idat) {
+      compressed.insert(compressed.end(), bytes.begin() + offset + 8, bytes.begin() + offset + 8 + length);
+    }
+    offset += 12 + length;
+  }
+  assert(!compressed.empty());
+
+  std::vector<uint8_t> raw(128 * (1 + 256 * 3));
+  uLongf raw_size = raw.size();
+  assert(uncompress(raw.data(), &raw_size, compressed.data(), compressed.size()) == Z_OK);
+  assert(raw_size == raw.size());
+
+  bool has_non_white_pixel = false;
+  for (size_t row = 0; row < 128 && !has_non_white_pixel; ++row) {
+    const size_t row_begin = row * (1 + 256 * 3);
+    for (size_t i = 1; i < 1 + 256 * 3; ++i) {
+      if (raw[row_begin + i] != 255) {
+        has_non_white_pixel = true;
+        break;
+      }
+    }
+  }
+  assert(has_non_white_pixel);
+
+  std::filesystem::remove(png_path);
+
+  GeometryStore empty_store;
+  assert(!render_thumbnail_png(empty_store, {}, png_path, 64, 64));
+}
+
 }  // namespace
 
 int main()
@@ -807,5 +971,8 @@ int main()
   test_geometry_edit_command_carries_expected_version();
   test_geometry_edit_diagnostic_flags_round_trip();
   test_snapshot_header_has_stable_schema_identity();
+  test_snapshot_rejects_wrapped_payload_range();
+  test_geometry_indices_handle_extreme_tile_coordinates();
+  test_render_thumbnail_png_writes_valid_png();
   return 0;
 }

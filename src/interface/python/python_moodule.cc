@@ -32,7 +32,9 @@
 #include "py_register_imj.h"
 #include "py_register_report.h"
 #include "python_module.h"
-#include "py_register_native.h"
+#if defined(ECCDB_PYTHON_NATIVE)
+#include "py_eccdb.h"
+#endif
 
 namespace python_interface {
 
@@ -55,7 +57,9 @@ PYBIND11_MODULE(ecc_py, m)
   register_imj(m);
   register_report(m);
   register_feature(m);
-  register_native(m);
+#if defined(ECCDB_PYTHON_NATIVE)
+  register_eccdb(m);
+#endif
 }
 
 }  // namespace python_interface

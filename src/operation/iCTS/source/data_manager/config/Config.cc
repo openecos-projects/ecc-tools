@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>
@@ -46,7 +47,7 @@ namespace {
 // how many wirelength points it sweeps, and how many iterations it allows are
 // properties of the characterizer, not of the design - so a config naming one is
 // reported as an unrecognized key rather than silently taking effect.
-constexpr std::array<std::string_view, 15> kSupportedConfigKeys = {
+constexpr std::array<std::string_view, 16> kSupportedConfigKeys = {
     "skew_bound",
     "max_buf_tran",
     "root_input_slew",
@@ -54,6 +55,7 @@ constexpr std::array<std::string_view, 15> kSupportedConfigKeys = {
     "max_cap",
     "max_fanout",
     "routing_layer",
+    "routing_layer_1st",
     "buffer_type",
     "wirelength_unit_um",
     "wire_width",
@@ -375,6 +377,12 @@ auto Config::parse(const std::string& json_file) -> bool
   }
   if (!ApplyRoutingLayersIfPresent(json, *this, json_file)) {
     return false;
+  }
+  if (json.contains("routing_layer_1st")) {
+    if (!json.at("routing_layer_1st").is_string()) {
+      return setConfigParseError(*this, json_file, "routing_layer_1st", json.at("routing_layer_1st"), "string");
+    }
+    set_routing_layer_1st(trim_copy(json.at("routing_layer_1st").get<std::string>()));
   }
   ApplyBufferTypesIfPresent(json, *this);
   if (!ApplyDoubleIfPresent(json, "wire_width", *this, &Config::set_wire_width, json_file)) {

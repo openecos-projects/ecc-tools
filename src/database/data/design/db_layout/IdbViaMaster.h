@@ -150,12 +150,10 @@ class IdbViaMasterGenerate
   const int32_t get_cut_cols() const { return _num_cut_cols; }
   const int32_t get_original_offset_x() const { return _original_offset_x; }
   const int32_t get_original_offset_y() const { return _original_offset_y; }
-  bool has_origin() const { return _has_origin; }
   const int32_t get_offset_bottom_x() const { return _offset_bottom_x; }
   const int32_t get_offset_bottom_y() const { return _offset_bottom_y; }
   const int32_t get_offset_top_x() const { return _offset_top_x; }
   const int32_t get_offset_top_y() const { return _offset_top_y; }
-  bool has_offset() const { return _has_offset; }
   vector<IdbRect*>& get_cut_rect_list() { return _cut_rect_list; }
   IdbRect* get_cut_bouding_rect() { return _cut_bouding_rect; }
   IdbViaMasterRulePattern* get_patttern() { return _patttern; }
@@ -197,19 +195,16 @@ class IdbViaMasterGenerate
   {
     _original_offset_x = offset_x;
     _original_offset_y = offset_y;
-    _has_origin = true;
   }
   void set_offset_bottom(int32_t x, int32_t y)
   {
     _offset_bottom_x = x;
     _offset_bottom_y = y;
-    _has_offset = true;
   }
   void set_offset_top(int32_t x, int32_t y)
   {
     _offset_top_x = x;
     _offset_top_y = y;
-    _has_offset = true;
   }
   void set_patttern(IdbViaMasterRulePattern* patttern) { _patttern = patttern; }
   void set_patttern(string pattern_string)
@@ -250,13 +245,11 @@ class IdbViaMasterGenerate
 
   int32_t _original_offset_x;
   int32_t _original_offset_y;
-  bool _has_origin;
 
   int32_t _offset_bottom_x;
   int32_t _offset_bottom_y;
   int32_t _offset_top_x;
   int32_t _offset_top_y;
-  bool _has_offset;
   //<-----tbd----------------
   // pattern
   IdbViaMasterRulePattern* _patttern;

@@ -65,10 +65,7 @@ auto hasCoord(const spef::Coord& coord) -> bool
 
 auto expandScanName(const spef::Exchange& exchange, std::string_view name) -> std::string
 {
-  // TextGeometryAugmenter scans the original SPEF text, but its model was
-  // built from an Exchange that has already been normalized.  Decode the raw
-  // scan token exactly once before looking it up in that model.
-  return spef::stripQuotes(spef::expandName(exchange, std::string{name}));
+  return spef::removeEscapes(spef::stripQuotes(spef::expandName(exchange, std::string{name})));
 }
 
 auto extractGeometry(std::string_view text, int dbu) -> ScanGeometry

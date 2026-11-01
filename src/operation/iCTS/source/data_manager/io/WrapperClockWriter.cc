@@ -21,8 +21,8 @@
  * @brief Clock-tree materialization helpers for the iCTS iDB wrapper.
  */
 #include <algorithm>
+#include <cstddef>
 #include <optional>
-#include <ostream>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -39,7 +39,7 @@
 #include "IdbTerm.h"
 #include "Logger.hh"
 #include "Wrapper.hh"
-#include "CtsEccdbAdapter.hh"
+#include "CtsDesignSource.hh"
 #include "design/Clock.hh"
 #include "design/ClockDAG.hh"
 #include "design/Design.hh"
@@ -51,10 +51,19 @@
 namespace icts {
 namespace {
 
+// Pre-existing pin identity. Raw iDB pin pointers are not stable across the write:
+// updating an instance's cell master recreates its pins, so the snapshot records
+// (instance, pin) names and re-resolves them whenever it reads or restores them.
+struct ClockTreeIdbPinKey
+{
+  std::string inst_name;
+  std::string pin_name;
+};
+
 struct ClockTreeIdbNetPins
 {
-  std::vector<idb::IdbPin*> io_pins;
-  std::vector<idb::IdbPin*> inst_pins;
+  std::vector<ClockTreeIdbPinKey> io_pins;
+  std::vector<ClockTreeIdbPinKey> inst_pins;
 };
 
 struct ClockTreeIdbMaterializationScope
@@ -109,6 +118,28 @@ auto FindIdbInstPinByCtsPinName(idb::IdbInstance* idb_inst, const std::string& p
   return nullptr;
 }
 
+auto ResolveIdbPin(idb::IdbDesign* idb_design, const ClockTreeIdbPinKey& key) -> idb::IdbPin*
+{
+  if (idb_design == nullptr || key.pin_name.empty()) {
+    return nullptr;
+  }
+  if (key.inst_name.empty()) {
+    auto* io_pin_list = idb_design->get_io_pin_list();
+    return io_pin_list == nullptr ? nullptr : io_pin_list->find_pin(key.pin_name);
+  }
+  auto* inst_list = idb_design->get_instance_list();
+  auto* idb_inst = inst_list == nullptr ? nullptr : inst_list->find_instance(key.inst_name);
+  return FindIdbInstPinByCtsPinName(idb_inst, key.pin_name);
+}
+
+// A placement status only counts as resolved when it names where the instance really is.
+// kNone, kUnplaced and kMax all mean the design has not placed it yet, so the clock tree still
+// has to: those are the only cases where CTS may choose a coordinate.
+auto IsIdbPlacementResolved(idb::IdbPlacementStatus status) -> bool
+{
+  return status == idb::IdbPlacementStatus::kFixed || status == idb::IdbPlacementStatus::kCover || status == idb::IdbPlacementStatus::kPlaced;
+}
+
 auto CollectClockTreeIdbNetPins(idb::IdbNet* idb_net) -> ClockTreeIdbNetPins
 {
   ClockTreeIdbNetPins pins;
@@ -116,10 +147,19 @@ auto CollectClockTreeIdbNetPins(idb::IdbNet* idb_net) -> ClockTreeIdbNetPins
     return pins;
   }
   if (idb_net->get_io_pins() != nullptr) {
-    pins.io_pins = idb_net->get_io_pins()->get_pin_list();
+    for (auto* io_pin : idb_net->get_io_pins()->get_pin_list()) {
+      if (io_pin != nullptr) {
+        pins.io_pins.push_back(ClockTreeIdbPinKey{.inst_name = {}, .pin_name = io_pin->get_pin_name()});
+      }
+    }
   }
   if (idb_net->get_instance_pin_list() != nullptr) {
-    pins.inst_pins = idb_net->get_instance_pin_list()->get_pin_list();
+    for (auto* inst_pin : idb_net->get_instance_pin_list()->get_pin_list()) {
+      if (inst_pin == nullptr || inst_pin->get_instance() == nullptr) {
+        continue;
+      }
+      pins.inst_pins.push_back(ClockTreeIdbPinKey{.inst_name = inst_pin->get_instance()->get_name(), .pin_name = inst_pin->get_pin_name()});
+    }
   }
   return pins;
 }
@@ -151,7 +191,7 @@ class Wrapper::CtsClockIdbWriter
       if (clock == nullptr) {
         continue;
       }
-      if (!writeClockToIdb(*clock, scope)) {
+      if (!writeClockToIdb(*clock, scope, restore_data)) {
         result.success = false;
         result.failed_clock = clock->get_clock_name();
         result.failed_net = _failed_net_name.empty() ? clock->get_clock_net_name() : _failed_net_name;
@@ -164,7 +204,7 @@ class Wrapper::CtsClockIdbWriter
       }
     }
 
-    if (const auto dropped = findDroppedPreexistingPin(scope, restore_data); dropped.has_value()) {
+    if (const auto dropped = findDroppedPreexistingPin(scope, restore_data, _wrapper->_idb_design); dropped.has_value()) {
       result.success = false;
       result.failed_clock = findClockOwningNet(scope, dropped->first);
       result.failed_net = dropped->first;
@@ -267,9 +307,9 @@ class Wrapper::CtsClockIdbWriter
     return restore_data;
   }
 
-  auto writeClockToIdb(Clock& clock, const ClockTreeIdbMaterializationScope& scope) -> bool
+  auto writeClockToIdb(Clock& clock, const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data) -> bool
   {
-    if (!writeClockTreeInstsToIdb(clock)) {
+    if (!writeClockTreeInstsToIdb(clock, restore_data)) {
       if (_failed_net_name.empty()) {
         _failed_net_name = clock.get_clock_net_name();
       }
@@ -299,13 +339,13 @@ class Wrapper::CtsClockIdbWriter
     return true;
   }
 
-  auto writeClockTreeInstsToIdb(Clock& clock) -> bool
+  auto writeClockTreeInstsToIdb(Clock& clock, const ClockTreeIdbPreexistingObjects& restore_data) -> bool
   {
     for (auto* inst : clock.get_insts()) {
       if (inst == nullptr) {
         continue;
       }
-      if (createOrUpdateClockTreeInst(inst) == nullptr) {
+      if (createOrUpdateClockTreeInst(inst, restore_data) == nullptr) {
         _failure_reason = "create_or_update_clock_tree_inst_failed";
         _failed_net_name = clock.get_clock_net_name();
         return false;
@@ -314,7 +354,34 @@ class Wrapper::CtsClockIdbWriter
     return true;
   }
 
-  auto createOrUpdateClockTreeInst(Inst* inst) -> idb::IdbInstance*
+  // CTS owns where a clock-tree object sits and nothing else about an object the design
+  // already had. A pre-existing instance that is already placed therefore keeps its
+  // orientation, its placement status, its instance type and its coordinate untouched: a
+  // fixed pad stays fixed and a mirrored cell stays mirrored, because re-declaring those
+  // attributes would silently discard constraints the input DEF carried. An unplaced
+  // instance is the opposite case, the clock tree still has to route through it, so placing
+  // it completes the input rather than editing it.
+  auto applyClockTreeInstPlacement(idb::IdbInstance* idb_inst, Inst* inst, const ClockTreeIdbPreexistingObjects& restore_data) -> bool
+  {
+    if (idb_inst == nullptr || inst == nullptr) {
+      return false;
+    }
+    const bool preexisting = restore_data.inst_names.contains(inst->get_name());
+    if (preexisting && IsIdbPlacementResolved(idb_inst->get_status())) {
+      return true;
+    }
+    const auto orient = idb_inst->get_orient() == idb::IdbOrient::kNone ? idb::IdbOrient::kN_R0 : idb_inst->get_orient();
+    if (!_wrapper->_idb_design->placeInstance(inst->get_name(), inst->get_location().get_x(), inst->get_location().get_y(), orient,
+                                              idb::IdbPlacementStatus::kPlaced)) {
+      return false;
+    }
+    if (!preexisting) {
+      idb_inst->set_type(idb::IdbInstanceType::kTiming);
+    }
+    return true;
+  }
+
+  auto createOrUpdateClockTreeInst(Inst* inst, const ClockTreeIdbPreexistingObjects& restore_data) -> idb::IdbInstance*
   {
     if (inst == nullptr) {
       return nullptr;
@@ -357,12 +424,10 @@ class Wrapper::CtsClockIdbWriter
           return nullptr;
         }
       }
-      if (!_wrapper->_idb_design->placeInstance(inst->get_name(), inst->get_location().get_x(), inst->get_location().get_y(), idb::IdbOrient::kN_R0,
-                                                idb::IdbPlacementStatus::kPlaced)) {
+      if (!applyClockTreeInstPlacement(idb_inst, inst, restore_data)) {
         CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed: cannot place mapped iDB inst \"", inst->get_name(), "\".");
         return nullptr;
       }
-      idb_inst->set_type(idb::IdbInstanceType::kTiming);
       bindClockTreeInstPins(idb_inst, inst);
       return idb_inst;
     }
@@ -380,15 +445,12 @@ class Wrapper::CtsClockIdbWriter
                     inst->get_cell_master(), "\".");
         return nullptr;
       }
-      idb_inst->set_type(idb::IdbInstanceType::kTiming);
     }
 
-    if (!_wrapper->_idb_design->placeInstance(inst->get_name(), inst->get_location().get_x(), inst->get_location().get_y(), idb::IdbOrient::kN_R0,
-                                              idb::IdbPlacementStatus::kPlaced)) {
+    if (!applyClockTreeInstPlacement(idb_inst, inst, restore_data)) {
       CTSLOG.warn(Loc::current(), "CTS iDB clock-tree materialization failed: cannot place iDB inst \"", inst->get_name(), "\".");
       return nullptr;
     }
-    idb_inst->set_type(idb::IdbInstanceType::kTiming);
     _wrapper->crossRef(idb_inst, inst);
     bindClockTreeInstPins(idb_inst, inst);
     return idb_inst;
@@ -463,10 +525,6 @@ class Wrapper::CtsClockIdbWriter
       return nullptr;
     }
     if (auto* idb_net = findExistingClockTreeIdbNet(net); idb_net != nullptr) {
-      // Existing clock nets may have been read as ordinary SIGNAL nets. The
-      // CTS writer must preserve clock semantics on both create and existing
-      // net paths before pins and segments are materialized.
-      idb_net->set_connect_type(idb::IdbConnectType::kClock);
       return idb_net;
     }
 
@@ -615,11 +673,13 @@ class Wrapper::CtsClockIdbWriter
         continue;
       }
       DetachIdbNetPins(_wrapper->_idb_design, idb_net);
-      for (auto* io_pin : net_pins.io_pins) {
-        idb_clock_tree_restored = AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, io_pin) && idb_clock_tree_restored;
+      for (const auto& io_key : net_pins.io_pins) {
+        auto* io_pin = ResolveIdbPin(_wrapper->_idb_design, io_key);
+        idb_clock_tree_restored = io_pin != nullptr && AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, io_pin) && idb_clock_tree_restored;
       }
-      for (auto* inst_pin : net_pins.inst_pins) {
-        idb_clock_tree_restored = AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, inst_pin) && idb_clock_tree_restored;
+      for (const auto& inst_key : net_pins.inst_pins) {
+        auto* inst_pin = ResolveIdbPin(_wrapper->_idb_design, inst_key);
+        idb_clock_tree_restored = inst_pin != nullptr && AttachIdbPinToClockTreeNet(_wrapper->_idb_design, idb_net, inst_pin) && idb_clock_tree_restored;
       }
     }
 
@@ -641,24 +701,26 @@ class Wrapper::CtsClockIdbWriter
 
   // Every pin that was on a rewritten net before materialization must still be
   // connected afterwards; a dropped pin is a typed failure, never a silent edit.
-  static auto findDroppedPreexistingPin(const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data)
-      -> std::optional<std::pair<std::string, std::string>>
+  // Pins are re-resolved by name because updating an instance's cell master during
+  // the write recreates its pins, which invalidates captured pointers.
+  static auto findDroppedPreexistingPin(const ClockTreeIdbMaterializationScope& scope, const ClockTreeIdbPreexistingObjects& restore_data,
+                                        idb::IdbDesign* idb_design) -> std::optional<std::pair<std::string, std::string>>
   {
     for (const auto& [net_name, net_pins] : restore_data.pins_by_net_name) {
       if (!scope.touched_net_names.contains(net_name)) {
         continue;
       }
-      for (auto* io_pin : net_pins.io_pins) {
-        if (io_pin != nullptr && io_pin->get_net() == nullptr) {
-          return std::pair{net_name, io_pin->get_pin_name()};
+      for (const auto& io_key : net_pins.io_pins) {
+        auto* io_pin = ResolveIdbPin(idb_design, io_key);
+        if (io_pin == nullptr || (io_pin->get_net() == nullptr && io_pin->get_special_net() == nullptr)) {
+          return std::pair{net_name, io_key.pin_name};
         }
       }
-      for (auto* inst_pin : net_pins.inst_pins) {
-        if (inst_pin == nullptr || inst_pin->get_net() != nullptr) {
-          continue;
+      for (const auto& inst_key : net_pins.inst_pins) {
+        auto* inst_pin = ResolveIdbPin(idb_design, inst_key);
+        if (inst_pin == nullptr || (inst_pin->get_net() == nullptr && inst_pin->get_special_net() == nullptr)) {
+          return std::pair{net_name, inst_key.inst_name + "/" + inst_key.pin_name};
         }
-        auto* inst = inst_pin->get_instance();
-        return std::pair{net_name, inst == nullptr ? inst_pin->get_pin_name() : inst->get_name() + "/" + inst_pin->get_pin_name()};
       }
     }
     return std::nullopt;
@@ -695,23 +757,16 @@ class Wrapper::CtsClockIdbWriter
 
 auto Wrapper::writeClock(Design& design, Clock& clock) -> bool
 {
-  if (_native_adapter != nullptr) {
-    return _native_adapter->writeClocks(design, {&clock}).success;
+  if (_design_source != nullptr) {
+    return _design_source->writeClocks(design, {&clock}).success;
   }
   return CtsClockIdbWriter(*this, design).writeClocksDetailed({&clock}).success;
 }
 
 auto Wrapper::writeClocksDetailed(Design& design, const std::vector<Clock*>& clocks) -> WrapperWriteSummary
 {
-  if (_native_adapter != nullptr) {
-    const auto native_summary = _native_adapter->writeClocks(design, clocks);
-    return WrapperWriteSummary{.success = native_summary.success,
-                               .failed_clock = native_summary.failed_clock,
-                               .failed_net = native_summary.failed_net,
-                               .idb_clock_tree_restored = false,
-                               .inserted_inst_count = native_summary.inserted_inst_count,
-                               .inserted_net_count = native_summary.inserted_net_count,
-                               .reason = native_summary.reason};
+  if (_design_source != nullptr) {
+    return _design_source->writeClocks(design, clocks);
   }
   return CtsClockIdbWriter(*this, design).writeClocksDetailed(clocks);
 }

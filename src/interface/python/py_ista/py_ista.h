@@ -16,13 +16,20 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
+
 #include <tcl_util.h>
 
 namespace python_interface {
 
-bool initSTA(std::string& config, std::map<std::string, std::string>& config_dict);
+bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool prepareTimingModel();
+bool exportTimingModel();
 bool runSTA();
 bool extractLib();
 bool destroySTA();
+bool isModelReady();
+bool isTimingReady();
 
 }  // namespace python_interface

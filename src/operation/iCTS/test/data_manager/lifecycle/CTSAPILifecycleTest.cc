@@ -22,24 +22,41 @@
  */
 
 #include <gtest/gtest.h>
+#include <stdint.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
+#include <map>
+#include <memory>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include "CTSAPI.hh"
+#include "CTSStatus.hh"
+#include "ClockDAG.hh"
+#include "ClockLayout.hh"
+#include "Config.hh"
+#include "FastSTA.hh"
 #include "IdbDesign.h"
+#include "IdbEnum.h"
+#include "IdbGeometry.h"
+#include "IdbInstance.h"
 #include "IdbLayer.h"
+#include "IdbLayout.h"
+#include "IdbNet.h"
+#include "IdbPins.h"
 #include "Logger.hh"
-#include "Utility.hh"
-#include "data_manager/adapter/fast_sta/liberty/FastSTALiberty.hh"
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "design/Clock.hh"
@@ -47,6 +64,7 @@
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
+#include "dm_config.h"
 #include "evaluation/Evaluation.hh"
 #include "evaluation/qor/ClockQORMetricCollector.hh"
 #include "idm.h"
@@ -54,6 +72,7 @@
 #include "module/synthesis/Synthesis.hh"
 #include "module/synthesis/realization/ClockTreeRealization.hh"
 #include "optimization/Optimization.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts_test {
 namespace {
@@ -165,7 +184,7 @@ class ScopedNativeClockExternalIdb
     const auto sdc_path = _output_dir / "native.sdc";
     _work_dir = _output_dir / "cts_work";
 
-    constexpr auto config = R"json({
+    constexpr auto config_default_fanout = R"json({
   "root_input_slew": 0.02,
   "max_sink_tran": 1.0,
   "max_fanout": 8,
@@ -173,6 +192,17 @@ class ScopedNativeClockExternalIdb
   "buffer_type": ["BUF_X1"],
   "enable_sink_clustering": false
 })json";
+    // The partial-traced-frontier fixture keeps its 13-load traced leaf under the fanout
+    // limit, so the explicit-frontier semantics are exercised without the fanout gate.
+    constexpr auto config_wide_fanout = R"json({
+  "root_input_slew": 0.02,
+  "max_sink_tran": 1.0,
+  "max_fanout": 32,
+  "routing_layer": [1],
+  "buffer_type": ["BUF_X1"],
+  "enable_sink_clustering": false
+})json";
+    const std::string config = label == "partial_traced_frontier" ? config_wide_fanout : config_default_fanout;
     constexpr auto tech_lef = R"lef(VERSION 5.8 ;
 BUSBITCHARS "[]" ;
 DIVIDERCHAR "/" ;
@@ -504,7 +534,6 @@ END DESIGN
 
   auto ready() const -> bool { return _ready; }
   auto configPath() const -> const std::filesystem::path& { return _config_path; }
-  auto libertyPath() const -> std::filesystem::path { return _output_dir / "native.lib"; }
   auto workDir() const -> const std::filesystem::path& { return _work_dir; }
   auto reportDir() const -> std::filesystem::path { return _output_dir / "report"; }
 
@@ -514,12 +543,6 @@ END DESIGN
   std::filesystem::path _work_dir;
   bool _ready = false;
 };
-
-auto Median(std::array<double, 4> samples) -> double
-{
-  std::ranges::sort(samples);
-  return (samples.at(1U) + samples.at(2U)) / 2.0;
-}
 
 struct ExternalDesignFingerprint
 {
@@ -854,48 +877,6 @@ TEST(CTSAPILifecycleTest, NativeCharacterizationProducerPublishesExactBufferPair
   EXPECT_TRUE(fast_sta.eraseCharContext(context_id));
 }
 
-TEST(CTSAPILifecycleTest, FfLibertyScalarCapacitancesStayNormalizedThroughCts)
-{
-  const ScopedNativeClockExternalIdb external_idb("ff_liberty_scalar_capacitance");
-  ASSERT_TRUE(external_idb.ready());
-
-  std::ifstream liberty_stream(external_idb.libertyPath());
-  ASSERT_TRUE(liberty_stream.good());
-  std::string liberty{std::istreambuf_iterator<char>(liberty_stream), std::istreambuf_iterator<char>()};
-  liberty_stream.close();
-  const auto replace_all = [&liberty](const std::string& source, const std::string& replacement) -> std::size_t {
-    std::size_t replacements = 0U;
-    std::size_t position = 0U;
-    while ((position = liberty.find(source, position)) != std::string::npos) {
-      liberty.replace(position, source.size(), replacement);
-      position += replacement.size();
-      ++replacements;
-    }
-    return replacements;
-  };
-  ASSERT_EQ(replace_all("capacitive_load_unit (1, pf)", "capacitive_load_unit (1, ff)"), 1U);
-  ASSERT_EQ(replace_all("capacitance : 0.01;", "capacitance : 484.009;"), 3U);
-  ASSERT_EQ(replace_all("max_capacitance : 1.0;", "max_capacitance : 484.009;"), 2U);
-  ASSERT_TRUE(WriteTextFile(external_idb.libertyPath(), liberty));
-
-  const auto init_status = icts::CTSAPI::init(external_idb.configPath().string(), external_idb.workDir().string());
-  ASSERT_EQ(init_status.code, icts::CTSStatusCode::kOk) << init_status.message;
-
-  constexpr double kExpectedCapPf = 0.484009;
-  auto& wrapper = CTSDM.getWrapper();
-  const auto wrapper_input_cap_pf = wrapper.queryCharInputPinCap("BUF_X1");
-  const auto wrapper_output_cap_pf = wrapper.queryCellOutPinCapLimit("BUF_X1");
-  ASSERT_TRUE(wrapper_input_cap_pf.has_value());
-  ASSERT_TRUE(wrapper_output_cap_pf.has_value());
-  EXPECT_DOUBLE_EQ(*wrapper_input_cap_pf, kExpectedCapPf);
-  EXPECT_DOUBLE_EQ(*wrapper_output_cap_pf, kExpectedCapPf);
-
-  const auto fast_sta_cell = icts::FastStaLiberty::extractBufferCell(wrapper, "BUF_X1");
-  ASSERT_TRUE(fast_sta_cell.has_value());
-  EXPECT_DOUBLE_EQ(fast_sta_cell->input_cap_pf, kExpectedCapPf);
-  EXPECT_DOUBLE_EQ(fast_sta_cell->output_cap_limit_pf, kExpectedCapPf);
-}
-
 TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitFrontierAndRepeatsSafely)
 {
   const ScopedNativeClockExternalIdb external_idb("partial_traced_frontier");
@@ -932,7 +913,7 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   ASSERT_EQ(input_clock->get_loads().size(), 14U);
   const auto input_inst_count = input_design.get_insts().size();
   const auto input_net_count = input_design.get_nets().size();
-  const auto input_frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*input_clock);
+  const auto input_frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*input_clock, 0U);
   ASSERT_TRUE(input_frontier.hasTracedTopology());
   ASSERT_EQ(input_frontier.top_level_traced_inputs, std::vector<icts::Pin*>({input_pin}));
   ASSERT_EQ(input_frontier.uncovered_terminal_loads, std::vector<icts::Pin*>({boundary_pin}));
@@ -991,8 +972,10 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   EXPECT_GT(committed_design.get_clock_dag().reachableNets(committed_clock).size(), 2U);
   const auto path_stats = committed_design.get_clock_dag().pathBufferStats(committed_clock);
   EXPECT_TRUE(path_stats.available);
-  EXPECT_EQ(path_stats.min_buffer_count, 2);
-  EXPECT_EQ(path_stats.max_buffer_count, 2);
+  // Both branches carry a single buffer: the traced leaf keeps its pre-existing buffer,
+  // and the single-sink domain adds only its root buffer (a direct-wire segment).
+  EXPECT_EQ(path_stats.min_buffer_count, 1);
+  EXPECT_EQ(path_stats.max_buffer_count, 1);
   EXPECT_EQ(path_stats.ff_sink_terminal_count, 13U);
   EXPECT_EQ(committed_clock->findPropagationArc(committed_design.findInst("boundary_inv")), nullptr);
   EXPECT_EQ(CTSDM.getClockLayout().findInst(0U, "boundary_buf"), nullptr);
@@ -1084,8 +1067,8 @@ TEST(CTSAPILifecycleTest, SameClockPartialTracedTopologySynthesizesOnlyExplicitF
   }
   EXPECT_NEAR(buffer_stats->second.total_cap_pf.value_or(-1.0), 0.01 * static_cast<double>(expected_buffer_count), 1e-12);
   EXPECT_EQ(evaluation.output.state.summary.path_depth_metric_status, "available");
-  EXPECT_EQ(evaluation.output.state.summary.clock_path_min_buffer, 2);
-  EXPECT_EQ(evaluation.output.state.summary.clock_path_max_buffer, 2);
+  EXPECT_EQ(evaluation.output.state.summary.clock_path_min_buffer, 1);
+  EXPECT_EQ(evaluation.output.state.summary.clock_path_max_buffer, 1);
 }
 
 TEST(CTSAPILifecycleTest, FullyCoveredTracedTopologyRemainsZeroInsertionAcrossRepeatedSynthesis)
@@ -1197,45 +1180,6 @@ TEST(CTSAPILifecycleTest, CompletionIsLoggedBeforeLoggerDestruction)
   EXPECT_LT(start_pos, completion_pos);
 
   RemoveOutputDir(output_dir);
-}
-
-TEST(CTSAPILifecycleTest, TenCyclesRemainWithinApprovedPostDestroyRssThreshold)
-{
-#ifdef __linux__
-  const ScopedMinimalExternalIdb external_idb("ten_cycles");
-  ASSERT_TRUE(external_idb.ready());
-  std::array<double, 10> post_destroy_rss_mb{};
-  for (std::size_t cycle = 0U; cycle < post_destroy_rss_mb.size(); ++cycle) {
-    const auto init_status = icts::CTSAPI::init(external_idb.configPath().string(), external_idb.workDir().string());
-    ASSERT_EQ(init_status.code, icts::CTSStatusCode::kOk) << "cycle " << cycle << ": " << init_status.message;
-    EXPECT_TRUE(icts::CTSAPI::outputClockTiming().empty());
-    EXPECT_EQ(icts::CTSAPI::runCTS().code, icts::CTSStatusCode::kNoOp);
-    PopulateRepresentativeSession(4096U);
-    ASSERT_TRUE(icts::CTSAPI::destroyCTS().ok());
-    ASSERT_TRUE(icts::CTSAPI::destroyCTS().ok());
-    const auto rss_mb = icts::Utility::currentRssMb();
-    if (!rss_mb.has_value()) {
-      FAIL() << "Expected rss_mb to have a value.";
-    }
-    post_destroy_rss_mb.at(cycle) = rss_mb.value_or(0.0);
-  }
-
-  const std::array<double, 4> early_samples = {post_destroy_rss_mb.at(1U), post_destroy_rss_mb.at(2U), post_destroy_rss_mb.at(3U), post_destroy_rss_mb.at(4U)};
-  const std::array<double, 4> late_samples = {post_destroy_rss_mb.at(6U), post_destroy_rss_mb.at(7U), post_destroy_rss_mb.at(8U), post_destroy_rss_mb.at(9U)};
-  const double early_median_mb = Median(early_samples);
-  const double late_median_mb = Median(late_samples);
-  constexpr double absolute_tolerance_mb = 16.0;
-  const double allowed_growth_mb = std::max(absolute_tolerance_mb, early_median_mb * 0.05);
-  EXPECT_LE(late_median_mb, early_median_mb + allowed_growth_mb);
-
-  bool sustained_growth = true;
-  for (std::size_t index = 2U; index < post_destroy_rss_mb.size(); ++index) {
-    sustained_growth = sustained_growth && post_destroy_rss_mb.at(index) > post_destroy_rss_mb.at(index - 1U);
-  }
-  EXPECT_FALSE(sustained_growth);
-#else
-  GTEST_SKIP() << "Linux /proc RSS sampling is unavailable.";
-#endif
 }
 
 }  // namespace

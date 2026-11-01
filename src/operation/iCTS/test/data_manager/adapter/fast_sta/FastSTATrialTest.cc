@@ -24,20 +24,35 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <filesystem>
+#include <initializer_list>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <tuple>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "FastSTA.hh"
+#include "FastSTAClockNetParasitic.hh"
+#include "FastSTAClockSizingEdit.hh"
+#include "FastSTAClockTiming.hh"
+#include "IdbCellMaster.h"
 #include "IdbLayout.h"
+#include "IdbUnits.h"
+#include "Point.hh"
+#include "TimingConstraints.hh"
 #include "clock_sizing/FastSTAIncremental.hh"
 #include "clock_state/FastSTABuilder.hh"
+#include "clock_state/FastSTAClockState.hh"
 #include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
+#include "dm_config.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"

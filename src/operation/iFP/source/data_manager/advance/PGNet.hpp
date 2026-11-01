@@ -49,7 +49,12 @@ class PGNet
 
   // function
   void add_io_pin(std::string pin_name, IOPinDirection direction) { _io_pin_name_to_direction_map[pin_name] = direction; }
-  void add_instance_pin(std::string pin_name) { _instance_pin_name_list.push_back(pin_name); }
+  void add_instance_pin(std::string pin_name)
+  {
+    if (std::find(_instance_pin_name_list.begin(), _instance_pin_name_list.end(), pin_name) == _instance_pin_name_list.end()) {
+      _instance_pin_name_list.push_back(std::move(pin_name));
+    }
+  }
 
  private:
   std::string _name;

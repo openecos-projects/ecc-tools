@@ -25,7 +25,6 @@
 
 #include <cstddef>
 #include <initializer_list>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -34,7 +33,7 @@
 #include <utility>
 #include <vector>
 
-#include "SDCClockReader.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 
@@ -122,6 +121,10 @@ class SdcSubsetEvaluator
   // Record an SDC construct iCTS does not read. These never make `SdcClockData::ok()`
   // false: the clock model iCTS consumes is unaffected by a command it never looks at.
   auto reportIgnored(const std::string& command, const std::string& detail) -> void;
+  // `status` mirrors the first surviving fatal issue. After an unrecognized command
+  // rewinds its subtree, `issues` shrinks, so `status` must be recomputed from what
+  // remains instead of keeping whatever a discarded argument left behind.
+  auto refreshStatus() -> void;
   auto parseOptions(const std::string& command, const std::vector<SdcValue>& args, std::initializer_list<std::string_view> value_options,
                     std::initializer_list<std::string_view> flag_options, std::initializer_list<std::string_view> repeated_options = {})
       -> std::optional<SdcCommandOptions>;
@@ -150,6 +153,7 @@ auto MakeObjectValue(SdcObjectKind kind, const std::vector<std::string>& pattern
 auto AppendRefsFromValue(std::vector<SdcObjectRef>& refs, const SdcValue& value, SdcObjectKind default_kind) -> void;
 auto ParseDoubleValue(const std::string& text, double& value) -> bool;
 auto ParseIntValue(const std::string& text, int& value) -> bool;
+auto ParseCaseAnalysisValue(const std::string& text, int& value) -> SdcConstraintStatusCode;
 auto TimeUnitToNs(const std::string& unit) -> double;
 auto CapacitanceUnitToPf(const std::string& unit) -> double;
 auto OptionTransition(const SdcCommandOptions& options) -> SdcTransition;

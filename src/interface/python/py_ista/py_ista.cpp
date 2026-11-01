@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "py_ista.h"
 
+#include "py_path_utils.h"
 #include "STAInterface.hpp"
 
 namespace python_interface {
@@ -23,12 +24,13 @@ namespace python_interface {
 bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
-bool initSTA(std::string& config, std::map<std::string, std::string>& config_dict)
+bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
   bool pass = false;
-  pass = config.empty() ? true : initStaConfigMapByJSON(config, config_map);
+  pass = config_.empty() ? true : initStaConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -43,6 +45,21 @@ bool runSTA()
   return true;
 }
 
+bool prepareTimingModel()
+{
+  STAI.prepareTimingModel();
+  return true;
+}
+
+bool exportTimingModel()
+{
+  // The value is consumed through the PyPlaceDB model-only constructor. Keep
+  // this binding as a readiness operation so Python callers can validate the
+  // lifecycle without copying a large native snapshot through pybind.
+  (void) STAI.exportTimingModel();
+  return true;
+}
+
 bool extractLib()
 {
   STAI.extractLib();
@@ -53,6 +70,16 @@ bool destroySTA()
 {
   STAI.destroySTA();
   return true;
+}
+
+bool isModelReady()
+{
+  return STAI.isModelReady();
+}
+
+bool isTimingReady()
+{
+  return STAI.isTimingReady();
 }
 
 }  // namespace python_interface

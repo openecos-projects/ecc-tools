@@ -10,14 +10,6 @@ add_library(imj_interface
     ${IMJ_INTERFACE}/MJInterface.cpp
 )
 
-if(TARGET eccdb_core)
-    target_sources(imj_interface PRIVATE
-        ${PROJECT_SOURCE_DIR}/src/database/eccdb/adapters/imj/MJInterfaceEccdb.cpp
-    )
-    target_compile_definitions(imj_interface PRIVATE IMJ_HAS_ECCDB=1)
-    target_link_libraries(imj_interface PRIVATE eccdb_core)
-endif()
-
 target_link_libraries(imj_interface
     PRIVATE
     imj_source

@@ -33,6 +33,7 @@ add_library(eval_util_init_egr
 target_link_libraries(eval_util_init_egr
     PRIVATE
         irt_interface
+        eccdb_irt_adapter
         idm
         ecc_logger
 )
@@ -68,6 +69,7 @@ target_link_libraries(eval_util_init_ista
         ecc_feature
         idm
         irt_interface
+        eccdb_irt_adapter
         eval_db
 )
 

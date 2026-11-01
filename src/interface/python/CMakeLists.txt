@@ -2,6 +2,10 @@
 
 SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 
+# Headers shared by the py_* binding modules (for example py_path_utils.h) live
+# in this directory, so every module can include them without a relative path.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 # DEFINE PYTHON MODULE & CMAKE TARGET
 pybind11_add_module(ecc_py python_moodule.cc)
 
@@ -48,16 +52,18 @@ add_subdirectory(py_report)
 add_subdirectory(py_feature)
 add_subdirectory(py_imp)
 
+if(TARGET eccdb_scripting)
+    add_subdirectory(py_eccdb)
+    target_link_libraries(ecc_py PRIVATE py_eccdb)
+    target_compile_definitions(ecc_py PRIVATE ECCDB_PYTHON_NATIVE=1)
+endif()
+
 # ADD SOURCE FILES
 # file(GLOB_RECURSE PYTHON_INTERFACE_SRC CONFIGURE_DEPENDS ./*.cpp ./*.cc)
 file(GLOB PYTHON_INTERFACE_SRC CONFIGURE_DEPENDS *.cpp .h)
 
 # SET SOURCE FILES
 target_sources(ecc_py PUBLIC ${PYTHON_INTERFACE_SRC})
-
-target_sources(ecc_py PRIVATE py_native/py_native.cpp)
-target_include_directories(ecc_py PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/py_native)
-target_link_libraries(ecc_py PRIVATE ecc_native_toolchain)
 
 target_link_libraries(ecc_py
     PRIVATE

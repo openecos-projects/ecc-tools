@@ -1,26 +1,12 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 #include "DesignTestFixture.h"
@@ -193,6 +179,41 @@ TEST_F(ConnectivityServiceTest, DeleteNetDetachesTermsAndDestroysOwnedRouting)
   EXPECT_FALSE(design.geometryRegistry().contains(track));
   EXPECT_FALSE(netlist.instanceTerm(term).net);
   EXPECT_FALSE(netlist.instanceTerm(term).special_net);
+}
+
+TEST_F(ConnectivityServiceTest, SetNetAliasesNotifiesConnectivityAndSurvivesRename)
+{
+  struct Observer final : DatabaseObserver
+  {
+    void afterChange(const DatabaseChange& change) noexcept override
+    {
+      ++after_count;
+      domains = change.domains;
+      nets.assign(change.nets.begin(), change.nets.end());
+    }
+
+    uint32_t after_count = 0;
+    DatabaseChangeDomain domains = DatabaseChangeDomain::kNone;
+    std::vector<DesignNetId> nets;
+  } observer;
+
+  const auto net = service->createNet(DesignNet{.name = "canonical"});
+  const std::vector<std::string> names{R"(\rtl_alias[0])", "canonical"};
+  context->addObserver(observer);
+  const auto revision = context->revision();
+
+  service->setNetAliases(net, DesignNetAliases{.names = names});
+  ASSERT_EQ(observer.after_count, 1u);
+  EXPECT_EQ(observer.domains, DatabaseChangeDomain::kConnectivity);
+  EXPECT_EQ(observer.nets, std::vector<DesignNetId>{net});
+  EXPECT_EQ(context->revision(), revision + 1u);
+  ASSERT_NE(design.netlistStorage().netAliases(net), nullptr);
+  EXPECT_EQ(design.netlistStorage().netAliases(net)->names, names);
+
+  context->removeObserver(observer);
+  service->renameNet(net, "canonical_renamed");
+  ASSERT_NE(design.netlistStorage().netAliases(net), nullptr);
+  EXPECT_EQ(design.netlistStorage().netAliases(net)->names, names);
 }
 
 TEST_F(ConnectivityServiceTest, MustJoinRejectsInvalidPublicConnectivityEdits)

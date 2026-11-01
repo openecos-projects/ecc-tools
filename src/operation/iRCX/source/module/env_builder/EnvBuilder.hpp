@@ -54,7 +54,6 @@ class EnvBuilder
   EnvBuilder& operator=(EnvBuilder&& other) = delete;
   // function
   void buildEBModel(EBModel& eb_model);
-  void assignStableNetRanks();
   bool buildNetEnvList(EBModel& eb_model);
   std::vector<CrossLayerOverlap> getClippedCrossLayerOverlapList(const std::vector<CrossLayerOverlap>& cross_layer_overlap_list, int32_t start_coord,
                                                                  int32_t end_coord);

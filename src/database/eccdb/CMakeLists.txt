@@ -1,20 +1,5 @@
-# ***************************************************************************************
 # SPDX-License-Identifier: MulanPSL-2.0
-# Copyright (c) 2023-2025 Peng Cheng Laboratory
-# Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-# Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-#
-# iEDA is licensed under Mulan PSL v2.
-# You can use this software according to the terms and conditions of the Mulan PSL v2.
-# You may obtain a copy of Mulan PSL v2 at:
-# http://license.coscl.org.cn/MulanPSL2
-#
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-#
-# See the Mulan PSL v2 for more details.
-# ***************************************************************************************
+# Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -115,8 +100,18 @@ mark_as_advanced(ECCDB_BOOST_INCLUDE_DIR)
 target_include_directories(eccdb_boost_pfr SYSTEM INTERFACE
   $<BUILD_INTERFACE:${ECCDB_BOOST_INCLUDE_DIR}>)
 
-option(ECCDB_BUILD_TESTS "Build ECCDB tests" ON)
+set(_eccdb_default_build_tests ON)
+set(_eccdb_default_install_sdk ON)
+if("${SKBUILD}" STREQUAL "2")
+  # A wheel ships the runtime extension, not the native SDK or its test corpus.
+  set(_eccdb_default_build_tests OFF)
+  set(_eccdb_default_install_sdk OFF)
+endif()
+option(ECCDB_BUILD_TESTS "Build ECCDB tests" ${_eccdb_default_build_tests})
 option(ECCDB_BUILD_BENCHMARKS "Build ECCDB performance benchmarks" OFF)
+option(ECCDB_INSTALL_SDK "Install the native EccDB SDK and CMake package" ${_eccdb_default_install_sdk})
+unset(_eccdb_default_build_tests)
+unset(_eccdb_default_install_sdk)
 
 add_subdirectory(storage)
 add_subdirectory(service)
@@ -137,6 +132,12 @@ target_link_libraries(eccdb_core
     eccdb_library
     eccdb_tech_database
 )
+
+# Operation-facing EccDB adaptors live at the SDK boundary.  They are only
+# meaningful in the full ecc-tools build, where the corresponding Operation
+# targets are provided later by src/operation; the adaptor CMake file keeps
+# those target names as explicit link dependencies.
+add_subdirectory(adapters)
 
 add_subdirectory(io/binary)
 add_subdirectory(io/idb)
@@ -230,6 +231,40 @@ foreach(_target IN ITEMS eccdb_lef_import eccdb_def_import)
   endif()
 endforeach()
 
+# Licenses accompany both the native SDK and the Python runtime wheel.
+install(FILES
+  "${ECCDB_SOURCE_DIR}/LICENSE"
+  "${ECCDB_SOURCE_DIR}/NOTICE"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb"
+)
+install(FILES "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt/LICENSE"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb/entt"
+)
+install(FILES
+  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/LICENSE"
+  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/lef/LICENSE.TXT"
+  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/def/LICENSE.TXT"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb/lefdef"
+)
+
+if(NOT ECCDB_INSTALL_SDK)
+  # ecc_py loads the database owner and optional LEF/DEF import boundaries.
+  # Keep SDK-only shared targets, such as eccdb_viewer, out of the wheel.
+  set(_eccdb_runtime_targets eccdb_database_owner)
+  foreach(_target IN ITEMS eccdb_lef_import eccdb_def_import)
+    if(TARGET ${_target})
+      list(APPEND _eccdb_runtime_targets ${_target})
+    endif()
+  endforeach()
+  if(_eccdb_runtime_targets)
+    install(TARGETS ${_eccdb_runtime_targets}
+      LIBRARY DESTINATION "ecc_tools_bin/lib"
+      RUNTIME DESTINATION "ecc_tools_bin/lib"
+    )
+  endif()
+  return()
+endif()
+
 install(TARGETS ${_eccdb_export_targets}
   EXPORT EccDBTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -270,16 +305,6 @@ install(DIRECTORY "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt/entt/"
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/eccdb/third_party/entt/entt"
   FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
-install(FILES "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/entt/LICENSE"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb/entt"
-)
-install(FILES
-  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/LICENSE"
-  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/lef/LICENSE.TXT"
-  "${ECCDB_ECC_TOOLS_ROOT}/src/third_party/lefdef/def/LICENSE.TXT"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/eccdb/lefdef"
-)
-
 configure_package_config_file(
   "${ECCDB_SOURCE_DIR}/cmake/EccDBConfig.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/EccDBConfig.cmake"

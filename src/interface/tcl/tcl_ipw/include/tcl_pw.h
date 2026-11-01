@@ -86,6 +86,17 @@ class TclReportNetPower : public TclCmd
   unsigned exec() override;
 };
 
+class TclReportPeakPowerWaveform : public TclCmd
+{
+ public:
+  explicit TclReportPeakPowerWaveform(const char* cmd_name);
+  ~TclReportPeakPowerWaveform() override = default;
+
+  unsigned check() override { return 1; }
+
+  unsigned exec() override;
+};
+
 #endif
 
 }  // namespace tcl

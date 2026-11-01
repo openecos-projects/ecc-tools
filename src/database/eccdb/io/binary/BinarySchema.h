@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #pragma once
 
@@ -23,6 +8,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "tech/common/TechLayerAntennaComponents.h"
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/fill/model/FillComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
@@ -132,12 +118,13 @@ namespace binary_detail {
 // GeometryEntity is a 64-bit EnTT identifier.  Its width is part of each
 // geometry registry snapshot, so changing it invalidates all three archive
 // payloads even when the domain component lists stay unchanged.
-inline constexpr uint32_t kTechSchemaVersion = 11;
-inline constexpr uint32_t kLibrarySchemaVersion = 5;
+inline constexpr uint32_t kTechSchemaVersion = 12;
+inline constexpr uint32_t kLibrarySchemaVersion = 6;
 // Version 13 changes instance terms from records embedded in their owner to
 // independent DesignRegistry entities. Older payloads have a different
 // component layout and are intentionally rejected rather than migrated.
-inline constexpr uint32_t kDesignSchemaVersion = 13;
+// Version 15 adds optional DesignNetAliases provenance metadata.
+inline constexpr uint32_t kDesignSchemaVersion = 15;
 
 template <typename... Types>
 struct BinaryTypeList
@@ -149,7 +136,7 @@ struct BinaryTypeList
 // incrementing kTechSchemaVersion.
 using TechBinaryComponents = BinaryTypeList<
     TechRoot, TechLayerSequence, TechGlobalUnits, TechManufacturingGrid, TechUseMinSpacingObs, TechUseMinSpacingPin, TechMaxViaStack,
-    TechLayerInfo, TechLayerProperties,
+    TechLayerInfo, TechLayerProperties, TechLayerAntenna,
     TechRoutingLayer, TechCutLayer, TechImplantLayer, TechImplantSpacingRules, TechMastersliceLayer, TechTrimmedMetalRule, TechOverlapLayer,
     TechRoutingSpacingRule, TechRoutingEndOfLineSpacingRule, TechRoutingMinEncloseAreaRule, TechRoutingMinStepRule,
     TechRoutingMinimumCutRule,
@@ -180,7 +167,8 @@ using TechBinaryComponents = BinaryTypeList<
     TechViaRuleProperties, TechNonDefaultRule, TechNdrRoutingRules, TechNdrMinCutsRules, TechNdrUseVias, TechNdrUseViaRules,
     TechNdrProperties, TechNdrViaDefinition, TechNdrViaDefinitions, TechNdrSameNetSpacingRules, TechRuleOwner>;
 
-using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, LibraryMasterTerm, LibraryMasterPort, LibraryMasterObs>;
+using LibraryBinaryComponents = BinaryTypeList<LibrarySite, LibraryCellMaster, LibraryMasterTerm, LibraryMasterTermAntenna,
+                                               LibraryMasterPort, LibraryMasterObs>;
 
 // Geometry has its own EnTT registry.  These lists are deliberately separate
 // from the design/tech/library registries: a geometry entity is a first-class
@@ -198,9 +186,9 @@ using DesignGeometryBinaryComponents = BinaryTypeList<GeometryShape, DesignRoute
 // Shapes own geometry. Wire owns Shape IDs; DEF paths and bbox are derived.
 using DesignBinaryComponents
     = BinaryTypeList<DesignRoot, DesignInfo, DesignDieArea, DesignCoreArea, DesignRow, DesignTrackGrid, DesignGCellGrid,
-                     DesignInstance, DesignInstanceTerms, DesignInstanceTerm, DesignBlockTerm, DesignBlockPin, DesignNet,
+                     DesignInstance, DesignInstanceTerms, DesignInstanceTerm, DesignBlockTerm, DesignBlockTermAntenna, DesignBlockPin, DesignNet,
                      DesignNetInstancePins,
-                     DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignWire, DesignNetGeometry, DesignVia,
+                     DesignNetIoPins, DesignSpecialNet, DesignNetOptions, DesignNetAliases, DesignWire, DesignNetGeometry, DesignVia,
                      DesignNonDefaultRule, DesignRegion, DesignGroup, DesignBlockage, DesignFill, DesignNetRouteGuides,
                      DesignNetTrackAssignments, DesignPinAccessCatalog, DesignInstancePinAccessGroupIndex,
                      DesignInstancePreferredPinAccess, DesignBlockPinAccessGroups>;

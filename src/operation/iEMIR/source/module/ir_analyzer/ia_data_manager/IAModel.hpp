@@ -27,7 +27,6 @@ class IAModel
   ~IAModel() = default;
   // getter
   std::set<std::size_t>& get_source_node_id_set() { return _source_node_id_set; }
-  std::vector<std::size_t>& get_node_id_to_canonical_node_id_list() { return _node_id_to_canonical_node_id_list; }
   std::map<std::size_t, std::size_t>& get_node_id_to_matrix_idx_map() { return _node_id_to_matrix_idx_map; }
   std::vector<std::size_t>& get_matrix_idx_to_node_id_list() { return _matrix_idx_to_node_id_list; }
   std::map<std::size_t, double>& get_node_current_map() { return _node_current_map; }
@@ -42,7 +41,6 @@ class IAModel
 
  private:
   std::set<std::size_t> _source_node_id_set;
-  std::vector<std::size_t> _node_id_to_canonical_node_id_list;
   std::map<std::size_t, std::size_t> _node_id_to_matrix_idx_map;
   std::vector<std::size_t> _matrix_idx_to_node_id_list;
   std::map<std::size_t, double> _node_current_map;

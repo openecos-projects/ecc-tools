@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <gtest/gtest.h>
 
@@ -182,7 +167,33 @@ TEST_F(GeometryPayloadServiceTest, HitTestRejectsPolygonBoundingBoxFalsePositive
   EXPECT_FALSE(service.hitTest(Point{25, 25}, 0, filter).has_value());
 }
 
-TEST_F(GeometryPayloadServiceTest, ResolvesTruncatedShapeSegmentCapsToZeroWithoutDiscardingExtensions)
+TEST_F(GeometryPayloadServiceTest, SegmentPayloadCapsMatchBoundsForRegularAndUnclassifiedSpecialWires)
+{
+  DatabaseContext context{design};
+  GeometryPayloadService service(context);
+  for (const bool is_special : {false, true}) {
+    const auto owner = design.routingStorage().createWire(DesignWire{.net = is_special ? special : regular});
+    const auto shape = design.geometryStorage().createRouteShape(
+        owner,
+        DesignRouteShape{.wire = owner,
+                         .layer = m1,
+                         .flags = is_special ? DesignWirePathFlag::kHasWidth : 0u,
+                         .geometry = DesignRouteSegment{.begin = {.position = {100, 0}}, .end = {.position = {0, 0}}}},
+        is_special ? std::optional{DesignRouteShapeAttributes{.width = 10}} : std::nullopt);
+    const std::array<uint64_t, 1> ids{shape.packed()};
+    const auto batch = service.fetchShapes(ids);
+    ASSERT_EQ(batch.segments.size(), 1u);
+    const auto& segment = batch.segments.front();
+    const double expected_cap = is_special ? 0.0 : segment.width / 2.0;
+    EXPECT_DOUBLE_EQ(segment.begin_cap, expected_cap);
+    EXPECT_DOUBLE_EQ(segment.end_cap, expected_cap);
+    EXPECT_EQ(batch.headers.front().bounds, design.routingStorage().shapeBoundingBox(shape));
+    EXPECT_EQ(batch.headers.front().bounds.ll_x, -static_cast<int32_t>(expected_cap));
+    EXPECT_EQ(batch.headers.front().bounds.ur_x, 100 + static_cast<int32_t>(expected_cap));
+  }
+}
+
+TEST_F(GeometryPayloadServiceTest, ExplicitExtensionsOverrideSpecialShapeDefaultCaps)
 {
   const auto shape_wire = design.routingStorage().createWire(DesignWire{.net = special});
   const auto shape = design.geometryStorage().createRouteShape(
@@ -201,13 +212,13 @@ TEST_F(GeometryPayloadServiceTest, ResolvesTruncatedShapeSegmentCapsToZeroWithou
   const auto batch = service.fetchShapes(ids);
   ASSERT_EQ(batch.segments.size(), 1u);
   const auto& segment = batch.segments.front();
-  EXPECT_DOUBLE_EQ(segment.begin_cap, 0.0);
-  EXPECT_DOUBLE_EQ(segment.end_cap, 0.0);
+  EXPECT_DOUBLE_EQ(segment.begin_cap, 17.0);
+  EXPECT_DOUBLE_EQ(segment.end_cap, 23.0);
   EXPECT_EQ(segment.begin_flags, DesignWirePointFlag::kHasExtension);
   EXPECT_EQ(segment.end_flags, DesignWirePointFlag::kHasExtension);
   EXPECT_EQ(segment.begin_extension, 17);
   EXPECT_EQ(segment.end_extension, 23);
-  EXPECT_EQ(batch.headers.front().bounds, (Rect{0, -5, 100, 5}));
+  EXPECT_EQ(batch.headers.front().bounds, (Rect{-17, -5, 123, 5}));
 }
 
 TEST_F(GeometryPayloadServiceTest, RepresentsZeroLengthSegmentAsWidthSquare)

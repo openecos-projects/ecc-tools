@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "idb/IdbLibraryImporter.h"
 
@@ -26,6 +11,7 @@
 
 #include "IdbLayout.h"
 #include "IdbObs.h"
+#include "antenna/AntennaService.h"
 #include "idb/IdbTechImporter.h"
 
 namespace eccdb {
@@ -195,6 +181,33 @@ int32_t checkedCoordinate(int64_t value, const char* field)
   return static_cast<int32_t>(value);
 }
 
+LibraryMasterTermAntenna importAntenna(::idb::IdbTerm& source)
+{
+  LibraryMasterTermAntenna target;
+  // The legacy iDB term has at most these two unqualified values.  Reserving
+  // also avoids an unnecessary allocation while importing a large library.
+  target.values.reserve(2);
+  if (source.has_antenna_gate_area()) {
+    target.flags |= LibraryMasterTermAntennaFlag::kHasValues;
+    target.values.push_back(AntennaValue{.metric = AntennaMetric::kGateArea, .value = source.get_antenna_gate_area()});
+  }
+  if (source.has_antenna_diff_area()) {
+    target.flags |= LibraryMasterTermAntennaFlag::kHasValues;
+    target.values.push_back(AntennaValue{.metric = AntennaMetric::kDiffArea, .value = source.get_antenna_diff_area()});
+  }
+
+  const auto append_layer_values = [&](const auto& values, AntennaMetric metric) {
+    for (const auto& [layer, value] : values) {
+      target.flags |= LibraryMasterTermAntennaFlag::kHasLayerValues;
+      target.layer_values.push_back(AntennaLayerValue{.metric = metric, .layer = layer, .value = value});
+    }
+  };
+  append_layer_values(source.get_antenna_partial_metal_area(), AntennaMetric::kPartialMetalArea);
+  append_layer_values(source.get_antenna_partial_metal_side_area(), AntennaMetric::kPartialMetalSideArea);
+  append_layer_values(source.get_antenna_partial_cut_area(), AntennaMetric::kPartialCutArea);
+  return target;
+}
+
 Rect rect(::idb::IdbRect& source, int64_t offset_x = 0, int64_t offset_y = 0)
 {
   return Rect{.ll_x = checkedCoordinate(static_cast<int64_t>(source.get_low_x()) + offset_x, "legacy library rectangle X"),
@@ -211,6 +224,7 @@ void IdbLibraryImporter::import(::idb::IdbLayout& source)
     throw std::logic_error("legacy iDB library importer is one-shot");
   }
   _imported = true;
+  AntennaService antenna_service(_database);
 
   for (auto* source_site : source.get_sites()->get_site_list()) {
     if (source_site == nullptr) {
@@ -289,6 +303,14 @@ void IdbLibraryImporter::import(::idb::IdbLayout& source)
           throw std::runtime_error("duplicate legacy PIN has conflicting attributes: " + source_master->get_name() + "/"
                                    + imported_term.name);
         }
+      }
+
+      // iDB keeps legacy MACRO PIN antenna data on the term itself.  Keep it
+      // as an optional EccDB component; PORT geometry remains owned by the
+      // normal master-port entities.
+      const auto antenna = importAntenna(*source_term);
+      if (antenna.flags != 0u) {
+        antenna_service.setMasterTermAntenna(term_id, antenna);
       }
 
       for (auto* source_port : source_term->get_port_list()) {

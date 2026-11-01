@@ -16,20 +16,6 @@
 // ***************************************************************************************
 #include "GraphBuilder.hpp"
 
-#include <algorithm>
-#include <cstdint>
-#include <map>
-#include <string>
-#include <tuple>
-#include <utility>
-#include <vector>
-
-#include <boost/geometry.hpp>
-#include <boost/geometry/geometries/box.hpp>
-#include <boost/geometry/geometries/point_xy.hpp>
-#include <boost/geometry/index/predicates.hpp>
-#include <boost/geometry/index/rtree.hpp>
-
 #include "DataManager.hpp"
 #include "EMTech.hpp"
 #include "Logger.hpp"
@@ -58,111 +44,6 @@ std::string csvField(const std::string& value)
 }  // namespace
 
 namespace iemir {
-namespace {
-
-struct PinPortKey
-{
-  bool is_source = false;
-  uint64_t instance_id = 0;
-  std::string pin_name;
-  uint64_t port_id = 0;
-
-  [[nodiscard]] bool operator<(const PinPortKey& other) const
-  {
-    return std::tie(is_source, instance_id, pin_name, port_id) < std::tie(other.is_source, other.instance_id, other.pin_name, other.port_id);
-  }
-};
-
-struct PendingPinPort
-{
-  PowerPin* fallback_pin = nullptr;
-  std::vector<std::size_t> node_ids;
-};
-
-void appendUniqueNodeId(std::vector<std::size_t>& node_ids, const std::size_t node_id)
-{
-  if (std::find(node_ids.begin(), node_ids.end(), node_id) == node_ids.end()) {
-    node_ids.push_back(node_id);
-  }
-}
-
-namespace bg = boost::geometry;
-namespace bgi = boost::geometry::index;
-
-using ViaContactPoint = bg::model::d2::point_xy<int32_t>;
-using ViaContactBox = bg::model::box<ViaContactPoint>;
-using ViaContactIndexValue = std::pair<ViaContactBox, std::size_t>;
-using ViaContactIndex = bgi::rtree<ViaContactIndexValue, bgi::quadratic<16>>;
-
-[[nodiscard]] ViaContactBox toViaContactBox(const PowerViaMetalRect& rectangle)
-{
-  return {{rectangle.ll_x, rectangle.ll_y}, {rectangle.ur_x, rectangle.ur_y}};
-}
-
-[[nodiscard]] ViaContactBox toViaContactBox(PowerPin& power_pin)
-{
-  return {{power_pin.get_ll_x(), power_pin.get_ll_y()}, {power_pin.get_ur_x(), power_pin.get_ur_y()}};
-}
-
-class ViaContactIndexByLayer
-{
- public:
-  void add(int32_t layer_idx, const PowerViaMetalRect& rectangle, std::size_t node_id)
-  {
-    _value_map[layer_idx].emplace_back(toViaContactBox(rectangle), node_id);
-  }
-
-  void build()
-  {
-    for (auto& [layer_idx, values] : _value_map) {
-      _rtree_map[layer_idx] = ViaContactIndex(values.begin(), values.end());
-    }
-  }
-
-  void appendContactNodeIds(PowerPin& power_pin, std::vector<std::size_t>& node_ids) const
-  {
-    if (!power_pin.has_bounds()) {
-      return;
-    }
-    const auto rtree_iter = _rtree_map.find(power_pin.get_layer_idx());
-    if (rtree_iter == _rtree_map.end()) {
-      return;
-    }
-    const ViaContactBox pin_box = toViaContactBox(power_pin);
-    for (auto query_iter = rtree_iter->second.qbegin(bgi::intersects(pin_box)); query_iter != rtree_iter->second.qend(); ++query_iter) {
-      appendUniqueNodeId(node_ids, query_iter->second);
-    }
-  }
-
- private:
-  std::map<int32_t, std::vector<ViaContactIndexValue>> _value_map;
-  std::map<int32_t, ViaContactIndex> _rtree_map;
-};
-
-[[nodiscard]] ViaContactIndexByLayer buildViaContactIndex(PowerGraph& power_graph, PowerNet& power_net)
-{
-  std::map<std::tuple<int32_t, int32_t, int32_t>, std::size_t> node_id_map;
-  for (PowerNode& node : power_graph.get_node_list()) {
-    node_id_map.emplace(std::make_tuple(node.get_layer_idx(), node.get_x(), node.get_y()), node.get_node_id());
-  }
-
-  ViaContactIndexByLayer result;
-  for (PowerVia& power_via : power_net.get_via_list()) {
-    const std::size_t bottom_node_id
-        = node_id_map.at(std::make_tuple(power_via.get_bottom_layer_idx(), power_via.get_x(), power_via.get_y()));
-    for (const PowerViaMetalRect& rectangle : power_via.get_bottom_rect_list()) {
-      result.add(power_via.get_bottom_layer_idx(), rectangle, bottom_node_id);
-    }
-    const std::size_t top_node_id = node_id_map.at(std::make_tuple(power_via.get_top_layer_idx(), power_via.get_x(), power_via.get_y()));
-    for (const PowerViaMetalRect& rectangle : power_via.get_top_rect_list()) {
-      result.add(power_via.get_top_layer_idx(), rectangle, top_node_id);
-    }
-  }
-  result.build();
-  return result;
-}
-
-}  // namespace
 
 // public
 
@@ -454,128 +335,102 @@ void GraphBuilder::buildViaNodeList(PowerGraph& power_graph, PowerNet& power_net
 
 void GraphBuilder::buildPinNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model)
 {
-  const auto registerPinNode = [&power_graph](PowerPin& power_pin, const std::size_t node_id) {
-    PowerNode& power_node = power_graph.get_node_list()[node_id];
-    if (power_pin.get_is_source()) {
-      power_node.set_type(PowerNodeType::kSource);
-      power_node.set_is_source(true);
-      std::vector<std::size_t>& source_node_id_list = power_graph.get_source_node_id_list();
-      appendUniqueNodeId(source_node_id_list, node_id);
-    } else {
-      power_node.get_instance_id_set().insert(power_pin.get_instance_id());
-      std::vector<std::size_t>& node_id_list = power_graph.get_instance_node_id_list_map()[power_pin.get_instance_id()];
-      appendUniqueNodeId(node_id_list, node_id);
-    }
-  };
-
-  const auto appendCenterNode = [this, &power_graph, &power_net, &gb_model](PowerPin& power_pin) {
-    const PowerNodeType node_type = power_pin.get_is_source() ? PowerNodeType::kSource : PowerNodeType::kInstancePin;
-    const std::size_t node_id = getPowerNode(power_graph, power_pin.get_layer_idx(), power_pin.get_x(), power_pin.get_y(), node_type);
-    for (std::size_t segment_idx = 0; segment_idx < power_net.get_wire_segment_list().size(); segment_idx++) {
-      PowerWireSegment& power_wire_segment = power_net.get_wire_segment_list()[segment_idx];
-      if (power_wire_segment.get_layer_idx() == power_pin.get_layer_idx()
-          && isOnWireSegment(power_wire_segment, power_graph.get_node_list()[node_id])) {
-        appendWireNodeId(gb_model, segment_idx, node_id);
-      }
-    }
-    return node_id;
-  };
-
-  const ViaContactIndexByLayer via_contact_index = buildViaContactIndex(power_graph, power_net);
-  std::map<PinPortKey, PendingPinPort> pending_port_map;
+  std::size_t connected_pin_num = 0;
+  std::size_t skipped_pin_num = 0;
   for (PowerPin& power_pin : power_net.get_pin_list()) {
-    const PowerNodeType node_type = power_pin.get_is_source() ? PowerNodeType::kSource : PowerNodeType::kInstancePin;
-    std::vector<std::size_t> contact_node_ids;
-    for (std::size_t segment_idx = 0; segment_idx < power_net.get_wire_segment_list().size(); segment_idx++) {
-      PowerWireSegment& power_wire_segment = power_net.get_wire_segment_list()[segment_idx];
-      if (power_wire_segment.get_layer_idx() != power_pin.get_layer_idx()) {
-        continue;
+    PowerNodeType power_node_type = power_pin.get_is_source() ? PowerNodeType::kSource : PowerNodeType::kInstancePin;
+    std::set<std::size_t> pin_node_id_set;
+    std::map<std::size_t, double> pin_node_weights;
+    bool use_imported_pin_area = power_net.get_has_explicit_parasitics() && !power_pin.get_is_source();
+    if (use_imported_pin_area) {
+      // Reconstruct the distributed load on the imported extraction nodes.
+      // A segment wholly within the pin contributes half its length at each
+      // endpoint. Use the original segments, so later pin subdivisions cannot
+      // change another pin's current distribution or make it order dependent.
+      auto inside_pin = [&power_pin](int32_t x, int32_t y) {
+        return power_pin.get_low_x() <= x && x <= power_pin.get_high_x() && power_pin.get_low_y() <= y && y <= power_pin.get_high_y();
+      };
+      for (PowerWireSegment& segment : power_net.get_wire_segment_list()) {
+        if (segment.get_layer_idx() != power_pin.get_layer_idx()) {
+          continue;
+        }
+        bool first_inside = inside_pin(segment.get_first_x(), segment.get_first_y());
+        bool second_inside = inside_pin(segment.get_second_x(), segment.get_second_y());
+        std::size_t first_id = 0;
+        std::size_t second_id = 0;
+        if (first_inside) {
+          first_id = getPowerNode(power_graph, power_pin.get_layer_idx(), segment.get_first_x(), segment.get_first_y(), power_node_type);
+          pin_node_id_set.insert(first_id);
+        }
+        if (second_inside) {
+          second_id = getPowerNode(power_graph, power_pin.get_layer_idx(), segment.get_second_x(), segment.get_second_y(), power_node_type);
+          pin_node_id_set.insert(second_id);
+        }
+        if (first_inside && second_inside) {
+          double length = std::abs(static_cast<double>(segment.get_second_x()) - segment.get_first_x())
+                          + std::abs(static_cast<double>(segment.get_second_y()) - segment.get_first_y());
+          pin_node_weights[first_id] += length / 2.0;
+          pin_node_weights[second_id] += length / 2.0;
+        }
       }
-      int32_t x = power_pin.get_x();
-      int32_t y = power_pin.get_y();
-      const bool is_contact = power_pin.has_bounds() ? getPinWireContact(power_pin, power_wire_segment, x, y)
-                                                     : isOnWireSegment(power_wire_segment, x, y);
-      if (!is_contact) {
-        continue;
-      }
-      const std::size_t node_id = getPowerNode(power_graph, power_pin.get_layer_idx(), x, y, node_type);
-      appendWireNodeId(gb_model, segment_idx, node_id);
-      appendUniqueNodeId(contact_node_ids, node_id);
     }
-    via_contact_index.appendContactNodeIds(power_pin, contact_node_ids);
-
-    if (!power_pin.has_port_id()) {
-      if (contact_node_ids.empty()) {
-        contact_node_ids.push_back(appendCenterNode(power_pin));
+    if (!use_imported_pin_area || pin_node_id_set.empty()) {
+      for (std::size_t segment_idx = 0; segment_idx < power_net.get_wire_segment_list().size(); segment_idx++) {
+        PowerWireSegment& power_wire_segment = power_net.get_wire_segment_list()[segment_idx];
+        int32_t x = 0;
+        int32_t y = 0;
+        if (power_wire_segment.get_layer_idx() == power_pin.get_layer_idx()
+            && getPinWireConnectionCoordinate(power_wire_segment, power_pin, x, y)) {
+          std::size_t node_id = getPowerNode(power_graph, power_pin.get_layer_idx(), x, y, power_node_type);
+          appendWireNodeId(gb_model, segment_idx, node_id);
+          pin_node_id_set.insert(node_id);
+        }
       }
-      for (const std::size_t node_id : contact_node_ids) {
-        registerPinNode(power_pin, node_id);
-      }
-      for (std::size_t node_idx = 1; node_idx < contact_node_ids.size(); node_idx++) {
-        power_graph.add_node_equivalence(contact_node_ids.front(), contact_node_ids[node_idx]);
-      }
+    }
+    if (pin_node_id_set.empty()) {
+      skipped_pin_num++;
       continue;
     }
-
-    const PinPortKey key{.is_source = power_pin.get_is_source(),
-                         .instance_id = power_pin.get_instance_id(),
-                         .pin_name = power_pin.get_pin_name(),
-                         .port_id = power_pin.get_port_id()};
-    PendingPinPort& pending_port = pending_port_map[key];
-    if (pending_port.fallback_pin == nullptr) {
-      pending_port.fallback_pin = &power_pin;
+    connected_pin_num++;
+    double total_weight = 0.0;
+    for (const auto& [node_id, weight] : pin_node_weights) {
+      total_weight += weight;
     }
-    for (const std::size_t node_id : contact_node_ids) {
-      appendUniqueNodeId(pending_port.node_ids, node_id);
+    for (std::size_t node_id : pin_node_id_set) {
+      PowerNode& power_node = power_graph.get_node_list()[node_id];
+      if (power_pin.get_is_source()) {
+        std::vector<std::size_t>& source_node_id_list = power_graph.get_source_node_id_list();
+        if (std::find(source_node_id_list.begin(), source_node_id_list.end(), node_id) == source_node_id_list.end()) {
+          source_node_id_list.push_back(node_id);
+        }
+        continue;
+      }
+      power_node.get_instance_id_set().insert(power_pin.get_instance_id());
+      std::vector<std::size_t>& node_id_list = power_graph.get_instance_node_id_list_map()[power_pin.get_instance_id()];
+      if (std::find(node_id_list.begin(), node_id_list.end(), node_id) == node_id_list.end()) {
+        node_id_list.push_back(node_id);
+      }
+      std::string pin_name = power_pin.get_pin_name();
+      std::size_t delimiter_pos = pin_name.rfind(':');
+      if (delimiter_pos != std::string::npos) {
+        pin_name = pin_name.substr(delimiter_pos + 1);
+      }
+      std::vector<std::size_t>& pin_node_id_list
+          = power_graph.get_instance_pin_node_id_list_map()[std::make_pair(power_pin.get_instance_id(), pin_name)];
+      if (std::find(pin_node_id_list.begin(), pin_node_id_list.end(), node_id) == pin_node_id_list.end()) {
+        pin_node_id_list.push_back(node_id);
+      }
+      if (use_imported_pin_area) {
+        double weight = total_weight > 0.0 ? pin_node_weights[node_id] / total_weight : 1.0 / pin_node_id_set.size();
+        power_graph.get_instance_node_weight_map()[power_pin.get_instance_id()][node_id] += weight;
+        power_graph.get_instance_pin_node_weight_map()[std::make_pair(power_pin.get_instance_id(), pin_name)][node_id] += weight;
+      }
     }
   }
-  for (auto& pending_port_pair : pending_port_map) {
-    PendingPinPort& pending_port = pending_port_pair.second;
-    if (pending_port.node_ids.empty()) {
-      pending_port.node_ids.push_back(appendCenterNode(*pending_port.fallback_pin));
-    }
-    for (const std::size_t node_id : pending_port.node_ids) {
-      registerPinNode(*pending_port.fallback_pin, node_id);
-    }
-    for (std::size_t node_idx = 1; node_idx < pending_port.node_ids.size(); node_idx++) {
-      power_graph.add_node_equivalence(pending_port.node_ids.front(), pending_port.node_ids[node_idx]);
-    }
+  if (skipped_pin_num > 0) {
+    EMIRLOG.info(Loc::current(), "Skipped ", skipped_pin_num, " unconnected power pins in net ", power_net.get_net_name(), ", connected ",
+                 connected_pin_num, " pins");
   }
-}
-
-bool GraphBuilder::getPinWireContact(PowerPin& power_pin, PowerWireSegment& power_wire_segment, int32_t& x, int32_t& y)
-{
-  const int32_t half_width = power_wire_segment.get_width() / 2;
-  const int32_t min_x = std::min(power_wire_segment.get_first_x(), power_wire_segment.get_second_x());
-  const int32_t max_x = std::max(power_wire_segment.get_first_x(), power_wire_segment.get_second_x());
-  const int32_t min_y = std::min(power_wire_segment.get_first_y(), power_wire_segment.get_second_y());
-  const int32_t max_y = std::max(power_wire_segment.get_first_y(), power_wire_segment.get_second_y());
-  if (power_wire_segment.get_first_y() == power_wire_segment.get_second_y()) {
-    const int32_t ll_x = std::max(power_pin.get_ll_x(), min_x);
-    const int32_t ur_x = std::min(power_pin.get_ur_x(), max_x);
-    const int32_t ll_y = std::max(power_pin.get_ll_y(), power_wire_segment.get_first_y() - half_width);
-    const int32_t ur_y = std::min(power_pin.get_ur_y(), power_wire_segment.get_first_y() + half_width);
-    if (ll_x > ur_x || ll_y > ur_y) {
-      return false;
-    }
-    x = std::clamp(power_pin.get_x(), ll_x, ur_x);
-    y = power_wire_segment.get_first_y();
-    return true;
-  }
-  if (power_wire_segment.get_first_x() == power_wire_segment.get_second_x()) {
-    const int32_t ll_x = std::max(power_pin.get_ll_x(), power_wire_segment.get_first_x() - half_width);
-    const int32_t ur_x = std::min(power_pin.get_ur_x(), power_wire_segment.get_first_x() + half_width);
-    const int32_t ll_y = std::max(power_pin.get_ll_y(), min_y);
-    const int32_t ur_y = std::min(power_pin.get_ur_y(), max_y);
-    if (ll_x > ur_x || ll_y > ur_y) {
-      return false;
-    }
-    x = power_wire_segment.get_first_x();
-    y = std::clamp(power_pin.get_y(), ll_y, ur_y);
-    return true;
-  }
-  EMIRLOG.error(Loc::current(), "The power wire segment is oblique!");
-  return false;
 }
 
 void GraphBuilder::buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model, std::ofstream& source_report)
@@ -808,7 +663,10 @@ void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net
         = getPowerNode(power_graph, power_via.get_top_layer_idx(), power_via.get_top_x(), power_via.get_top_y(), PowerNodeType::kVia);
     auto rule_iter = via_rules.find(power_via.get_cut_layer_name());
     double resistance = power_via.get_resistance();
-    if (rule_iter != via_rules.end() && rule_iter->second.get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
+    // SPEF/extracted resistance is authoritative. Technology resistance is
+    // only a fallback for geometry-built networks.
+    if (!power_net.get_has_explicit_parasitics() && rule_iter != via_rules.end()
+        && rule_iter->second.get_resistance_per_cut() > 0.0 && power_via.get_cut_num() > 0) {
       resistance = rule_iter->second.get_resistance_per_cut() / power_via.get_cut_num();
     }
     if (!power_net.get_has_explicit_parasitics()
@@ -820,10 +678,11 @@ void GraphBuilder::buildViaEdgeList(PowerGraph& power_graph, PowerNet& power_net
     }
     PowerEdge* power_edge
         = addPowerEdge(power_graph, PowerEdgeType::kVia, bottom_node_id, top_node_id, power_via.get_bottom_layer_idx(), 0, 0,
-                       resistance, power_net.get_has_explicit_parasitics());
+                       resistance, true);
     if (power_edge != nullptr) {
       power_edge->set_layer_name(power_via.get_bottom_layer_name());
       power_edge->set_via_name(power_via.get_via_name());
+      power_edge->set_cut_layer_name(power_via.get_cut_layer_name());
       power_edge->set_cut_num(power_via.get_cut_num());
       power_edge->set_cut_area_um2(power_via.get_cut_area_um2());
       power_edge->set_cut_low_x(power_via.get_cut_low_x());
@@ -840,11 +699,13 @@ PowerEdge* GraphBuilder::addPowerEdge(PowerGraph& power_graph, PowerEdgeType pow
   if (first_node_id == second_node_id) {
     return nullptr;
   }
-  for (PowerEdge& power_edge : power_graph.get_edge_list()) {
-    bool is_same_node_pair = (power_edge.get_first_node_id() == first_node_id && power_edge.get_second_node_id() == second_node_id)
-                             || (power_edge.get_first_node_id() == second_node_id && power_edge.get_second_node_id() == first_node_id);
-    if (!allow_parallel && is_same_node_pair && power_edge.get_type() == power_edge_type) {
-      return &power_edge;
+  if (!allow_parallel) {
+    for (PowerEdge& power_edge : power_graph.get_edge_list()) {
+      bool is_same_node_pair = (power_edge.get_first_node_id() == first_node_id && power_edge.get_second_node_id() == second_node_id)
+                               || (power_edge.get_first_node_id() == second_node_id && power_edge.get_second_node_id() == first_node_id);
+      if (is_same_node_pair && power_edge.get_type() == power_edge_type) {
+        return &power_edge;
+      }
     }
   }
   PowerEdge power_edge;
@@ -869,10 +730,6 @@ void GraphBuilder::checkPowerGraphConnectivity(PowerGraph& power_graph)
   for (PowerEdge& power_edge : power_graph.get_edge_list()) {
     node_adjacency_map[power_edge.get_first_node_id()].push_back(power_edge.get_second_node_id());
     node_adjacency_map[power_edge.get_second_node_id()].push_back(power_edge.get_first_node_id());
-  }
-  for (const auto [first_node_id, second_node_id] : power_graph.get_node_equivalence_pair_list()) {
-    node_adjacency_map[first_node_id].push_back(second_node_id);
-    node_adjacency_map[second_node_id].push_back(first_node_id);
   }
   std::queue<std::size_t> node_id_queue;
   std::set<std::size_t> visited_node_id_set;

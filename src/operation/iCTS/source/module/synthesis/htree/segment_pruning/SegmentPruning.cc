@@ -29,12 +29,14 @@
 #include <cstddef>
 #include <limits>
 #include <ranges>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "BufferingPattern.hh"
 #include "LogTable.hh"
+#include "Logger.hh"
 #include "PatternId.hh"
 #include "SegmentChar.hh"
 #include "characterization/Characterization.hh"
@@ -102,6 +104,7 @@ auto AppendRetainedSegmentPatternIds(const SegmentCandidateFrontierSet& entry_se
     if (entries == nullptr) {
       continue;
     }
+    pattern_ids.reserve(pattern_ids.size() + entries->size());
     for (const auto& entry : *entries) {
       pattern_ids.push_back(entry.get_pattern_id());
     }

@@ -1,21 +1,23 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// ***************************************************************************************
 
 #include "CtsEccdbAdapter.hh"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <stdexcept>
 #include <set>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -36,6 +38,10 @@
 #include "instance/InstanceService.h"
 #include "library/LibraryStore.h"
 #include "liberty/Lib.hh"
+#include "Wrapper.hh"
+#include "salt/base/flute.h"
+#include "salt/base/net.h"
+#include "salt/base/tree.h"
 
 namespace eccdb::adapter::icts {
 namespace {
@@ -265,6 +271,9 @@ struct NativeEndpoint
   LibraryMasterTermDirection instance_direction = LibraryMasterTermDirection::kNone;
   DesignIoPinDirection block_direction = DesignIoPinDirection::kNone;
   std::string debug_name;
+  Point location;
+  std::string cell_master;
+  std::string port_name;
 };
 
 auto collectEndpoints(const PhysicalDesignService& physical, DesignNetId net) -> std::vector<NativeEndpoint>
@@ -650,16 +659,353 @@ auto clockNets(const ::icts::Design& design, const std::vector<::icts::Clock*>& 
   return nets;
 }
 
+auto nativeIsCombinationalArc(idb::LibArc* arc) -> bool
+{
+  if (arc == nullptr || arc->isDisableArc() != 0U || arc->isDelayArc() == 0U) {
+    return false;
+  }
+  const auto timing_type = arc->get_timing_type();
+  return timing_type == idb::LibArc::TimingType::kDefault || timing_type == idb::LibArc::TimingType::kComb
+         || timing_type == idb::LibArc::TimingType::kCombRise || timing_type == idb::LibArc::TimingType::kCombFall;
+}
+
+auto nativeFirstEnabledArc(idb::LibArcSet* arc_set) -> idb::LibArc*
+{
+  if (arc_set == nullptr) {
+    return nullptr;
+  }
+  idb::LibArc* first = nullptr;
+  for (const auto& holder : arc_set->get_arcs()) {
+    auto* arc = holder.get();
+    if (arc == nullptr || arc->isDisableArc() != 0U) {
+      continue;
+    }
+    if (first == nullptr) {
+      first = arc;
+    }
+    if (arc->get_when().empty()) {
+      return arc;
+    }
+  }
+  return first;
+}
+
+auto nativeTransition(idb::LibArc* arc) -> ::icts::WrapperTimingTransition
+{
+  return arc != nullptr && (arc->isFallingTriggerArc() != 0U || arc->isFallingEdgeCheck() != 0U)
+             ? ::icts::WrapperTimingTransition::kFall
+             : ::icts::WrapperTimingTransition::kRise;
+}
+
+auto appendNativeTimingNode(const NativeEndpoint& endpoint, idb::LibCell* lib_cell, ::icts::WrapperTimingGraph& graph,
+                            std::unordered_map<std::string, std::size_t>& node_index) -> bool
+{
+  if (endpoint.debug_name.empty()) {
+    return false;
+  }
+  if (node_index.contains(endpoint.debug_name)) {
+    return true;
+  }
+
+  ::icts::WrapperTimingNode node;
+  node.pin_name = endpoint.debug_name;
+  node.inst_name = endpoint.is_instance ? endpoint.debug_name.substr(0, endpoint.debug_name.find('/')) : std::string{};
+  node.cell_master = endpoint.cell_master;
+  node.port_name = endpoint.port_name;
+  node.top_level = !endpoint.is_instance;
+  node.x_dbu = endpoint.location.x;
+  node.y_dbu = endpoint.location.y;
+
+  if (node.top_level) {
+    node.input = endpoint.block_direction == DesignIoPinDirection::kInput || endpoint.block_direction == DesignIoPinDirection::kInOut;
+    node.output = endpoint.block_direction == DesignIoPinDirection::kOutput || endpoint.block_direction == DesignIoPinDirection::kInOut;
+    if (!node.input && !node.output) {
+      graph.status = ::icts::WrapperTimingGraphStatus::kConnectivityInvalid;
+      graph.diagnostic = "native_top_level_pin_direction_unavailable:" + endpoint.debug_name;
+      return false;
+    }
+    node_index.emplace(node.pin_name, graph.nodes.size());
+    graph.nodes.push_back(std::move(node));
+    return true;
+  }
+
+  if (lib_cell == nullptr) {
+    graph.status = ::icts::WrapperTimingGraphStatus::kLibraryUnavailable;
+    graph.diagnostic = "native_signal_pin_liberty_model_unavailable:" + endpoint.debug_name + ":" + endpoint.cell_master;
+    return false;
+  }
+  auto* lib_port = lib_cell->get_cell_port_or_port_bus(endpoint.port_name.c_str());
+  if (lib_port == nullptr) {
+    graph.status = ::icts::WrapperTimingGraphStatus::kLibraryUnavailable;
+    graph.diagnostic = "native_signal_pin_liberty_port_unavailable:" + endpoint.debug_name + ":" + endpoint.port_name;
+    return false;
+  }
+  auto* owner_lib = lib_cell->get_owner_lib();
+  if (owner_lib == nullptr || !owner_lib->has_time_unit() || !owner_lib->has_cap_unit()) {
+    graph.status = ::icts::WrapperTimingGraphStatus::kLibraryUnavailable;
+    graph.diagnostic = "native_signal_pin_liberty_units_unavailable:" + endpoint.debug_name;
+    return false;
+  }
+
+  node.logic_function = lib_port->get_func_expr_str();
+  node.clock_pin = lib_port->isClock() || lib_port->get_clock_gate_clock_pin();
+  node.input = lib_port->isInput() != 0U;
+  node.output = lib_port->isOutput() != 0U;
+  if (node.input) {
+    for (const auto& [analysis_index, analysis] : {std::pair{0U, idb::AnalysisMode::kMin}, std::pair{1U, idb::AnalysisMode::kMax}}) {
+      for (const auto& [transition_index, transition] : {std::pair{0U, idb::TransType::kRise}, std::pair{1U, idb::TransType::kFall}}) {
+        auto cap = lib_port->get_port_cap(analysis, transition);
+        if (!cap.has_value() && lib_port->has_port_cap()) {
+          cap = lib_port->get_port_cap();
+        }
+        if (!cap.has_value() || !std::isfinite(*cap) || *cap < 0.0) {
+          graph.status = ::icts::WrapperTimingGraphStatus::kLibraryUnavailable;
+          graph.diagnostic = "native_signal_pin_capacitance_unavailable:" + endpoint.debug_name;
+          return false;
+        }
+        node.input_cap_pf_by_timing.at(analysis_index).at(transition_index) = *cap;
+      }
+    }
+    node.input_cap_pf = node.input_cap_pf_by_timing.at(1U).at(0U);
+    node.input_cap_profile_available = true;
+  }
+  auto slew = lib_port->get_port_slew_limit(idb::AnalysisMode::kMax);
+  if ((!slew.has_value() || !std::isfinite(*slew) || *slew <= 0.0) && owner_lib != nullptr) {
+    slew = owner_lib->get_default_max_transition();
+  }
+  if (slew.has_value() && std::isfinite(*slew) && *slew > 0.0) {
+    node.max_slew_ns = *slew;
+  }
+  node.slew_limit_from_master = true;
+  node_index.emplace(node.pin_name, graph.nodes.size());
+  graph.nodes.push_back(std::move(node));
+  return true;
+}
+
+auto makeNativeRoutingLayer(TechRoutingLayerId layer_id, uint32_t routing_level, const TechLayerInfo& info,
+                            const TechRoutingLayer& layer, int32_t dbu_per_um) -> std::optional<::icts::WrapperSignalRoutingLayer>
+{
+  if (dbu_per_um <= 0 || layer.width <= 0 || (layer.direction != TechRoutingDirection::kHorizontal && layer.direction != TechRoutingDirection::kVertical)
+      || !std::isfinite(layer.resistance) || layer.resistance <= 0.0 || !std::isfinite(layer.capacitance) || layer.capacitance < 0.0
+      || !std::isfinite(layer.edge_capacitance) || layer.edge_capacitance < 0.0) {
+    return std::nullopt;
+  }
+  const double width_um = static_cast<double>(layer.width) / static_cast<double>(dbu_per_um);
+  const double resistance_per_um = layer.resistance / width_um;
+  const double capacitance_per_um = layer.capacitance * width_um + 2.0 * layer.edge_capacitance;
+  if (!std::isfinite(width_um) || width_um <= 0.0 || !std::isfinite(resistance_per_um) || resistance_per_um <= 0.0
+      || !std::isfinite(capacitance_per_um) || capacitance_per_um <= 0.0) {
+    return std::nullopt;
+  }
+  return ::icts::WrapperSignalRoutingLayer{.name = info.name,
+                                           .id = static_cast<int32_t>(layer_id.packed()),
+                                           .order = routing_level,
+                                           .direction = layer.direction == TechRoutingDirection::kHorizontal
+                                                            ? ::icts::WrapperRoutingDirection::kHorizontal
+                                                            : ::icts::WrapperRoutingDirection::kVertical,
+                                           .width_dbu = layer.width,
+                                           .width_um = width_um,
+                                           .sheet_resistance_ohm_per_square = layer.resistance,
+                                           .area_capacitance_pf_per_um2 = layer.capacitance,
+                                           .edge_capacitance_pf_per_um = layer.edge_capacitance,
+                                           .resistance_ohm_per_um = resistance_per_um,
+                                           .capacitance_pf_per_um = capacitance_per_um};
+}
+
+auto makeNativeRoutingAuthority(const PhysicalDesignService& physical, int32_t dbu_per_um, std::string_view anchor_name,
+                                std::optional<uint32_t> anchor_level)
+    -> ::icts::WrapperSignalRoutingAuthority
+{
+  struct Candidate
+  {
+    TechRoutingLayerId id;
+    uint32_t sequence = 0U;
+    uint32_t level = 0U;
+    const TechLayerInfo* info = nullptr;
+    const TechRoutingLayer* layer = nullptr;
+  };
+  std::vector<Candidate> candidates;
+  physical.forEachRoutingLayer([&](TechRoutingLayerId id, uint32_t sequence, uint32_t level, const TechLayerInfo& info, const TechRoutingLayer& layer) {
+    candidates.push_back(Candidate{.id = id, .sequence = sequence, .level = level, .info = &info, .layer = &layer});
+  });
+  std::ranges::sort(candidates, [](const Candidate& lhs, const Candidate& rhs) { return std::tie(lhs.sequence, lhs.level) < std::tie(rhs.sequence, rhs.level); });
+
+  ::icts::WrapperSignalRoutingAuthority result;
+  result.policy_version = "eccdb-tech-routing-rc-v1";
+  if (candidates.empty()) {
+    result.status = ::icts::WrapperSignalRoutingStatus::kLayoutUnavailable;
+    result.diagnostic = "EccDB has no routing layers";
+    return result;
+  }
+  std::size_t anchor_index = 0U;
+  if (anchor_level.has_value() || !anchor_name.empty()) {
+    auto iter = candidates.end();
+    // A named platform anchor is authoritative.  The numeric iCTS value
+    // belongs to the CTS characterization space and is only a fallback for
+    // callers that have no technology-layer name.  Prefer the name even
+    // when both are supplied; otherwise sky130's numeric value 4 can select
+    // li1 instead of the configured met1 anchor.
+    if (!anchor_name.empty()) {
+      iter = std::ranges::find_if(candidates, [&](const Candidate& candidate) {
+        return candidate.info != nullptr && candidate.info->name == anchor_name;
+      });
+    } else if (anchor_level.has_value()) {
+      // Routing levels exclude CUT layers.  A legacy ordinal is only useful
+      // when the technology has no exact routing-level match; combining both
+      // predicates in one search can select an earlier sequence match over a
+      // later, exact routing level.
+      iter = std::ranges::find_if(candidates, [&](const Candidate& candidate) { return candidate.level == *anchor_level; });
+      if (iter == candidates.end()) {
+        iter = std::ranges::find_if(candidates, [&](const Candidate& candidate) { return candidate.sequence + 1U == *anchor_level; });
+      }
+    }
+    if (iter == candidates.end()) {
+      result.status = ::icts::WrapperSignalRoutingStatus::kAnchorUnavailable;
+      result.anchor_name = anchor_name.empty() ? std::string{} : std::string(anchor_name);
+      result.anchor_order = anchor_level.value_or(0U);
+      result.diagnostic = "configured signal-routing anchor is absent from EccDB technology";
+      return result;
+    }
+    anchor_index = static_cast<std::size_t>(std::distance(candidates.begin(), iter));
+  }
+  result.anchor_name = candidates[anchor_index].info == nullptr ? std::string{} : candidates[anchor_index].info->name;
+  result.anchor_order = candidates[anchor_index].level;
+  for (std::size_t index = anchor_index; index < candidates.size(); ++index) {
+    const auto& candidate = candidates[index];
+    if (candidate.info == nullptr || candidate.layer == nullptr) {
+      continue;
+    }
+    const auto layer = makeNativeRoutingLayer(candidate.id, candidate.level, *candidate.info, *candidate.layer, dbu_per_um);
+    if (!layer.has_value()) {
+      continue;
+    }
+    if (layer->direction == ::icts::WrapperRoutingDirection::kHorizontal && !result.horizontal.has_value()) {
+      result.horizontal = layer;
+    } else if (layer->direction == ::icts::WrapperRoutingDirection::kVertical && !result.vertical.has_value()) {
+      result.vertical = layer;
+    }
+    if (result.horizontal.has_value() && result.vertical.has_value()) {
+      result.status = ::icts::WrapperSignalRoutingStatus::kComplete;
+      return result;
+    }
+  }
+  result.status = ::icts::WrapperSignalRoutingStatus::kDirectionalLayerUnavailable;
+  result.diagnostic = "no valid horizontal/vertical EccDB routing-layer pair exists at or above anchor";
+  return result;
+}
+
+auto buildNativeNetWireModel(const std::vector<NativeEndpoint>& endpoints, std::size_t driver_index,
+                             const std::vector<std::size_t>& load_indices, const ::icts::WrapperSignalRoutingAuthority& authority,
+                             int32_t dbu_per_um, ::icts::WrapperTimingNet& result) -> bool
+{
+  if (!authority.complete() || !authority.horizontal.has_value() || !authority.vertical.has_value() || dbu_per_um <= 0 || load_indices.empty()
+      || driver_index >= endpoints.size()) {
+    return false;
+  }
+  const auto& horizontal = *authority.horizontal;
+  const auto& vertical = *authority.vertical;
+  std::vector<std::pair<int32_t, int32_t>> locations;
+  locations.reserve(load_indices.size() + 1U);
+  locations.emplace_back(endpoints[driver_index].location.x, endpoints[driver_index].location.y);
+  for (const auto index : load_indices) {
+    if (index >= endpoints.size()) {
+      return false;
+    }
+    locations.emplace_back(endpoints[index].location.x, endpoints[index].location.y);
+  }
+  std::ranges::sort(locations);
+  locations.erase(std::ranges::unique(locations).begin(), locations.end());
+  const auto driver_location = std::pair(endpoints[driver_index].location.x, endpoints[driver_index].location.y);
+  const auto driver_iter = std::ranges::find(locations, driver_location);
+  if (driver_iter == locations.end()) {
+    return false;
+  }
+  std::ranges::rotate(locations, driver_iter);
+  int64_t horizontal_dbu = 0;
+  int64_t vertical_dbu = 0;
+  bool valid = true;
+  const auto append_segment = [&](int32_t source_x, int32_t source_y, int32_t target_x, int32_t target_y) {
+    const auto dx = std::abs(static_cast<int64_t>(source_x) - static_cast<int64_t>(target_x));
+    const auto dy = std::abs(static_cast<int64_t>(source_y) - static_cast<int64_t>(target_y));
+    if (horizontal_dbu > std::numeric_limits<int64_t>::max() - dx || vertical_dbu > std::numeric_limits<int64_t>::max() - dy) {
+      valid = false;
+      return;
+    }
+    const double h_um = static_cast<double>(dx) / static_cast<double>(dbu_per_um);
+    const double v_um = static_cast<double>(dy) / static_cast<double>(dbu_per_um);
+    const double resistance = h_um * horizontal.resistance_ohm_per_um + v_um * vertical.resistance_ohm_per_um;
+    const double capacitance = h_um * horizontal.capacitance_pf_per_um + v_um * vertical.capacitance_pf_per_um;
+    if (resistance > 0.0 || capacitance > 0.0) {
+      result.rc_segments.push_back(::icts::WrapperTimingRcSegment{.begin_x_dbu = source_x,
+                                                                   .begin_y_dbu = source_y,
+                                                                   .end_x_dbu = target_x,
+                                                                   .end_y_dbu = target_y,
+                                                                   .resistance_ohm = resistance,
+                                                                   .capacitance_pf = capacitance});
+    }
+    horizontal_dbu += dx;
+    vertical_dbu += dy;
+  };
+  if (locations.size() == 2U) {
+    append_segment(locations[0].first, locations[0].second, locations[1].first, locations[1].second);
+  } else if (locations.size() > 2U) {
+    std::vector<std::shared_ptr<salt::Pin>> pins;
+    pins.reserve(locations.size());
+    for (std::size_t index = 0U; index < locations.size(); ++index) {
+      pins.push_back(std::make_shared<salt::Pin>(locations[index].first, locations[index].second, static_cast<int>(index), 0.0));
+    }
+    salt::Net net;
+    net.init(0, result.net_name, pins);
+    salt::Tree tree;
+    salt::FluteBuilder builder;
+    builder.Run(net, tree);
+    tree.UpdateId();
+    if (tree.source == nullptr) {
+      return false;
+    }
+    salt::TreeNode::preOrder(tree.source, [&](const std::shared_ptr<salt::TreeNode>& node) {
+      if (node == nullptr || node == tree.source || node->parent == nullptr) {
+        if (node != nullptr && node != tree.source && node->parent == nullptr) {
+          valid = false;
+        }
+        return;
+      }
+      append_segment(node->loc.x, node->loc.y, node->parent->loc.x, node->parent->loc.y);
+    });
+  }
+  if (!valid || horizontal_dbu > std::numeric_limits<int64_t>::max() - vertical_dbu) {
+    return false;
+  }
+  result.total_wirelength_dbu = horizontal_dbu + vertical_dbu;
+  const double h_um = static_cast<double>(horizontal_dbu) / static_cast<double>(dbu_per_um);
+  const double v_um = static_cast<double>(vertical_dbu) / static_cast<double>(dbu_per_um);
+  result.wire_resistance_ohm = h_um * horizontal.resistance_ohm_per_um + v_um * vertical.resistance_ohm_per_um;
+  result.wire_cap_pf = h_um * horizontal.capacitance_pf_per_um + v_um * vertical.capacitance_pf_per_um;
+  result.physically_zero_length = result.total_wirelength_dbu == 0;
+  return std::isfinite(result.wire_resistance_ohm) && result.wire_resistance_ohm >= 0.0 && std::isfinite(result.wire_cap_pf)
+         && result.wire_cap_pf >= 0.0;
+}
+
 }  // namespace
 
-CtsEccdbAdapter::CtsEccdbAdapter(DatabaseContext& context, CtsLibertyCellLookup liberty_cell_lookup)
-    : _context(&context), _liberty_cell_lookup(std::move(liberty_cell_lookup))
+CtsEccdbAdapter::CtsEccdbAdapter(DatabaseContext& context, CtsLibertyCellLookup liberty_cell_lookup, std::string sdc_path)
+    : _context(&context), _liberty_cell_lookup(std::move(liberty_cell_lookup)), _sdc_path(std::move(sdc_path))
 {
 }
 
 void CtsEccdbAdapter::setLibertyCellLookup(CtsLibertyCellLookup liberty_cell_lookup)
 {
   _liberty_cell_lookup = std::move(liberty_cell_lookup);
+}
+
+::icts::SdcClockData CtsEccdbAdapter::readClockData() const
+{
+  return ::icts::SdcClockReader(_sdc_path).readClockData();
+}
+
+idb::LibCell* CtsEccdbAdapter::findLibertyCell(const std::string& cell_master) const
+{
+  return _liberty_cell_lookup ? _liberty_cell_lookup(cell_master) : nullptr;
 }
 
 bool CtsEccdbAdapter::isDesignReady() const noexcept
@@ -701,7 +1047,7 @@ std::optional<bool> CtsEccdbAdapter::withinCore(int32_t point_x, int32_t point_y
   }
 }
 
-std::optional<CtsEccdbCellGeometry> CtsEccdbAdapter::queryInstGeometry(const std::string& inst_name) const
+std::optional<::icts::WrapperCellGeometry> CtsEccdbAdapter::queryInstGeometry(const std::string& inst_name) const
 {
   if (!isDesignReady() || inst_name.empty()) {
     return std::nullopt;
@@ -714,20 +1060,19 @@ std::optional<CtsEccdbCellGeometry> CtsEccdbAdapter::queryInstGeometry(const std
     }
     const auto& instance = netlist.instance(id);
     const auto& master = _context->library()->cellMasterStorage().cellMaster(instance.master);
-    return CtsEccdbCellGeometry{.name = instance.name,
-                                .cell_master = master.name,
-                                .origin_x = instance.origin.x,
-                                .origin_y = instance.origin.y,
-                                .width_dbu = static_cast<int32_t>(master.width),
-                                .height_dbu = static_cast<int32_t>(master.height)};
+    return ::icts::WrapperCellGeometry{.name = instance.name,
+                                       .cell_master = master.name,
+                                       .origin = ::icts::Point<int>{instance.origin.x, instance.origin.y},
+                                       .width_dbu = static_cast<int32_t>(master.width),
+                                       .height_dbu = static_cast<int32_t>(master.height)};
   } catch (const std::exception&) {
     return std::nullopt;
   }
 }
 
-std::vector<CtsEccdbCellGeometry> CtsEccdbAdapter::collectLogicCellGeometries() const
+std::vector<::icts::WrapperCellGeometry> CtsEccdbAdapter::collectLogicCellGeometries() const
 {
-  std::vector<CtsEccdbCellGeometry> geometries;
+  std::vector<::icts::WrapperCellGeometry> geometries;
   if (!isDesignReady()) {
     return geometries;
   }
@@ -738,12 +1083,11 @@ std::vector<CtsEccdbCellGeometry> CtsEccdbAdapter::collectLogicCellGeometries() 
         if (!isLogicMaster(master.type) || instance.source == DesignInstanceSource::kTiming) {
           return;
         }
-        geometries.push_back(CtsEccdbCellGeometry{.name = instance.name,
-                                                  .cell_master = master.name,
-                                                  .origin_x = instance.origin.x,
-                                                  .origin_y = instance.origin.y,
-                                                  .width_dbu = static_cast<int32_t>(master.width),
-                                                  .height_dbu = static_cast<int32_t>(master.height)});
+        geometries.push_back(::icts::WrapperCellGeometry{.name = instance.name,
+                                                          .cell_master = master.name,
+                                                          .origin = ::icts::Point<int>{instance.origin.x, instance.origin.y},
+                                                          .width_dbu = static_cast<int32_t>(master.width),
+                                                          .height_dbu = static_cast<int32_t>(master.height)});
       });
   return geometries;
 }
@@ -785,6 +1129,72 @@ std::optional<double> CtsEccdbAdapter::queryCellAreaUm2(const std::string& cell_
   return std::isfinite(value) && value > 0.0 ? std::optional<double>{value} : std::nullopt;
 }
 
+std::optional<double> CtsEccdbAdapter::querySupplyVoltage() const
+{
+  if (!isDesignReady() || !_liberty_cell_lookup) {
+    return std::nullopt;
+  }
+  const PhysicalDesignService physical{*_context};
+  std::optional<double> voltage;
+  std::size_t found_cells = 0U;
+  bool invalid = false;
+  physical.forEachMaster([&](LibraryCellMasterId, const LibraryCellMaster& master) {
+    if (!isLogicMaster(master.type)) {
+      return;
+    }
+    auto* cell = _liberty_cell_lookup(master.name);
+    if (cell == nullptr || cell->get_owner_lib() == nullptr) {
+      return;
+    }
+    const auto candidate = cell->get_owner_lib()->get_nom_voltage();
+    if (!std::isfinite(candidate) || candidate <= 0.0) {
+      invalid = true;
+      return;
+    }
+    ++found_cells;
+    if (voltage.has_value() && *voltage != candidate) {
+      invalid = true;
+      return;
+    }
+    voltage = candidate;
+  });
+  return !invalid && found_cells > 0U ? voltage : std::nullopt;
+}
+
+std::optional<::icts::SdcUnits> CtsEccdbAdapter::queryLibertyUnits() const
+{
+  if (!isDesignReady() || !_liberty_cell_lookup) {
+    return std::nullopt;
+  }
+  const PhysicalDesignService physical{*_context};
+  std::optional<::icts::SdcUnits> units;
+  bool invalid = false;
+  physical.forEachMaster([&](LibraryCellMasterId, const LibraryCellMaster& master) {
+    if (!isLogicMaster(master.type)) {
+      return;
+    }
+    auto* cell = _liberty_cell_lookup(master.name);
+    auto* library = cell == nullptr ? nullptr : cell->get_owner_lib();
+    if (library == nullptr || !library->has_cap_unit() || !library->has_time_unit()) {
+      invalid = true;
+      return;
+    }
+    const ::icts::SdcUnits candidate{.time_unit_ns = library->convert_time_unit_to_ns(1.0),
+                                     .capacitance_unit_pf = idb::ConvertCapUnit(library->get_cap_unit(), idb::CapacitiveUnit::kPF, 1.0)};
+    if (!std::isfinite(candidate.time_unit_ns) || candidate.time_unit_ns <= 0.0 || !std::isfinite(candidate.capacitance_unit_pf)
+        || candidate.capacitance_unit_pf <= 0.0) {
+      invalid = true;
+      return;
+    }
+    if (units.has_value() && (units->time_unit_ns != candidate.time_unit_ns || units->capacitance_unit_pf != candidate.capacitance_unit_pf)) {
+      invalid = true;
+      return;
+    }
+    units = candidate;
+  });
+  return !invalid ? units : std::nullopt;
+}
+
 std::optional<double> CtsEccdbAdapter::queryWireResistance(int routing_layer, double length_um,
                                                             std::optional<double> wire_width_um) const
 {
@@ -811,14 +1221,14 @@ std::optional<double> CtsEccdbAdapter::queryWireResistance(int routing_layer, do
   }
 }
 
-std::optional<CtsEccdbWireCapacitanceProfile> CtsEccdbAdapter::queryWireCapacitanceProfile(int routing_layer, double length_um,
-                                                                                              std::optional<double> wire_width_um) const
+std::optional<::icts::Wrapper::WireCapacitanceProfile> CtsEccdbAdapter::queryWireCapacitanceProfile(
+    int routing_layer, double length_um, std::optional<double> wire_width_um) const
 {
   if (!isDesignReady() || routing_layer <= 0 || !std::isfinite(length_um) || length_um < 0.0) {
     return std::nullopt;
   }
   if (length_um == 0.0) {
-    return CtsEccdbWireCapacitanceProfile{.timing_coupling_factor = kOppositeSwitchingCouplingFactor};
+    return ::icts::Wrapper::WireCapacitanceProfile{.timing_coupling_factor = kOppositeSwitchingCouplingFactor};
   }
   try {
     const PhysicalDesignService physical{*_context};
@@ -832,21 +1242,289 @@ std::optional<CtsEccdbWireCapacitanceProfile> CtsEccdbAdapter::queryWireCapacita
     }
     const auto area_cap_pf = layer->capacitance * length_um * *width_um;
     const auto edge_cap_pf = layer->edge_capacitance * 2.0 * (length_um + *width_um);
-    const auto profile = CtsEccdbWireCapacitanceProfile{.area_cap_pf = area_cap_pf,
-                                                         .edge_cap_pf = edge_cap_pf,
-                                                         .ground_cap_pf = area_cap_pf,
-                                                         .coupling_cap_pf = edge_cap_pf,
-                                                         .timing_coupling_factor = kOppositeSwitchingCouplingFactor,
-                                                         .total_cap_pf = area_cap_pf + edge_cap_pf,
-                                                         .timing_effective_cap_pf = area_cap_pf + kOppositeSwitchingCouplingFactor * edge_cap_pf};
+    const auto profile = ::icts::Wrapper::WireCapacitanceProfile{.area_cap_pf = area_cap_pf,
+                                                                  .edge_cap_pf = edge_cap_pf,
+                                                                  .ground_cap_pf = area_cap_pf,
+                                                                  .coupling_cap_pf = edge_cap_pf,
+                                                                  .timing_coupling_factor = kOppositeSwitchingCouplingFactor,
+                                                                  .total_cap_pf = area_cap_pf + edge_cap_pf,
+                                                                  .timing_effective_cap_pf = area_cap_pf + kOppositeSwitchingCouplingFactor * edge_cap_pf};
     const auto finite_non_negative = [](double value) { return std::isfinite(value) && value >= 0.0; };
     return finite_non_negative(profile.area_cap_pf) && finite_non_negative(profile.edge_cap_pf)
                    && finite_non_negative(profile.total_cap_pf) && finite_non_negative(profile.timing_effective_cap_pf)
-               ? std::optional<CtsEccdbWireCapacitanceProfile>{profile}
+               ? std::optional<::icts::Wrapper::WireCapacitanceProfile>{profile}
                : std::nullopt;
   } catch (const std::exception&) {
     return std::nullopt;
   }
+}
+
+::icts::WrapperTimingGraph CtsEccdbAdapter::collectTimingGraph(std::string_view routing_anchor_name,
+                                                               std::optional<unsigned> routing_anchor_level) const
+{
+  const auto graph_start = std::chrono::steady_clock::now();
+  ::icts::WrapperTimingGraph result;
+  if (!isDesignReady()) {
+    result.status = ::icts::WrapperTimingGraphStatus::kDesignUnavailable;
+    result.diagnostic = "native EccDB context, technology, or library is unavailable";
+    return result;
+  }
+  if (!_liberty_cell_lookup) {
+    result.status = ::icts::WrapperTimingGraphStatus::kLibraryUnavailable;
+    result.diagnostic = "native Liberty cell lookup is unavailable";
+    return result;
+  }
+
+  const auto dbu = queryDbUnit();
+  if (!dbu.has_value() || *dbu <= 0) {
+    result.status = ::icts::WrapperTimingGraphStatus::kUnsupported;
+    result.diagnostic = "native EccDB DBU-per-micron is unavailable";
+    return result;
+  }
+  const PhysicalDesignService physical{*_context};
+  const auto native_routing_anchor_level = routing_anchor_level.has_value()
+                                               ? std::optional<uint32_t>{static_cast<uint32_t>(*routing_anchor_level)}
+                                               : std::nullopt;
+  result.signal_routing_authority = makeNativeRoutingAuthority(physical, *dbu, routing_anchor_name, native_routing_anchor_level);
+  if (!result.signal_routing_authority.complete()) {
+    result.status = ::icts::WrapperTimingGraphStatus::kUnsupported;
+    result.diagnostic = "native signal routing authority unavailable:" + result.signal_routing_authority.diagnostic;
+    return result;
+  }
+
+  const auto& netlist = _context->design().netlistStorage();
+  const auto& library = *_context->library();
+  std::unordered_map<std::string, std::size_t> node_index;
+  double logic_rc_runtime_s = 0.0;
+
+  auto collect_timing_endpoints = [&](DesignNetId net_id) {
+    std::vector<NativeEndpoint> endpoints;
+    physical.forEachNetPin(net_id, PhysicalNetPinVisitor{
+                                             .instance_pin = [&](DesignInstancePinId pin, const DesignInstanceTerm&, const DesignInstance& instance,
+                                                                 const LibraryMasterTerm& term) {
+                                               NativeEndpoint endpoint;
+                                               endpoint.is_instance = true;
+                                               endpoint.instance_term = pin;
+                                               endpoint.instance_direction = term.direction;
+                                               endpoint.debug_name = instance.name + "/" + term.name;
+                                               endpoint.cell_master = library.cellMasterStorage().cellMaster(instance.master).name;
+                                               endpoint.port_name = term.name;
+                                               endpoint.location = averageInstancePinLocationLikeIdb(physical, pin, instance.origin);
+                                               endpoints.push_back(std::move(endpoint));
+                                             },
+                                             .io_pin = [&](DesignIoPinId pin, const DesignIoPin& term) {
+                                               NativeEndpoint endpoint;
+                                               endpoint.is_instance = false;
+                                               endpoint.block_term = pin;
+                                               endpoint.block_direction = term.direction;
+                                               endpoint.debug_name = term.name;
+                                               endpoint.port_name = term.name;
+                                               endpoint.location = averageBlockPinLocation(physical, pin, Point{});
+                                               endpoints.push_back(std::move(endpoint));
+                                             }});
+    std::ranges::sort(endpoints, [](const NativeEndpoint& lhs, const NativeEndpoint& rhs) { return lhs.debug_name < rhs.debug_name; });
+    return endpoints;
+  };
+
+  physical.forEachRegularNet([&](DesignNetId net_id, const DesignNet& net) {
+    if (result.status != ::icts::WrapperTimingGraphStatus::kDesignUnavailable && result.status != ::icts::WrapperTimingGraphStatus::kComplete
+        && !result.diagnostic.empty()) {
+      return;
+    }
+    if (net.use == DesignSignalUse::kPower || net.use == DesignSignalUse::kGround) {
+      return;
+    }
+    auto endpoints = collect_timing_endpoints(net_id);
+    if (endpoints.size() < 2U) {
+      return;
+    }
+    const auto driver_index = resolveDriverIndex(endpoints);
+    if (!driver_index.has_value()) {
+      result.status = ::icts::WrapperTimingGraphStatus::kConnectivityInvalid;
+      result.diagnostic = "native signal net has no unique driver pin:" + net.name;
+      return;
+    }
+    const auto driver_name = endpoints[*driver_index].debug_name;
+    auto* driver_cell = endpoints[*driver_index].is_instance ? _liberty_cell_lookup(endpoints[*driver_index].cell_master) : nullptr;
+    if (!appendNativeTimingNode(endpoints[*driver_index], driver_cell, result, node_index)) {
+      if (result.diagnostic.empty()) {
+        result.status = ::icts::WrapperTimingGraphStatus::kConnectivityInvalid;
+        result.diagnostic = "native driver pin cannot be represented:" + driver_name;
+      }
+      return;
+    }
+    std::vector<std::size_t> load_indices;
+    load_indices.reserve(endpoints.size() - 1U);
+    ::icts::WrapperTimingNet timing_net;
+    timing_net.net_name = net.name;
+    timing_net.driver_pin = driver_name;
+    for (std::size_t index = 0U; index < endpoints.size(); ++index) {
+      if (index == *driver_index) {
+        continue;
+      }
+      auto* load_cell = endpoints[index].is_instance ? _liberty_cell_lookup(endpoints[index].cell_master) : nullptr;
+      if (!appendNativeTimingNode(endpoints[index], load_cell, result, node_index)) {
+        if (result.diagnostic.empty()) {
+          result.status = ::icts::WrapperTimingGraphStatus::kConnectivityInvalid;
+          result.diagnostic = "native load pin cannot be represented:" + endpoints[index].debug_name;
+        }
+        return;
+      }
+      timing_net.load_pins.push_back(endpoints[index].debug_name);
+      load_indices.push_back(index);
+    }
+    if (load_indices.empty()) {
+      return;
+    }
+    std::ranges::sort(timing_net.load_pins);
+    timing_net.load_pins.erase(std::ranges::unique(timing_net.load_pins).begin(), timing_net.load_pins.end());
+    const auto logic_rc_start = std::chrono::steady_clock::now();
+    if (!buildNativeNetWireModel(endpoints, *driver_index, load_indices, result.signal_routing_authority, *dbu, timing_net)) {
+      result.status = ::icts::WrapperTimingGraphStatus::kUnsupported;
+      result.diagnostic = "native signal net RC construction failed:" + net.name;
+      return;
+    }
+    logic_rc_runtime_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - logic_rc_start).count();
+    result.nets.push_back(std::move(timing_net));
+  });
+
+  if (!result.diagnostic.empty() && result.status != ::icts::WrapperTimingGraphStatus::kComplete
+      && result.status != ::icts::WrapperTimingGraphStatus::kDesignUnavailable) {
+    return result;
+  }
+
+  physical.forEachInstance([&](DesignInstanceId instance_id, const DesignInstance& instance, std::span<const DesignInstanceTermId>) {
+    const auto& master = library.cellMasterStorage().cellMaster(instance.master);
+    auto* lib_cell = _liberty_cell_lookup(master.name);
+    if (lib_cell == nullptr) {
+      return;
+    }
+    for (const auto& arc_set_holder : lib_cell->get_cell_arcs()) {
+      auto* arc_set = arc_set_holder.get();
+      auto* arc = nativeFirstEnabledArc(arc_set);
+      if (arc == nullptr) {
+        continue;
+      }
+      const auto input_port = std::string(arc->get_src_port());
+      const auto output_port = std::string(arc->get_snk_port());
+      const auto input_term = netlist.findInstanceTerm(instance_id, input_port);
+      const auto output_term = netlist.findInstanceTerm(instance_id, output_port);
+      const auto input_name = instance.name + "/" + input_port;
+      const auto output_name = instance.name + "/" + output_port;
+      bool positive = false;
+      bool negative = false;
+      for (const auto& candidate_holder : arc_set->get_arcs()) {
+        auto* candidate = candidate_holder.get();
+        if (candidate == nullptr || candidate->isDisableArc() != 0U) {
+          continue;
+        }
+        positive = positive || candidate->isPositiveArc() != 0U;
+        negative = negative || candidate->isNegativeArc() != 0U;
+      }
+      const auto timing_type = arc->get_timing_type();
+      if (nativeIsCombinationalArc(arc)) {
+        if (!node_index.contains(input_name) && !node_index.contains(output_name)) {
+          continue;
+        }
+        if (!input_term || !output_term || !netlist.instanceTerm(input_term).net || !netlist.instanceTerm(output_term).net
+            || !node_index.contains(input_name) || !node_index.contains(output_name)) {
+          ++result.unsupported_arc_count;
+          continue;
+        }
+        result.arcs.push_back(::icts::WrapperTimingArc{.inst_name = instance.name,
+                                                       .cell_master = master.name,
+                                                       .input_port = input_port,
+                                                       .output_port = output_port,
+                                                       .input_pin = input_name,
+                                                       .output_pin = output_name,
+                                                       .positive_unate = positive,
+                                                       .negative_unate = negative,
+                                                       .clock_gate_boundary = lib_cell->isICG()});
+        continue;
+      }
+      if ((timing_type == idb::LibArc::TimingType::kRisingEdge || timing_type == idb::LibArc::TimingType::kFallingEdge) && node_index.contains(output_name)) {
+        if (!input_term || !output_term || input_name.empty() || output_name.empty()) {
+          ++result.unsupported_arc_count;
+          continue;
+        }
+        result.launches.push_back(::icts::WrapperTimingLaunch{.inst_name = instance.name,
+                                                              .cell_master = master.name,
+                                                              .clock_port = input_port,
+                                                              .output_port = output_port,
+                                                              .clock_pin = input_name,
+                                                              .output_pin = output_name,
+                                                              .clock_transition = nativeTransition(arc)});
+        continue;
+      }
+      if ((arc->isSetupArc() != 0U || arc->isHoldArc() != 0U) && node_index.contains(output_name)) {
+        if (!input_term || !output_term || input_name.empty() || output_name.empty()) {
+          ++result.unsupported_arc_count;
+          continue;
+        }
+        result.checks.push_back(::icts::WrapperTimingCheck{.inst_name = instance.name,
+                                                            .cell_master = master.name,
+                                                            .clock_port = input_port,
+                                                            .data_port = output_port,
+                                                            .clock_pin = input_name,
+                                                            .data_pin = output_name,
+                                                            .kind = arc->isSetupArc() != 0U ? ::icts::WrapperTimingCheckKind::kSetup
+                                                                                            : ::icts::WrapperTimingCheckKind::kHold,
+                                                            .clock_transition = nativeTransition(arc),
+                                                            .clock_gating = lib_cell->isICG()});
+      }
+    }
+  });
+
+  std::ranges::sort(result.nodes, {}, &::icts::WrapperTimingNode::pin_name);
+  std::ranges::sort(result.nets, {}, &::icts::WrapperTimingNet::net_name);
+  std::ranges::sort(result.arcs, [](const auto& lhs, const auto& rhs) {
+    return std::tie(lhs.inst_name, lhs.input_port, lhs.output_port, lhs.input_pin, lhs.output_pin, lhs.cell_master, lhs.positive_unate,
+                    lhs.negative_unate, lhs.clock_gate_boundary)
+           < std::tie(rhs.inst_name, rhs.input_port, rhs.output_port, rhs.input_pin, rhs.output_pin, rhs.cell_master, rhs.positive_unate,
+                      rhs.negative_unate, rhs.clock_gate_boundary);
+  });
+  std::vector<::icts::WrapperTimingArc> merged_arcs;
+  merged_arcs.reserve(result.arcs.size());
+  for (auto& arc : result.arcs) {
+    const bool same_edge = !merged_arcs.empty()
+                           && std::tie(merged_arcs.back().inst_name, merged_arcs.back().input_port, merged_arcs.back().output_port,
+                                       merged_arcs.back().input_pin, merged_arcs.back().output_pin, merged_arcs.back().cell_master)
+                                  == std::tie(arc.inst_name, arc.input_port, arc.output_port, arc.input_pin, arc.output_pin, arc.cell_master);
+    if (!same_edge) {
+      merged_arcs.push_back(std::move(arc));
+      continue;
+    }
+    merged_arcs.back().positive_unate = merged_arcs.back().positive_unate || arc.positive_unate;
+    merged_arcs.back().negative_unate = merged_arcs.back().negative_unate || arc.negative_unate;
+    merged_arcs.back().clock_gate_boundary = merged_arcs.back().clock_gate_boundary || arc.clock_gate_boundary;
+  }
+  result.arcs = std::move(merged_arcs);
+  std::ranges::sort(result.launches, [](const auto& lhs, const auto& rhs) {
+    return std::tie(lhs.clock_pin, lhs.output_pin, lhs.cell_master, lhs.clock_port, lhs.output_port, lhs.clock_transition)
+           < std::tie(rhs.clock_pin, rhs.output_pin, rhs.cell_master, rhs.clock_port, rhs.output_port, rhs.clock_transition);
+  });
+  result.launches.erase(std::ranges::unique(result.launches, {}, [](const auto& launch) {
+                             return std::tie(launch.clock_pin, launch.output_pin, launch.clock_transition);
+                           }).begin(),
+                        result.launches.end());
+  std::ranges::sort(result.checks, [](const auto& lhs, const auto& rhs) {
+    return std::tie(lhs.clock_pin, lhs.data_pin, lhs.kind, lhs.clock_transition, lhs.cell_master, lhs.clock_port, lhs.data_port)
+           < std::tie(rhs.clock_pin, rhs.data_pin, rhs.kind, rhs.clock_transition, rhs.cell_master, rhs.clock_port, rhs.data_port);
+  });
+  result.checks.erase(std::ranges::unique(result.checks, {}, [](const auto& check) {
+                          return std::tie(check.clock_pin, check.data_pin, check.kind, check.clock_transition);
+                        }).begin(),
+                     result.checks.end());
+  if (result.unsupported_arc_count > 0U) {
+    result.status = ::icts::WrapperTimingGraphStatus::kUnsupported;
+    result.diagnostic = "native Liberty arcs cannot be joined to live EccDB instance terms";
+    return result;
+  }
+  result.status = ::icts::WrapperTimingGraphStatus::kComplete;
+  const auto total_runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - graph_start).count();
+  result.logic_rc_construction_runtime_s = logic_rc_runtime_s;
+  result.graph_construction_runtime_s = std::max(0.0, total_runtime_s - logic_rc_runtime_s);
+  return result;
 }
 
 ::icts::ClockTraceBuild CtsEccdbAdapter::traceSdcClocks(const ::icts::SdcClockTraceInput& input) const
@@ -994,9 +1672,9 @@ bool CtsEccdbAdapter::readTraceClockTargets(::icts::Design& design, const std::v
   }
 }
 
-CtsEccdbWriteSummary CtsEccdbAdapter::writeClocks(::icts::Design& design, const std::vector<::icts::Clock*>& clocks)
+::icts::WrapperWriteSummary CtsEccdbAdapter::writeClocks(::icts::Design& design, const std::vector<::icts::Clock*>& clocks)
 {
-  CtsEccdbWriteSummary summary;
+  ::icts::WrapperWriteSummary summary;
   if (!isDesignReady()) {
     summary.reason = "eccdb_context_not_ready";
     return summary;

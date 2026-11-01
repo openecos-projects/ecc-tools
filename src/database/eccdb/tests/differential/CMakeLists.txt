@@ -1,20 +1,5 @@
-# ***************************************************************************************
 # SPDX-License-Identifier: MulanPSL-2.0
-# Copyright (c) 2023-2025 Peng Cheng Laboratory
-# Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-# Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-#
-# iEDA is licensed under Mulan PSL v2.
-# You can use this software according to the terms and conditions of the Mulan PSL v2.
-# You may obtain a copy of Mulan PSL v2 at:
-# http://license.coscl.org.cn/MulanPSL2
-#
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-#
-# See the Mulan PSL v2 for more details.
-# ***************************************************************************************
+# Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 find_package(GTest REQUIRED)
 include(GoogleTest)
@@ -66,6 +51,24 @@ if(TARGET eccdb_lef_import AND TARGET eccdb_def_import AND TARGET eccdb_def_expo
   gtest_discover_tests(eccdb_def_full_corpus_semantic_test
     PROPERTIES LABELS eccdb_differential)
   list(APPEND _eccdb_differential_targets eccdb_def_full_corpus_semantic_test)
+
+  add_executable(eccdb_def_semantic_probe ${ECCDB_ECC_TOOLS_ROOT}/test/native/def_semantic_probe.cpp)
+  eccdb_storage_target(eccdb_def_semantic_probe)
+  target_include_directories(eccdb_def_semantic_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(eccdb_def_semantic_probe PRIVATE
+    eccdb_lef_import eccdb_def_import eccdb_def_export eccdb_service GTest::gtest)
+  set_target_properties(eccdb_def_semantic_probe PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+  add_executable(eccdb_ifp_semantic_differential_test
+    IfpSemanticDifferentialTest.cpp
+  )
+  eccdb_storage_target(eccdb_ifp_semantic_differential_test)
+  target_link_libraries(eccdb_ifp_semantic_differential_test PRIVATE
+    eccdb_service eccdb_lef_import eccdb_def_import GTest::gtest_main)
+  gtest_discover_tests(eccdb_ifp_semantic_differential_test
+    PROPERTIES LABELS eccdb_differential)
+  list(APPEND _eccdb_differential_targets eccdb_ifp_semantic_differential_test)
 
   add_executable(eccdb_opendb_design_differential_test
     OpenDbDesignDifferentialTest.cpp

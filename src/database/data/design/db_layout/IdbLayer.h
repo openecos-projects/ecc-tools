@@ -851,7 +851,6 @@ class IdbLayerCut : public IdbLayer
   IDB_LAYER_ANTENNA_PROPS_FORWARD
   // getter
   const int32_t get_width() const { return _width; }
-  double get_resistance() const { return _resistance; }
   std::vector<IdbLayerCutSpacing*> get_spacings() { return _spacings; }
   IdbLayerCutArraySpacing* get_array_spacing() { return _array_spacing; }
   IdbLayerCutEnclosure* get_enclosure_below() { return _enclosure_below; }
@@ -868,7 +867,6 @@ class IdbLayerCut : public IdbLayer
   std::vector<std::shared_ptr<cutlayer::Lef58SpacingTable>>& get_lef58_spacing_table() { return _lef58_spacing_tables; }
   // setter
   void set_width(int32_t width) { _width = width; }
-  void set_resistance(double resistance) { _resistance = resistance; }
   // void set_spacing(int32_t spacing) { _spacing = spacing; }
   void set_array_spacing(IdbLayerCutArraySpacing* array_spacing) { _array_spacing = array_spacing; }
   void set_enclosure_below(IdbLayerCutEnclosure* enclosure_below) { _enclosure_below = enclosure_below; }
@@ -898,7 +896,6 @@ class IdbLayerCut : public IdbLayer
  private:
   //!--------tbd----------------
   int32_t _width;
-  double _resistance = 0.0;
   // int32_t _spacing;
   std::vector<IdbLayerCutSpacing*> _spacings;
 

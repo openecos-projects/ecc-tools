@@ -20,11 +20,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
 #include "../../../database/interaction/RT_DRC/ids.hpp"
+#include "DRCDesignSource.hpp"
 
 #if 1  // 前向声明
 
@@ -35,18 +37,13 @@ class IdbLayerCut;
 enum class IdbLayerDirection : uint8_t;
 }  // namespace idb
 
-namespace eccdb {
-class DesignStore;
-class TechStore;
-class LibraryStore;
-class DatabaseContext;
-}  // namespace eccdb
 
 namespace idrc {
 class RoutingLayer;
 class CutLayer;
 class DRCShape;
-class Database;
+class Violation;
+class PlanarRect;
 enum class Direction;
 enum class ViolationType;
 }  // namespace idrc
@@ -68,12 +65,9 @@ class DRCInterface
 #if 1  // iDRC
   void initDRC(std::map<std::string, std::any> config_map, bool enable_quiet = true);
   void runDRC();
-  void checkDef();
-  [[nodiscard]] const std::map<std::string, std::size_t>& lastViolationCounts() const noexcept;
   void destroyDRC();
   // Releases a partially initialized run without publishing DRC output.
   void abortDRC();
-  bool saveDRC(std::string path);
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list);
 #endif
@@ -85,18 +79,11 @@ class DRCInterface
 #if 1  // TopData
 
 #if 1  // input
-  void setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
-                       eccdb::LibraryStore* library);
-  // Borrow the caller-owned Context for the lifetime of a native run. Passing
-  // nullptr detaches it and clears the native source selection.
-  void setDesignSource(eccdb::DatabaseContext* context);
-  void setDesignSource(eccdb::DatabaseContext& context);
+  // The caller supplies a database-neutral source; nullptr restores iDB.
+  void setDesignSource(std::shared_ptr<DRCDesignSource> source);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
-  void wrapDatabaseFromIdb();
-  void wrapDatabaseFromEnTT();
-  std::string compareWrappedDatabase(Database& left, Database& right);
   void wrapDBInfo();
   void wrapMicronDBU();
   void wrapManufactureGrid();
@@ -117,40 +104,24 @@ class DRCInterface
 #endif
 
 #if 1  // check
-  std::vector<ids::Shape> buildEnvShapeList();
-  std::vector<ids::Shape> buildEnvShapeListFromEnTT(std::set<size_t>* obs_shape_idx_set = nullptr);
+  std::vector<DRCShape> buildEnvShapeList();
   bool isSkipping(idb::IdbNet* idb_net);
-  std::vector<ids::Shape> buildResultShapeList();
-  std::vector<ids::Shape> buildResultShapeListFromEnTT();
+  std::vector<DRCShape> buildResultShapeList();
   std::string getNetName(int32_t net_idx);
-  // IDB-only shape conversion path. EccDB keeps the ids::Shape builders above
-  // as its public adapter contract; these helpers avoid a return-type-only
-  // overload collision with that contract.
-  std::vector<DRCShape> buildEnvDrcShapeList();
-  std::vector<DRCShape> buildResultDrcShapeList();
   void printSummary(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputViolationJson(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputViolationFile(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   void outputTofeature(std::map<std::string, std::vector<ids::Violation>>& type_violation_map);
   DRCShape convertToDRCShape(const ids::Shape& ids_shape);
+  std::vector<ids::Violation> convertToIDSViolationList(const std::vector<Violation>& violation_list);
 #endif
 
 #endif
 
  private:
   static DRCInterface* _drc_interface_instance;
-  eccdb::DesignStore* _design = nullptr;
-  eccdb::TechStore* _tech = nullptr;
-  eccdb::LibraryStore* _library = nullptr;
-  eccdb::DatabaseContext* _database_context = nullptr;
+  std::shared_ptr<DRCDesignSource> _design_source;
   bool _drc_initialized = false;
-  std::map<std::string, std::size_t> _last_violation_counts;
-  // iDRC uses regular-then-special net ordinals. Build this snapshot
-  // before parallel queries and keep it read-only for the initialized run.
-  // A changed source/netlist is picked up by the next initDRC, not per box.
-  int32_t _eccdb_regular_net_count = 0;
-  std::vector<std::string> _eccdb_net_names;
-
   DRCInterface() = default;
   DRCInterface(const DRCInterface& other) = delete;
   DRCInterface(DRCInterface&& other) = delete;
@@ -158,14 +129,13 @@ class DRCInterface
   DRCInterface& operator=(const DRCInterface& other) = delete;
   DRCInterface& operator=(DRCInterface&& other) = delete;
   // function
-  void refreshEccdbNetIndex();
-  void clearEccdbNetIndex();
-  void finishDRC(bool write_output);
   std::vector<ids::Violation> getViolationList(const std::vector<ids::Shape>& ids_env_shape_list, const std::vector<ids::Shape>& ids_result_shape_list,
                                                const std::set<std::string>& ids_check_type_set, const std::vector<ids::Shape>& ids_check_region_list,
                                                const std::set<size_t>& obs_shape_idx_set);
   std::vector<ids::Violation> getViolationList(std::vector<DRCShape> drc_env_shape_list, std::vector<DRCShape> drc_result_shape_list,
                                                std::set<ViolationType> drc_check_type_set, std::vector<DRCShape> drc_check_region_list);
+  std::vector<Violation> getMacroViolationList(std::vector<DRCShape> drc_result_shape_list, std::vector<DRCShape> drc_check_region_list);
+  bool isMacroPinOverlapped(const std::vector<PlanarRect>& pin_rect_list, const PlanarRect& rect);
 };
 
 }  // namespace idrc

@@ -1,25 +1,11 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -731,6 +717,34 @@ TEST_F(DesignStorageTest, StoresAndValidatesOptionalNetOptions)
 
   EXPECT_TRUE(netlist.destroyNet(regular));
   EXPECT_TRUE(netlist.destroyNet(special));
+}
+
+TEST_F(DesignStorageTest, StoresNetAliasesAsOptionalRawProvenance)
+{
+  auto& netlist = design.netlistStorage();
+  auto& registry = design.designRegistry().registry();
+  const auto net = netlist.createNet(DesignNet{.name = "canonical"});
+  const std::vector<std::string> names{R"(\rtl_alias[0])", "canonical", R"(\rtl_alias[0])", ""};
+
+  EXPECT_EQ(netlist.netAliases(net), nullptr);
+  netlist.setNetAliases(net, DesignNetAliases{.names = names});
+  const auto* aliases = netlist.netAliases(net);
+  ASSERT_NE(aliases, nullptr);
+  EXPECT_EQ(aliases->names, names);
+  EXPECT_FALSE(netlist.findNet(R"(\rtl_alias[0])"));
+
+  auto renamed = netlist.net(net);
+  renamed.name = "canonical_renamed";
+  netlist.updateNet(net, std::move(renamed));
+  EXPECT_EQ(netlist.findNet("canonical_renamed"), net);
+  ASSERT_NE(netlist.netAliases(net), nullptr);
+  EXPECT_EQ(netlist.netAliases(net)->names, names);
+
+  netlist.setNetAliases(net, {});
+  EXPECT_EQ(netlist.netAliases(net), nullptr);
+  netlist.setNetAliases(net, DesignNetAliases{.names = names});
+  EXPECT_TRUE(netlist.destroyNet(net));
+  EXPECT_FALSE(registry.all_of<DesignNetAliases>(net.entity()));
 }
 
 }  // namespace

@@ -50,13 +50,9 @@ auto owningNetName(const std::string& node_name) -> std::string
   return delimiter == std::string::npos ? node_name : node_name.substr(0, delimiter);
 }
 
-auto commandSpefName(const spef::Exchange& exchange, const std::string& name) -> std::string
+auto normalizeSpefName(const spef::Exchange& exchange, const std::string& name) -> std::string
 {
-  // The command-line filter is raw SPEF spelling, while the model is built
-  // after SpefReader::expandName().  expandName() already consumes each
-  // escape pair; doing removeEscapes() again would turn a legal literal
-  // backslash ("\\\\") into no character.
-  return spef::stripQuotes(spef::expandName(exchange, name));
+  return spef::removeEscapes(spef::stripQuotes(spef::expandName(exchange, name)));
 }
 
 auto sameEdgeRef(const EdgeRef& lhs, const EdgeRef& rhs) -> bool
@@ -113,7 +109,7 @@ auto parseEdgeName(const spef::Exchange& exchange, const Config& config) -> std:
   }
 
   EdgeName edge_name;
-  edge_name.net_name = commandSpefName(exchange, config.edge_name.substr(0, delimiter));
+  edge_name.net_name = normalizeSpefName(exchange, config.edge_name.substr(0, delimiter));
   if (!parseSize(std::string_view{config.edge_name}.substr(delimiter + 1), edge_name.res_index)) {
     RCXLOG.warn(Loc::current(), "plot_spef -edge expects a non-negative *RES index, got ", config.edge_name);
     return std::nullopt;
@@ -271,7 +267,7 @@ auto showCoupledNetContext(const Model& model, Visibility& visibility, NetMap& n
 auto makeNetVisibleObjects(const Model& model, const spef::Exchange& exchange, const Config& config) -> Visibility
 {
   auto visibility = makeVisibility(model, false);
-  const std::string target_net = commandSpefName(exchange, config.net_name);
+  const std::string target_net = normalizeSpefName(exchange, config.net_name);
   auto net_map = buildNetMap(model);
   const bool found_target = showOnlyNet(model, visibility, target_net);
   showCoupledNetContext(model, visibility, net_map, target_net);

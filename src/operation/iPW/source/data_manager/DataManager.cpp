@@ -148,8 +148,15 @@ void DataManager::readConstraint()
   SdcCommand::initInst();
   SdcCommand& sdc_command = SdcCommand::getInst();
   if (sdc_command.evalScriptFile(_config.sdc_file_path) != TCL_OK) {
-    PWLOG.warn(Loc::current(), "SDC command failed in '", _config.sdc_file_path, "' at line ", sdc_command.get_error_line_number(), ": ",
-               sdc_command.get_error_message());
+    PWLOG.warn(
+        Loc::current(),
+        "SDC command failed in '",
+        _config.sdc_file_path,
+        "' at line ",
+        sdc_command.get_error_line_number(),
+        ": ",
+        sdc_command.get_error_message()
+    );
     PWLOG.error(Loc::current(), "SDC contains invalid or unsupported constraints; power analysis stopped");
   }
   SdcCommand::destroyInst();
@@ -271,11 +278,14 @@ void DataManager::makeNet(const std::string& net_name, Net& net)
   Database& database = _database;
   net.get_driver_pin_list().clear();
   net.get_load_pin_list().clear();
-
+  std::unordered_set<std::string> seen;
+  seen.reserve(net.get_pin_name_list().size());
   for (std::string& pin_name : net.get_pin_name_list()) {
     Pin& pin = database.get_pin_map()[pin_name];
     pin.set_net_name(net_name);
-    makeUniqueName(net.get_load_pin_list(), pin_name);
+    if (seen.insert(pin_name).second) {
+      net.get_load_pin_list().push_back(pin_name);
+    }
   }
 }
 

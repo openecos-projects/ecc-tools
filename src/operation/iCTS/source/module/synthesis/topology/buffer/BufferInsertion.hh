@@ -59,6 +59,7 @@ auto FindRenderableLocation(const Pin* pin) -> Point<int>;
 auto CollectValidLoads(const Net& net) -> std::vector<Pin*>;
 auto ConnectNet(const TopologyNetConnectionInput& input) -> void;
 auto ReconnectExistingNet(const TopologyNetConnectionInput& input) -> void;
+auto ReconnectExistingNetPreservingLoads(const TopologyNetConnectionInput& input) -> void;
 auto CreateBufferInstance(Topology::Build& result, const std::string& inst_name, const std::string& cell_master, const std::string& input_pin_name,
                           const std::string& output_pin_name, const Point<int>& location) -> BufferCreation;
 auto CreateNet(Topology::Build& result, const std::string& net_name, Pin* driver, const std::vector<Pin*>& sinks) -> Net*;

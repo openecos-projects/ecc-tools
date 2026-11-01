@@ -1,0 +1,35 @@
+EccDB source notices
+===================
+
+EccDB source files use SPDX-License-Identifier: MulanPSL-2.0.
+The complete license is provided by this directory's LICENSE, a verbatim copy
+of the ecc-tools root LICENSE, and installed alongside this NOTICE in
+share/licenses/eccdb.
+
+Existing copyright statements are retained in the corresponding source files:
+
+Copyright (c) 2023-2025 Peng Cheng Laboratory
+Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+Copyright (c) 2026 Peng Cheng Laboratory
+Copyright (c) 2026 Beijing Institute of Open Source Chip
+
+iEDA is licensed under Mulan PSL v2.
+You can use this software according to the terms and conditions of the Mulan PSL v2.
+You may obtain a copy of Mulan PSL v2 at:
+http://license.coscl.org.cn/MulanPSL2
+
+Original disclaimer statements retained from the source headers:
+
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+
+THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+
+See the Mulan PSL v2 for more details.
+
+Third-party dependencies retain their own licenses and notices. Their source
+headers and the existing EnTT/LEF/DEF license installation rules are unchanged.

@@ -102,6 +102,11 @@ auto HTreeSynthesisState::segmentPatterns() -> BufferPatternLibrary&
 
 auto AssembleHTreeSynthesisState(const HTree::Input& input, const HTree::Config& config) -> HTreeSynthesisStateBuild
 {
+  return AssembleHTreeSynthesisState(input, config, std::nullopt);
+}
+
+auto AssembleHTreeSynthesisState(const HTree::Input& input, const HTree::Config& config, std::optional<unsigned> topology_depth) -> HTreeSynthesisStateBuild
+{
   HTreeSynthesisStateBuild state_build;
   auto& state = state_build.state;
   state.input = &input;
@@ -132,11 +137,13 @@ auto AssembleHTreeSynthesisState(const HTree::Input& input, const HTree::Config&
   topology_config.htree_topology_tolerance = std::max(0.0, config.topology_tolerance);
   topology_config.max_leaf_load_count = config.max_fanout;
   const auto topology_branching_factor = TopologyGen::resolveBranchingFactor(topology_config.max_leaf_load_count);
+  TopologyGen::Config topology_gen_config{.partition_config = topology_config, .branching_factor = topology_branching_factor};
+  topology_gen_config.target_depth = topology_depth;
   state.result.output.topology = TopologyGen::build(loads,
                                                     TopologyGen::Input{
                                                         .fixed_root_location = input.fixed_topology_root_location,
                                                     },
-                                                    TopologyGen::Config{.partition_config = topology_config, .branching_factor = topology_branching_factor});
+                                                    topology_gen_config);
   const auto levels = state.result.output.topology.levels();
   if (levels.empty()) {
     CTSLOG.warn(Loc::current(), "HTree: topology generation produced no tree nodes.");

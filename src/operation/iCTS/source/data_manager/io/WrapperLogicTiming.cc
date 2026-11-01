@@ -22,10 +22,14 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -37,7 +41,10 @@
 #include <utility>
 #include <vector>
 
+#include "IdbCellMaster.h"
 #include "IdbDesign.h"
+#include "IdbEnum.h"
+#include "IdbGeometry.h"
 #include "IdbInstance.h"
 #include "IdbLayer.h"
 #include "IdbLayout.h"
@@ -45,7 +52,10 @@
 #include "IdbPins.h"
 #include "IdbTerm.h"
 #include "IdbUnits.h"
+#include "Type.hh"
 #include "Wrapper.hh"
+#include "dm_config.h"
+#include "CtsDesignSource.hh"
 #include "idm.h"
 #include "liberty/Lib.hh"
 #include "salt/base/flute.h"
@@ -423,8 +433,13 @@ auto Wrapper::querySignalRoutingAuthority(std::string_view anchor_name) const ->
   return result;
 }
 
-auto Wrapper::collectTimingGraph() const -> WrapperTimingGraph
+auto Wrapper::collectTimingGraph(std::optional<unsigned> routing_layer, std::string_view routing_anchor_name) const -> WrapperTimingGraph
 {
+  // The external source supplies a CTS timing graph; keep the legacy path below.
+  if (_design_source != nullptr) {
+    return _design_source->collectTimingGraph(routing_anchor_name, routing_layer);
+  }
+
   const auto graph_start = std::chrono::steady_clock::now();
   WrapperTimingGraph result;
   double logic_rc_runtime_s = 0.0;

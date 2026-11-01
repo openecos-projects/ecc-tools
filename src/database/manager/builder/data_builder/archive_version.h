@@ -21,12 +21,11 @@
 namespace idb {
 namespace data_binary {
 
-constexpr uint32_t kArchiveVersionV2 = 2;
-constexpr uint32_t kArchiveVersion = 3;
+constexpr uint32_t kArchiveVersion = 2;
 
 constexpr bool is_archive_version_supported(uint32_t version)
 {
-  return version == kArchiveVersionV2 || version == kArchiveVersion;
+  return version == kArchiveVersion;
 }
 
 }  // namespace data_binary

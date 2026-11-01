@@ -22,7 +22,6 @@
  */
 #include <algorithm>
 #include <cmath>
-#include <ostream>
 
 #include "Logger.hh"
 #include "bound_skew_tree/component/Components.hh"

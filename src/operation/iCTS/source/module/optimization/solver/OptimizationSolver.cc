@@ -27,7 +27,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>

@@ -1,26 +1,12 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "def/DefDesignExporter.h"
 
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <limits>
@@ -43,6 +29,8 @@
 #include "design/non_default_rule/component/NonDefaultRuleComponents.h"
 #include "design/routing/component/RoutingComponents.h"
 #include "design/via/component/ViaComponents.h"
+#include "antenna/AntennaService.h"
+#include "tech/common/AntennaRuleTypes.h"
 #include "design/geometry/DesignGeometryComponents.h"
 #include "geometry/DomainGeometryComponents.h"
 #include "geometry/GeometryRegistry.h"
@@ -600,6 +588,126 @@ void writeBlockPin(DefTextOutput& output, const DefNameCache& names, const Geome
   }
 }
 
+int32_t defAntennaInteger(double value, AntennaMetric metric)
+{
+  if (!std::isfinite(value) || std::floor(value) != value
+      || value < static_cast<double>(std::numeric_limits<int32_t>::min())
+      || value > static_cast<double>(std::numeric_limits<int32_t>::max())) {
+    throw std::logic_error("DEF antenna value is not an int32 for metric " + std::to_string(static_cast<unsigned>(metric)));
+  }
+  return static_cast<int32_t>(value);
+}
+
+void writeDefAntennaLayerValue(DefTextOutput& output, std::string_view keyword, const AntennaLayerValue& value)
+{
+  const bool requires_layer = keyword == "ANTENNAPINMAXAREACAR" || keyword == "ANTENNAPINMAXSIDEAREACAR"
+                              || keyword == "ANTENNAPINMAXCUTCAR";
+  if (requires_layer && value.layer.empty()) {
+    throw std::logic_error(std::string(keyword) + " requires a layer in DEF 5.8");
+  }
+  output << "\n  + " << keyword << ' ' << defAntennaInteger(value.value, value.metric);
+  if (!value.layer.empty()) {
+    output << " LAYER " << value.layer;
+  }
+}
+
+void writeDefAntennaValue(DefTextOutput& output, std::string_view keyword, const AntennaValue& value)
+{
+  const AntennaLayerValue layer_value{.metric = value.metric, .flags = value.flags, .layer = {}, .value = value.value};
+  writeDefAntennaLayerValue(output, keyword, layer_value);
+}
+
+void writeDefAntennaModelValue(DefTextOutput& output, const AntennaLayerValue& value)
+{
+  switch (value.metric) {
+    case AntennaMetric::kGateArea:
+      writeDefAntennaLayerValue(output, "ANTENNAPINGATEAREA", value);
+      return;
+    case AntennaMetric::kMaxAreaCar:
+      writeDefAntennaLayerValue(output, "ANTENNAPINMAXAREACAR", value);
+      return;
+    case AntennaMetric::kMaxSideAreaCar:
+      writeDefAntennaLayerValue(output, "ANTENNAPINMAXSIDEAREACAR", value);
+      return;
+    case AntennaMetric::kMaxCutCar:
+      writeDefAntennaLayerValue(output, "ANTENNAPINMAXCUTCAR", value);
+      return;
+    default:
+      return;
+  }
+}
+
+void writeDefAntennaModelValue(DefTextOutput& output, const AntennaValue& value)
+{
+  switch (value.metric) {
+    case AntennaMetric::kGateArea:
+      writeDefAntennaValue(output, "ANTENNAPINGATEAREA", value);
+      return;
+    case AntennaMetric::kMaxAreaCar:
+      writeDefAntennaValue(output, "ANTENNAPINMAXAREACAR", value);
+      return;
+    case AntennaMetric::kMaxSideAreaCar:
+      writeDefAntennaValue(output, "ANTENNAPINMAXSIDEAREACAR", value);
+      return;
+    case AntennaMetric::kMaxCutCar:
+      writeDefAntennaValue(output, "ANTENNAPINMAXCUTCAR", value);
+      return;
+    default:
+      return;
+  }
+}
+
+void writeBlockTermAntenna(DefTextOutput& output, const DesignBlockTermAntenna& antenna)
+{
+  for (const auto& value : antenna.values) {
+    switch (value.metric) {
+      case AntennaMetric::kPartialMetalArea:
+        writeDefAntennaValue(output, "ANTENNAPINPARTIALMETALAREA", value);
+        break;
+      case AntennaMetric::kPartialMetalSideArea:
+        writeDefAntennaValue(output, "ANTENNAPINPARTIALMETALSIDEAREA", value);
+        break;
+      case AntennaMetric::kPartialCutArea:
+        writeDefAntennaValue(output, "ANTENNAPINPARTIALCUTAREA", value);
+        break;
+      case AntennaMetric::kDiffArea:
+        writeDefAntennaValue(output, "ANTENNAPINDIFFAREA", value);
+        break;
+      default:
+        break;
+    }
+  }
+  for (const auto& value : antenna.layer_values) {
+    switch (value.metric) {
+      case AntennaMetric::kPartialMetalArea:
+        writeDefAntennaLayerValue(output, "ANTENNAPINPARTIALMETALAREA", value);
+        break;
+      case AntennaMetric::kPartialMetalSideArea:
+        writeDefAntennaLayerValue(output, "ANTENNAPINPARTIALMETALSIDEAREA", value);
+        break;
+      case AntennaMetric::kPartialCutArea:
+        writeDefAntennaLayerValue(output, "ANTENNAPINPARTIALCUTAREA", value);
+        break;
+      case AntennaMetric::kDiffArea:
+        writeDefAntennaLayerValue(output, "ANTENNAPINDIFFAREA", value);
+        break;
+      default:
+        break;
+    }
+  }
+  for (const auto& model : antenna.models) {
+    output << "\n  + ANTENNAMODEL " << (model.oxide.empty() ? std::string_view{"OXIDE1"} : std::string_view{model.oxide});
+    for (const auto& value : model.values) {
+      writeDefAntennaModelValue(output, value);
+    }
+    for (const auto& value : model.layer_values) {
+      writeDefAntennaModelValue(output, value);
+    }
+    // DEF PIN antenna models currently have integer layer-qualified values.
+    // Ignore future LEF-only values here rather than emitting invalid DEF.
+  }
+}
+
 void writeNetGeometryPrefix(DefTextOutput& output, DesignWireStatus status, std::string_view shield_net, uint32_t flags,
                             std::string_view shape)
 {
@@ -1148,6 +1256,9 @@ void DefDesignExporter::write(std::ostream& stream) const
 
   const auto& netlist = _design.netlistStorage();
   const auto& constraints = _design.constraintStorage();
+  // AntennaService exposes the optional term component without coupling the
+  // DEF writer to EnTT storage.
+  const AntennaService antenna_service(_design);
   const auto instances = netlist.instances();
   const auto regions = constraints.regions();
 
@@ -1234,6 +1345,9 @@ void DefDesignExporter::write(std::ostream& stream) const
       }
       for (const auto block_pin : netlist.blockPins(id)) {
         writeBlockPin(output, names, geometry, netlist.blockPin(block_pin));
+      }
+      if (const auto* antenna = antenna_service.blockTermAntenna(id); antenna != nullptr) {
+        writeBlockTermAntenna(output, *antenna);
       }
       output << "\n  ;\n";
     }

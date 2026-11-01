@@ -1,16 +1,6 @@
-add_library(ista_timing_propagator
-    ${ISTA_MODULE}/timing_propagator/TimingPropagator.cpp
-)
+add_subdirectory(clock)
+add_subdirectory(data)
 
-target_link_libraries(ista_timing_propagator
-    PUBLIC
-    ista_delay_calculator
-    ista_data_manager
-    ista_toolkit
-)
-
-target_include_directories(ista_timing_propagator
-    PUBLIC
-    ${ISTA_MODULE}/timing_propagator/tp_data_manager
-    ${ISTA_MODULE}/timing_propagator
-)
+add_library(ista_required_propagator RequiredPropagator.cpp)
+target_link_libraries(ista_required_propagator PUBLIC ista_path_checker)
+target_include_directories(ista_required_propagator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

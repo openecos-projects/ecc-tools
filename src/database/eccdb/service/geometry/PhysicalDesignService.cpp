@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "geometry/PhysicalDesignService.h"
 #include "context/DatabaseContext.h"
@@ -346,9 +331,20 @@ bool PhysicalDesignService::hasDesignInfo() const noexcept
   return _design.globalStorage().hasInfo();
 }
 
+const DesignInfo& PhysicalDesignService::designInfo() const
+{
+  return _design.globalStorage().info();
+}
+
 int32_t PhysicalDesignService::databaseUnitsPerMicron() const
 {
-  return _design.globalStorage().info().database_units_per_micron;
+  return designInfo().database_units_per_micron;
+}
+
+std::optional<int32_t> PhysicalDesignService::manufacturingGrid() const noexcept
+{
+  const auto* grid = _tech.globalStorage().tryGetManufacturingGrid();
+  return grid == nullptr ? std::nullopt : std::optional<int32_t>{grid->value};
 }
 
 bool PhysicalDesignService::hasDieArea() const noexcept
@@ -366,6 +362,138 @@ Rect PhysicalDesignService::dieBounds() const
   return _design.globalStorage().dieBounds();
 }
 
+bool PhysicalDesignService::hasCoreArea() const noexcept
+{
+  return _design.floorplanStorage().hasCoreArea();
+}
+
+Rect PhysicalDesignService::coreBounds() const
+{
+  return _design.floorplanStorage().coreBounds();
+}
+
+TechLayerId PhysicalDesignService::findLayer(std::string_view name) const
+{
+  return _tech.findLayer(name);
+}
+
+std::optional<uint32_t> PhysicalDesignService::layerPosition(TechLayerId layer) const noexcept
+{
+  return _tech.layerPosition(layer);
+}
+
+LibrarySiteId PhysicalDesignService::findSite(std::string_view name) const
+{
+  return _library.siteStorage().findSite(name);
+}
+
+const LibrarySite& PhysicalDesignService::site(LibrarySiteId id) const
+{
+  return _library.siteStorage().site(id);
+}
+
+const LibraryCellMaster& PhysicalDesignService::master(LibraryCellMasterId id) const
+{
+  return _library.cellMasterStorage().cellMaster(id);
+}
+
+const LibraryMasterTerm& PhysicalDesignService::masterTerm(LibraryMasterTermId id) const
+{
+  return _library.masterTermStorage().masterTerm(id);
+}
+
+const DesignInstance& PhysicalDesignService::instance(DesignInstanceId id) const
+{
+  return _design.netlistStorage().instance(id);
+}
+
+const DesignInstanceTerm& PhysicalDesignService::instanceTerm(DesignInstanceTermId id) const
+{
+  return _design.netlistStorage().instanceTerm(id);
+}
+
+std::span<const DesignInstanceTermId> PhysicalDesignService::instanceTerms(DesignInstanceId instance) const
+{
+  return _design.netlistStorage().instanceTerms(instance);
+}
+
+const DesignBlockPin& PhysicalDesignService::blockPin(DesignBlockPinId id) const
+{
+  return _design.netlistStorage().blockPin(id);
+}
+
+const DesignPinRectangle& PhysicalDesignService::blockPinRectangle(GeometryShapeId id) const noexcept
+{
+  return _design.netlistStorage().blockPinRectangle(id);
+}
+
+DesignNetId PhysicalDesignService::findSpecialNet(std::string_view name) const
+{
+  return _design.netlistStorage().findSpecialNet(name);
+}
+
+void PhysicalDesignService::forEachSite(const SiteVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  const auto& storage = _library.siteStorage();
+  for (const auto id : storage.sites()) {
+    visitor(id, storage.site(id));
+  }
+}
+
+void PhysicalDesignService::forEachMaster(const MasterVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  const auto& storage = _library.cellMasterStorage();
+  for (const auto id : storage.cellMasters()) {
+    visitor(id, storage.cellMaster(id));
+  }
+}
+
+void PhysicalDesignService::forEachRow(const RowVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  const auto& storage = _design.floorplanStorage();
+  for (const auto id : storage.rows()) {
+    visitor(id, storage.row(id));
+  }
+}
+
+void PhysicalDesignService::forEachInstance(const InstanceVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  _design.netlistStorage().forEachInstance(visitor);
+}
+
+void PhysicalDesignService::forEachInstanceTerm(const InstanceTermVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  _design.netlistStorage().forEachInstanceTerm(visitor);
+}
+
+void PhysicalDesignService::forEachBlockTerm(const BlockTermVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  _design.netlistStorage().forEachBlockTerm(visitor);
+}
+
+Rect PhysicalDesignService::rowBounds(DesignRowId row) const
+{
+  return _design.floorplanStorage().rowBounds(row);
+}
+
 GeometryLayerKind PhysicalDesignService::layerKind(TechLayerId layer) const
 {
   const auto& registry = _tech.techRegistry().registry();
@@ -381,6 +509,11 @@ GeometryLayerKind PhysicalDesignService::layerKind(TechLayerId layer) const
   return GeometryLayerKind::kOther;
 }
 
+bool PhysicalDesignService::isMastersliceLayer(TechLayerId layer) const
+{
+  return _tech.contains(layer) && _tech.techRegistry().registry().all_of<TechMastersliceLayer>(layer.entity());
+}
+
 const TechLayerInfo& PhysicalDesignService::layerInfo(TechLayerId layer) const
 {
   return _tech.layerInfo(layer);
@@ -389,6 +522,27 @@ const TechLayerInfo& PhysicalDesignService::layerInfo(TechLayerId layer) const
 const TechRoutingLayer& PhysicalDesignService::routingLayer(TechRoutingLayerId layer) const
 {
   return _tech.routingLayerStorage().routingLayer(layer);
+}
+
+int32_t PhysicalDesignService::routingSpacing(TechRoutingLayerId layer, int32_t width, int32_t parallel_length) const
+{
+  const auto& storage = _tech.routingLayerStorage();
+  const auto prl_rules = storage.prlSpacingTableRules(layer);
+  if (!prl_rules.empty()) {
+    return storage.prlSpacingFor(prl_rules.front(), width, width, parallel_length);
+  }
+
+  int32_t spacing = 0;
+  for (const auto rule_id : storage.spacingRules(layer)) {
+    const auto& rule = storage.rule(rule_id);
+    if (rule.type == TechRoutingSpacingType::kDefault) {
+      spacing = rule.min_spacing;
+    } else if (width >= rule.min_width && width <= rule.max_width) {
+      spacing = rule.min_spacing;
+      break;
+    }
+  }
+  return spacing;
 }
 
 const TechCutLayer& PhysicalDesignService::cutLayer(TechCutLayerId layer) const
@@ -435,6 +589,64 @@ void PhysicalDesignService::forEachCutLayer(const CutLayerVisitor& visitor) cons
     const auto id = TechCutLayerId{layer.entity()};
     visitor(id, index, _tech.layerInfo(layer), _tech.cutLayerStorage().cutLayer(id));
   }
+}
+
+void PhysicalDesignService::forEachMastersliceLayer(const MastersliceLayerVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  const auto& registry = _tech.techRegistry().registry();
+  const auto& sequence = _tech.layerSequence();
+  for (uint32_t index = 0; index < sequence.size(); ++index) {
+    const auto layer = sequence[index];
+    if (!registry.all_of<TechMastersliceLayer>(layer.entity())) {
+      continue;
+    }
+    const auto id = TechMastersliceLayerId{layer.entity()};
+    visitor(id, index, _tech.layerInfo(layer), _tech.mastersliceLayerStorage().mastersliceLayer(id));
+  }
+}
+
+void PhysicalDesignService::forEachCutSpacingRule(TechCutLayerId layer, const CutSpacingRuleVisitor& visitor) const
+{
+  if (!visitor) {
+    return;
+  }
+  const auto& storage = _tech.cutLayerStorage();
+  for (const auto id : storage.spacingRules(layer)) {
+    visitor(id, storage.spacingRule(id));
+  }
+}
+
+const TechViaRuleGenerate& PhysicalDesignService::techViaRuleGenerate(TechViaRuleGenerateId id) const
+{
+  return _tech.viaRuleGenerateStorage().viaRuleGenerate(id);
+}
+
+const TechViaRuleGenerateBottomLayer& PhysicalDesignService::techViaRuleGenerateBottomLayer(TechViaRuleGenerateId id) const
+{
+  return _tech.viaRuleGenerateStorage().bottomLayer(id);
+}
+
+const TechViaRuleGenerateCutLayer& PhysicalDesignService::techViaRuleGenerateCutLayer(TechViaRuleGenerateId id) const
+{
+  return _tech.viaRuleGenerateStorage().cutLayer(id);
+}
+
+const TechViaRuleGenerateTopLayer& PhysicalDesignService::techViaRuleGenerateTopLayer(TechViaRuleGenerateId id) const
+{
+  return _tech.viaRuleGenerateStorage().topLayer(id);
+}
+
+std::vector<TechViaRuleGenerateId> PhysicalDesignService::viaRuleGeneratesForLayer(TechLayerId layer) const
+{
+  return _tech.viaRuleGenerateStorage().viaRuleGeneratesForLayer(layer);
+}
+
+std::vector<TechViaRuleGenerateId> PhysicalDesignService::viaRuleGeneratesForCutLayer(TechCutLayerId layer) const
+{
+  return _tech.viaRuleGenerateStorage().viaRuleGeneratesForCutLayer(layer);
 }
 
 void PhysicalDesignService::forEachTrackGrid(const TrackGridVisitor& visitor) const
@@ -689,6 +901,11 @@ void PhysicalDesignService::forEachNetWireShape(DesignNetId net, const NetWireSh
       visitor(wire_id, wire, id, shape, attributes);
     });
   });
+}
+
+Rect PhysicalDesignService::routeShapeBounds(DesignRouteShapeId shape) const
+{
+  return _design.routingStorage().shapeBoundingBox(shape);
 }
 
 void PhysicalDesignService::forEachNetGeometry(DesignNetId net, const PhysicalNetGeometryVisitor& visitor) const

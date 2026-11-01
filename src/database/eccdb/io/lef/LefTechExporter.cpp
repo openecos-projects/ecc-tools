@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "lef/LefTechExporter.h"
 
@@ -28,7 +13,9 @@
 #include <string_view>
 #include <vector>
 
+#include "tech/common/TechLayerAntennaComponents.h"
 #include "lef/LefExportFormat.h"
+#include "service/antenna/AntennaService.h"
 #include "tech/TechStore.h"
 
 namespace eccdb {
@@ -707,6 +694,90 @@ class TechLefWriter
     }
   }
 
+  static const char* antennaValueName(AntennaMetric metric)
+  {
+    switch (metric) {
+      case AntennaMetric::kLengthFactor: return "ANTENNALENGTHFACTOR";
+      case AntennaMetric::kAreaRatio: return "ANTENNAAREARATIO";
+      case AntennaMetric::kDiffAreaRatio: return "ANTENNADIFFAREARATIO";
+      case AntennaMetric::kCumAreaRatio: return "ANTENNACUMAREARATIO";
+      case AntennaMetric::kCumDiffAreaRatio: return "ANTENNACUMDIFFAREARATIO";
+      case AntennaMetric::kAreaFactor: return "ANTENNAAREAFACTOR";
+      case AntennaMetric::kCutAreaFactor: return "ANTENNAAREAFACTOR";
+      case AntennaMetric::kSideAreaRatio: return "ANTENNASIDEAREARATIO";
+      case AntennaMetric::kDiffSideAreaRatio: return "ANTENNADIFFSIDEAREARATIO";
+      case AntennaMetric::kCumSideAreaRatio: return "ANTENNACUMSIDEAREARATIO";
+      case AntennaMetric::kCumDiffSideAreaRatio: return "ANTENNACUMDIFFSIDEAREARATIO";
+      case AntennaMetric::kSideAreaFactor: return "ANTENNASIDEAREAFACTOR";
+      case AntennaMetric::kGatePlusDiff: return "ANTENNAGATEPLUSDIFF";
+      case AntennaMetric::kAreaMinusDiff: return "ANTENNAAREAMINUSDIFF";
+      default: return nullptr;
+    }
+  }
+
+  static const char* antennaPwlName(AntennaMetric metric)
+  {
+    switch (metric) {
+      case AntennaMetric::kDiffAreaRatioPwl: return "ANTENNADIFFAREARATIO";
+      case AntennaMetric::kCumDiffAreaRatioPwl: return "ANTENNACUMDIFFAREARATIO";
+      case AntennaMetric::kDiffSideAreaRatioPwl: return "ANTENNADIFFSIDEAREARATIO";
+      case AntennaMetric::kCumDiffSideAreaRatioPwl: return "ANTENNACUMDIFFSIDEAREARATIO";
+      case AntennaMetric::kAreaDiffReducePwl: return "ANTENNAAREADIFFREDUCEPWL";
+      default: return nullptr;
+    }
+  }
+
+  void writeLayerAntenna(TechLayerId id)
+  {
+    const AntennaService antenna_service(_database);
+    const auto* antenna = antenna_service.layerAntenna(id);
+    if (antenna == nullptr) {
+      return;
+    }
+    for (const auto& model : antenna->models) {
+      if (!model.oxide.empty()) {
+        _output << "  ANTENNAMODEL " << model.oxide << " ;\n";
+      }
+      for (const auto& value : model.values) {
+        if (value.metric == AntennaMetric::kCumRoutingPlusCut || (value.flags & AntennaValueFlag::kBoolean) != 0u) {
+          if (value.metric != AntennaMetric::kCumRoutingPlusCut) {
+            throw std::logic_error("unknown boolean antenna metric");
+          }
+          _output << "  ANTENNACUMROUTINGPLUSCUT ;\n";
+          continue;
+        }
+        const auto* name = antennaValueName(value.metric);
+        if (name == nullptr) {
+          throw std::logic_error("antenna metric is not representable in a technology LEF layer");
+        }
+        _output << "  " << name << ' ' << lef_export_detail::number(value.value);
+        if ((value.flags & AntennaValueFlag::kDiffuseOnly) != 0u) {
+          if (value.metric != AntennaMetric::kAreaFactor && value.metric != AntennaMetric::kCutAreaFactor
+              && value.metric != AntennaMetric::kSideAreaFactor) {
+            throw std::logic_error("DIFFUSEONLY is attached to an invalid antenna metric");
+          }
+          _output << " DIFFUSEONLY";
+        }
+        _output << " ;\n";
+      }
+      for (const auto& pwl : model.pwls) {
+        const auto* name = antennaPwlName(pwl.metric);
+        if (name == nullptr) {
+          throw std::logic_error("antenna PWL metric is not representable in a technology LEF layer");
+        }
+        _output << "  " << name;
+        if (pwl.metric != AntennaMetric::kAreaDiffReducePwl) {
+          _output << " PWL";
+        }
+        _output << " ( ";
+        for (const auto& point : pwl.points) {
+          _output << "( " << lef_export_detail::number(point.x) << ' ' << lef_export_detail::number(point.y) << " ) ";
+        }
+        _output << ") ;\n";
+      }
+    }
+  }
+
   void writeRoutingLayer(TechRoutingLayerId id, const TechLayerInfo& info)
   {
     const auto& storage = _database.routingLayerStorage();
@@ -720,6 +791,7 @@ class TechLefWriter
     writeRoutingAxes(layer);
     writeRoutingScalars(layer);
     writeRoutingNativeRules(id, properties);
+    writeLayerAntenna(TechLayerId{id.entity()});
     requireRoutingLef58Properties(id, properties);
     writeLayerProperties(info, properties);
   }
@@ -1039,6 +1111,7 @@ class TechLefWriter
       _output << "  RESISTANCE " << lef_export_detail::number(layer.resistance_per_cut) << " ;\n";
     }
     writeCutNativeRules(id);
+    writeLayerAntenna(TechLayerId{id.entity()});
     requireCutLef58Properties(id, properties);
     writeSynthesizedCutLef58Properties(id, properties);
     writeLayerProperties(info, properties);

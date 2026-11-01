@@ -33,6 +33,7 @@
 #include "Point.hh"
 #include "Tree.hh"
 #include "module/topology/fixture/analysis/TopologyAnalysis.hh"
+#include "module/topology/fixture/analysis/TopologyStats.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "toolkit/geometry/Geometry.hh"
 

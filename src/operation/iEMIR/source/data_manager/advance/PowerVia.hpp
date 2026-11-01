@@ -16,20 +16,9 @@
 // ***************************************************************************************
 #pragma once
 
-#include <cstdint>
-#include <vector>
-
 #include "EMIRHeader.hpp"
 
 namespace iemir {
-
-struct PowerViaMetalRect
-{
-  int32_t ll_x = 0;
-  int32_t ll_y = 0;
-  int32_t ur_x = 0;
-  int32_t ur_y = 0;
-};
 
 class PowerVia
 {
@@ -56,8 +45,6 @@ class PowerVia
   int32_t get_cut_high_y() { return _cut_high_y; }
   double get_cut_area_um2() { return _cut_area_um2; }
   double get_resistance() { return _resistance; }
-  const std::vector<PowerViaMetalRect>& get_bottom_rect_list() const { return _bottom_rect_list; }
-  const std::vector<PowerViaMetalRect>& get_top_rect_list() const { return _top_rect_list; }
   // setter
   void set_via_name(const std::string& via_name) { _via_name = via_name; }
   void set_bottom_layer_name(const std::string& bottom_layer_name) { _bottom_layer_name = bottom_layer_name; }
@@ -88,8 +75,6 @@ class PowerVia
   void set_cut_high_y(int32_t cut_high_y) { _cut_high_y = cut_high_y; }
   void set_cut_area_um2(double cut_area_um2) { _cut_area_um2 = cut_area_um2; }
   void set_resistance(double resistance) { _resistance = resistance; }
-  void add_bottom_rect(PowerViaMetalRect rectangle) { _bottom_rect_list.push_back(rectangle); }
-  void add_top_rect(PowerViaMetalRect rectangle) { _top_rect_list.push_back(rectangle); }
   // function
 
  private:
@@ -112,10 +97,6 @@ class PowerVia
   int32_t _cut_high_y = 0;
   double _cut_area_um2 = 0.0;
   double _resistance = 0.0;
-  // Keep each placed enclosure separately.  A union bbox can bridge the
-  // empty gap between disjoint Via metal rectangles.
-  std::vector<PowerViaMetalRect> _bottom_rect_list;
-  std::vector<PowerViaMetalRect> _top_rect_list;
 };
 
 }  // namespace iemir

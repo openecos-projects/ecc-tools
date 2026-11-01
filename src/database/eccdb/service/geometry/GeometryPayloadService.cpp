@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "geometry/GeometryPayloadService.h"
 
@@ -206,18 +191,16 @@ struct ResolvedSegmentCaps
   double end_cap = 0.0;
 };
 
-[[nodiscard]] ResolvedSegmentCaps resolvedSegmentCaps(const DesignRouteShape& shape, const DesignRouteSegment& segment,
-                                                       int32_t width, const DesignRouteShapeAttributes* attributes)
+[[nodiscard]] ResolvedSegmentCaps resolvedSegmentCaps(const DesignStore& design, const DesignRouteShape& shape,
+                                                       const DesignRouteSegment& segment, int32_t width)
 {
-  const bool truncated = (shape.flags & DesignWirePathFlag::kHasShape) != 0u
-                         && attributes != nullptr && !attributes->shape.empty();
-  if (truncated) {
-    return {};
-  }
-
-  const auto capFor = [](const DesignWirePoint& point) -> std::optional<double> {
+  const auto& registry = design.designRegistry().registry();
+  const auto& wire = registry.get<const DesignWire>(shape.wire.entity());
+  const bool truncated = registry.all_of<DesignSpecialNet>(wire.net.entity())
+                         && (segment.begin.position.x == segment.end.position.x || segment.begin.position.y == segment.end.position.y);
+  const auto capFor = [truncated](const DesignWirePoint& point) -> std::optional<double> {
     if ((point.flags & DesignWirePointFlag::kHasExtension) == 0u) {
-      return std::nullopt;
+      return truncated ? std::optional<double>{0.0} : std::nullopt;
     }
     return static_cast<double>(point.extension);
   };
@@ -513,7 +496,7 @@ class PayloadBuilder
           using Geometry = std::remove_cvref_t<decltype(value)>;
           if constexpr (std::is_same_v<Geometry, DesignRouteSegment>) {
             const auto width = resolvedSegmentWidth(_design, shape, attributes);
-            const auto caps = resolvedSegmentCaps(shape, value, width, attributes);
+            const auto caps = resolvedSegmentCaps(_design, shape, value, width);
             _batch.segments.push_back(GeometryPayloadSegment{.header_index = header_index,
                                                               .p0 = value.begin.position,
                                                               .p1 = value.end.position,

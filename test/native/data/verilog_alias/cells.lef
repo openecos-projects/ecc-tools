@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: MulanPSL-2.0
+
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+
+MACRO BUF
+  CLASS CORE ;
+  ORIGIN 0.000 0.000 ;
+  SIZE 1.000 BY 1.000 ;
+  SYMMETRY X Y ;
+  SITE CORE ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M1 ;
+        RECT 0.000 0.400 0.100 0.600 ;
+    END
+  END A
+  PIN Y
+    DIRECTION OUTPUT ;
+    USE SIGNAL ;
+    PORT
+      LAYER M1 ;
+        RECT 0.900 0.400 1.000 0.600 ;
+    END
+  END Y
+END BUF
+
+END LIBRARY

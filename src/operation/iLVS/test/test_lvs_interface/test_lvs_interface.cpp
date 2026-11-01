@@ -14,13 +14,7 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include <cassert>
-#include <stdexcept>
-#include <string>
-#include <vector>
-
 #include "DataManager.hpp"
-#include "EntityChecker.hpp"
 #include "DefData.hpp"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
@@ -28,153 +22,6 @@
 #include "LVSInterface.hpp"
 #include "NetlistData.hpp"
 #include "Utility.hpp"
-#include "context/DatabaseContext.h"
-#include "design/DesignStore.h"
-#include "design/netlist/model/NetlistComponents.h"
-#include "library/LibraryStore.h"
-#include "library/cell_master/model/CellMasterComponents.h"
-#include "library/master_term/model/MasterTermComponents.h"
-#include "tech/TechStore.h"
-
-namespace {
-
-void testNativeInputIoDriverSelection()
-{
-  eccdb::TechStore technology;
-  eccdb::LibraryStore library(technology.techRegistry());
-  eccdb::DesignStore design(technology.techRegistry(), library.libraryRegistry());
-  design.globalStorage().setInfo({.name = "native_lvs_io_root", .database_units_per_micron = 1000});
-  eccdb::DatabaseContext context(technology, library, design);
-
-  const auto sink_master = library.cellMasterStorage().createCellMaster(
-      {.name = "SINK", .type = eccdb::LibraryCellMasterType::kCore, .width = 10, .height = 10});
-  static_cast<void>(library.masterTermStorage().createMasterTerm(
-      sink_master, {.name = "A", .direction = eccdb::LibraryMasterTermDirection::kInput}));
-  const auto driver_master = library.cellMasterStorage().createCellMaster(
-      {.name = "DRIVER", .type = eccdb::LibraryCellMasterType::kCore, .width = 10, .height = 10});
-  static_cast<void>(library.masterTermStorage().createMasterTerm(
-      driver_master, {.name = "Y", .direction = eccdb::LibraryMasterTermDirection::kOutput}));
-
-  auto& netlist = design.netlistStorage();
-  const auto input_sink = netlist.createInstance({.name = "input_sink", .master = sink_master});
-  const auto driven_sink = netlist.createInstance({.name = "driven_sink", .master = sink_master});
-  const auto output_sink = netlist.createInstance({.name = "output_sink", .master = sink_master});
-  const auto driver = netlist.createInstance({.name = "driver", .master = driver_master});
-  const auto input_net = netlist.createNet({.name = "input_net"});
-  const auto driven_net = netlist.createNet({.name = "driven_net"});
-  const auto output_net = netlist.createNet({.name = "output_net"});
-  const auto input_port = netlist.createBlockTerm({.name = "top_input", .direction = eccdb::DesignIoPinDirection::kInput});
-  const auto driven_port = netlist.createBlockTerm({.name = "top_driven", .direction = eccdb::DesignIoPinDirection::kInput});
-  const auto output_port = netlist.createBlockTerm({.name = "top_output", .direction = eccdb::DesignIoPinDirection::kOutput});
-
-  const auto input_sink_term = netlist.findInstanceTerm(input_sink, "A");
-  const auto driven_sink_term = netlist.findInstanceTerm(driven_sink, "A");
-  const auto output_sink_term = netlist.findInstanceTerm(output_sink, "A");
-  const auto driver_term = netlist.findInstanceTerm(driver, "Y");
-  assert(input_sink_term && driven_sink_term && output_sink_term && driver_term);
-  netlist.connect(input_port, input_net);
-  netlist.connect(input_sink_term, input_net);
-  netlist.connect(driven_port, driven_net);
-  netlist.connect(driver_term, driven_net);
-  netlist.connect(driven_sink_term, driven_net);
-  netlist.connect(output_port, output_net);
-  netlist.connect(output_sink_term, output_net);
-
-  ilvs::NetlistData reference;
-  reference.set_design_name("native_lvs_io_root");
-  ilvs::DataManager::initInst();
-  auto& lvs = ilvs::LVSInterface::getInst();
-  lvs.setDesignSource(context);
-  lvs.setReferenceNetlist(&reference);
-  lvs.wrapDatabaseFromEccdb();
-
-  const auto& routing_map =
-      ilvs::DataManager::getInst().getDatabase().get_def_data().get_def_routing_data().get_net_routing_data_map();
-  assert(routing_map.at("input_net").get_driver_terminal_name() == "PIN/top_input");
-  assert(routing_map.at("driven_net").get_driver_terminal_name() == "driver/Y");
-  assert(routing_map.at("output_net").get_driver_terminal_name().empty());
-
-  lvs.setReferenceNetlist(nullptr);
-  lvs.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
-  ilvs::DataManager::destroyInst();
-}
-
-void testNativeEscapedDefNetNamesMatchReferenceVerilog()
-{
-  eccdb::TechStore technology;
-  eccdb::LibraryStore library(technology.techRegistry());
-  eccdb::DesignStore design(technology.techRegistry(), library.libraryRegistry());
-  design.globalStorage().setInfo({.name = "native_lvs_escaped_net", .database_units_per_micron = 1000});
-  eccdb::DatabaseContext context(technology, library, design);
-
-  // The raw DEF spelling contains both a doubled slash (a literal slash) and
-  // escaped bus delimiters.  The reference Verilog identifier is its semantic
-  // spelling, not the DEF serialization spelling.
-  const std::string def_name = R"(queue\\literal\[0\])";
-  const std::string reference_name = R"(queue\literal[0])";
-  static_cast<void>(design.netlistStorage().createNet({.name = def_name}));
-
-  ilvs::NetlistData reference;
-  reference.set_design_name("native_lvs_escaped_net");
-  reference.get_net_map()[reference_name] = ilvs::Net{};
-
-  ilvs::DataManager::initInst();
-  auto& lvs = ilvs::LVSInterface::getInst();
-  lvs.setDesignSource(context);
-  lvs.setReferenceNetlist(&reference);
-  lvs.wrapDatabaseFromEccdb();
-
-  auto& database = ilvs::DataManager::getInst().getDatabase();
-  const auto& def_data = database.get_def_data();
-  assert(def_data.get_net_map().contains(reference_name));
-  assert(!def_data.get_net_map().contains(def_name));
-  assert(def_data.get_def_routing_data().get_net_routing_data_map().contains(reference_name));
-  assert(!def_data.get_def_routing_data().get_net_routing_data_map().contains(def_name));
-
-  ilvs::EntityChecker::initInst();
-  ilvs::EntityChecker::getInst().check();
-  assert(database.get_summary().ec_summary.net_difference_num == 0);
-  ilvs::EntityChecker::destroyInst();
-
-  lvs.setReferenceNetlist(nullptr);
-  lvs.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
-  ilvs::DataManager::destroyInst();
-}
-
-void testNativeEscapedDefNetNameCollisionFailsClearly()
-{
-  eccdb::TechStore technology;
-  eccdb::LibraryStore library(technology.techRegistry());
-  eccdb::DesignStore design(technology.techRegistry(), library.libraryRegistry());
-  design.globalStorage().setInfo({.name = "native_lvs_escaped_collision", .database_units_per_micron = 1000});
-  eccdb::DatabaseContext context(technology, library, design);
-
-  // These names remain distinct in the DEF-facing EccDB.  iLVS has only a
-  // string net identity, so it must reject the lossy projection rather than
-  // merge their geometry and terminals under one reference-net name.
-  static_cast<void>(design.netlistStorage().createNet({.name = R"(literal\[0\])"}));
-  static_cast<void>(design.netlistStorage().createNet({.name = "literal[0]"}));
-
-  ilvs::NetlistData reference;
-  reference.set_design_name("native_lvs_escaped_collision");
-  ilvs::DataManager::initInst();
-  auto& lvs = ilvs::LVSInterface::getInst();
-  lvs.setDesignSource(context);
-  lvs.setReferenceNetlist(&reference);
-  bool rejected = false;
-  try {
-    lvs.wrapDatabaseFromEccdb();
-  } catch (const std::runtime_error& error) {
-    rejected = std::string(error.what()).find("both decode to 'literal[0]'") != std::string::npos;
-  }
-  assert(rejected);
-
-  lvs.setReferenceNetlist(nullptr);
-  lvs.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
-  ilvs::DataManager::destroyInst();
-}
-
-}  // namespace
 
 int main()
 {
@@ -248,9 +95,6 @@ int main()
   assert(vdd_pin->get_special_net() == nullptr);
   assert(vss_pin->get_special_net() == nullptr);
 
-  testNativeInputIoDriverSelection();
-  testNativeEscapedDefNetNamesMatchReferenceVerilog();
-  testNativeEscapedDefNetNameCollisionFailsClearly();
   ilvs::LVSInterface::destroyInst();
   return 0;
 }

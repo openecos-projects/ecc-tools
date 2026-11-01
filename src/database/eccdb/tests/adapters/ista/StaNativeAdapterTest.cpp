@@ -1,17 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
 // Copyright (c) 2026 Peng Cheng Laboratory
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -23,6 +11,7 @@
 #include "DataManager.hpp"
 #include "Logger.hpp"
 #include "STAInterface.hpp"
+#include "adapters/ista/STAInterfaceEccdb.h"
 #include "context/DatabaseContext.h"
 #include "design/DesignStore.h"
 #include "design/netlist/model/NetlistComponents.h"
@@ -139,14 +128,13 @@ class StaNativeAdapterTest : public testing::Test
     connectivity.connect(design.netlistStorage().findInstanceTerm(sink, input), net);
 
     ista::DataManager::initInst();
-    ista::STAInterface::getInst().setDesignSource(context);
+    eccdb::adapters::bindStaSource(ista::STAInterface::getInst(), &context);
   }
 
   void TearDown() override
   {
     auto& interface = ista::STAInterface::getInst();
-    interface.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
-    interface.setTimingInputs({});
+    eccdb::adapters::bindStaSource(interface, nullptr);
     ista::STAInterface::destroyInst();
     ista::DataManager::destroyInst();
     ista::Logger::destroyInst();
@@ -173,6 +161,8 @@ TEST_F(StaNativeAdapterTest, EscapedDefNamesMatchActualSpefConnections)
   reader.expandName();
 
   auto& interface = ista::STAInterface::getInst();
+  // SetUp installed the source callback before the SPEF became available. The
+  // callback must use the current operation inputs rather than a captured copy.
   interface.setTimingInputs({.spef_reader = &reader, .spef_path = fixture.path().string()});
   ASSERT_NO_THROW(interface.wrapDatabase());
 
@@ -181,18 +171,18 @@ TEST_F(StaNativeAdapterTest, EscapedDefNamesMatchActualSpefConnections)
   EXPECT_EQ(design.netlistStorage().instance(source).name, R"(u_src\[0\])");
 
   auto& database = ista::DataManager::getInst().getDatabase();
-  ASSERT_TRUE(database.get_instance_map().contains("u_src[0]"));
-  ASSERT_TRUE(database.get_pin_map().contains("u_src[0]:Q"));
-  ASSERT_TRUE(database.get_pin_map().contains("u_sink[0]:A"));
-  ASSERT_TRUE(database.get_net_map().contains("bus[0]"));
-  EXPECT_FALSE(database.get_net_map().contains(R"(bus\[0\])"));
+  ASSERT_TRUE(database.network().instances().contains("u_src[0]"));
+  ASSERT_TRUE(database.network().pins().contains("u_src[0]:Q"));
+  ASSERT_TRUE(database.network().pins().contains("u_sink[0]:A"));
+  ASSERT_TRUE(database.network().nets().contains("bus[0]"));
+  EXPECT_FALSE(database.network().nets().contains(R"(bus\[0\])"));
 
-  auto& timing_net = database.get_net_map().at("bus[0]");
+  auto& timing_net = database.network().nets().at("bus[0]");
   ASSERT_EQ(timing_net.get_pin_name_list().size(), 2u);
   EXPECT_EQ(timing_net.get_pin_name_list()[0], "u_src[0]:Q");
   EXPECT_EQ(timing_net.get_pin_name_list()[1], "u_sink[0]:A");
 
-  auto& parasitics = database.get_parasitic_library().get_net_map();
+  auto& parasitics = database.parasitics().nets();
   ASSERT_TRUE(parasitics.contains("bus[0]"));
   auto& parasitic_net = parasitics.at("bus[0]");
   EXPECT_TRUE(parasitic_net.get_node_map().contains("u_src[0]:Q"));
@@ -211,9 +201,10 @@ TEST_F(StaNativeAdapterTest, SpefResolvedNetAliasCollisionFailsBeforeObjectsAreD
   spef::SpefReader reader;
   ASSERT_TRUE(reader.read(fixture.path().string()));
   reader.expandName();
-  ista::STAInterface::getInst().setTimingInputs({.spef_reader = &reader, .spef_path = fixture.path().string()});
+  auto& interface = ista::STAInterface::getInst();
+  eccdb::adapters::bindStaSource(interface, &context, {.spef_reader = &reader, .spef_path = fixture.path().string()});
 
-  EXPECT_THROW(ista::STAInterface::getInst().wrapDatabase(), std::runtime_error);
+  EXPECT_THROW(interface.wrapDatabase(), std::runtime_error);
 }
 
 TEST_F(StaNativeAdapterTest, BlockTerminalCannotOverwriteAnInstancePinProjection)
@@ -225,9 +216,10 @@ TEST_F(StaNativeAdapterTest, BlockTerminalCannotOverwriteAnInstancePinProjection
   spef::SpefReader reader;
   ASSERT_TRUE(reader.read(fixture.path().string()));
   reader.expandName();
-  ista::STAInterface::getInst().setTimingInputs({.spef_reader = &reader, .spef_path = fixture.path().string()});
+  auto& interface = ista::STAInterface::getInst();
+  eccdb::adapters::bindStaSource(interface, &context, {.spef_reader = &reader, .spef_path = fixture.path().string()});
 
-  EXPECT_THROW(ista::STAInterface::getInst().wrapDatabase(), std::runtime_error);
+  EXPECT_THROW(interface.wrapDatabase(), std::runtime_error);
 }
 
 TEST_F(StaNativeAdapterTest, SemanticLiteralBackslashWinsOverEscapeAliasWhenSpefMatchesExactly)
@@ -242,16 +234,17 @@ TEST_F(StaNativeAdapterTest, SemanticLiteralBackslashWinsOverEscapeAliasWhenSpef
   spef::SpefReader reader;
   ASSERT_TRUE(reader.read(fixture.path().string()));
   reader.expandName();
-  ista::STAInterface::getInst().setTimingInputs({.spef_reader = &reader, .spef_path = fixture.path().string()});
-  ASSERT_NO_THROW(ista::STAInterface::getInst().wrapDatabase());
+  auto& interface = ista::STAInterface::getInst();
+  eccdb::adapters::bindStaSource(interface, &context, {.spef_reader = &reader, .spef_path = fixture.path().string()});
+  ASSERT_NO_THROW(interface.wrapDatabase());
 
-  const auto& timing_nets = ista::DataManager::getInst().getDatabase().get_net_map();
+  const auto& timing_nets = ista::DataManager::getInst().getDatabase().network().nets();
   EXPECT_TRUE(timing_nets.contains(R"(literal\leaf)"));
   EXPECT_FALSE(timing_nets.contains("literalleaf"));
-  const auto& timing_instances = ista::DataManager::getInst().getDatabase().get_instance_map();
+  const auto& timing_instances = ista::DataManager::getInst().getDatabase().network().instances();
   EXPECT_TRUE(timing_instances.contains(R"(literal\driver)"));
   EXPECT_FALSE(timing_instances.contains("literaldriver"));
-  const auto& timing_pins = ista::DataManager::getInst().getDatabase().get_pin_map();
+  const auto& timing_pins = ista::DataManager::getInst().getDatabase().network().pins();
   EXPECT_TRUE(timing_pins.contains(R"(literal\driver:Q)"));
 }
 
@@ -264,13 +257,14 @@ TEST_F(StaNativeAdapterTest, MixedTermSpellingsDoNotRejectAnUnescapedInstance)
   spef::SpefReader reader;
   ASSERT_TRUE(reader.read(fixture.path().string()));
   reader.expandName();
-  ista::STAInterface::getInst().setTimingInputs({.spef_reader = &reader, .spef_path = fixture.path().string()});
-  ASSERT_NO_THROW(ista::STAInterface::getInst().wrapDatabase());
+  auto& interface = ista::STAInterface::getInst();
+  eccdb::adapters::bindStaSource(interface, &context, {.spef_reader = &reader, .spef_path = fixture.path().string()});
+  ASSERT_NO_THROW(interface.wrapDatabase());
 
   auto& database = ista::DataManager::getInst().getDatabase();
-  EXPECT_TRUE(database.get_instance_map().contains("u_plain"));
-  EXPECT_TRUE(database.get_pin_map().contains("u_plain:A"));
-  EXPECT_TRUE(database.get_pin_map().contains("u_plain:B[0]"));
+  EXPECT_TRUE(database.network().instances().contains("u_plain"));
+  EXPECT_TRUE(database.network().pins().contains("u_plain:A"));
+  EXPECT_TRUE(database.network().pins().contains("u_plain:B[0]"));
 }
 
 TEST_F(StaNativeAdapterTest, MissingSpefPreservesRawDefSpellings)
@@ -278,10 +272,10 @@ TEST_F(StaNativeAdapterTest, MissingSpefPreservesRawDefSpellings)
   ASSERT_NO_THROW(ista::STAInterface::getInst().wrapDatabase());
 
   auto& database = ista::DataManager::getInst().getDatabase();
-  EXPECT_TRUE(database.get_instance_map().contains(R"(u_src\[0\])"));
-  EXPECT_TRUE(database.get_pin_map().contains(R"(u_src\[0\]:Q)"));
-  EXPECT_TRUE(database.get_net_map().contains(R"(bus\[0\])"));
-  EXPECT_FALSE(database.get_net_map().contains("bus[0]"));
+  EXPECT_TRUE(database.network().instances().contains(R"(u_src\[0\])"));
+  EXPECT_TRUE(database.network().pins().contains(R"(u_src\[0\]:Q)"));
+  EXPECT_TRUE(database.network().nets().contains(R"(bus\[0\])"));
+  EXPECT_FALSE(database.network().nets().contains("bus[0]"));
 }
 
 }  // namespace

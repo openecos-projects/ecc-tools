@@ -1,22 +1,9 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "idb/IdbTechImporter.h"
+
+#include "tech/common/TechLayerAntennaComponents.h"
 
 #include <algorithm>
 #include <cctype>
@@ -27,6 +14,7 @@
 #include <vector>
 
 #include "IdbLayout.h"
+#include "antenna/AntennaService.h"
 
 namespace eccdb {
 namespace {
@@ -61,6 +49,63 @@ TechConductorLayerRef conductorLayer(const TechStore& database, TechLayerId laye
     return TechConductorLayerRef{TechMastersliceLayerId{layer.entity()}};
   }
   throw std::runtime_error(std::string(field) + " requires a ROUTING or MASTERSLICE layer");
+}
+
+template <typename Layer>
+TechLayerAntenna importAntenna(const Layer& source)
+{
+  TechLayerAntenna target;
+  AntennaModel model;
+  const auto append = [&](AntennaMetric metric, bool present, double value, uint32_t flags = 0u) {
+    if (!present) return;
+    model.flags |= AntennaModelFlag::kHasValues;
+    if ((flags & AntennaValueFlag::kBoolean) != 0u) model.flags |= AntennaModelFlag::kHasBooleanValues;
+    model.values.push_back(AntennaValue{.metric = metric, .flags = flags, .value = value});
+  };
+  append(AntennaMetric::kAreaRatio, source.has_antenna_area_ratio(), source.get_antenna_area_ratio());
+  append(AntennaMetric::kCumAreaRatio, source.has_antenna_cum_area_ratio(), source.get_antenna_cum_area_ratio());
+  append(AntennaMetric::kAreaFactor, source.has_antenna_area_factor(), source.get_antenna_area_factor());
+  if (source.has_antenna_area_factor()) {
+    model.values.back().flags |= source.get_antenna_area_factor_diffuse_only() ? AntennaValueFlag::kDiffuseOnly : 0u;
+  }
+  append(AntennaMetric::kSideAreaRatio, source.has_antenna_side_area_ratio(), source.get_antenna_side_area_ratio());
+  append(AntennaMetric::kCumSideAreaRatio, source.has_antenna_cum_side_area_ratio(), source.get_antenna_cum_side_area_ratio());
+  append(AntennaMetric::kSideAreaFactor, source.has_antenna_side_area_factor(), source.get_antenna_side_area_factor());
+  if (source.has_antenna_side_area_factor()) {
+    model.values.back().flags |= source.get_antenna_side_area_factor_diffuse_only() ? AntennaValueFlag::kDiffuseOnly : 0u;
+  }
+  append(AntennaMetric::kGatePlusDiff, source.has_antenna_gate_plus_diff(), source.get_antenna_gate_plus_diff());
+  append(AntennaMetric::kAreaMinusDiff, source.has_antenna_area_minus_diff(), source.get_antenna_area_minus_diff());
+  append(AntennaMetric::kDiffAreaRatio, source.has_antenna_diff_area_ratio(), source.get_antenna_diff_area_ratio());
+  append(AntennaMetric::kCumDiffAreaRatio, source.has_antenna_cum_diff_area_ratio(), source.get_antenna_cum_diff_area_ratio());
+  append(AntennaMetric::kDiffSideAreaRatio, source.has_antenna_diff_side_area_ratio(), source.get_antenna_diff_side_area_ratio());
+  append(AntennaMetric::kCumDiffSideAreaRatio, source.has_antenna_cum_diff_side_area_ratio(), source.get_antenna_cum_diff_side_area_ratio());
+  append(AntennaMetric::kCumRoutingPlusCut, source.get_antenna_cum_routing_plus_cut(), 1.0, AntennaValueFlag::kBoolean);
+  append(AntennaMetric::kCutAreaFactor, source.has_antenna_cut_area_factor(), source.get_antenna_cut_area_factor());
+  if (source.has_antenna_cut_area_factor()) {
+    model.values.back().flags |= source.get_antenna_cut_area_factor_diffuse_only() ? AntennaValueFlag::kDiffuseOnly : 0u;
+  }
+
+  const auto append_pwl = [&](AntennaMetric metric, bool present, const std::vector<std::pair<double, double>>& points) {
+    if (!present) return;
+    AntennaPwl pwl{.metric = metric};
+    pwl.points.reserve(points.size());
+    for (const auto& [x, y] : points) pwl.points.push_back(AntennaPwlPoint{.x = x, .y = y});
+    model.flags |= AntennaModelFlag::kHasPwls;
+    model.pwls.push_back(std::move(pwl));
+  };
+  append_pwl(AntennaMetric::kDiffAreaRatioPwl, source.has_antenna_diff_area_ratio_pwl(), source.get_antenna_diff_area_ratio_pwl());
+  append_pwl(AntennaMetric::kCumDiffAreaRatioPwl, source.has_antenna_cum_diff_area_ratio_pwl(), source.get_antenna_cum_diff_area_ratio_pwl());
+  append_pwl(AntennaMetric::kDiffSideAreaRatioPwl, source.has_antenna_diff_side_area_ratio_pwl(), source.get_antenna_diff_side_area_ratio_pwl());
+  append_pwl(AntennaMetric::kCumDiffSideAreaRatioPwl, source.has_antenna_cum_diff_side_area_ratio_pwl(), source.get_antenna_cum_diff_side_area_ratio_pwl());
+  append_pwl(AntennaMetric::kAreaDiffReducePwl, source.has_antenna_area_diff_reduce_pwl(), source.get_antenna_area_diff_reduce_pwl());
+
+  if (model.flags != 0u) {
+    target.flags |= TechLayerAntennaFlag::kHasModels;
+    model.flags |= model.values.empty() ? 0u : AntennaModelFlag::kHasValues;
+    target.models.push_back(std::move(model));
+  }
+  return target;
 }
 
 TechViaMasterShapeInput materializeGeneratedVia(const TechGeneratedViaMaster& source, TechConductorLayerRef bottom,
@@ -400,10 +445,6 @@ TechCutLayer importCutLayer(::idb::IdbLayerCut& source)
   if (source.get_width() >= 0) {
     target.flags |= TechCutLayerFlag::kHasWidth;
     target.width = source.get_width();
-  }
-  if (source.get_resistance() > 0.0) {
-    target.flags |= TechCutLayerFlag::kHasResistance;
-    target.resistance_per_cut = source.get_resistance();
   }
   return target;
 }
@@ -928,6 +969,7 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
     throw std::logic_error("legacy iDB technology importer is one-shot");
   }
   _imported = true;
+  AntennaService antenna_service(_database);
 
   if (const auto* units = source.get_units(); units != nullptr) {
     _database.globalStorage().setUnits(importUnits(*units));
@@ -951,6 +993,9 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
         }
         const auto id = _database.createRoutingLayer(info, importRoutingLayer(*routing, _database.globalStorage().getUnits().database_units_per_micron));
         imported = TechLayerId{id.entity()};
+        if (auto antenna = importAntenna(*routing); antenna.flags != 0u) {
+          antenna_service.setLayerAntenna(imported, std::move(antenna));
+        }
         break;
       }
       case ::idb::IdbLayerType::kLayerCut: {
@@ -960,6 +1005,9 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
         }
         const auto id = _database.createCutLayer(info, importCutLayer(*cut));
         imported = TechLayerId{id.entity()};
+        if (auto antenna = importAntenna(*cut); antenna.flags != 0u) {
+          antenna_service.setLayerAntenna(imported, std::move(antenna));
+        }
         break;
       }
       case ::idb::IdbLayerType::kLayerImplant: {
@@ -977,11 +1025,14 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
         break;
       }
       case ::idb::IdbLayerType::kLayerMasterslice: {
-        const auto* masterslice = dynamic_cast<::idb::IdbLayerMasterslice*>(layer);
+        auto* masterslice = dynamic_cast<::idb::IdbLayerMasterslice*>(layer);
         if (masterslice == nullptr) throw std::runtime_error("legacy MASTERSLICE layer has an invalid dynamic type");
         info.lef58_type = lef58LayerType(masterslice->get_lef58_type());
         const auto id = _database.createMastersliceLayer(info, TechMastersliceLayer{.subtype = mastersliceType(masterslice->get_lef58_type())});
         imported = TechLayerId{id.entity()};
+        if (auto antenna = importAntenna(*masterslice); antenna.flags != 0u) {
+          antenna_service.setLayerAntenna(imported, std::move(antenna));
+        }
         break;
       }
       case ::idb::IdbLayerType::kLayerOverlap: {
@@ -1137,10 +1188,13 @@ void IdbTechImporter::import(::idb::IdbLayout& source)
       if (generated.row_count != 1u || generated.column_count != 1u) {
         generated.flags |= TechGeneratedViaMasterFlag::kHasRowCol;
       }
-      if (source_generate->has_origin()) {
+      // Legacy iDB stores only coordinates, so explicit zero-valued ORIGIN/OFFSET
+      // clauses cannot be distinguished from an omitted clause after import.
+      if (generated.origin_x != 0 || generated.origin_y != 0) {
         generated.flags |= TechGeneratedViaMasterFlag::kHasOrigin;
       }
-      if (source_generate->has_offset()) {
+      if (generated.bottom_offset_x != 0 || generated.bottom_offset_y != 0 || generated.top_offset_x != 0
+          || generated.top_offset_y != 0) {
         generated.flags |= TechGeneratedViaMasterFlag::kHasOffset;
       }
       if (auto* pattern = source_generate->get_patttern(); pattern != nullptr) {

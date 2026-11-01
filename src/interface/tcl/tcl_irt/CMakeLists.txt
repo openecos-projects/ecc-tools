@@ -10,6 +10,7 @@ target_link_libraries(tcl_irt
     tcl
     PRIVATE
     irt_interface
+    eccdb_irt_adapter
 )
 
 target_include_directories(tcl_irt

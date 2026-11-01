@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #pragma once
 
@@ -39,8 +24,12 @@
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/cell_master/model/MasterObsComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
+#include "library/site/model/SiteComponents.h"
 #include "tech/common/TechLayerTypes.h"
 #include "tech/cut_layer/model/CutLayerComponents.h"
+#include "tech/cut_layer/model/CutRuleComponents.h"
+#include "tech/cut_layer/model/CutRuleIds.h"
+#include "tech/masterslice_layer/model/MastersliceLayerComponents.h"
 #include "tech/non_default_rule/model/NonDefaultRuleComponents.h"
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 #include "tech/via_master/model/ViaMasterComponents.h"
@@ -157,6 +146,8 @@ class PhysicalDesignService
   using RoutingLayerVisitor
       = std::function<void(TechRoutingLayerId, uint32_t sequence_index, uint32_t routing_level, const TechLayerInfo&, const TechRoutingLayer&)>;
   using CutLayerVisitor = std::function<void(TechCutLayerId, uint32_t sequence_index, const TechLayerInfo&, const TechCutLayer&)>;
+  using MastersliceLayerVisitor
+      = std::function<void(TechMastersliceLayerId, uint32_t sequence_index, const TechLayerInfo&, const TechMastersliceLayer&)>;
   using TrackGridVisitor = std::function<void(DesignTrackGridId, const DesignTrackGrid&)>;
   using GCellGridVisitor = std::function<void(DesignGCellGridId, const DesignGCellGrid&)>;
   using NetVisitor = std::function<void(DesignNetId, const DesignNet&)>;
@@ -167,6 +158,14 @@ class PhysicalDesignService
       = std::function<void(TechViaRuleGenerateId, const TechViaRuleGenerate&, const TechViaRuleGenerateBottomLayer&,
                            const TechViaRuleGenerateCutLayer&, const TechViaRuleGenerateTopLayer&)>;
   using DesignViaVisitor = std::function<void(DesignViaId, const DesignVia&)>;
+  using SiteVisitor = std::function<void(LibrarySiteId, const LibrarySite&)>;
+  using MasterVisitor = std::function<void(LibraryCellMasterId, const LibraryCellMaster&)>;
+  using RowVisitor = std::function<void(DesignRowId, const DesignRow&)>;
+  using InstanceVisitor
+      = std::function<void(DesignInstanceId, const DesignInstance&, std::span<const DesignInstanceTermId>)>;
+  using InstanceTermVisitor = std::function<void(DesignInstanceTermId, const DesignInstanceTerm&)>;
+  using BlockTermVisitor = std::function<void(DesignBlockTermId, const DesignBlockTerm&)>;
+  using CutSpacingRuleVisitor = std::function<void(TechCutSpacingRuleId, const TechCutSpacingRule&)>;
 
   PhysicalDesignService(const TechStore& tech, const LibraryStore& library, const DesignStore& design);
   explicit PhysicalDesignService(const DatabaseContext& context);
@@ -176,18 +175,54 @@ class PhysicalDesignService
   [[nodiscard]] const DesignStore& design() const noexcept { return _design; }
 
   [[nodiscard]] bool hasDesignInfo() const noexcept;
+  [[nodiscard]] const DesignInfo& designInfo() const;
   [[nodiscard]] int32_t databaseUnitsPerMicron() const;
+  [[nodiscard]] std::optional<int32_t> manufacturingGrid() const noexcept;
   [[nodiscard]] bool hasDieArea() const noexcept;
   [[nodiscard]] std::span<const Point> dieBoundary() const;
   [[nodiscard]] Rect dieBounds() const;
+  [[nodiscard]] bool hasCoreArea() const noexcept;
+  [[nodiscard]] Rect coreBounds() const;
+
+  [[nodiscard]] TechLayerId findLayer(std::string_view name) const;
+  [[nodiscard]] std::optional<uint32_t> layerPosition(TechLayerId layer) const noexcept;
+  [[nodiscard]] LibrarySiteId findSite(std::string_view name) const;
+  [[nodiscard]] const LibrarySite& site(LibrarySiteId id) const;
+  [[nodiscard]] const LibraryCellMaster& master(LibraryCellMasterId id) const;
+  [[nodiscard]] const LibraryMasterTerm& masterTerm(LibraryMasterTermId id) const;
+  [[nodiscard]] const DesignInstance& instance(DesignInstanceId id) const;
+  [[nodiscard]] const DesignInstanceTerm& instanceTerm(DesignInstanceTermId id) const;
+  [[nodiscard]] std::span<const DesignInstanceTermId> instanceTerms(DesignInstanceId instance) const;
+  [[nodiscard]] const DesignBlockPin& blockPin(DesignBlockPinId id) const;
+  [[nodiscard]] const DesignPinRectangle& blockPinRectangle(GeometryShapeId id) const noexcept;
+  [[nodiscard]] DesignNetId findSpecialNet(std::string_view name) const;
+
+  void forEachSite(const SiteVisitor& visitor) const;
+  void forEachMaster(const MasterVisitor& visitor) const;
+  void forEachRow(const RowVisitor& visitor) const;
+  void forEachInstance(const InstanceVisitor& visitor) const;
+  void forEachInstanceTerm(const InstanceTermVisitor& visitor) const;
+  void forEachBlockTerm(const BlockTermVisitor& visitor) const;
+  [[nodiscard]] Rect rowBounds(DesignRowId row) const;
 
   [[nodiscard]] GeometryLayerKind layerKind(TechLayerId layer) const;
+  [[nodiscard]] bool isMastersliceLayer(TechLayerId layer) const;
   [[nodiscard]] const TechLayerInfo& layerInfo(TechLayerId layer) const;
   [[nodiscard]] const TechRoutingLayer& routingLayer(TechRoutingLayerId layer) const;
+  [[nodiscard]] int32_t routingSpacing(TechRoutingLayerId layer, int32_t width, int32_t parallel_length = 0) const;
   [[nodiscard]] const TechCutLayer& cutLayer(TechCutLayerId layer) const;
   [[nodiscard]] std::optional<uint32_t> routingLevel(TechRoutingLayerId layer) const noexcept;
   void forEachRoutingLayer(const RoutingLayerVisitor& visitor) const;
   void forEachCutLayer(const CutLayerVisitor& visitor) const;
+  void forEachMastersliceLayer(const MastersliceLayerVisitor& visitor) const;
+  void forEachCutSpacingRule(TechCutLayerId layer, const CutSpacingRuleVisitor& visitor) const;
+
+  [[nodiscard]] const TechViaRuleGenerate& techViaRuleGenerate(TechViaRuleGenerateId id) const;
+  [[nodiscard]] const TechViaRuleGenerateBottomLayer& techViaRuleGenerateBottomLayer(TechViaRuleGenerateId id) const;
+  [[nodiscard]] const TechViaRuleGenerateCutLayer& techViaRuleGenerateCutLayer(TechViaRuleGenerateId id) const;
+  [[nodiscard]] const TechViaRuleGenerateTopLayer& techViaRuleGenerateTopLayer(TechViaRuleGenerateId id) const;
+  [[nodiscard]] std::vector<TechViaRuleGenerateId> viaRuleGeneratesForLayer(TechLayerId layer) const;
+  [[nodiscard]] std::vector<TechViaRuleGenerateId> viaRuleGeneratesForCutLayer(TechCutLayerId layer) const;
 
   void forEachTrackGrid(const TrackGridVisitor& visitor) const;
   void forEachTrackGrid(TechRoutingLayerId layer, const TrackGridVisitor& visitor) const;
@@ -238,6 +273,10 @@ class PhysicalDesignService
                                                 const DesignRouteShape&, const DesignRouteShapeAttributes*)>;
   // Direct geometry access; no DEF path decoding or per-Shape snapshot.
   void forEachNetWireShape(DesignNetId net, const NetWireShapeVisitor& visitor) const;
+  // Resolves width/NDR and DEF endpoint extensions in the owning net context.
+  // Exact rectangle for Manhattan segments/patches; conservative bounds for
+  // diagonal segments and complex via geometry.
+  [[nodiscard]] Rect routeShapeBounds(DesignRouteShapeId shape) const;
   void forEachNetGeometry(DesignNetId net, const PhysicalNetGeometryVisitor& visitor) const;
   [[nodiscard]] std::string_view viaName(TechViaMasterId tech_via, DesignViaId design_via) const;
   [[nodiscard]] PhysicalRoutingViaLayers routingViaLayers(TechViaMasterId tech_via, DesignViaId design_via) const;

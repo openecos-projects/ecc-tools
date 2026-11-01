@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,9 +41,9 @@
 #include "design/Net.hh"
 #include "design/Pin.hh"
 #include "evaluation/qor/ClockQORMetricCollector.hh"
-#include "evaluation/qor/QOREvaluation.hh"
 #include "io/Wrapper.hh"
 #include "router/Router.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts::qor_evaluation {
 namespace {

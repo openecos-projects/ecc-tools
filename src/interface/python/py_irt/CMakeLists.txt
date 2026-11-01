@@ -5,6 +5,7 @@ add_library(py_irt ${PY_IRT_SRC})
 target_link_libraries(py_irt
     PUBLIC
         irt_interface
+        eccdb_irt_adapter
         tcl
         pybind11::pybind11
         ecc_logger

@@ -20,6 +20,8 @@
 #include "PowerActivity.hpp"
 #include "PWHeader.hpp"
 
+#include <atomic>
+
 namespace ipw {
 
 class LogicExpression
@@ -32,6 +34,8 @@ class LogicExpression
   bool get_is_empty() const { return _term_list.empty(); }
   // setter
   // function
+  static void invalidateThreadBddCache() { getBddCacheGeneration().fetch_add(1, std::memory_order_relaxed); }
+
   void substitute_ports(std::map<std::string, LogicExpression>& expressions)
   {
     std::set<std::string> expanding;
@@ -50,6 +54,7 @@ class LogicExpression
     };
     expand(*this);
     _term_list = std::move(terms);
+    invalidateCachedBdd();
   }
 
   bool get_has_port(std::string& port_name)
@@ -64,37 +69,59 @@ class LogicExpression
 
   std::optional<double> evaluate_probability(std::map<std::string, PowerActivity>& port_activity_map)
   {
-    BddModel bdd_model;
-    int32_t root_node_idx = 0;
-    if (!build_bdd(bdd_model, root_node_idx)) return std::nullopt;
+    CachedBdd& cached_bdd = getCachedBdd();
+    if (!ensureBdd(cached_bdd)) {
+      return std::nullopt;
+    }
     bool is_valid = true;
-    std::map<int32_t, double> probabilities;
-    double probability = get_bdd_static_probability(bdd_model, root_node_idx, port_activity_map, probabilities, is_valid);
+    // Reuse the memo table per thread; get_bdd_* fills it from empty on entry.
+    static thread_local std::map<int32_t, double> static_probability_map;
+    static_probability_map.clear();
+    double probability = get_bdd_static_probability(
+        cached_bdd.model,
+        cached_bdd.root_node_idx,
+        port_activity_map,
+        static_probability_map,
+        is_valid
+    );
     return is_valid ? std::optional<double>(probability) : std::nullopt;
   }
 
   PowerActivity evaluate_activity(std::map<std::string, PowerActivity>& port_activity_map)
   {
-    BddModel bdd_model;
-    int32_t root_node_idx = 0;
-    if (!build_bdd(bdd_model, root_node_idx)) {
+    CachedBdd& cached_bdd = getCachedBdd();
+    if (!ensureBdd(cached_bdd)) {
       return PowerActivity();
     }
-
     bool is_valid = true;
-    std::map<int32_t, double> static_probability_map;
-    double static_probability = get_bdd_static_probability(bdd_model, root_node_idx, port_activity_map, static_probability_map, is_valid);
+    // Reuse the memo table per thread; get_bdd_* fills it from empty on entry.
+    static thread_local std::map<int32_t, double> static_probability_map;
+    static_probability_map.clear();
+    double static_probability = get_bdd_static_probability(
+        cached_bdd.model,
+        cached_bdd.root_node_idx,
+        port_activity_map,
+        static_probability_map,
+        is_valid
+    );
     if (!is_valid) {
       return PowerActivity();
     }
-    double transition_density = get_bdd_transition_density(bdd_model, root_node_idx, port_activity_map, static_probability_map, is_valid);
+    double transition_density = get_bdd_transition_density(
+        cached_bdd.model,
+        cached_bdd.root_node_idx,
+        port_activity_map,
+        static_probability_map,
+        is_valid
+    );
     if (!is_valid) {
       return PowerActivity();
     }
 
     PowerActivity stack_activity = evaluate_stack_activity(port_activity_map);
     PowerActivity activity;
-    if (stack_activity.get_is_valid() && stack_activity.get_transition_density() > PW_ERROR && transition_density > PW_ERROR) {
+    if (stack_activity.get_is_valid() && stack_activity.get_transition_density() > PW_ERROR
+        && transition_density > PW_ERROR) {
       double density_scale = transition_density / stack_activity.get_transition_density();
       activity.set_rise_transition_density(stack_activity.get_rise_transition_density() * density_scale);
       activity.set_fall_transition_density(stack_activity.get_fall_transition_density() * density_scale);
@@ -102,61 +129,69 @@ class LogicExpression
       activity.set_transition_density(transition_density);
     }
     activity.set_static_probability(static_probability);
-    activity.set_origin(transition_density <= PW_ERROR && (static_probability <= PW_ERROR || static_probability >= 1.0 - PW_ERROR)
-                            ? PowerActivityOrigin::kConstant
-                            : PowerActivityOrigin::kPropagated);
+    activity.set_origin(
+        transition_density <= PW_ERROR && (static_probability <= PW_ERROR || static_probability >= 1.0 - PW_ERROR)
+            ? PowerActivityOrigin::kConstant
+            : PowerActivityOrigin::kPropagated
+    );
     activity.set_is_valid(true);
     return activity;
   }
 
-  double get_sensitivity_probability(std::string& port_name, std::map<std::string, PowerActivity>& port_activity_map,
-                                     LogicExpression* condition = nullptr)
+  double get_sensitivity_probability(
+      std::string& port_name,
+      std::map<std::string, PowerActivity>& port_activity_map,
+      LogicExpression* condition = nullptr
+  )
   {
-    BddModel bdd_model;
-    int32_t root_node_idx = 0;
-    if (!build_bdd(bdd_model, root_node_idx)) {
+    CachedBdd& cached_bdd = getCachedBdd();
+    if (!ensureBdd(cached_bdd)) {
       return 0.0;
     }
-    if (bdd_model.get_port_variable_map().count(port_name) == 0) {
+    int32_t target_node_idx = getBooleanDifferenceNode(cached_bdd, port_name);
+    if (target_node_idx < 0) {
       return 0.0;
     }
-
-    int32_t port_variable_idx = bdd_model.get_port_variable_map()[port_name];
-    int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, port_variable_idx);
     if (condition && !condition->get_is_empty()) {
-      int32_t condition_node_idx = 0;
-      if (!condition->build_bdd(bdd_model, condition_node_idx)) return 0.0;
-      difference_node_idx = bdd_model.get_and_node(difference_node_idx, condition_node_idx);
+      target_node_idx = getConditionAndNode(cached_bdd, *condition, port_name, target_node_idx);
+      if (target_node_idx < 0) {
+        return 0.0;
+      }
     }
     bool is_valid = true;
-    std::map<int32_t, double> static_probability_map;
-    double sensitivity_probability = get_bdd_static_probability(bdd_model, difference_node_idx, port_activity_map, static_probability_map, is_valid);
+    // Reuse the memo table per thread; get_bdd_* fills it from empty on entry.
+    static thread_local std::map<int32_t, double> static_probability_map;
+    static_probability_map.clear();
+    double sensitivity_probability = get_bdd_static_probability(
+        cached_bdd.model,
+        target_node_idx,
+        port_activity_map,
+        static_probability_map,
+        is_valid
+    );
     return is_valid ? sensitivity_probability : 0.0;
   }
 
   std::optional<bool> evaluate_constant(const std::map<std::string, bool>& port_values)
   {
-    BddModel bdd_model;
-    int32_t root_node_idx = 0;
-    if (!build_bdd(bdd_model, root_node_idx)) {
+    CachedBdd& cached_bdd = getCachedBdd();
+    if (!ensureBdd(cached_bdd)) {
       return std::nullopt;
     }
-    return evaluate_bdd_constant(bdd_model, root_node_idx, port_values);
+    return evaluate_bdd_constant(cached_bdd.model, cached_bdd.root_node_idx, port_values);
   }
 
   bool is_sensitive_to(std::string port_name, const std::map<std::string, bool>& port_values)
   {
-    BddModel bdd_model;
-    int32_t root_node_idx = 0;
-    if (!build_bdd(bdd_model, root_node_idx)) {
+    CachedBdd& cached_bdd = getCachedBdd();
+    if (!ensureBdd(cached_bdd)) {
       return true;
     }
-    const auto variable = bdd_model.get_port_variable_map().find(port_name);
-    if (variable == bdd_model.get_port_variable_map().end()) {
+    const int32_t difference_node_idx = getBooleanDifferenceNode(cached_bdd, port_name);
+    if (difference_node_idx < 0) {
       return false;
     }
-    const int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, variable->second);
-    const std::optional<bool> sensitive = evaluate_bdd_constant(bdd_model, difference_node_idx, port_values);
+    const std::optional<bool> sensitive = evaluate_bdd_constant(cached_bdd.model, difference_node_idx, port_values);
     return !sensitive.has_value() || *sensitive;
   }
 
@@ -263,8 +298,11 @@ class LogicExpression
       if (node_variable_idx == variable_idx) {
         difference_node_idx = get_xor_node(low_node_idx, high_node_idx);
       } else {
-        difference_node_idx
-            = get_unique_node(node_variable_idx, get_boolean_difference(low_node_idx, variable_idx), get_boolean_difference(high_node_idx, variable_idx));
+        difference_node_idx = get_unique_node(
+            node_variable_idx,
+            get_boolean_difference(low_node_idx, variable_idx),
+            get_boolean_difference(high_node_idx, variable_idx)
+        );
       }
       _boolean_difference_map[std::make_pair(node_idx, variable_idx)] = difference_node_idx;
       return difference_node_idx;
@@ -281,23 +319,39 @@ class LogicExpression
       if (left_node_idx <= 1 && right_node_idx <= 1) {
         return get_constant_binary_node(operation_type, left_node_idx, right_node_idx);
       }
-      std::tuple<int32_t, int32_t, int32_t> key = std::make_tuple(static_cast<int32_t>(operation_type), left_node_idx, right_node_idx);
+      std::tuple<int32_t, int32_t, int32_t> key
+          = std::make_tuple(static_cast<int32_t>(operation_type), left_node_idx, right_node_idx);
       if (_binary_node_map.count(key) > 0) {
         return _binary_node_map[key];
       }
 
       int32_t variable_idx = std::min(get_node_variable_idx(left_node_idx), get_node_variable_idx(right_node_idx));
-      int32_t left_low_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_low_node_idx() : left_node_idx;
-      int32_t left_high_node_idx = get_node_variable_idx(left_node_idx) == variable_idx ? _node_list[left_node_idx].get_high_node_idx() : left_node_idx;
-      int32_t right_low_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_low_node_idx() : right_node_idx;
-      int32_t right_high_node_idx = get_node_variable_idx(right_node_idx) == variable_idx ? _node_list[right_node_idx].get_high_node_idx() : right_node_idx;
-      int32_t binary_node_idx = get_unique_node(variable_idx, get_binary_node(operation_type, left_low_node_idx, right_low_node_idx),
-                                                get_binary_node(operation_type, left_high_node_idx, right_high_node_idx));
+      int32_t left_low_node_idx = get_node_variable_idx(left_node_idx) == variable_idx
+                                      ? _node_list[left_node_idx].get_low_node_idx()
+                                      : left_node_idx;
+      int32_t left_high_node_idx = get_node_variable_idx(left_node_idx) == variable_idx
+                                       ? _node_list[left_node_idx].get_high_node_idx()
+                                       : left_node_idx;
+      int32_t right_low_node_idx = get_node_variable_idx(right_node_idx) == variable_idx
+                                       ? _node_list[right_node_idx].get_low_node_idx()
+                                       : right_node_idx;
+      int32_t right_high_node_idx = get_node_variable_idx(right_node_idx) == variable_idx
+                                        ? _node_list[right_node_idx].get_high_node_idx()
+                                        : right_node_idx;
+      int32_t binary_node_idx = get_unique_node(
+          variable_idx,
+          get_binary_node(operation_type, left_low_node_idx, right_low_node_idx),
+          get_binary_node(operation_type, left_high_node_idx, right_high_node_idx)
+      );
       _binary_node_map[key] = binary_node_idx;
       return binary_node_idx;
     }
 
-    int32_t get_constant_binary_node(const LogicOperationType operation_type, const int32_t left_node_idx, const int32_t right_node_idx)
+    int32_t get_constant_binary_node(
+        const LogicOperationType operation_type,
+        const int32_t left_node_idx,
+        const int32_t right_node_idx
+    )
     {
       bool left_value = left_node_idx == 1;
       bool right_value = right_node_idx == 1;
@@ -346,6 +400,94 @@ class LogicExpression
     std::map<int32_t, int32_t> _not_node_map;
     std::map<std::pair<int32_t, int32_t>, int32_t> _boolean_difference_map;
   };
+
+  struct CachedBdd
+  {
+    BddModel model;
+    bool is_built = false;
+    bool is_empty = false;
+    int32_t root_node_idx = 0;
+    std::map<std::string, int32_t> boolean_difference_map;
+    std::map<const LogicExpression*, int32_t> condition_root_map;
+    std::map<std::pair<const LogicExpression*, std::string>, int32_t> condition_and_map;
+  };
+
+  static std::atomic<std::uint64_t>& getBddCacheGeneration()
+  {
+    static std::atomic<std::uint64_t> generation(0);
+    return generation;
+  }
+
+  CachedBdd& getCachedBdd()
+  {
+    static thread_local std::unordered_map<const LogicExpression*, CachedBdd> cache_map;
+    static thread_local std::uint64_t cache_generation = 0;
+    const std::uint64_t generation = getBddCacheGeneration().load(std::memory_order_relaxed);
+    if (cache_generation != generation) {
+      cache_map.clear();
+      cache_generation = generation;
+    }
+    return cache_map[this];
+  }
+
+  bool ensureBdd(CachedBdd& cached_bdd)
+  {
+    if (!cached_bdd.is_built) {
+      cached_bdd.is_built = true;
+      int32_t root_node_idx = 0;
+      if (build_bdd(cached_bdd.model, root_node_idx)) {
+        cached_bdd.root_node_idx = root_node_idx;
+      } else {
+        cached_bdd.is_empty = true;
+      }
+    }
+    return !cached_bdd.is_empty;
+  }
+
+  int32_t getBooleanDifferenceNode(CachedBdd& cached_bdd, const std::string& port_name)
+  {
+    auto cached = cached_bdd.boolean_difference_map.find(port_name);
+    if (cached != cached_bdd.boolean_difference_map.end()) {
+      return cached->second;
+    }
+    const auto variable = cached_bdd.model.get_port_variable_map().find(port_name);
+    if (variable == cached_bdd.model.get_port_variable_map().end()) {
+      return -1;
+    }
+    const int32_t difference_node_idx
+        = cached_bdd.model.get_boolean_difference(cached_bdd.root_node_idx, variable->second);
+    cached_bdd.boolean_difference_map[port_name] = difference_node_idx;
+    return difference_node_idx;
+  }
+
+  int32_t getConditionAndNode(
+      CachedBdd& cached_bdd,
+      LogicExpression& condition,
+      const std::string& port_name,
+      const int32_t difference_node_idx
+  )
+  {
+    const std::pair<const LogicExpression*, std::string> key = std::make_pair(&condition, port_name);
+    auto cached = cached_bdd.condition_and_map.find(key);
+    if (cached != cached_bdd.condition_and_map.end()) {
+      return cached->second;
+    }
+    int32_t condition_root_node_idx = 0;
+    auto condition_root = cached_bdd.condition_root_map.find(&condition);
+    if (condition_root != cached_bdd.condition_root_map.end()) {
+      condition_root_node_idx = condition_root->second;
+    } else {
+      if (!condition.build_bdd(cached_bdd.model, condition_root_node_idx)) {
+        return -1;
+      }
+      cached_bdd.condition_root_map[&condition] = condition_root_node_idx;
+    }
+    const int32_t and_node_idx = cached_bdd.model.get_and_node(difference_node_idx, condition_root_node_idx);
+    cached_bdd.condition_and_map[key] = and_node_idx;
+    return and_node_idx;
+  }
+
+  void invalidateCachedBdd() { getCachedBdd() = CachedBdd(); }
 
   bool build_bdd(BddModel& bdd_model, int32_t& root_node_idx)
   {
@@ -397,7 +539,11 @@ class LogicExpression
     return true;
   }
 
-  std::optional<bool> evaluate_bdd_constant(BddModel& bdd_model, int32_t node_idx, const std::map<std::string, bool>& port_values)
+  std::optional<bool> evaluate_bdd_constant(
+      BddModel& bdd_model,
+      int32_t node_idx,
+      const std::map<std::string, bool>& port_values
+  )
   {
     if (node_idx == 0 || node_idx == 1) {
       return node_idx == 1;
@@ -406,15 +552,24 @@ class LogicExpression
     const std::string& port_name = bdd_model.get_port_name(node.get_variable_idx());
     const auto value = port_values.find(port_name);
     if (value != port_values.end()) {
-      return evaluate_bdd_constant(bdd_model, value->second ? node.get_high_node_idx() : node.get_low_node_idx(), port_values);
+      return evaluate_bdd_constant(
+          bdd_model,
+          value->second ? node.get_high_node_idx() : node.get_low_node_idx(),
+          port_values
+      );
     }
     const std::optional<bool> low = evaluate_bdd_constant(bdd_model, node.get_low_node_idx(), port_values);
     const std::optional<bool> high = evaluate_bdd_constant(bdd_model, node.get_high_node_idx(), port_values);
     return low.has_value() && high.has_value() && *low == *high ? low : std::nullopt;
   }
 
-  double get_bdd_static_probability(BddModel& bdd_model, const int32_t node_idx, std::map<std::string, PowerActivity>& port_activity_map,
-                                    std::map<int32_t, double>& static_probability_map, bool& is_valid)
+  double get_bdd_static_probability(
+      BddModel& bdd_model,
+      const int32_t node_idx,
+      std::map<std::string, PowerActivity>& port_activity_map,
+      std::map<int32_t, double>& static_probability_map,
+      bool& is_valid
+  )
   {
     if (node_idx == 0) {
       return 0.0;
@@ -436,20 +591,44 @@ class LogicExpression
 
     double static_probability = port_activity.get_static_probability();
     if (static_probability <= PW_ERROR) {
-      double probability = get_bdd_static_probability(bdd_model, node.get_low_node_idx(), port_activity_map, static_probability_map, is_valid);
+      double probability = get_bdd_static_probability(
+          bdd_model,
+          node.get_low_node_idx(),
+          port_activity_map,
+          static_probability_map,
+          is_valid
+      );
       static_probability_map[node_idx] = probability;
       return probability;
     }
     if (static_probability >= 1.0 - PW_ERROR) {
-      double high_probability = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
+      double high_probability = get_bdd_static_probability(
+          bdd_model,
+          node.get_high_node_idx(),
+          port_activity_map,
+          static_probability_map,
+          is_valid
+      );
       static_probability_map[node_idx] = high_probability;
       return high_probability;
     }
-    double probability = get_bdd_static_probability(bdd_model, node.get_low_node_idx(), port_activity_map, static_probability_map, is_valid);
+    double probability = get_bdd_static_probability(
+        bdd_model,
+        node.get_low_node_idx(),
+        port_activity_map,
+        static_probability_map,
+        is_valid
+    );
     if (!is_valid) {
       return 0.0;
     }
-    double high_probability = get_bdd_static_probability(bdd_model, node.get_high_node_idx(), port_activity_map, static_probability_map, is_valid);
+    double high_probability = get_bdd_static_probability(
+        bdd_model,
+        node.get_high_node_idx(),
+        port_activity_map,
+        static_probability_map,
+        is_valid
+    );
     if (!is_valid) {
       return 0.0;
     }
@@ -458,8 +637,13 @@ class LogicExpression
     return probability;
   }
 
-  double get_bdd_transition_density(BddModel& bdd_model, const int32_t root_node_idx, std::map<std::string, PowerActivity>& port_activity_map,
-                                    std::map<int32_t, double>& static_probability_map, bool& is_valid)
+  double get_bdd_transition_density(
+      BddModel& bdd_model,
+      const int32_t root_node_idx,
+      std::map<std::string, PowerActivity>& port_activity_map,
+      std::map<int32_t, double>& static_probability_map,
+      bool& is_valid
+  )
   {
     double transition_density = 0.0;
     for (std::pair<const std::string, int32_t>& port_pair : bdd_model.get_port_variable_map()) {
@@ -470,8 +654,13 @@ class LogicExpression
       }
       int32_t difference_node_idx = bdd_model.get_boolean_difference(root_node_idx, port_pair.second);
       bool difference_is_valid = true;
-      double sensitivity_probability
-          = get_bdd_static_probability(bdd_model, difference_node_idx, port_activity_map, static_probability_map, difference_is_valid);
+      double sensitivity_probability = get_bdd_static_probability(
+          bdd_model,
+          difference_node_idx,
+          port_activity_map,
+          static_probability_map,
+          difference_is_valid
+      );
       if (!difference_is_valid) {
         is_valid = false;
         return 0.0;
@@ -569,16 +758,22 @@ class LogicExpression
   {
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
-    double transition_density
-        = left_activity.get_transition_density() * (1.0 - right_probability) + right_activity.get_transition_density() * (1.0 - left_probability);
-    return get_binary_activity(transition_density, left_probability + right_probability - left_probability * right_probability, left_activity, right_activity);
+    double transition_density = left_activity.get_transition_density() * (1.0 - right_probability)
+                                + right_activity.get_transition_density() * (1.0 - left_probability);
+    return get_binary_activity(
+        transition_density,
+        left_probability + right_probability - left_probability * right_probability,
+        left_activity,
+        right_activity
+    );
   }
 
   PowerActivity get_and_activity(PowerActivity& left_activity, PowerActivity& right_activity)
   {
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
-    double transition_density = left_activity.get_transition_density() * right_probability + right_activity.get_transition_density() * left_probability;
+    double transition_density = left_activity.get_transition_density() * right_probability
+                                + right_activity.get_transition_density() * left_probability;
     return get_binary_activity(transition_density, left_probability * right_probability, left_activity, right_activity);
   }
 
@@ -587,12 +782,17 @@ class LogicExpression
     double left_probability = left_activity.get_static_probability();
     double right_probability = right_activity.get_static_probability();
     double transition_density = left_activity.get_transition_density() + right_activity.get_transition_density();
-    double static_probability = left_probability * (1.0 - right_probability) + (1.0 - left_probability) * right_probability;
+    double static_probability
+        = left_probability * (1.0 - right_probability) + (1.0 - left_probability) * right_probability;
     return get_binary_activity(transition_density, static_probability, left_activity, right_activity);
   }
 
-  PowerActivity get_binary_activity(const double transition_density, const double static_probability, PowerActivity& left_activity,
-                                    PowerActivity& right_activity)
+  PowerActivity get_binary_activity(
+      const double transition_density,
+      const double static_probability,
+      PowerActivity& left_activity,
+      PowerActivity& right_activity
+  )
   {
     PowerActivity activity;
     activity.set_transition_density(transition_density);

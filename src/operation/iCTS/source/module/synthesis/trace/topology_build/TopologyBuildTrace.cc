@@ -39,6 +39,7 @@ namespace {
 template <typename T>
 auto absorbOwnedObjects(std::vector<std::unique_ptr<T>>& target, std::vector<std::unique_ptr<T>>& source) -> void
 {
+  target.reserve(target.size() + source.size());
   for (auto& object : source) {
     target.push_back(std::move(object));
   }
@@ -48,6 +49,7 @@ auto absorbOwnedObjects(std::vector<std::unique_ptr<T>>& target, std::vector<std
 template <typename T>
 auto absorbValues(std::vector<T>& target, std::vector<T>& source) -> void
 {
+  target.reserve(target.size() + source.size());
   target.insert(target.end(), std::make_move_iterator(source.begin()), std::make_move_iterator(source.end()));
   source.clear();
 }

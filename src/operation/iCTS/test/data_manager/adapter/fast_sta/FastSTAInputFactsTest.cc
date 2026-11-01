@@ -25,23 +25,34 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <system_error>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "FastSTA.hh"
 #include "FastSTAConstraints.hh"
-#include "FastSTAEvents.hh"
+#include "FastSTAPower.hh"
+#include "IdbCellMaster.h"
 #include "IdbLayout.h"
+#include "IdbUnits.h"
 #include "SDCClockReader.hh"
+#include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
+#include "dm_config.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"
+#include "liberty/FastSTALibertyModel.hh"
 #include "liberty/Lib.hh"
 
 namespace icts_test {
@@ -120,6 +131,42 @@ class FastSTAInputFactsTestInterface : public ::testing::Test
   icts::Wrapper _wrapper;
 };
 
+TEST_F(FastSTAInputFactsTestInterface, SourceToSequentialPinsUsesTheirLibraryWithUnrelatedIoLoaded)
+{
+  const ScopedTimingInput standard_cells(ReplaceInput(_library, "nom_voltage : 1;", "nom_voltage : 1.08;"));
+  const ScopedTimingInput io_cells("library(IO) { nom_voltage : 2.97; cell(IOPAD) { area : 1; } }");
+  ASSERT_TRUE(standard_cells.ready());
+  ASSERT_TRUE(io_cells.ready());
+  icts::FastStaContext context;
+  context.wrapper = &_wrapper;
+  context.clock_period_ns = 10.0;
+  context.clock_timing_valid = true;
+  icts::FastStaNode clock_source;
+  clock_source.kind = icts::FastStaNodeKind::kSource;
+  clock_source.name = "clk";
+  icts::FastStaNode clock_sink;
+  clock_sink.kind = icts::FastStaNodeKind::kSink;
+  clock_sink.name = "ff/CLK";
+  clock_sink.cell_master = "SEQ";
+  context.nodes = {std::move(clock_source), std::move(clock_sink)};
+  icts::FastStaNet clock_net;
+  clock_net.name = "clk";
+  clock_net.driver_node_id = 0U;
+  clock_net.load_node_ids = {1U};
+  clock_net.load_cap_pf = 0.01;
+  context.nets = {std::move(clock_net)};
+  ASSERT_TRUE(context.liberty_cell_by_master.empty());
+
+  // Loading order must not select a different supply for the same clock net.
+  for (const auto& paths :
+       {std::vector<std::string>{standard_cells.path(), io_cells.path()}, std::vector<std::string>{io_cells.path(), standard_cells.path()}}) {
+    dmInst->get_config().set_lib_paths(paths);
+    ASSERT_TRUE(dmInst->readLib(paths));
+    ASSERT_TRUE(icts::FastStaPower::update(context));
+    EXPECT_NEAR(context.power.switching_power_w, 0.01e-12 * 1.08 * 1.08 / 10e-9, 1e-18);
+  }
+}
+
 TEST_F(FastSTAInputFactsTestInterface, ParsedLeakageDistinguishesMissingZeroPositiveAndInvalid)
 {
   const auto zero = loadModel(_library);
@@ -190,7 +237,10 @@ TEST_F(FastSTAInputFactsTestInterface, ExplicitSdcUnitsCannotSupplyMissingLibert
   EXPECT_DOUBLE_EQ(constraints.clocks.front().period_ns, 10.0);
   EXPECT_FALSE(loadModel(ReplaceInput(_library, "time_unit : \"1ns\";", "")).has_value());
   EXPECT_FALSE(loadModel(ReplaceInput(_library, "capacitive_load_unit(1, pf);", "")).has_value());
-  EXPECT_FALSE(loadModel(ReplaceInput(_library, "capacitive_load_unit(1, pf);", "capacitive_load_unit(1.5, pf);")).has_value());
+  // Unsupported multipliers are rejected by the shared parser before model extraction.
+  const ScopedTimingInput unsupported_units(ReplaceInput(_library, "capacitive_load_unit(1, pf);", "capacitive_load_unit(1.5, pf);"));
+  ASSERT_TRUE(unsupported_units.ready());
+  EXPECT_FALSE(dmInst->readLib({unsupported_units.path()}));
   EXPECT_TRUE(loadModel(_library).has_value());
 }
 
@@ -242,12 +292,14 @@ TEST(FastSTAParsedInputTest, GeneratedClockRequiresItsActualMasterAndSourcePath)
   }
   EXPECT_EQ(*master_error, "generated_clock_source_master_mismatch:G");
 
+  // A target the clock graph cannot reach from the source is a warning, not an error:
+  // a black-box boundary (e.g. a PLL output) sits in between, and the waveform is
+  // resolved from the declaration itself.
   auto wrong_branch = ParsedClockGraph(ReplaceInput(correct, "[get_ports clkB]", "[get_ports branch]"));
   const auto path_error = icts::FastStaConstraints::prepare(wrong_branch);
-  if (!path_error.has_value()) {
-    FAIL() << "Expected path_error to have a value.";
-  }
-  EXPECT_EQ(*path_error, "generated_clock_target_not_reached_from_source:G:out");
+  ASSERT_FALSE(path_error.has_value()) << path_error.value_or("");
+  ASSERT_NE(icts::FastStaConstraints::clock(wrong_branch, "G"), nullptr);
+  EXPECT_DOUBLE_EQ(icts::FastStaConstraints::clock(wrong_branch, "G")->period_ns, 40.0);
 
   auto no_clock = ParsedClockGraph(ReplaceInput(correct, "[get_ports clkB]", "[get_pins inst/A]"));
   const auto missing_error = icts::FastStaConstraints::prepare(no_clock);

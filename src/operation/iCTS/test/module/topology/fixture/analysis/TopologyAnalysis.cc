@@ -35,6 +35,7 @@
 #include "Pin.hh"
 #include "Point.hh"
 #include "data_manager/spatial/Tree.hh"
+#include "module/topology/fixture/analysis/TopologyStats.hh"
 
 namespace icts_test::module::topology::fixture::analysis {
 namespace {

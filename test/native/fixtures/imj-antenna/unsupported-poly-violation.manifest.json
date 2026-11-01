@@ -1,0 +1,4 @@
+{
+  "lef_files": ["unsupported-poly-tech.lef", "unsupported-poly-gate.lef"],
+  "def_file": "unsupported-poly-violation.def"
+}

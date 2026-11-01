@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "def/DefDesignImporter.h"
 
@@ -49,6 +34,8 @@
 #include "defiRowTrack.hpp"
 #include "defiVia.hpp"
 #include "defrReader.hpp"
+#include "antenna/AntennaService.h"
+#include "tech/common/AntennaRuleTypes.h"
 #include "design/constraint/model/ConstraintComponents.h"
 #include "design/fill/model/FillComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
@@ -87,9 +74,10 @@ struct GroupContext
 // are never retained here.
 struct DirectContext
 {
-  explicit DirectContext(DesignStore& database) : design(database) {}
+  explicit DirectContext(DesignStore& database) : design(database), antenna(database) {}
 
   DesignStore& design;
+  AntennaService antenna;
   std::string design_name;
   int32_t database_units_per_micron = 0;
   std::string divider_character = "/";
@@ -1287,6 +1275,103 @@ void directSetPinPlacement(DesignBlockPinInput& pin, DesignPlacementStatus statu
   pin.orientation = orient;
 }
 
+void appendDefPinAntennaLayerValue(DesignBlockTermAntenna& target, AntennaMetric metric, int value, bool has_layer,
+                                   const char* layer)
+{
+  target.layer_values.push_back(AntennaLayerValue{.metric = metric,
+                                                   .flags = 0u,
+                                                   .layer = has_layer && layer != nullptr ? layer : std::string{},
+                                                   .value = static_cast<double>(value)});
+  target.flags |= DesignBlockTermAntennaFlag::kHasLayerValues;
+}
+
+template <typename Count, typename Value, typename HasLayer, typename Layer>
+void appendDefPinAntennaValues(DesignBlockTermAntenna& target, AntennaMetric metric, Count count, Value value,
+                               HasLayer has_layer, Layer layer)
+{
+  for (int index = 0; index < count(); ++index) {
+    appendDefPinAntennaLayerValue(target, metric, value(index), has_layer(index), layer(index));
+  }
+}
+
+template <typename Count, typename Value, typename HasLayer, typename Layer>
+void appendDefPinAntennaModelValues(AntennaModel& target, AntennaMetric metric, Count count, Value value,
+                                    HasLayer has_layer, Layer layer)
+{
+  for (int index = 0; index < count(); ++index) {
+    target.layer_values.push_back(AntennaLayerValue{.metric = metric,
+                                                     .flags = 0u,
+                                                     .layer = has_layer(index) && layer(index) != nullptr ? layer(index) : std::string{},
+                                                     .value = static_cast<double>(value(index))});
+    target.flags |= AntennaModelFlag::kHasLayerValues;
+  }
+}
+
+void directParsePinAntenna(const defiPin& source, DesignBlockTermAntenna& target)
+{
+  appendDefPinAntennaValues(
+      target, AntennaMetric::kPartialMetalArea, [&source]() { return source.numAPinPartialMetalArea(); },
+      [&source](int index) { return source.APinPartialMetalArea(index); },
+      [&source](int index) { return source.hasAPinPartialMetalAreaLayer(index) != 0; },
+      [&source](int index) { return source.APinPartialMetalAreaLayer(index); });
+  appendDefPinAntennaValues(
+      target, AntennaMetric::kPartialMetalSideArea, [&source]() { return source.numAPinPartialMetalSideArea(); },
+      [&source](int index) { return source.APinPartialMetalSideArea(index); },
+      [&source](int index) { return source.hasAPinPartialMetalSideAreaLayer(index) != 0; },
+      [&source](int index) { return source.APinPartialMetalSideAreaLayer(index); });
+  appendDefPinAntennaValues(
+      target, AntennaMetric::kDiffArea, [&source]() { return source.numAPinDiffArea(); },
+      [&source](int index) { return source.APinDiffArea(index); },
+      [&source](int index) { return source.hasAPinDiffAreaLayer(index) != 0; },
+      [&source](int index) { return source.APinDiffAreaLayer(index); });
+  appendDefPinAntennaValues(
+      target, AntennaMetric::kPartialCutArea, [&source]() { return source.numAPinPartialCutArea(); },
+      [&source](int index) { return source.APinPartialCutArea(index); },
+      [&source](int index) { return source.hasAPinPartialCutAreaLayer(index) != 0; },
+      [&source](int index) { return source.APinPartialCutAreaLayer(index); });
+
+  for (int model_index = 0; model_index < source.numAntennaModel(); ++model_index) {
+    auto* parsed = source.antennaModel(model_index);
+    if (parsed == nullptr) {
+      continue;
+    }
+    AntennaModel model;
+    if (const char* oxide = parsed->antennaOxide(); oxide != nullptr) {
+      model.oxide = oxide;
+    }
+    appendDefPinAntennaModelValues(
+        model, AntennaMetric::kGateArea, [&parsed]() { return parsed->numAPinGateArea(); },
+        [&parsed](int index) { return parsed->APinGateArea(index); },
+        [&parsed](int index) { return parsed->hasAPinGateAreaLayer(index) != 0; },
+        [&parsed](int index) { return parsed->APinGateAreaLayer(index); });
+    appendDefPinAntennaModelValues(
+        model, AntennaMetric::kMaxAreaCar, [&parsed]() { return parsed->numAPinMaxAreaCar(); },
+        [&parsed](int index) { return parsed->APinMaxAreaCar(index); },
+        [&parsed](int index) { return parsed->hasAPinMaxAreaCarLayer(index) != 0; },
+        [&parsed](int index) { return parsed->APinMaxAreaCarLayer(index); });
+    appendDefPinAntennaModelValues(
+        model, AntennaMetric::kMaxSideAreaCar, [&parsed]() { return parsed->numAPinMaxSideAreaCar(); },
+        [&parsed](int index) { return parsed->APinMaxSideAreaCar(index); },
+        [&parsed](int index) { return parsed->hasAPinMaxSideAreaCarLayer(index) != 0; },
+        [&parsed](int index) { return parsed->APinMaxSideAreaCarLayer(index); });
+    appendDefPinAntennaModelValues(
+        model, AntennaMetric::kMaxCutCar, [&parsed]() { return parsed->numAPinMaxCutCar(); },
+        [&parsed](int index) { return parsed->APinMaxCutCar(index); },
+        [&parsed](int index) { return parsed->hasAPinMaxCutCarLayer(index) != 0; },
+        [&parsed](int index) { return parsed->APinMaxCutCarLayer(index); });
+    if (!model.layer_values.empty()) {
+      model.flags |= AntennaModelFlag::kHasLayerValues;
+    }
+    target.models.push_back(std::move(model));
+  }
+  if (!target.layer_values.empty()) {
+    target.flags |= DesignBlockTermAntennaFlag::kHasLayerValues;
+  }
+  if (!target.models.empty()) {
+    target.flags |= DesignBlockTermAntennaFlag::kHasModels;
+  }
+}
+
 template <typename Source>
 void directParsePinGeometry(const Source& source, DesignBlockPinInput& pin, DirectContext& context, std::string_view field)
 {
@@ -1354,6 +1439,11 @@ int directPinCallback(defrCallbackType_e type, defiPin* source, defiUserData use
     }
     directDiagnostic(context, "PIN NETEXPR/SENSITIVITY", static_cast<std::size_t>(source->hasNetExpr() + source->hasSupplySensitivity() + source->hasGroundSensitivity()));
     const auto id = context.design.netlistStorage().createIoPin(std::move(term), std::move(pins));
+    DesignBlockTermAntenna antenna;
+    directParsePinAntenna(*source, antenna);
+    if (antenna.flags != 0u) {
+      context.antenna.setBlockTermAntenna(id, std::move(antenna));
+    }
     context.pending_pin_nets.push_back({.pin = id, .net = net});
   });
 }

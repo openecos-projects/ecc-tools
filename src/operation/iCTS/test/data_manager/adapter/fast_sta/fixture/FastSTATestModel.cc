@@ -23,8 +23,15 @@
 
 #include "FastSTATestModel.hh"
 
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <initializer_list>
+#include <optional>
 #include <utility>
+
+#include "FastSTAClockTiming.hh"
+#include "clock_net_parasitic/FastSTAClockNetParasitic.hh"
 
 namespace icts_test {
 

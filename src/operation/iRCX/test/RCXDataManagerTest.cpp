@@ -16,7 +16,6 @@
 // ***************************************************************************************
 #include <cassert>
 #include <cstdlib>
-#include <utility>
 
 #include "Database.hpp"
 
@@ -72,58 +71,9 @@ int main()
   resistance_list[0] = 1.25;
   ground_capacitance_list[0] = 0.75;
   rc_table.append_net_coupling_cap_entry(0, 0, 0, 1, 0.5);
-  topo_pool.get_net_edge_list(0)[0].set_stable_net_rank(0);
-  rc_table.merge_net_coupling_cap_entry_list(topo_pool);
+  rc_table.merge_net_coupling_cap_entry_list();
   ircx::CouplingKey coupling_key(0, 0);
   assert(rc_table.get_merged_coupling_capacitance_map()[coupling_key][1] == 0.5);
-
-  const auto mergeEquivalentContributionLists = [](bool reverse_storage_order) {
-    constexpr double kLargeCapacitance = 1.0e16;
-    constexpr double kSmallCapacitance = 1.0;
-    ircx::TopoPool pool;
-    pool.reserve(2, 0, 2);
-
-    const auto append_net = [&pool](int32_t storage_net_idx, int32_t stable_net_rank) {
-      std::vector<ircx::TopoNode> nodes;
-      std::vector<ircx::TopoEdge> edges;
-      edges.emplace_back(storage_net_idx);
-      pool.add_net(std::move(nodes), std::move(edges));
-      pool.get_net_edge_list(storage_net_idx)[0].set_stable_net_rank(stable_net_rank);
-    };
-
-    // Physical net A is the semantic first source and physical net B is the
-    // second source. Their storage positions intentionally differ per run.
-    const int32_t net_a_idx = reverse_storage_order ? 1 : 0;
-    const int32_t net_b_idx = reverse_storage_order ? 0 : 1;
-    if (reverse_storage_order) {
-      append_net(net_b_idx, 1);
-      append_net(net_a_idx, 0);
-    } else {
-      append_net(net_a_idx, 0);
-      append_net(net_b_idx, 1);
-    }
-
-    ircx::RCData data;
-    data.init(1, 2, pool);
-    const int32_t edge_a = pool.get_edge_idx(net_a_idx, 0);
-    const int32_t edge_b = pool.get_edge_idx(net_b_idx, 0);
-    data.append_net_coupling_cap_entry(net_a_idx, edge_a, edge_b, 0, kLargeCapacitance);
-    data.append_net_coupling_cap_entry(net_b_idx, edge_a, edge_b, 0, kSmallCapacitance);
-    data.append_net_coupling_cap_entry(net_b_idx, edge_a, edge_b, 0, kSmallCapacitance);
-    data.merge_net_coupling_cap_entry_list(pool);
-    return data.get_merged_coupling_capacitance_map()[ircx::CouplingKey(edge_a, edge_b)][0];
-  };
-
-  // Positive floating-point addition is non-associative. Backend-local net
-  // ordering must not decide which of these two valid sums reaches SPEF.
-  constexpr double kLargeCapacitance = 1.0e16;
-  constexpr double kSmallCapacitance = 1.0;
-  const double storage_a_then_b = (kLargeCapacitance + kSmallCapacitance) + kSmallCapacitance;
-  const double storage_b_then_a = (kSmallCapacitance + kSmallCapacitance) + kLargeCapacitance;
-  assert(storage_a_then_b != storage_b_then_a);
-  const double ordered_result = mergeEquivalentContributionLists(false);
-  assert(ordered_result == storage_a_then_b);
-  assert(mergeEquivalentContributionLists(true) == ordered_result);
 
   ircx::NetEnv net_env;
   std::vector<ircx::EdgeEnvInterval> env_interval_list(1);

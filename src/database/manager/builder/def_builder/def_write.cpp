@@ -528,14 +528,6 @@ int32_t DefWrite::write_via()
           master_generate->get_enclosure_bottom_y(), master_generate->get_enclosure_top_x(), master_generate->get_enclosure_top_y(),
           master_generate->get_cut_rows(), master_generate->get_cut_cols());
 
-      if (master_generate->has_origin()) {
-        writestr(" + ORIGIN %d %d\n", master_generate->get_original_offset_x(), master_generate->get_original_offset_y());
-      }
-      if (master_generate->has_offset()) {
-        writestr(" + OFFSET %d %d %d %d\n", master_generate->get_offset_bottom_x(), master_generate->get_offset_bottom_y(),
-                 master_generate->get_offset_top_x(), master_generate->get_offset_top_y());
-      }
-
       if (nullptr != master_generate->get_patttern()) {
         writestr(" + PATTERN %s \n", master_generate->get_patttern()->get_pattern_string().c_str());
       }
@@ -1183,6 +1175,7 @@ int32_t DefWrite::write_region()
     writestr(";\n");
   }
 
+  writestr("END REGIONS\n\n");
   ECCLOG.info(ecc::Loc::current(), "Write REGIONS success...");
   return kDbSuccess;
 }
@@ -1244,8 +1237,10 @@ int32_t DefWrite::write_group()
       writestr("%s ", instance_name.c_str());
     }
 
-    const std::string region_name = format_instance_name(group->get_region()->get_name());
-    writestr("+ REGION %s ", region_name.c_str());
+    if (group->get_region() != nullptr) {
+      const std::string region_name = format_instance_name(group->get_region()->get_name());
+      writestr("+ REGION %s ", region_name.c_str());
+    }
 
     writestr(";\n");
   }

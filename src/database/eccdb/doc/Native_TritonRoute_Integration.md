@@ -1,5 +1,11 @@
 # Native EccDB / TritonRoute integration
 
+As of 2026-10-28, this integration and its OpenROAD patches/build scripts are
+maintained as a separate local experiment outside ecc-tools. The adapter paths
+and build commands below are historical. OpenDB replay projections remain in
+`../benchmarks/odb/`; this bridge is not a dependency of the EccDB core or the
+Operation iRT adapter.
+
 Verified on 2026-09-28 using ISPD 2018 and ISPD 2019 files under
 `/home/zhuxu1/workspace/reference`.
 

@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #pragma once
 
@@ -25,6 +10,7 @@
 
 #include <entt/container/dense_map.hpp>
 
+#include "tech/common/AntennaRuleTypes.h"
 #include "common/GeometryTypes.h"
 #include "design/common/DesignTypes.h"
 #include "geometry/GeometryEntity.h"
@@ -369,6 +355,28 @@ struct DesignNetOptions
   int32_t style = 0;
   int32_t voltage = 0;
   std::vector<DesignNetSpacingRule> spacing_rules;
+};
+
+// Optional Verilog provenance metadata. Names retain their original spelling
+// and order; aliases are not part of the DesignNet name indexes.
+struct DesignNetAliases
+{
+  std::vector<std::string> names;
+};
+
+namespace DesignBlockTermAntennaFlag {
+constexpr uint32_t kHasValues = 1u << 0;
+constexpr uint32_t kHasLayerValues = 1u << 1;
+constexpr uint32_t kHasModels = 1u << 2;
+}  // namespace DesignBlockTermAntennaFlag
+
+// Optional DEF top-level PIN antenna metadata owned by a DesignBlockTerm.
+struct DesignBlockTermAntenna
+{
+  uint32_t flags = 0;
+  std::vector<AntennaValue> values;
+  std::vector<AntennaLayerValue> layer_values;
+  std::vector<AntennaModel> models;
 };
 
 }  // namespace eccdb

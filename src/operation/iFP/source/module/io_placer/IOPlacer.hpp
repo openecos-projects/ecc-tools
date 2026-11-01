@@ -55,7 +55,7 @@ class IOPlacer
   void placeIOPinsFromFile(const std::string& file_path);
   void autoPlacePins(std::vector<std::string>& layer_name_list);
   int32_t getLayerMinWidth(std::string layer_name);
-  int32_t getLayerMinArea(std::string layer_name);
+  int64_t getLayerMinArea(std::string layer_name);
   int32_t getTrackPitch(std::string layer_name);
   int32_t getTrackOffset(std::string layer_name);
   int32_t calculatePinDepth(IOEdgeType edge_type, int32_t width, const std::string& pin_layer_name, const std::string& access_layer_name);

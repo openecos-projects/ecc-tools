@@ -27,7 +27,6 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
-#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,7 +38,6 @@
 #include "Utility.hh"
 #include "ValueLattice.hh"
 #include "characterization/Characterization.hh"
-#include "characterization/buffer_cell/CharacterizationBufferCell.hh"
 #include "characterization/builder/CharBuilderImpl.hh"
 
 namespace icts::char_builder::detail {

@@ -436,7 +436,7 @@ int32_t IOPlacer::getLayerMinWidth(std::string layer_name)
   return database.get_routing_layer_list()[iter->second].get_min_width();
 }
 
-int32_t IOPlacer::getLayerMinArea(std::string layer_name)
+int64_t IOPlacer::getLayerMinArea(std::string layer_name)
 {
   Database& database = FPDM.getDatabase();
   auto iter = database.get_routing_layer_name_to_idx_map().find(layer_name);

@@ -21,8 +21,6 @@
  * @brief Pin, liberty, and transition helpers for SDC clock tracing.
  */
 
-#include <algorithm>
-#include <cstddef>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -37,6 +35,7 @@
 #include "IdbTerm.h"
 #include "SDCClockReader.hh"
 #include "SDCClockTraceAlgorithm.hh"
+#include "TimingConstraints.hh"
 #include "liberty/Lib.hh"
 
 namespace icts::clock_trace {

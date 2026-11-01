@@ -19,4 +19,4 @@ icts_add_test_executable(
     icts_test_toolkit_io
 )
 
-target_link_libraries(icts_test_toolkit_io_artifact PUBLIC icts_test_toolkit_io)
+target_link_libraries(icts_test_toolkit_io_artifact PRIVATE icts_test_toolkit_io)

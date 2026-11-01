@@ -22,11 +22,14 @@
  *        besides clock identity and case analysis.
  */
 
-#include <algorithm>
+#include <initializer_list>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 

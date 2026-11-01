@@ -21,7 +21,6 @@
  * @brief Thin topology generation test entry.
  */
 
-#include <gtest/gtest-param-test.h>
 #include <gtest/gtest.h>
 
 #include <string>

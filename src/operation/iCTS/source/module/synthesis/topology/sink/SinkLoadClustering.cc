@@ -23,12 +23,10 @@
 
 #include "synthesis/topology/sink/SinkLoadClustering.hh"
 
-#include <algorithm>
 #include <compare>
 #include <cstddef>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <utility>

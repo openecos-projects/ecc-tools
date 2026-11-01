@@ -22,6 +22,7 @@
  */
 #include "CTSAPI.hh"
 
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,11 +33,12 @@
 #include "Utility.hh"
 #include "data_manager/DataManager.hh"
 #include "evaluation/Evaluation.hh"
-#include "evaluation/qor/QOREvaluation.hh"
 #include "feature_icts.h"
 #include "instantiation/Instantiation.hh"
 #include "optimization/Optimization.hh"
 #include "output/Output.hh"
+#include "stage/StageSummary.hh"
+#include "data_manager/io/CtsDesignSource.hh"
 #include "synthesis/Synthesis.hh"
 
 namespace icts {
@@ -93,28 +95,9 @@ CTSAPI::CTSAPI() = default;
 
 CTSAPI::~CTSAPI() = default;
 
-auto CTSAPI::setDesignSource(eccdb::DatabaseContext* context) -> void
+auto CTSAPI::setDesignSource(std::shared_ptr<CtsDesignSource> source) -> void
 {
-  _database_context = context;
-  if (_initialized) {
-    CTSDM.setDesignSource(context);
-  }
-}
-
-auto CTSAPI::setSdcPath(std::string sdc_path) -> void
-{
-  _sdc_path = std::move(sdc_path);
-  if (_initialized) {
-    CTSDM.setSdcPath(_sdc_path);
-  }
-}
-
-auto CTSAPI::setLibertyCellLookup(LibertyCellLookup liberty_cell_lookup) -> void
-{
-  _liberty_cell_lookup = std::move(liberty_cell_lookup);
-  if (_initialized) {
-    CTSDM.setLibertyCellLookup(_liberty_cell_lookup);
-  }
+  _design_source = std::move(source);
 }
 
 auto CTSAPI::setLastStatus(CTSStatus status) -> CTSStatus
@@ -201,6 +184,7 @@ auto CTSAPI::destroyCTS() -> CTSStatus
   Logger::initInst();
   CTSLOG.info(Loc::current(), "Starting CTS destruction...");
   DataManager::destroyInst();
+  api._design_source.reset();
   api._initialized = false;
   const auto memory_stats = Utility::releaseMemory();
   const auto status = api.setLastStatus(buildOkStatus("CTS destruction completed."));
@@ -218,23 +202,20 @@ auto CTSAPI::abortCTS() -> CTSStatus
 {
   (void) destroyCTS();
   auto& api = getInst();
-  api._database_context = nullptr;
-  api._sdc_path.clear();
-  api._liberty_cell_lookup = {};
-  return api.setLastStatus(buildOkStatus("CTS aborted and native input sources released."));
+  return api.setLastStatus(buildOkStatus("CTS aborted and input source released."));
 }
 
 auto CTSAPI::init(const std::string& config_file, const std::string& work_dir) -> CTSStatus
 {
-  (void) destroyCTS();
   auto& api = getInst();
+  auto design_source = std::move(api._design_source);
+  (void) destroyCTS();
+  api._design_source = std::move(design_source);
   Logger::initInst();
   Monitor monitor;
   CTSLOG.info(Loc::current(), "Starting CTS initialization...");
   DataManager::initInst();
-  CTSDM.setDesignSource(api._database_context);
-  CTSDM.setSdcPath(api._sdc_path);
-  CTSDM.setLibertyCellLookup(api._liberty_cell_lookup);
+  CTSDM.setDesignSource(api._design_source);
   const auto input_status = CTSDM.input(DataManagerInput{
       .config_file = config_file,
       .work_dir = work_dir,

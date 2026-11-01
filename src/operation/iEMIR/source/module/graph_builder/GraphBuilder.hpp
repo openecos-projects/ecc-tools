@@ -63,9 +63,6 @@ class GraphBuilder
   void buildViaNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
   void buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model, std::ofstream& source_report);
   void buildPinNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model);
-  bool getPinWireContact(PowerPin& power_pin, PowerWireSegment& power_wire_segment, int32_t& x, int32_t& y);
-  void buildGeneratedSourceNodeList(PowerGraph& power_graph);
-  void buildFullSourceNodeList(PowerGraph& power_graph);
   bool getPointWireConnectionCoordinate(PowerWireSegment& power_wire_segment, int32_t point_x, int32_t point_y, int32_t& wire_x,
                                         int32_t& wire_y);
   bool getPinWireConnectionCoordinate(PowerWireSegment& power_wire_segment, PowerPin& power_pin, int32_t& x, int32_t& y);

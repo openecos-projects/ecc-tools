@@ -24,11 +24,20 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
+#include <memory>
 #include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
+#include "ClockLayout.hh"
+#include "Design.hh"
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
 #include "module/synthesis/Synthesis.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts_test {
 namespace {

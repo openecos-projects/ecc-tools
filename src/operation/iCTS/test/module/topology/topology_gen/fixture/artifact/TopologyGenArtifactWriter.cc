@@ -24,7 +24,6 @@
 
 #include <cstddef>
 #include <filesystem>
-#include <ostream>
 #include <string>
 #include <system_error>
 #include <unordered_map>

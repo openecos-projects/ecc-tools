@@ -30,7 +30,6 @@ class TopoEdge
   // getter
   int32_t get_edge_idx() const { return _edge_idx; }
   int32_t get_net_idx() const { return _net_idx; }
-  int32_t get_stable_net_rank() const { return _stable_net_rank; }
   std::string& get_via_name() { return _via_name; }
   int32_t get_start_node_idx() const { return _start_node_idx; }
   int32_t get_end_node_idx() const { return _end_node_idx; }
@@ -43,7 +42,6 @@ class TopoEdge
   LineSegment& get_line_segment() { return _line_segment; }
   // setter
   void set_via_name(const std::string& via_name) { _via_name = via_name; }
-  void set_stable_net_rank(int32_t stable_net_rank) { _stable_net_rank = stable_net_rank; }
   void set_start_node_idx(int32_t start_node_idx) { _start_node_idx = start_node_idx; }
   void set_end_node_idx(int32_t end_node_idx) { _end_node_idx = end_node_idx; }
   void set_layer_idx(int32_t layer_idx) { _layer_idx = layer_idx; }
@@ -81,9 +79,6 @@ class TopoEdge
 
   int32_t _edge_idx = -1;
   int32_t _net_idx = -1;
-  // Environment indices use this semantic rank when coincident edges need a
-  // deterministic owner. It is assigned by EnvBuilder for each extraction.
-  int32_t _stable_net_rank = -1;
   bool _is_special_net = false;
   std::string _via_name;
   int32_t _start_node_idx = -1;

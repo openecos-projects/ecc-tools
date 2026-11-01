@@ -15,9 +15,16 @@ class ACViolation
  public:
   std::string net_name;
   std::string layer_name;
+  std::string pin_name;
+  std::string instance_name;
   ACViolationType type = ACViolationType::kNone;
   double ratio = 0.0;
   double threshold = 0.0;
+  double gate_area = 0.0;
+  double diff_area = 0.0;
+  double metal_area = 0.0;
+  double side_area = 0.0;
+  double cut_area = 0.0;
   double lx = 0.0;
   double ly = 0.0;
   double hx = 0.0;

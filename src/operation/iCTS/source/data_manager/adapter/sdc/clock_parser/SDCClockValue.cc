@@ -30,13 +30,16 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 namespace {
@@ -217,6 +220,15 @@ auto ParseIntValue(const std::string& text, int& value) -> bool
   }
   value = static_cast<int>(parsed);
   return true;
+}
+
+auto ParseCaseAnalysisValue(const std::string& text, int& value) -> SdcConstraintStatusCode
+{
+  if (ParseIntValue(text, value) && (value == 0 || value == 1)) {
+    return SdcConstraintStatusCode::kOk;
+  }
+  return text == "rise" || text == "fall" || text == "rising" || text == "falling" ? SdcConstraintStatusCode::kUnsupported
+                                                                                   : SdcConstraintStatusCode::kMalformed;
 }
 
 auto TimeUnitToNs(const std::string& unit) -> double

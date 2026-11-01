@@ -1,12 +1,9 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -16,6 +13,7 @@
 
 #include "database/Database.h"
 #include "design/DesignStore.h"
+#include "import/verilog/VerilogNetlistImportService.h"
 
 namespace eccdb {
 namespace {
@@ -140,6 +138,65 @@ endmodule
   auto explicit_top = openLefVerilog(verilog.path(), semantic_top);
   ASSERT_TRUE(explicit_top.context().design().globalStorage().hasInfo());
   EXPECT_EQ(explicit_top.context().design().globalStorage().info().name, semantic_top);
+}
+
+TEST(VerilogImportTest, PreservesAliasGroupWithPhysicalRepresentative)
+{
+  for (const auto* assignments : {"assign OUT=alias; assign alias=physical; assign SECOND=physical;",
+                                  "assign SECOND=physical; assign alias=physical; assign OUT=alias;"}) {
+    TemporaryVerilog verilog{"eccdb-verilog-alias-group.v",
+                              std::string("module top(input A, output OUT, output SECOND); wire alias, physical; ")
+                                  + assignments + " XOR2X1 u0(.A(A),.B(A),.Y(physical)); endmodule"};
+    auto database = openLefVerilog(verilog.path());
+    const auto& netlist = database.context().design().netlistStorage();
+    const auto net = netlist.findNet("physical");
+    ASSERT_TRUE(net);
+    const auto* aliases = netlist.netAliases(net);
+    ASSERT_NE(aliases, nullptr);
+    EXPECT_EQ(std::set<std::string>(aliases->names.begin(), aliases->names.end()),
+              (std::set<std::string>{"OUT", "SECOND", "alias", "physical"}));
+    EXPECT_EQ(netlist.blockTerms(net).size(), 2u);
+    EXPECT_EQ(netlist.instanceTerms(net).size(), 1u);
+    EXPECT_FALSE(netlist.findNet("OUT"));
+    EXPECT_EQ(netlist.netAliases(netlist.findNet("A")), nullptr);
+  }
+}
+
+TEST(VerilogImportTest, SharesInputAliasAndInputWidthRules)
+{
+  TemporaryVerilog verilog{"eccdb-verilog-input-alias-width.v", R"(module top(input [1:0] A, output Y);
+wire internal;
+assign internal=A[0];
+XOR2X1 u0(.A(A),.B(internal),.Y(Y));
+endmodule
+)"};
+  auto database = openLefVerilog(verilog.path());
+  const auto& netlist = database.context().design().netlistStorage();
+  const auto net = netlist.findNet("internal");
+  ASSERT_TRUE(net);
+  EXPECT_EQ(netlist.instanceTerms(net).size(), 2u);
+  EXPECT_EQ(netlist.blockTerms(net).size(), 1u);
+  const auto* aliases = netlist.netAliases(net);
+  ASSERT_NE(aliases, nullptr);
+  EXPECT_EQ(std::set<std::string>(aliases->names.begin(), aliases->names.end()),
+            (std::set<std::string>{"A[0]", "internal"}));
+}
+
+TEST(VerilogImportTest, RejectsAssignmentDriverConflictsBeforeMutation)
+{
+  TemporaryVerilog empty{"eccdb-verilog-empty-base.v", "module top; endmodule"};
+  auto database = openLefVerilog(empty.path());
+  TemporaryVerilog invalid{"eccdb-verilog-driver-conflict.v", R"(module top(input A, output Y);
+assign Y=A;
+XOR2X1 u0(.A(A),.B(A),.Y(Y));
+endmodule
+)"};
+  VerilogNetlistImportService importer(database.context());
+  EXPECT_THROW(static_cast<void>(importer.import(invalid.path(), "top")), VerilogNetlistImportError);
+  const auto& netlist = database.context().design().netlistStorage();
+  EXPECT_TRUE(netlist.nets().empty());
+  EXPECT_TRUE(netlist.instances().empty());
+  EXPECT_TRUE(netlist.blockTerms().empty());
 }
 
 }  // namespace

@@ -142,8 +142,10 @@ void FPInterface::runSimpleFP()
   FPIP.placeAuto();
   IOPlacer::destroyInst();
 
-  outputFloorplan();
-  outputIOPinList();
+  if (!_design_source) {
+    outputFloorplan();
+    outputIOPinList();
+  }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -388,14 +390,9 @@ void FPInterface::inputMacroPlacement(const std::string& macro_place_file_path)
 
 #if 1  // input
 
-void FPInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+void FPInterface::setDesignSource(std::shared_ptr<FPDesignSource> source)
 {
-  _database_context = context;
-}
-
-void FPInterface::setDesignSource(eccdb::DatabaseContext& context) noexcept
-{
-  setDesignSource(&context);
+  _design_source = std::move(source);
 }
 
 void FPInterface::input(std::map<std::string, std::any>& config_map)
@@ -542,16 +539,10 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void FPInterface::wrapDatabase()
 {
-#if defined(IFP_HAS_ECCDB)
-  if (_database_context != nullptr) {
-    wrapDatabaseFromEnTT();
+  if (_design_source) {
+    _design_source->wrapDatabase(FPDM.getDatabase());
     return;
   }
-#else
-  if (_database_context != nullptr) {
-    throw std::logic_error("iFP was built without native EccDB support");
-  }
-#endif
   wrapDBInfo();
   wrapMicronDBU();
   wrapManufactureGrid();
@@ -845,16 +836,10 @@ void FPInterface::wrapIOPinList()
 
 void FPInterface::output()
 {
-#if defined(IFP_HAS_ECCDB)
-  if (_database_context != nullptr) {
-    outputToEnTT();
+  if (_design_source) {
+    _design_source->output(FPDM.getDatabase());
     return;
   }
-#else
-  if (_database_context != nullptr) {
-    throw std::logic_error("iFP was built without native EccDB support");
-  }
-#endif
   outputFloorplan();
   outputPGNetList();
   outputIOPinList();

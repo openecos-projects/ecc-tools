@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <gtest/gtest.h>
 
@@ -192,12 +177,16 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsShapeRoutingAndIndex
   const TemporaryFile binary{"design", ".edb"};
   const TemporaryFile fixed{"design-fixed", ".edb"};
   const TemporaryFile transient{"design-transient", ".edb"};
+  auto& source_netlist = fixture.design.netlistStorage();
+  const auto source_regular = source_netlist.findRegularNet("n1");
+  const std::vector<std::string> source_aliases{R"(\rtl_n1[0])", "n1", R"(\rtl_n1[0])"};
+  ASSERT_TRUE(source_regular);
+  source_netlist.setNetAliases(source_regular, DesignNetAliases{.names = source_aliases});
   const auto expected = test::makeDesignSemanticSnapshot(fixture.design);
   const auto expected_def = DefDesignExporter(fixture.design).exportText();
   const auto expected_statistics = fixture.design.routingStorage().routingStatistics();
 
   BinaryDatabaseExporter::saveDesign(binary.path(), fixture.design);
-  auto& source_netlist = fixture.design.netlistStorage();
   const auto source_instance = source_netlist.findInstance("u1");
   const auto source_term_id = source_netlist.findInstanceTerm(source_instance, "A");
   ASSERT_TRUE(source_term_id);
@@ -230,9 +219,13 @@ TEST(DesignBinaryDatabaseArchiveTest, RoundTripsDefSemanticsShapeRoutingAndIndex
   EXPECT_EQ(test::makeDesignSemanticSnapshot(*restored), expected);
   EXPECT_EQ(DefDesignExporter(*restored).exportText(), expected_def);
   EXPECT_TRUE(restored->netlistStorage().findInstance("u1"));
-  EXPECT_TRUE(restored->netlistStorage().findRegularNet("n1"));
+  const auto restored_regular = restored->netlistStorage().findRegularNet("n1");
+  EXPECT_EQ(restored_regular, source_regular);
+  const auto* restored_aliases = restored->netlistStorage().netAliases(restored_regular);
+  ASSERT_NE(restored_aliases, nullptr);
+  EXPECT_EQ(restored_aliases->names, source_aliases);
   EXPECT_TRUE(restored->netlistStorage().findSpecialNet("VDD"));
-  EXPECT_EQ(restored->routingStorage().wires(restored->netlistStorage().findRegularNet("n1")).size(), 1u);
+  EXPECT_EQ(restored->routingStorage().wires(restored_regular).size(), 1u);
 
   const auto restored_instance = restored->netlistStorage().findInstance("u1");
   const auto& restored_registry = std::as_const(restored->designRegistry().registry());
@@ -459,7 +452,8 @@ TEST(DesignBinaryDatabaseArchiveTest, RejectsLegacyDesignSchemas)
   LibraryStore library{technology.techRegistry()};
   const TemporaryFile binary{"legacy-design-schema", ".edb"};
   constexpr uint32_t kEmbeddedInstanceTermSchemaVersion = 12u;
-  for (const uint32_t schema_version : {6u, 7u, 8u, kEmbeddedInstanceTermSchemaVersion}) {
+  constexpr uint32_t kBeforeNetAliasesSchemaVersion = 14u;
+  for (const uint32_t schema_version : {6u, 7u, 8u, kEmbeddedInstanceTermSchemaVersion, kBeforeNetAliasesSchemaVersion}) {
     binary_detail::BinaryFileHeader header;
     header.kind = binary_detail::BinaryDatabaseKind::kDesign;
     header.schema_version = schema_version;

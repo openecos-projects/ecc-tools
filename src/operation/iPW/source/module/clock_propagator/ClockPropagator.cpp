@@ -75,8 +75,8 @@ bool ClockPropagator::isDisableArc(Arc& arc)
 
 void ClockPropagator::initSignalPointList(CPModel& cp_model)
 {
-  for (std::pair<const std::string, TimingPoint>& timing_pair : PWDM.getDatabase().get_timing_point_map()) {
-    TimingPoint& timing_point = timing_pair.second;
+  for (GraphVertex& vertex : PWDM.getDatabase().get_graph_vertex_list()) {
+    TimingPoint& timing_point = vertex.get_timing_point();
     timing_point.get_clock_slew_map().clear();
     timing_point.get_data_slew_map().clear();
     timing_point.set_is_clock_point(false);
@@ -126,28 +126,32 @@ void ClockPropagator::markClockPoint(CPModel& cp_model, std::string& clock_name)
 {
   Database& database = PWDM.getDatabase();
   TimingClock& timing_clock = database.get_timing_constraint().get_clock_map().at(clock_name);
-  std::queue<std::string> pin_queue;
+  std::queue<int32_t> pin_queue;
   for (const std::string& clock_source : timing_clock.get_source_list()) {
     if (!database.get_timing_point_map().contains(clock_source)) {
       PWLOG.warn(Loc::current(), "clock '", clock_name, "' has no source");
       continue;
     }
-    pin_queue.push(clock_source);
+    pin_queue.push(database.get_pin_map().at(clock_source).get_driver_vertex_idx());
   }
 
   while (!pin_queue.empty()) {
-    std::string pin_name = pin_queue.front();
+    int32_t vertex_idx = pin_queue.front();
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    std::string& pin_name = vertex.get_pin_name();
     pin_queue.pop();
     Pin& pin = database.get_pin_map().at(pin_name);
-    if (pin.get_is_port() && pin.get_direction() == PinDirection::kOutput && database.get_outgoing_arc_list_map()[pin_name].empty()) {
+    if (pin.get_is_port() && pin.get_direction() == PinDirection::kOutput && vertex.get_outgoing_arc_list().empty()) {
       continue;
     }
     bool another_root = false;
     for (std::pair<const std::string, TimingClock>& clock_pair : database.get_timing_constraint().get_clock_map()) {
       TimingClock& definition = clock_pair.second;
       if (clock_pair.first != clock_name
-          && std::find(definition.get_source_list().begin(), definition.get_source_list().end(), pin_name) != definition.get_source_list().end()
-          && std::find(timing_clock.get_source_list().begin(), timing_clock.get_source_list().end(), pin_name) == timing_clock.get_source_list().end()) {
+          && std::find(definition.get_source_list().begin(), definition.get_source_list().end(), pin_name)
+                 != definition.get_source_list().end()
+          && std::find(timing_clock.get_source_list().begin(), timing_clock.get_source_list().end(), pin_name)
+                 == timing_clock.get_source_list().end()) {
         another_root = true;
         break;
       }
@@ -155,22 +159,22 @@ void ClockPropagator::markClockPoint(CPModel& cp_model, std::string& clock_name)
     if (another_root) {
       continue;
     }
-    TimingPoint& timing_point = database.get_timing_point_map()[pin_name];
-    if (cp_model.has_clock_state(pin_name, clock_name)) {
+    TimingPoint& timing_point = vertex.get_timing_point();
+    if (cp_model.has_clock_state(vertex_idx, clock_name)) {
       continue;
     }
     timing_point.set_is_clock_point(true);
-    cp_model.get_clock_state(pin_name, clock_name);
-    if (cp_model.get_clock_name(pin_name).empty()) {
-      cp_model.set_clock_name(pin_name, clock_name);
+    cp_model.get_clock_state(vertex_idx, clock_name);
+    if (cp_model.get_clock_name(vertex_idx).empty()) {
+      cp_model.set_clock_name(vertex_idx, clock_name);
     }
     if (shouldStopClockPropagation(pin_name)) {
       continue;
     }
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+    for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
       Arc& arc = database.get_arc_list()[arc_idx];
       if (!isDisableArc(arc)) {
-        pin_queue.push(arc.get_sink_pin());
+        pin_queue.push(arc.get_sink_vertex_idx());
       }
     }
   }
@@ -189,18 +193,26 @@ void ClockPropagator::seedPhysicalClockSlew(CPModel& cp_model, std::string& cloc
 {
   Database& database = PWDM.getDatabase();
   TimingClock& timing_clock = database.get_timing_constraint().get_clock_map().at(clock_name);
-  if (timing_clock.get_is_generated() && timing_clock.get_is_propagated() && seedGeneratedClockSlew(cp_model, clock_name, timing_clock)) {
+  if (timing_clock.get_is_generated() && timing_clock.get_is_propagated()
+      && seedGeneratedClockSlew(cp_model, clock_name, timing_clock)) {
     return;
   }
   if (timing_clock.get_is_generated() && timing_clock.get_is_propagated()) {
-    PWLOG.warn(Loc::current(), "generated clock '", clock_name, "' has no signal path from master clock '",
-               timing_clock.get_master_clock_name(), "' to its target; using zero insertion slew");
+    PWLOG.warn(
+        Loc::current(),
+        "generated clock '",
+        clock_name,
+        "' has no signal path from master clock '",
+        timing_clock.get_master_clock_name(),
+        "' to its target; using zero insertion slew"
+    );
   }
   for (const std::string& pin_name : timing_clock.get_source_list()) {
     if (!database.get_timing_point_map().contains(pin_name)) {
       continue;
     }
-    ClockSlewState& state = cp_model.get_clock_state(pin_name, clock_name);
+    ClockSlewState& state
+        = cp_model.get_clock_state(database.get_pin_map().at(pin_name).get_driver_vertex_idx(), clock_name);
     state.get_physical_slew_map()[AnalysisType::kMax][TransType::kRise] = 0.0;
     state.get_physical_slew_map()[AnalysisType::kMax][TransType::kFall] = 0.0;
     state.get_physical_slew_map()[AnalysisType::kMin][TransType::kRise] = 0.0;
@@ -208,36 +220,43 @@ void ClockPropagator::seedPhysicalClockSlew(CPModel& cp_model, std::string& cloc
   }
 }
 
-bool ClockPropagator::seedGeneratedClockSlew(CPModel& cp_model, std::string& clock_name, const TimingClock& timing_clock)
+bool ClockPropagator::seedGeneratedClockSlew(
+    CPModel& cp_model,
+    std::string& clock_name,
+    const TimingClock& timing_clock
+)
 {
   Database& database = PWDM.getDatabase();
   const std::string& master_clock_name = timing_clock.get_master_clock_name();
   const std::string& master_source = timing_clock.get_master_source();
   bool is_combinational = timing_clock.get_is_generated_combinational();
-  std::set<std::string> source_path_point_set;
-  std::queue<std::string> pin_queue;
+  std::set<int32_t> source_path_point_set;
+  std::queue<int32_t> pin_queue;
   for (const std::string& target : timing_clock.get_source_list()) {
     if (database.get_timing_point_map().contains(target)) {
-      pin_queue.push(target);
+      pin_queue.push(database.get_pin_map().at(target).get_driver_vertex_idx());
     }
   }
 
   bool found_master = false;
   while (!pin_queue.empty()) {
-    std::string pin_name = pin_queue.front();
+    int32_t vertex_idx = pin_queue.front();
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    std::string& pin_name = vertex.get_pin_name();
     pin_queue.pop();
-    if (!source_path_point_set.insert(pin_name).second) {
+    if (!source_path_point_set.insert(vertex_idx).second) {
       continue;
     }
-    bool is_source_boundary = master_source.empty() ? hasPhysicalClockSlew(cp_model, pin_name, master_clock_name) : pin_name == master_source;
-    if (is_source_boundary && hasPhysicalClockSlew(cp_model, pin_name, master_clock_name)) {
+    bool is_source_boundary = master_source.empty() ? hasPhysicalClockSlew(cp_model, vertex_idx, master_clock_name)
+                                                    : pin_name == master_source;
+    if (is_source_boundary && hasPhysicalClockSlew(cp_model, vertex_idx, master_clock_name)) {
       found_master = true;
       continue;
     }
-    for (std::size_t arc_idx : database.get_incoming_arc_list_map()[pin_name]) {
+    for (std::size_t arc_idx : vertex.get_incoming_arc_list()) {
       Arc& arc = database.get_arc_list()[arc_idx];
       if (!isDisableArc(arc) && !(is_combinational && arc.get_is_clock_arc())) {
-        pin_queue.push(arc.get_source_pin());
+        pin_queue.push(arc.get_source_vertex_idx());
       }
     }
   }
@@ -245,23 +264,27 @@ bool ClockPropagator::seedGeneratedClockSlew(CPModel& cp_model, std::string& clo
     return false;
   }
 
-  for (const std::string& pin_name : source_path_point_set) {
-    ClockSlewState& generated_state = cp_model.get_clock_state(pin_name, clock_name);
-    bool is_source_boundary = master_source.empty() ? hasPhysicalClockSlew(cp_model, pin_name, master_clock_name) : pin_name == master_source;
-    const ClockSlewState* master_state = cp_model.find_clock_state(pin_name, master_clock_name);
-    if (is_source_boundary && master_state != nullptr && hasPhysicalClockSlew(cp_model, pin_name, master_clock_name)) {
+  for (int32_t vertex_idx : source_path_point_set) {
+    std::string& pin_name = database.get_graph_vertex_list()[vertex_idx].get_pin_name();
+    ClockSlewState& generated_state = cp_model.get_clock_state(vertex_idx, clock_name);
+    bool is_source_boundary = master_source.empty() ? hasPhysicalClockSlew(cp_model, vertex_idx, master_clock_name)
+                                                    : pin_name == master_source;
+    const ClockSlewState* master_state = cp_model.find_clock_state(vertex_idx, master_clock_name);
+    if (is_source_boundary && master_state != nullptr
+        && hasPhysicalClockSlew(cp_model, vertex_idx, master_clock_name)) {
       generated_state.set_physical_slew_map(master_state->get_physical_slew_map());
     }
   }
 
   for (std::size_t pass = 0; pass < source_path_point_set.size(); ++pass) {
-    for (const std::string& source_pin : source_path_point_set) {
-      if (!hasPhysicalClockSlew(cp_model, source_pin, clock_name)) {
+    for (int32_t source_idx : source_path_point_set) {
+      if (!hasPhysicalClockSlew(cp_model, source_idx, clock_name)) {
         continue;
       }
-      for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[source_pin]) {
+      for (std::size_t arc_idx : database.get_graph_vertex_list()[source_idx].get_outgoing_arc_list()) {
         Arc& arc = database.get_arc_list()[arc_idx];
-        if (source_path_point_set.contains(arc.get_sink_pin()) && !isDisableArc(arc) && !(is_combinational && arc.get_is_clock_arc())) {
+        if (source_path_point_set.contains(arc.get_sink_vertex_idx()) && !isDisableArc(arc)
+            && !(is_combinational && arc.get_is_clock_arc())) {
           propagateClockSlewArc(cp_model, clock_name, arc_idx, AnalysisType::kMax);
           propagateClockSlewArc(cp_model, clock_name, arc_idx, AnalysisType::kMin);
         }
@@ -271,13 +294,13 @@ bool ClockPropagator::seedGeneratedClockSlew(CPModel& cp_model, std::string& clo
 
   return std::ranges::all_of(timing_clock.get_source_list(), [&](const std::string& target) {
     return database.get_timing_point_map().contains(target)
-           && hasPhysicalClockSlew(cp_model, target, clock_name);
+           && hasPhysicalClockSlew(cp_model, database.get_pin_map().at(target).get_driver_vertex_idx(), clock_name);
   });
 }
 
-bool ClockPropagator::hasPhysicalClockSlew(const CPModel& cp_model, std::string_view pin_name, std::string_view clock_name)
+bool ClockPropagator::hasPhysicalClockSlew(const CPModel& cp_model, int32_t vertex_idx, std::string_view clock_name)
 {
-  const ClockSlewState* state = cp_model.find_clock_state(pin_name, clock_name);
+  const ClockSlewState* state = cp_model.find_clock_state(vertex_idx, clock_name);
   if (state == nullptr) {
     return false;
   }
@@ -294,12 +317,12 @@ void ClockPropagator::updateEffectiveClockSlew(CPModel& cp_model, std::string& c
 {
   Database& database = PWDM.getDatabase();
   TimingClock& timing_clock = database.get_timing_constraint().get_clock_map().at(clock_name);
-  for (std::pair<const std::string, TimingPoint>& timing_pair : database.get_timing_point_map()) {
-    if (!cp_model.has_clock_state(timing_pair.first, clock_name)) {
+  for (int32_t vertex_idx : database.get_graph_order_list()) {
+    if (!cp_model.has_clock_state(vertex_idx, clock_name)) {
       continue;
     }
-    TimingPoint& timing_point = timing_pair.second;
-    ClockSlewState& state = cp_model.get_clock_state(timing_pair.first, clock_name);
+    TimingPoint& timing_point = database.get_graph_vertex_list()[vertex_idx].get_timing_point();
+    ClockSlewState& state = cp_model.get_clock_state(vertex_idx, clock_name);
     if (timing_clock.get_is_propagated()) {
       state.set_slew_map(state.get_physical_slew_map());
     } else {
@@ -308,13 +331,13 @@ void ClockPropagator::updateEffectiveClockSlew(CPModel& cp_model, std::string& c
         for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
           const auto transition_iter = timing_clock.get_transition_map().find(analysis_type);
           slew_map[analysis_type][trans_type] = transition_iter != timing_clock.get_transition_map().end()
-                                                   && transition_iter->second.contains(trans_type)
-                                               ? transition_iter->second.at(trans_type)
-                                               : 0.0;
+                                                        && transition_iter->second.contains(trans_type)
+                                                    ? transition_iter->second.at(trans_type)
+                                                    : 0.0;
         }
       }
     }
-    if (cp_model.get_clock_name(timing_pair.first) == clock_name) {
+    if (cp_model.get_clock_name(vertex_idx) == clock_name) {
       timing_point.set_clock_slew_map(state.get_slew_map());
     }
   }
@@ -323,11 +346,13 @@ void ClockPropagator::updateEffectiveClockSlew(CPModel& cp_model, std::string& c
 void ClockPropagator::propagateClockSlew(CPModel& cp_model, std::string& clock_name)
 {
   Database& database = PWDM.getDatabase();
-  for (std::string& pin_name : database.get_signal_order_list()) {
-    if (!cp_model.has_clock_state(pin_name, clock_name) || shouldStopClockPropagation(pin_name)) {
+  for (int32_t vertex_idx : database.get_graph_order_list()) {
+    GraphVertex& vertex = database.get_graph_vertex_list()[vertex_idx];
+    std::string& pin_name = vertex.get_pin_name();
+    if (!cp_model.has_clock_state(vertex_idx, clock_name) || shouldStopClockPropagation(pin_name)) {
       continue;
     }
-    for (std::size_t arc_idx : database.get_outgoing_arc_list_map()[pin_name]) {
+    for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
       if (!isDisableArc(database.get_arc_list()[arc_idx])) {
         propagateClockSlewArc(cp_model, clock_name, arc_idx, AnalysisType::kMax);
         propagateClockSlewArc(cp_model, clock_name, arc_idx, AnalysisType::kMin);
@@ -336,21 +361,32 @@ void ClockPropagator::propagateClockSlew(CPModel& cp_model, std::string& clock_n
   }
 }
 
-void ClockPropagator::propagateClockSlewArc(CPModel& cp_model, std::string& clock_name, std::size_t arc_idx, AnalysisType analysis_type)
+void ClockPropagator::propagateClockSlewArc(
+    CPModel& cp_model,
+    std::string& clock_name,
+    std::size_t arc_idx,
+    AnalysisType analysis_type
+)
 {
   propagateClockSlewArc(cp_model, clock_name, arc_idx, analysis_type, TransType::kRise);
   propagateClockSlewArc(cp_model, clock_name, arc_idx, analysis_type, TransType::kFall);
 }
 
-void ClockPropagator::propagateClockSlewArc(CPModel& cp_model, std::string& clock_name, std::size_t arc_idx, AnalysisType analysis_type,
-                                             TransType input_trans_type)
+void ClockPropagator::propagateClockSlewArc(
+    CPModel& cp_model,
+    std::string& clock_name,
+    std::size_t arc_idx,
+    AnalysisType analysis_type,
+    TransType input_trans_type
+)
 {
   Database& database = PWDM.getDatabase();
   Arc& arc = database.get_arc_list()[arc_idx];
-  if (!cp_model.has_clock_state(arc.get_source_pin(), clock_name) || !cp_model.has_clock_state(arc.get_sink_pin(), clock_name)) {
+  if (!cp_model.has_clock_state(arc.get_source_vertex_idx(), clock_name)
+      || !cp_model.has_clock_state(arc.get_sink_vertex_idx(), clock_name)) {
     return;
   }
-  ClockSlewState& source_state = cp_model.get_clock_state(arc.get_source_pin(), clock_name);
+  ClockSlewState& source_state = cp_model.get_clock_state(arc.get_source_vertex_idx(), clock_name);
   if (!source_state.get_physical_slew_map().contains(analysis_type)
       || !source_state.get_physical_slew_map()[analysis_type].contains(input_trans_type)) {
     return;
@@ -360,11 +396,17 @@ void ClockPropagator::propagateClockSlewArc(CPModel& cp_model, std::string& cloc
   }
 }
 
-void ClockPropagator::updateClockSlew(CPModel& cp_model, std::string_view clock_name, Arc& arc, AnalysisType analysis_type,
-                                      TransType input_trans_type, TransType output_trans_type)
+void ClockPropagator::updateClockSlew(
+    CPModel& cp_model,
+    std::string_view clock_name,
+    Arc& arc,
+    AnalysisType analysis_type,
+    TransType input_trans_type,
+    TransType output_trans_type
+)
 {
-  ClockSlewState& source_state = cp_model.get_clock_state(arc.get_source_pin(), clock_name);
-  ClockSlewState& sink_state = cp_model.get_clock_state(arc.get_sink_pin(), clock_name);
+  ClockSlewState& source_state = cp_model.get_clock_state(arc.get_source_vertex_idx(), clock_name);
+  ClockSlewState& sink_state = cp_model.get_clock_state(arc.get_sink_vertex_idx(), clock_name);
   DCTask dc_task;
   dc_task.set_arc(&arc);
   dc_task.set_analysis_type(analysis_type);
@@ -378,7 +420,11 @@ void ClockPropagator::updateClockSlew(CPModel& cp_model, std::string_view clock_
   double output_slew = dc_task.get_output_slew();
   if (!sink_state.get_physical_slew_map().contains(analysis_type)
       || !sink_state.get_physical_slew_map()[analysis_type].contains(output_trans_type)
-      || isBetterSlew(output_slew, sink_state.get_physical_slew_map()[analysis_type][output_trans_type], analysis_type)) {
+      || isBetterSlew(
+          output_slew,
+          sink_state.get_physical_slew_map()[analysis_type][output_trans_type],
+          analysis_type
+      )) {
     sink_state.get_physical_slew_map()[analysis_type][output_trans_type] = output_slew;
   }
 }

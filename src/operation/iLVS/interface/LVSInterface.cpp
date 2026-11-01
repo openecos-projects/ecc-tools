@@ -37,6 +37,8 @@
 #include "Utility.hpp"
 #include "idm.h"
 
+#include <utility>
+
 namespace ilvs {
 
 // public
@@ -49,14 +51,9 @@ LVSInterface& LVSInterface::getInst()
   return *_lvs_interface_instance;
 }
 
-void LVSInterface::setDesignSource(eccdb::DatabaseContext* context) noexcept
+void LVSInterface::setDatabaseWrapper(std::function<void()> database_wrapper)
 {
-  _database_context = context;
-}
-
-void LVSInterface::setReferenceNetlist(const NetlistData* reference) noexcept
-{
-  _reference_netlist = reference;
+  _database_wrapper = std::move(database_wrapper);
 }
 
 void LVSInterface::destroyInst()
@@ -180,8 +177,8 @@ void LVSInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void LVSInterface::wrapDatabase()
 {
-  if (_database_context != nullptr) {
-    wrapDatabaseFromEccdb();
+  if (_database_wrapper) {
+    _database_wrapper();
     return;
   }
   Monitor wrap_monitor;

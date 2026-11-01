@@ -21,6 +21,7 @@ target_link_libraries(feature_builder
         idb
         idm
         irt_interface
+        eccdb_irt_adapter
         icts_interface
         # ista-engine
         # idrc_pro_api

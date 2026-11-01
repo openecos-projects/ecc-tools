@@ -24,11 +24,17 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <map>
 #include <memory>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
 #include "IdbDesign.h"
+#include "IdbUnits.h"
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
 #include "data_manager/design/Clock.hh"
 #include "data_manager/design/ClockDAG.hh"
@@ -40,6 +46,7 @@
 #include "data_manager/spatial/Point.hh"
 #include "module/evaluation/qor/QOREvaluation.hh"
 #include "module/synthesis/realization/ClockTreeRealization.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts_test {
 namespace {
@@ -251,7 +258,7 @@ TEST(ClockDAGTest, NestedBranchedTracedTopologyUsesOnlyDeterministicTopLevelAndU
   clock_pins.clock->add_load(uncovered_sink);
   clock_pins.clock->add_load(nested_sink_a);
 
-  const auto frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*clock_pins.clock);
+  const auto frontier = icts::ClockTreeRealization::deriveSynthesisFrontier(*clock_pins.clock, 0U);
   ASSERT_TRUE(frontier.hasTracedTopology());
   ASSERT_EQ(frontier.top_level_traced_inputs, std::vector<icts::Pin*>({top_buffer.input}));
   ASSERT_EQ(frontier.uncovered_terminal_loads, std::vector<icts::Pin*>({uncovered_sink}));

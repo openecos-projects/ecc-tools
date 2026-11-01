@@ -2086,6 +2086,7 @@ int32_t DefRead::parse_blockage(defiBlockage* def_blockage)
     }
 
     if (def_blockage->hasPartial()) {
+      placement_blockage->set_fills(true);
       placement_blockage->set_max_density(def_blockage->placementMaxDensity());
     }
 

@@ -65,15 +65,42 @@ class TimingCell
   void set_is_sequential(const bool is_sequential) { _is_sequential = is_sequential; }
   void set_is_clock_gating(const bool is_clock_gating) { _is_clock_gating = is_clock_gating; }
   void set_is_macro(const bool is_macro) { _is_macro = is_macro; }
-  void set_slew_lower_threshold_pct_rise(const double slew_lower_threshold_pct_rise) { _slew_lower_threshold_pct_rise = slew_lower_threshold_pct_rise; }
-  void set_slew_upper_threshold_pct_rise(const double slew_upper_threshold_pct_rise) { _slew_upper_threshold_pct_rise = slew_upper_threshold_pct_rise; }
-  void set_slew_lower_threshold_pct_fall(const double slew_lower_threshold_pct_fall) { _slew_lower_threshold_pct_fall = slew_lower_threshold_pct_fall; }
-  void set_slew_upper_threshold_pct_fall(const double slew_upper_threshold_pct_fall) { _slew_upper_threshold_pct_fall = slew_upper_threshold_pct_fall; }
-  void set_input_threshold_pct_rise(const double input_threshold_pct_rise) { _input_threshold_pct_rise = input_threshold_pct_rise; }
-  void set_output_threshold_pct_rise(const double output_threshold_pct_rise) { _output_threshold_pct_rise = output_threshold_pct_rise; }
-  void set_input_threshold_pct_fall(const double input_threshold_pct_fall) { _input_threshold_pct_fall = input_threshold_pct_fall; }
-  void set_output_threshold_pct_fall(const double output_threshold_pct_fall) { _output_threshold_pct_fall = output_threshold_pct_fall; }
-  void set_slew_derate_from_library(const double slew_derate_from_library) { _slew_derate_from_library = slew_derate_from_library; }
+  void set_slew_lower_threshold_pct_rise(const double slew_lower_threshold_pct_rise)
+  {
+    _slew_lower_threshold_pct_rise = slew_lower_threshold_pct_rise;
+  }
+  void set_slew_upper_threshold_pct_rise(const double slew_upper_threshold_pct_rise)
+  {
+    _slew_upper_threshold_pct_rise = slew_upper_threshold_pct_rise;
+  }
+  void set_slew_lower_threshold_pct_fall(const double slew_lower_threshold_pct_fall)
+  {
+    _slew_lower_threshold_pct_fall = slew_lower_threshold_pct_fall;
+  }
+  void set_slew_upper_threshold_pct_fall(const double slew_upper_threshold_pct_fall)
+  {
+    _slew_upper_threshold_pct_fall = slew_upper_threshold_pct_fall;
+  }
+  void set_input_threshold_pct_rise(const double input_threshold_pct_rise)
+  {
+    _input_threshold_pct_rise = input_threshold_pct_rise;
+  }
+  void set_output_threshold_pct_rise(const double output_threshold_pct_rise)
+  {
+    _output_threshold_pct_rise = output_threshold_pct_rise;
+  }
+  void set_input_threshold_pct_fall(const double input_threshold_pct_fall)
+  {
+    _input_threshold_pct_fall = input_threshold_pct_fall;
+  }
+  void set_output_threshold_pct_fall(const double output_threshold_pct_fall)
+  {
+    _output_threshold_pct_fall = output_threshold_pct_fall;
+  }
+  void set_slew_derate_from_library(const double slew_derate_from_library)
+  {
+    _slew_derate_from_library = slew_derate_from_library;
+  }
   // function
   void resolveDefaultPowerArcConditions()
   {
@@ -81,7 +108,8 @@ class TimingCell
     std::map<Group, LogicExpression> covered;
     for (auto& arc : _power_arc_list) {
       auto& condition = arc.get_when_expression();
-      if (condition.get_is_empty()) continue;
+      if (condition.get_is_empty())
+        continue;
       auto& combined = covered[{arc.get_source_port(), arc.get_sink_port(), arc.get_related_pg_port()}];
       bool append = !combined.get_is_empty();
       auto& terms = combined.get_term_list();
@@ -93,9 +121,11 @@ class TimingCell
       }
     }
     for (auto& arc : _power_arc_list) {
-      if (!arc.get_when_expression().get_is_empty()) continue;
+      if (!arc.get_when_expression().get_is_empty())
+        continue;
       auto found = covered.find({arc.get_source_port(), arc.get_sink_port(), arc.get_related_pg_port()});
-      if (found == covered.end()) continue;
+      if (found == covered.end())
+        continue;
       // A default table applies only where the state-dependent tables for
       // this path and supply rail do not apply. Use a Boolean union so that
       // overlapping conditions cannot double-count the covered probability.

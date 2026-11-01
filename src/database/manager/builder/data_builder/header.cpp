@@ -1260,7 +1260,6 @@ void write_layout_layers(const std::string& folder, IdbLayout* layout)
     } else if (layer->get_type() == IdbLayerType::kLayerCut) {
       auto* cut = dynamic_cast<IdbLayerCut*>(layer);
       writer.write(cut->get_width());
-      writer.write(cut->get_resistance());
       auto spacings = cut->get_spacings();
       writer.write(static_cast<uint64_t>(spacings.size()));
       for (auto* spacing : spacings) {
@@ -1403,13 +1402,6 @@ void read_layout_layers(const std::string& folder, IdbLayout* layout)
       int32_t width = 0;
       reader.read(width);
       cut->set_width(width);
-      if (reader.version() >= 3) {
-        double resistance = 0.0;
-        reader.read(resistance);
-        cut->set_resistance(resistance);
-      } else {
-        cut->set_resistance(0.0);
-      }
       uint64_t spacing_count = 0;
       reader.read(spacing_count);
       for (uint64_t j = 0; j < spacing_count; ++j) {

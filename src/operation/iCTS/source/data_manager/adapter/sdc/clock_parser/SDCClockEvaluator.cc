@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "SDCClockParser.hh"
+#include "TimingConstraints.hh"
 
 namespace icts::sdc_reader {
 namespace {
@@ -327,6 +328,7 @@ auto SdcSubsetEvaluator::evaluateCommandArgs(const std::string& command_name, co
     _data.issues.resize(watermark.issues);
     _data.diagnostics.resize(watermark.diagnostics);
     _data.ignored.resize(watermark.ignored);
+    refreshStatus();
     reportIgnored(command_name, "unsupported_sdc_command");
   }
   return {};

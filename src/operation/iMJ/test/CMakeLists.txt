@@ -1,4 +1,5 @@
 if(BUILD_TESTING)
+    add_subdirectory(${IMJ_TEST}/test_design_tools)
     add_subdirectory(${IMJ_TEST}/test_antenna_checker)
     add_subdirectory(${IMJ_TEST}/test_def_flattener)
     add_subdirectory(${IMJ_TEST}/test_filler_inserter)

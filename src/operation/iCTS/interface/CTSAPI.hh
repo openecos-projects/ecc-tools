@@ -22,7 +22,8 @@
  */
 #pragma once
 
-#include <functional>
+#include <cstddef>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -32,15 +33,9 @@ namespace ecc_feature {
 struct CTSSummary;
 }  // namespace ecc_feature
 
-namespace eccdb {
-class DatabaseContext;
-}
-
-namespace idb {
-class LibCell;
-}
-
 namespace icts {
+
+class CtsDesignSource;
 
 #define CTS_API_INST (icts::CTSAPI::getInst())
 
@@ -60,7 +55,6 @@ struct CTSTimingClock
 class CTSAPI
 {
  public:
-  using LibertyCellLookup = std::function<idb::LibCell*(const std::string&)>;
   static auto getInst() -> CTSAPI&
   {
     static CTSAPI inst;
@@ -73,16 +67,11 @@ class CTSAPI
   static auto report(const std::string& save_dir) -> CTSStatus;
 
   // Lifecycle API
-  // These non-owning sources are intentionally configured at the public API
-  // boundary so native callers never need an iDB design bridge.
-  auto setDesignSource(eccdb::DatabaseContext* context) -> void;
-  auto setDesignSource(eccdb::DatabaseContext& context) -> void { setDesignSource(&context); }
-  auto setSdcPath(std::string sdc_path) -> void;
-  auto setLibertyCellLookup(LibertyCellLookup liberty_cell_lookup) -> void;
+  // A source and its Liberty data stay fixed for one CTS session. Replacing
+  // this setting while initialized affects the next init() call only.
+  auto setDesignSource(std::shared_ptr<CtsDesignSource> source) -> void;
   static auto destroyCTS() -> CTSStatus;
-  // Destroy transient CTS state and release all caller-owned native inputs.
-  // Use this when a toolchain run is abandoned or its DatabaseContext is about
-  // to be released.
+  // Destroy transient CTS state and release the configured input source.
   static auto abortCTS() -> CTSStatus;
   static auto init(const std::string& config_file, const std::string& work_dir = "") -> CTSStatus;
   static auto lastStatus() -> CTSStatus;
@@ -102,9 +91,7 @@ class CTSAPI
   auto setLastStatus(CTSStatus status) -> CTSStatus;
 
   CTSStatus _last_status;
-  eccdb::DatabaseContext* _database_context = nullptr;
-  std::string _sdc_path;
-  LibertyCellLookup _liberty_cell_lookup;
+  std::shared_ptr<CtsDesignSource> _design_source;
   bool _initialized = false;
 };
 

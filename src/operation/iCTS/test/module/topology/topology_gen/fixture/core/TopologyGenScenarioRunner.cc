@@ -23,13 +23,12 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
-#include <ostream>
 #include <string>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 #include "Logger.hh"
+#include "data_manager/design/fixture/data/GeneratedPins.hh"
 #include "module/topology/TopologyGen.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"

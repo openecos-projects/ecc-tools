@@ -23,9 +23,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
 
 #include "toolkit/io/TestArtifactIO.hh"
 

@@ -123,8 +123,8 @@ class EnvTrackOverlapMerger
       if (lhs.get_edge()->get_is_special_net() != rhs.get_edge()->get_is_special_net()) {
         return lhs.get_edge()->get_is_special_net() < rhs.get_edge()->get_is_special_net();
       }
-      if (lhs.get_edge()->get_stable_net_rank() != rhs.get_edge()->get_stable_net_rank()) {
-        return lhs.get_edge()->get_stable_net_rank() < rhs.get_edge()->get_stable_net_rank();
+      if (lhs.get_edge()->get_net_idx() != rhs.get_edge()->get_net_idx()) {
+        return lhs.get_edge()->get_net_idx() < rhs.get_edge()->get_net_idx();
       }
       return lhs.get_edge()->get_edge_idx() < rhs.get_edge()->get_edge_idx();
     }

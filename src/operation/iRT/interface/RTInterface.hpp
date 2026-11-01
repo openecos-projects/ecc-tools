@@ -39,14 +39,8 @@ enum class IdbConnectType : uint8_t;
 class IdbRegularWireSegment;
 }  // namespace idb
 
-namespace eccdb {
-class DesignStore;
-class TechStore;
-class LibraryStore;
-class DatabaseContext;
-}  // namespace eccdb
-
 namespace irt {
+class RTDesignSource;
 class RoutingLayer;
 class CutLayer;
 class Violation;
@@ -63,7 +57,6 @@ class EXTLayerRect;
 class TAPanel;
 class PlanarCoord;
 enum class MacroPinEdge;
-class Database;
 }  // namespace irt
 
 namespace ecc_feature {
@@ -91,10 +84,8 @@ class RTInterface
   void runRT();
   void destroyRT();
   // Releases a partially initialized run without publishing routing results.
-  // Callers use this after an algorithm failure before detaching a borrowed
-  // DatabaseContext.
+  // Callers use this after an algorithm failure before detaching the source.
   void abortRT();
-  void cleanDef();
 #endif
 
 #endif
@@ -104,20 +95,12 @@ class RTInterface
 #if 1  // TopData
 
 #if 1  // input
-  void setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
-                       eccdb::LibraryStore* library);
-  // Borrow the caller's service context so native iRT output joins the same
-  // revision and observer lifecycle as the surrounding Operation or GUI.
-  // Passing nullptr detaches the borrowed context and restores legacy iDB
-  // source selection until another source is attached.
-  void setDesignSource(eccdb::DatabaseContext* context);
-  void setDesignSource(eccdb::DatabaseContext& context);
+  // The source and its backing database outlive the routing session. A null
+  // source selects the original iDB input/output path.
+  void setDesignSource(std::shared_ptr<RTDesignSource> source);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
-  void wrapDatabaseFromIdb();
-  void wrapDatabaseFromEnTT();
-  std::string compareWrappedDatabase(Database& left, Database& right);
   void wrapDBInfo();
   void wrapMicronDBU();
   void wrapManufactureGrid();
@@ -147,9 +130,6 @@ class RTInterface
   void outputTrackGrid();
   void outputGCellGrid();
   void outputNetList();
-  void outputTrackGridToEnTT();
-  void outputGCellGridToEnTT();
-  void outputNetListToEnTT();
   void outputSummary();
 #endif
 
@@ -177,9 +157,7 @@ class RTInterface
 
  private:
   static RTInterface* _rt_interface_instance;
-  eccdb::DesignStore* _design = nullptr;
-  eccdb::TechStore* _tech = nullptr;
-  eccdb::LibraryStore* _library = nullptr;
+  std::shared_ptr<RTDesignSource> _design_source;
 
   RTInterface() = default;
   RTInterface(const RTInterface& other) = delete;
@@ -187,21 +165,15 @@ class RTInterface
   ~RTInterface();
   RTInterface& operator=(const RTInterface& other) = delete;
   RTInterface& operator=(RTInterface&& other) = delete;
-  [[nodiscard]] eccdb::DatabaseContext& databaseContext() const noexcept;
   void finishRT(bool write_output);
   void abortIDRC();
   // function
-  // Legacy pointer callers do not provide a context. Keep the fallback here
-  // for the entire source attachment lifetime rather than creating one for
-  // every writeback operation.
-  std::unique_ptr<eccdb::DatabaseContext> _owned_database_context;
-  eccdb::DatabaseContext* _database_context = nullptr;
   bool _rt_initialized = false;
   bool _topo_initialized = false;
   bool _drc_engine_initialized = false;
   bool _idrc_initialized = false;
   void initRegionRoute();
-  void runRoutingFlow();
+  void outputDef(const std::string& def_name);
 };
 
 }  // namespace irt

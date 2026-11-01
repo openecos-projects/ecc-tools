@@ -24,7 +24,9 @@
 #include "synthesis/topology/layout/ClockLayoutBuilder.hh"
 
 #include <algorithm>
+#include <memory>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <unordered_set>
 #include <utility>

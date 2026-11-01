@@ -7,6 +7,12 @@ materialization (`irt_input_benchmark`), and EccDB binary persistence
 (`eccdb_binary_archive_benchmark`). These are performance workloads, not a
 replacement for semantic differential tests or an end-to-end routing benchmark.
 
+The OpenDB trace replay helpers live in `odb/`. Compile
+`DrtTraceOdb.cpp`, `DrtTraceOdbWire.cpp`, and
+`odb/OdbTraceDesignProjection.cpp` together against OpenDB for the ODB replayer.
+They do not depend on the experimental OpenROAD/TritonRoute bridge, which is
+maintained separately outside this repository.
+
 ## ISPD18 test6 OpenDB comparison
 
 `IspdImportComparison.py` compares LEF/DEF import on the single 107,919-instance

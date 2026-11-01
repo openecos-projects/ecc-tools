@@ -24,11 +24,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -37,12 +39,12 @@
 #include "IdbCellMaster.h"
 #include "IdbLayout.h"
 #include "IdbUnits.h"
-#include "LibParserCpp.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
+#include "TimingConstraints.hh"
 #include "Type.hh"
 #include "Wrapper.hh"
-#include "CtsEccdbAdapter.hh"
+#include "CtsDesignSource.hh"
 #include "config/Config.hh"
 #include "design/Design.hh"
 #include "design/Inst.hh"
@@ -85,13 +87,6 @@ auto convertLibCapToPf(idb::LibCell* lib_cell, double cap_value) -> double
 {
   (void) lib_cell;
   // Pin attributes are normalized by LibParserCpp; only table axes stay raw.
-  return cap_value;
-}
-
-auto storedPortCapToPf(double cap_value) -> double
-{
-  // LibParserCpp normalizes scalar Liberty pin capacitance and cap-limit
-  // attributes to pF. LUT axes remain in the library-declared unit.
   return cap_value;
 }
 
@@ -143,7 +138,7 @@ auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -
   if (!cap_value.has_value()) {
     return std::nullopt;
   }
-  const double cap_pf = storedPortCapToPf(*cap_value);
+  const double cap_pf = convertLibCapToPf(lib_cell, *cap_value);
   return std::isfinite(cap_pf) && cap_pf >= 0.0 ? std::optional<double>{cap_pf} : std::nullopt;
 }
 
@@ -279,7 +274,7 @@ auto queryLibOutputPinCapLimitPf(idb::LibCell* lib_cell, const Pin* pin) -> std:
   if (!cap_limit.has_value() || !std::isfinite(*cap_limit) || *cap_limit <= 0.0) {
     return std::nullopt;
   }
-  const double cap_limit_pf = storedPortCapToPf(*cap_limit);
+  const double cap_limit_pf = convertLibCapToPf(lib_cell, *cap_limit);
   return std::isfinite(cap_limit_pf) && cap_limit_pf > 0.0 ? std::optional<double>{cap_limit_pf} : std::nullopt;
 }
 
@@ -413,14 +408,10 @@ auto Wrapper::queryParallelWorkerCount() -> std::size_t
 
 auto Wrapper::loadLibertyIfNeeded() const -> void
 {
-  if (_native_adapter != nullptr) {
-    // Native callers inject a provider owned by their toolchain.  Falling
-    // through here would make the EccDB branch read dmInst again.
+  if (_design_source != nullptr) {
+    // The external source owns its Liberty data.
     return;
   }
-  // The iDB path can be reconfigured between runs. Keep the upstream
-  // generation/path guard so a changed Liberty set is indexed again, while
-  // retaining the native EccDB early return above.
   const auto current_generation = dmInst->get_liberty_generation();
   const auto& configured_paths = dmInst->get_config().get_lib_paths();
   if (_liberty_loaded && current_generation == _liberty_generation
@@ -477,6 +468,9 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
 
 auto Wrapper::querySdcUnits() const -> std::optional<SdcUnits>
 {
+  if (_design_source != nullptr) {
+    return _design_source->queryLibertyUnits();
+  }
   loadLibertyIfNeeded();
   if (_liberty_generation == nullptr) {
     return std::nullopt;
@@ -504,21 +498,14 @@ auto Wrapper::queryLibertyRevision() const -> std::uint64_t
   return _liberty_revision;
 }
 
-auto Wrapper::querySupplyVoltage() const -> std::optional<double>
+auto Wrapper::queryCellSupplyVoltage(const std::string& cell_master) const -> std::optional<double>
 {
-  loadLibertyIfNeeded();
-  if (_liberty_generation == nullptr) {
+  auto* cell = findLibertyCell(cell_master);
+  auto* library = cell != nullptr ? cell->get_owner_lib() : nullptr;
+  if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0) {
     return std::nullopt;
   }
-  std::optional<double> voltage;
-  for (const auto& library : _liberty_generation->get_libraries()) {
-    if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0
-        || (voltage.has_value() && *voltage != library->get_nom_voltage())) {
-      return std::nullopt;
-    }
-    voltage = library->get_nom_voltage();
-  }
-  return voltage;
+  return library->get_nom_voltage();
 }
 
 auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibCell*
@@ -526,8 +513,8 @@ auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibC
   if (cell_master.empty()) {
     return nullptr;
   }
-  if (_native_adapter != nullptr) {
-    return _native_liberty_cell_lookup ? _native_liberty_cell_lookup(cell_master) : nullptr;
+  if (_design_source != nullptr) {
+    return _design_source->findLibertyCell(cell_master);
   }
   loadLibertyIfNeeded();
   const auto iter = _lib_cell_by_master.find(cell_master);
@@ -552,7 +539,7 @@ auto Wrapper::queryCellOutPinCapLimit(const std::string& cell_master) const -> s
   if (!cap_limit.has_value() || !std::isfinite(*cap_limit) || *cap_limit <= 0.0) {
     return std::nullopt;
   }
-  const double cap_limit_pf = storedPortCapToPf(*cap_limit);
+  const double cap_limit_pf = convertLibCapToPf(lib_cell, *cap_limit);
   return std::isfinite(cap_limit_pf) && cap_limit_pf > 0.0 ? std::optional<double>{cap_limit_pf} : std::nullopt;
 }
 
@@ -690,8 +677,8 @@ auto Wrapper::queryPinSlewLimit(const Config& config, const Pin* pin) const -> s
 
 auto Wrapper::queryCellHeightUm(const std::string& cell_master) const -> std::optional<double>
 {
-  if (_native_adapter != nullptr) {
-    return _native_adapter->queryCellHeightUm(cell_master);
+  if (_design_source != nullptr) {
+    return _design_source->queryCellHeightUm(cell_master);
   }
   if (_idb_layout == nullptr || _idb_layout->get_cell_master_list() == nullptr || _idb_layout->get_units() == nullptr) {
     return std::nullopt;
@@ -713,8 +700,8 @@ auto Wrapper::queryCellHeightUm(const std::string& cell_master) const -> std::op
 
 auto Wrapper::queryCellAreaUm2(const std::string& cell_master) const -> std::optional<double>
 {
-  if (_native_adapter != nullptr) {
-    return _native_adapter->queryCellAreaUm2(cell_master);
+  if (_design_source != nullptr) {
+    return _design_source->queryCellAreaUm2(cell_master);
   }
   if (_idb_layout == nullptr || _idb_layout->get_cell_master_list() == nullptr || _idb_layout->get_units() == nullptr) {
     return std::nullopt;

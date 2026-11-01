@@ -178,7 +178,50 @@ void EntityChecker::checkNet(ECModel& ec_model)
 
   std::vector<std::string> missing_net_name_list = getDifference(netlist_net_name_list, def_net_name_list);
   std::vector<std::string> unexpected_net_name_list = getDifference(def_net_name_list, netlist_net_name_list);
+  // Exact names remain authoritative. Alias fallback only pairs two unmatched
+  // names with identical terminals; it never merges physical nets or repairs
+  // connectivity. A split alias group or ambiguous provenance stays a failure.
+  std::unordered_map<std::string, std::string> alias_owner;
+  for (const auto& [canonical, aliases] : netlist_data.get_net_alias_map()) {
+    for (const auto& alias : aliases) {
+      const auto [owner, inserted] = alias_owner.emplace(alias, canonical);
+      if (!inserted && owner->second != canonical) {
+        owner->second.clear();
+      }
+    }
+  }
+  std::unordered_set<std::string> matched_logical_aliases;
+  std::unordered_set<std::string> matched_physical_aliases;
+  for (const auto& name : missing_net_name_list) {
+    const auto aliases = netlist_data.get_net_alias_map().find(name);
+    if (aliases == netlist_data.get_net_alias_map().end()) {
+      continue;
+    }
+    std::unordered_set<std::string> physical_matches;
+    for (const auto& alias : aliases->second) {
+      if (def_data.get_net_map().contains(alias)) {
+        physical_matches.insert(alias);
+      }
+    }
+    if (physical_matches.size() != 1u) {
+      continue;
+    }
+    const auto& physical = *physical_matches.begin();
+    if (alias_owner.at(physical) != name || matched_physical_aliases.contains(physical)
+        || !std::binary_search(unexpected_net_name_list.begin(), unexpected_net_name_list.end(), physical)) {
+      continue;
+    }
+    if (LVSUTIL.getSortedUniqueList(netlist_data.get_net_map().at(name).get_terminal_name_list())
+        != LVSUTIL.getSortedUniqueList(def_data.get_net_map().at(physical).get_terminal_name_list())) {
+      continue;
+    }
+    matched_logical_aliases.insert(name);
+    matched_physical_aliases.insert(physical);
+  }
   for (std::string& net_name : missing_net_name_list) {
+    if (matched_logical_aliases.contains(net_name)) {
+      continue;
+    }
     Violation violation;
     violation.set_violation_type(ViolationType::kNet);
     violation.set_net_name(LVSUTIL.getString("NETLIST/", net_name));
@@ -186,6 +229,9 @@ void EntityChecker::checkNet(ECModel& ec_model)
     violation_list.push_back(std::move(violation));
   }
   for (std::string& net_name : unexpected_net_name_list) {
+    if (matched_physical_aliases.contains(net_name)) {
+      continue;
+    }
     Violation violation;
     violation.set_violation_type(ViolationType::kNet);
     violation.set_net_name(LVSUTIL.getString("DEF/", net_name));

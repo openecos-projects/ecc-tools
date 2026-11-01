@@ -18,6 +18,7 @@
 
 #include <string>
 
+#include "py_path_utils.h"
 #include "RTInterface.hpp"
 
 namespace python_interface {
@@ -27,11 +28,12 @@ void initRTConfigMapByDict(std::map<std::string, std::string>& config_dict, std:
 bool initERTConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initERTConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
-bool initRT(std::string& config, std::map<std::string, std::string>& config_dict)
+bool initRT(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
-  bool pass = config.empty() ? true : initRTConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initRTConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -40,11 +42,12 @@ bool initRT(std::string& config, std::map<std::string, std::string>& config_dict
   return true;
 }
 
-bool runERT(std::string& config, std::map<std::string, std::string>& config_dict)
+bool runERT(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
-  bool pass = config.empty() ? true : initERTConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initERTConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }

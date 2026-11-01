@@ -1,17 +1,7 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
 // Copyright (c) 2026 Peng Cheng Laboratory
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+
+#include "LVSInterfaceEccdb.h"
 
 #include "LVSInterface.hpp"
 
@@ -31,13 +21,15 @@
 #include "Die.hpp"
 #include "Logger.hpp"
 #include "Net.hpp"
+#include "NetlistData.hpp"
 #include "RoutingShape.hpp"
 #include "Shape.hpp"
 #include "service/context/DatabaseContext.h"
 #include "service/geometry/PhysicalDesignService.h"
 #include "storage/design/DesignStore.h"
+#include "storage/library/LibraryStore.h"
 
-namespace ilvs {
+namespace ilvs::detail {
 namespace {
 
 [[nodiscard]] std::string ioTerminalName(const std::string& name)
@@ -109,17 +101,6 @@ void registerLvsNetName(std::unordered_map<std::string, std::string>& physical_n
   return bounds;
 }
 
-[[nodiscard]] eccdb::Rect segmentBounds(const eccdb::Point begin, const eccdb::Point end, const int32_t width)
-{
-  const int32_t normalized_width = std::max(width, 1);
-  const int32_t lower_half = normalized_width / 2;
-  const int32_t upper_half = normalized_width - lower_half;
-  return {.ll_x = std::min(begin.x, end.x) - lower_half,
-          .ll_y = std::min(begin.y, end.y) - lower_half,
-          .ur_x = std::max(begin.x, end.x) + upper_half,
-          .ur_y = std::max(begin.y, end.y) + upper_half};
-}
-
 [[nodiscard]] RoutingShape toRoutingShape(const eccdb::PhysicalDesignService& physical, const eccdb::TechLayerId layer,
                                            const eccdb::Rect rectangle)
 {
@@ -181,18 +162,20 @@ void appendVia(NetRoutingGraph& routing, const eccdb::PhysicalDesignService& phy
   routing.get_via_shape_idx_pair_list().emplace_back(bottom_shape_idx, top_shape_idx);
 }
 
-void appendRouteShape(NetRoutingGraph& routing, const eccdb::PhysicalDesignService& physical, const eccdb::DesignRouteShape& shape,
-                      const eccdb::DesignRouteShapeAttributes* attributes)
+void appendRouteShape(NetRoutingGraph& routing, const eccdb::PhysicalDesignService& physical,
+                      const eccdb::DesignRouteShapeId shape_id, const eccdb::DesignRouteShape& shape)
 {
   std::visit(
       [&](const auto& geometry) {
         using Geometry = std::remove_cvref_t<decltype(geometry)>;
         if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
-          const int32_t width = attributes != nullptr && (shape.flags & eccdb::DesignWirePathFlag::kHasWidth) != 0u
-                                    ? attributes->width
-                                    : physical.routingLayer(shape.layer).width;
+          // iLVS consumes rectangles. A diagonal's broad-phase BBox is not
+          // its conductor and must not silently create electrical shorts.
+          if (geometry.begin.position.x != geometry.end.position.x && geometry.begin.position.y != geometry.end.position.y) {
+            throw std::invalid_argument("native iLVS requires Manhattan route segments");
+          }
           appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{shape.layer.entity()},
-                                                     segmentBounds(geometry.begin.position, geometry.end.position, width)));
+                                                     physical.routeShapeBounds(shape_id)));
         } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
           appendRoutingShape(routing, toRoutingShape(physical, eccdb::TechLayerId{shape.layer.entity()}, geometry.rectangle));
         } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
@@ -283,8 +266,8 @@ void appendNetRouting(DefData& def_data, const eccdb::PhysicalDesignService& phy
                       const std::string& net_name)
 {
   auto& routing = def_data.get_physical_graph().getOrCreateNetRoutingGraph(net_name);
-  physical.forEachNetWireShape(net_id, [&](const auto, const auto&, const auto, const auto& shape, const auto* attributes) {
-    appendRouteShape(routing, physical, shape, attributes);
+  physical.forEachNetWireShape(net_id, [&](const auto, const auto&, const auto shape_id, const auto& shape, const auto*) {
+    appendRouteShape(routing, physical, shape_id, shape);
   });
   physical.forEachNetGeometry(
       net_id,
@@ -304,19 +287,93 @@ void appendNetRouting(DefData& def_data, const eccdb::PhysicalDesignService& phy
 
 }  // namespace
 
-void LVSInterface::wrapDatabaseFromEccdb()
+NetlistData wrapLvsNetlist(const eccdb::DatabaseContext& context)
 {
-  if (_database_context == nullptr || _database_context->technology() == nullptr || _database_context->library() == nullptr) {
+  if (context.library() == nullptr) {
+    throw std::invalid_argument("native iLVS reference projection requires an EccDB library");
+  }
+  const auto& design = context.design();
+  const auto& netlist = design.netlistStorage();
+  const auto& library = *context.library();
+  NetlistData result;
+  if (design.globalStorage().hasInfo()) {
+    result.set_design_name(design.globalStorage().info().name);
+  }
+
+  const auto terminalName = [&](const eccdb::DesignInstanceTermId pin_id) {
+    const auto& pin = netlist.instanceTerm(pin_id);
+    const auto& instance = netlist.instance(pin.instance);
+    return instance.name + "/" + library.masterTermStorage().masterTerm(pin.master_term).name;
+  };
+  const auto appendNetPins = [&](const eccdb::DesignNetId net_id, ilvs::Net& target) {
+    for (const auto pin_id : netlist.instanceTerms(net_id)) {
+      target.get_terminal_name_list().push_back(terminalName(pin_id));
+    }
+    for (const auto pin_id : netlist.blockTerms(net_id)) {
+      target.get_terminal_name_list().push_back(ioTerminalName(netlist.blockTerm(pin_id).name));
+    }
+    target.get_terminal_name_list() = LVSUTIL.getSortedUniqueList(std::move(target.get_terminal_name_list()));
+  };
+  const auto markPowerGroundPins = [&](const eccdb::DesignNetId net_id, const ConnectType type) {
+    for (const auto pin_id : netlist.instanceTerms(net_id)) {
+      result.get_terminal_connect_type_map()[terminalName(pin_id)] = type;
+    }
+    for (const auto pin_id : netlist.blockTerms(net_id)) {
+      result.get_terminal_connect_type_map()[ioTerminalName(netlist.blockTerm(pin_id).name)] = type;
+    }
+  };
+
+  netlist.forEachInstance([&](const auto, const auto& instance, const auto) {
+    result.get_instance_name_set().insert(instance.name);
+  });
+  netlist.forEachBlockTerm([&](const auto, const auto& term) {
+    result.get_io_terminal_name_list().push_back(ioTerminalName(term.name));
+  });
+
+  // Verilog's supply nets are regular EccDB nets with a PG use.  They remain
+  // logical nets for entity comparison, while their terminals are tagged PG.
+  netlist.forEachRegularNet([&](const auto net_id, const auto& net) {
+    Net target;
+    appendNetPins(net_id, target);
+    result.get_net_map()[net.name] = std::move(target);
+    if (const auto* aliases = netlist.netAliases(net_id)) {
+      result.get_net_alias_map()[net.name] = aliases->names;
+    }
+    if (isPower(net.use)) {
+      markPowerGroundPins(net_id, ConnectType::kPower);
+    } else if (isGround(net.use)) {
+      markPowerGroundPins(net_id, ConnectType::kGround);
+    }
+  });
+
+  // SPECIALNETS are physical PG connectivity.  The reference projection does
+  // not invent a logical net for them, but preserves their explicit terminal
+  // classifications so iLVS can exclude PG IOs consistently.
+  netlist.forEachSpecialNet([&](const auto net_id, const auto& net) {
+    if (isPower(net.use)) {
+      markPowerGroundPins(net_id, ConnectType::kPower);
+    } else if (isGround(net.use)) {
+      markPowerGroundPins(net_id, ConnectType::kGround);
+    }
+  });
+
+  result.normalize();
+  return result;
+}
+
+void wrapDatabaseFromEccdb(eccdb::DatabaseContext* context, const NetlistData* reference_netlist)
+{
+  if (context == nullptr || context->technology() == nullptr || context->library() == nullptr) {
     LVSLOG.error(Loc::current(), "Native iLVS requires EccDB Design, Tech, and Library stores.");
     return;
   }
-  if (_reference_netlist == nullptr) {
+  if (reference_netlist == nullptr) {
     LVSLOG.error(Loc::current(), "Native iLVS requires an external reference netlist; it will not fall back to iDB.");
     return;
   }
 
-  const eccdb::PhysicalDesignService physical{*_database_context};
-  const auto& design = _database_context->design();
+  const eccdb::PhysicalDesignService physical{*context};
+  const auto& design = context->design();
   const auto& netlist = design.netlistStorage();
   DefData def_data;
   if (physical.hasDesignInfo()) {
@@ -365,7 +422,7 @@ void LVSInterface::wrapDatabaseFromEccdb()
   });
 
   def_data.normalize();
-  NetlistData reference = *_reference_netlist;
+  NetlistData reference = *reference_netlist;
   if (!reference.get_design_name().empty() && !def_data.get_design_name().empty() && reference.get_design_name() != def_data.get_design_name()) {
     LVSLOG.error(Loc::current(), "Native iLVS reference netlist design differs from EccDB: netlist='", reference.get_design_name(), "' design='",
                  def_data.get_design_name(), "'.");
@@ -377,4 +434,23 @@ void LVSInterface::wrapDatabaseFromEccdb()
               " routing_nets=", database.get_def_data().get_physical_graph().get_net_routing_graph_list().size(), ".");
 }
 
-}  // namespace ilvs
+}  // namespace ilvs::detail
+
+namespace eccdb::adapters {
+
+ilvs::NetlistData wrapLvsNetlist(const DatabaseContext& context)
+{
+  return ilvs::detail::wrapLvsNetlist(context);
+}
+
+void bindLvsSource(ilvs::LVSInterface& interface, DatabaseContext* context, const ilvs::NetlistData* reference)
+{
+  if (context == nullptr) {
+    interface.setDatabaseWrapper({});
+    return;
+  }
+
+  interface.setDatabaseWrapper([context, reference] { ilvs::detail::wrapDatabaseFromEccdb(context, reference); });
+}
+
+}  // namespace eccdb::adapters

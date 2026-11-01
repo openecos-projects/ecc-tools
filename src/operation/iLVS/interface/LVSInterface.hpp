@@ -17,6 +17,7 @@
 #pragma once
 
 #include <any>
+#include <functional>
 #include <map>
 #include <string>
 #include <unordered_set>
@@ -33,10 +34,6 @@ class IdbRect;
 class IdbRegularWireSegment;
 class IdbVia;
 }  // namespace idb
-
-namespace eccdb {
-class DatabaseContext;
-}  // namespace eccdb
 
 namespace ilvs {
 enum class ConnectType;
@@ -81,13 +78,9 @@ class LVSInterface
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
-  // The EccDB design and reference netlist are borrowed from the caller.
-  // A null design source restores the legacy iDB path; a null reference is
-  // deliberately not substituted with an iDB design in native mode.
-  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
-  void setDesignSource(eccdb::DatabaseContext& context) noexcept { setDesignSource(&context); }
-  void setReferenceNetlist(const NetlistData* reference) noexcept;
-  void wrapDatabaseFromEccdb();
+  // A backend adapter can replace legacy iDB wrapping for one session.
+  // Clearing the hook restores the direct iDB path.
+  void setDatabaseWrapper(std::function<void()> database_wrapper);
   NetlistData wrapNetlistData(idb::IdbDesign* idb_design);
   DefData wrapDefData(idb::IdbDesign* idb_design);
   void wrapDie(idb::IdbDesign* idb_design, DefData& def_data);
@@ -127,8 +120,7 @@ class LVSInterface
 
  private:
   static LVSInterface* _lvs_interface_instance;
-  eccdb::DatabaseContext* _database_context = nullptr;
-  const NetlistData* _reference_netlist = nullptr;
+  std::function<void()> _database_wrapper;
 
   LVSInterface() = default;
   LVSInterface(const LVSInterface& other) = delete;

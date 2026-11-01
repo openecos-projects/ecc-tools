@@ -16,88 +16,10 @@
 // ***************************************************************************************
 #include "TopoBuilder.hpp"
 
-#include <algorithm>
-#include <map>
-#include <set>
-#include <tuple>
-#include <utility>
-#include <vector>
-
 #include "LayerShape.hpp"
 #include "Utility.hpp"
 
 namespace ircx {
-
-namespace {
-
-[[nodiscard]] auto canonicalSegmentKey(Segment& segment)
-{
-  const auto start = std::pair{RCXUTIL.x(segment.get_start_point()), RCXUTIL.y(segment.get_start_point())};
-  const auto end = std::pair{RCXUTIL.x(segment.get_end_point()), RCXUTIL.y(segment.get_end_point())};
-  const auto& first = std::min(start, end);
-  const auto& second = std::max(start, end);
-  const GTLRectInt& shape = segment.get_shape();
-  return std::tuple{segment.get_layer_idx(),
-                    first.first,
-                    first.second,
-                    second.first,
-                    second.second,
-                    RCXUTIL.minX(shape),
-                    RCXUTIL.minY(shape),
-                    RCXUTIL.maxX(shape),
-                    RCXUTIL.maxY(shape)};
-}
-
-[[nodiscard]] auto canonicalViaKey(Via& via)
-{
-  const auto rectKey = [](LayerShape& layer_shape) {
-    const GTLRectInt& shape = layer_shape.get_shape();
-    return std::tuple{layer_shape.get_layer_idx(), RCXUTIL.minX(shape), RCXUTIL.minY(shape), RCXUTIL.maxX(shape), RCXUTIL.maxY(shape)};
-  };
-  const auto [bottom_layer, bottom_xl, bottom_yl, bottom_xh, bottom_yh] = rectKey(via.get_bottom_layer_shape());
-  const auto [cut_layer, cut_xl, cut_yl, cut_xh, cut_yh] = rectKey(via.get_cut_layer_shape());
-  const auto [top_layer, top_xl, top_yl, top_xh, top_yh] = rectKey(via.get_top_layer_shape());
-  return std::tuple{bottom_layer,
-                    cut_layer,
-                    top_layer,
-                    RCXUTIL.x(via.get_point()),
-                    RCXUTIL.y(via.get_point()),
-                    bottom_xl,
-                    bottom_yl,
-                    bottom_xh,
-                    bottom_yh,
-                    cut_xl,
-                    cut_yl,
-                    cut_xh,
-                    cut_yh,
-                    top_xl,
-                    top_yl,
-                    top_xh,
-                    top_yh,
-                    via.get_via_name()};
-}
-
-[[nodiscard]] bool rectLess(const GTLRectInt& lhs, const GTLRectInt& rhs)
-{
-  return std::tuple{RCXUTIL.minX(lhs), RCXUTIL.minY(lhs), RCXUTIL.maxX(lhs), RCXUTIL.maxY(lhs)}
-         < std::tuple{RCXUTIL.minX(rhs), RCXUTIL.minY(rhs), RCXUTIL.maxX(rhs), RCXUTIL.maxY(rhs)};
-}
-
-[[nodiscard]] LayerShape* canonicalContainingPinShape(Pin& pin, const int32_t layer_idx, const GTLPointInt& point)
-{
-  LayerShape* result = nullptr;
-  for (LayerShape& layer_shape : pin.get_layer_shape_list()) {
-    if (layer_shape.get_layer_idx() != layer_idx || !RCXUTIL.rectContainsPoint(layer_shape.get_shape(), point)) {
-      continue;
-    }
-    if (result == nullptr || rectLess(layer_shape.get_shape(), result->get_shape())) {
-      result = &layer_shape;
-    }
-  }
-  return result;
-}
-
-}  // namespace
 
 // public
 
@@ -186,112 +108,99 @@ TBTopo TopoBuilder::buildNetTopo(Net& net)
   std::vector<TopoNode>& node_list = net_topo.get_node_list();
   std::vector<TopoEdge>& edge_list = net_topo.get_edge_list();
   std::map<TBNodeKey, int32_t> node_key_to_idx_map;
-
-  std::vector<Segment*> segment_list;
-  segment_list.reserve(net.get_segment_list().size());
-  for (Segment& segment : net.get_segment_list()) {
-    segment_list.push_back(&segment);
-  }
-  std::sort(segment_list.begin(), segment_list.end(), [](Segment* lhs, Segment* rhs) { return canonicalSegmentKey(*lhs) < canonicalSegmentKey(*rhs); });
-
-  std::vector<Via*> via_list;
-  via_list.reserve(net.get_via_list().size());
-  for (Via& via : net.get_via_list()) {
-    via_list.push_back(&via);
-  }
-  std::sort(via_list.begin(), via_list.end(), [](Via* lhs, Via* rhs) { return canonicalViaKey(*lhs) < canonicalViaKey(*rhs); });
-
-  // Routing order and segment orientation are DEF serialization details. Build
-  // the topology's coordinate identity first, then attach terminals to that
-  // stable node set so equivalent physical routing produces one RC graph.
-  for (Segment* segment : segment_list) {
-    node_key_to_idx_map.emplace(TBNodeKey(segment->get_layer_idx(), RCXUTIL.x(segment->get_start_point()), RCXUTIL.y(segment->get_start_point())), -1);
-    node_key_to_idx_map.emplace(TBNodeKey(segment->get_layer_idx(), RCXUTIL.x(segment->get_end_point()), RCXUTIL.y(segment->get_end_point())), -1);
-  }
-  for (Via* via : via_list) {
-    node_key_to_idx_map.emplace(TBNodeKey(via->get_top_layer_shape().get_layer_idx(), RCXUTIL.x(via->get_point()), RCXUTIL.y(via->get_point())), -1);
-    node_key_to_idx_map.emplace(TBNodeKey(via->get_bottom_layer_shape().get_layer_idx(), RCXUTIL.x(via->get_point()), RCXUTIL.y(via->get_point())), -1);
-  }
-
-  node_list.reserve(node_key_to_idx_map.size());
-  for (auto& [node_key, node_idx] : node_key_to_idx_map) {
-    TopoNode node(net.get_net_idx());
-    node.set_layer_idx(node_key.get_layer_idx());
-    node.set_point(GTLPointInt(node_key.get_x_coord(), node_key.get_y_coord()));
-    node.set_shape(GTLRectInt(node_key.get_x_coord() - 1, node_key.get_y_coord() - 1, node_key.get_x_coord() + 1, node_key.get_y_coord() + 1));
-    node_idx = appendNode(node_list, std::move(node));
-  }
-
-  std::vector<Pin*> pin_list;
-  pin_list.reserve(net.get_pin_list().size());
-  for (Pin& pin : net.get_pin_list()) {
-    pin_list.push_back(&pin);
-  }
-  std::sort(pin_list.begin(), pin_list.end(), [](Pin* lhs, Pin* rhs) {
-    if (lhs->get_is_driver() != rhs->get_is_driver()) {
-      return lhs->get_is_driver();
-    }
-    return lhs->get_pin_name() < rhs->get_pin_name();
-  });
-
   std::set<std::string> consumed_pin_name_set;
-  for (const auto& [node_key, node_idx] : node_key_to_idx_map) {
-    TopoNode& node = node_list[node_idx];
-    for (Pin* pin : pin_list) {
-      if (consumed_pin_name_set.count(pin->get_pin_name()) != 0) {
-        continue;
-      }
-      LayerShape* pin_shape = canonicalContainingPinShape(*pin, node_key.get_layer_idx(), node.get_point());
-      if (pin_shape == nullptr) {
-        continue;
-      }
-      consumed_pin_name_set.insert(pin->get_pin_name());
-      node.set_pin_name(pin->get_pin_name());
-      node.set_shape(pin_shape->get_shape());
-      node.set_is_shape_valid(true);
-      break;
-    }
+
+  for (Segment& segment : net.get_segment_list()) {
+    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, segment.get_layer_idx(), segment.get_start_point());
+    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, segment.get_layer_idx(), segment.get_end_point());
+  }
+  for (Via& via : net.get_via_list()) {
+    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, via.get_top_layer_shape().get_layer_idx(), via.get_point());
+    appendNodeIfAbsent(net, node_list, node_key_to_idx_map, consumed_pin_name_set, via.get_bottom_layer_shape().get_layer_idx(), via.get_point());
   }
 
-  for (Segment* segment : segment_list) {
-    int32_t layer_idx = segment->get_layer_idx();
-    int32_t start_node_idx = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment->get_start_point()), RCXUTIL.y(segment->get_start_point()))];
-    int32_t end_node_idx = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment->get_end_point()), RCXUTIL.y(segment->get_end_point()))];
-    mergeNodeShape(node_list, start_node_idx, getSegmentEndpointShape(*segment, segment->get_start_point()));
-    mergeNodeShape(node_list, end_node_idx, getSegmentEndpointShape(*segment, segment->get_end_point()));
+  for (Segment& segment : net.get_segment_list()) {
+    int32_t layer_idx = segment.get_layer_idx();
+    int32_t start_node_idx = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment.get_start_point()), RCXUTIL.y(segment.get_start_point()))];
+    int32_t end_node_idx = node_key_to_idx_map[TBNodeKey(layer_idx, RCXUTIL.x(segment.get_end_point()), RCXUTIL.y(segment.get_end_point()))];
+    mergeNodeShape(node_list, start_node_idx, getSegmentEndpointShape(segment, segment.get_start_point()));
+    mergeNodeShape(node_list, end_node_idx, getSegmentEndpointShape(segment, segment.get_end_point()));
 
     TopoEdge edge(net.get_net_idx());
     edge.set_layer_idx(layer_idx);
-    if (RCXUTIL.x(segment->get_start_point()) < RCXUTIL.x(segment->get_end_point())
-        || (RCXUTIL.x(segment->get_start_point()) == RCXUTIL.x(segment->get_end_point())
-            && RCXUTIL.y(segment->get_start_point()) <= RCXUTIL.y(segment->get_end_point()))) {
+    if (RCXUTIL.x(segment.get_start_point()) < RCXUTIL.x(segment.get_end_point())
+        || (RCXUTIL.x(segment.get_start_point()) == RCXUTIL.x(segment.get_end_point())
+            && RCXUTIL.y(segment.get_start_point()) <= RCXUTIL.y(segment.get_end_point()))) {
       edge.set_start_node_idx(start_node_idx);
       edge.set_end_node_idx(end_node_idx);
     } else {
       edge.set_start_node_idx(end_node_idx);
       edge.set_end_node_idx(start_node_idx);
     }
-    edge.set_shape(segment->get_shape());
+    edge.set_shape(segment.get_shape());
     edge_list.push_back(std::move(edge));
   }
 
-  for (Via* via : via_list) {
-    int32_t top_layer_idx = via->get_top_layer_shape().get_layer_idx();
-    int32_t bottom_layer_idx = via->get_bottom_layer_shape().get_layer_idx();
-    int32_t top_node_idx = node_key_to_idx_map[TBNodeKey(top_layer_idx, RCXUTIL.x(via->get_point()), RCXUTIL.y(via->get_point()))];
-    int32_t bottom_node_idx = node_key_to_idx_map[TBNodeKey(bottom_layer_idx, RCXUTIL.x(via->get_point()), RCXUTIL.y(via->get_point()))];
-    mergeNodeShape(node_list, top_node_idx, via->get_top_layer_shape().get_shape());
-    mergeNodeShape(node_list, bottom_node_idx, via->get_bottom_layer_shape().get_shape());
+  for (Via& via : net.get_via_list()) {
+    int32_t top_layer_idx = via.get_top_layer_shape().get_layer_idx();
+    int32_t bottom_layer_idx = via.get_bottom_layer_shape().get_layer_idx();
+    int32_t top_node_idx = node_key_to_idx_map[TBNodeKey(top_layer_idx, RCXUTIL.x(via.get_point()), RCXUTIL.y(via.get_point()))];
+    int32_t bottom_node_idx = node_key_to_idx_map[TBNodeKey(bottom_layer_idx, RCXUTIL.x(via.get_point()), RCXUTIL.y(via.get_point()))];
+    mergeNodeShape(node_list, top_node_idx, via.get_top_layer_shape().get_shape());
+    mergeNodeShape(node_list, bottom_node_idx, via.get_bottom_layer_shape().get_shape());
 
     TopoEdge edge(net.get_net_idx());
-    edge.set_layer_idx(via->get_cut_layer_shape().get_layer_idx());
+    edge.set_layer_idx(via.get_cut_layer_shape().get_layer_idx());
     edge.set_start_node_idx(top_node_idx);
     edge.set_end_node_idx(bottom_node_idx);
-    edge.set_shape(via->get_cut_layer_shape().get_shape());
-    edge.set_via_name(via->get_via_name());
+    edge.set_shape(via.get_cut_layer_shape().get_shape());
+    edge.set_via_name(via.get_via_name());
     edge_list.push_back(std::move(edge));
   }
   return net_topo;
+}
+
+void TopoBuilder::appendNodeIfAbsent(Net& net, std::vector<TopoNode>& node_list, std::map<TBNodeKey, int32_t>& node_key_to_idx_map,
+                                     std::set<std::string>& consumed_pin_name_set, int32_t layer_idx, const GTLPointInt& point)
+{
+  TBNodeKey node_key(layer_idx, RCXUTIL.x(point), RCXUTIL.y(point));
+  if (node_key_to_idx_map.count(node_key) != 0) {
+    return;
+  }
+
+  TopoNode node(net.get_net_idx());
+  node.set_layer_idx(layer_idx);
+  node.set_point(point);
+
+  bool is_shape_valid = false;
+  for (Pin& pin : net.get_pin_list()) {
+    if (consumed_pin_name_set.count(pin.get_pin_name()) != 0) {
+      continue;
+    }
+    for (LayerShape& layer_shape : pin.get_layer_shape_list()) {
+      if (layer_shape.get_layer_idx() != layer_idx) {
+        continue;
+      }
+
+      GTLRectInt& pin_shape = layer_shape.get_shape();
+      if (RCXUTIL.rectContainsPoint(pin_shape, point)) {
+        consumed_pin_name_set.insert(pin.get_pin_name());
+        node.set_pin_name(pin.get_pin_name());
+        node.set_shape(pin_shape);
+        node.set_is_shape_valid(true);
+        is_shape_valid = true;
+        break;
+      }
+    }
+    if (is_shape_valid) {
+      break;
+    }
+  }
+  if (!is_shape_valid) {
+    node.set_shape(GTLRectInt(RCXUTIL.x(point) - 1, RCXUTIL.y(point) - 1, RCXUTIL.x(point) + 1, RCXUTIL.y(point) + 1));
+  }
+
+  node_key_to_idx_map[node_key] = appendNode(node_list, std::move(node));
 }
 
 int32_t TopoBuilder::appendNode(std::vector<TopoNode>& node_list, TopoNode node)

@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <gtest/gtest.h>
 #include <gtest/gtest-spi.h>
@@ -45,7 +30,13 @@
 
 #include "DataManager.hpp"
 #include "Database.hpp"
+#include "DRCDesignSource.hpp"
 #include "DRCInterface.hpp"
+#include "IdrcWrappedDatabaseCompare.h"
+#include "IrtWrappedDatabaseCompare.h"
+#include "ViaMaster.hpp"
+#include "adapters/idrc/DRCInterfaceEccdb.h"
+#include "adapters/irt/RTInterfaceEccdb.h"
 #include "Logger.hpp"
 #include "RTInterface.hpp"
 #include "../../../service/context/DatabaseContext.h"
@@ -465,10 +456,10 @@ void loadIntoIdb(const std::filesystem::path& lef, const std::filesystem::path& 
   });
 }
 
-class EnttDesignFixture
+class EccdbDesignFixture
 {
  public:
-  EnttDesignFixture(const std::filesystem::path& lef, const std::filesystem::path& def)
+  EccdbDesignFixture(const std::filesystem::path& lef, const std::filesystem::path& def)
       : library(technology.techRegistry()), design(technology.techRegistry(), library.libraryRegistry())
   {
     static_cast<void>(LefDefParser::lefrClear());
@@ -530,9 +521,9 @@ void runInjectedWriteback(const std::filesystem::path& temp_directory, eccdb::De
 {
   Logger::initInst();
   if (context != nullptr) {
-    RTI.setDesignSource(context);
+    eccdb::adapters::bindRtSource(RTI, context);
   } else {
-    RTI.setDesignSource(design, technology, library);
+    eccdb::adapters::bindRtSource(RTI, design, technology, library);
   }
   std::map<std::string, std::any> config{{"-temp_directory_path", temp_directory.string()},
                                          {"-thread_number", 1},
@@ -546,7 +537,7 @@ void runInjectedWriteback(const std::filesystem::path& temp_directory, eccdb::De
   } else {
     RTI.abortRT();
   }
-  RTI.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
+  eccdb::adapters::bindRtSource(RTI, static_cast<eccdb::DatabaseContext*>(nullptr));
 }
 
 void expectWritebackSemanticsEqual(const eccdb::DesignStore& expected, const eccdb::DesignStore& actual,
@@ -575,7 +566,7 @@ void expectWritebackSemanticsEqual(const eccdb::DesignStore& expected, const ecc
 
 using DrcShapeKey = std::tuple<std::string, int32_t, bool, int32_t, int32_t, int32_t, int32_t>;
 
-std::vector<std::string> enttNetNames(const eccdb::DesignStore& design)
+std::vector<std::string> eccdbNetNames(const eccdb::DesignStore& design)
 {
   std::vector<std::string> names;
   for (const auto net : design.netlistStorage().regularNets()) {
@@ -600,6 +591,21 @@ std::vector<DrcShapeKey> canonicalDrcShapes(const std::vector<ids::Shape>& shape
   return result;
 }
 
+std::vector<ids::Shape> nativeDrcResultShapes(eccdb::DesignStore& design, eccdb::TechStore& technology,
+                                               eccdb::LibraryStore& library)
+{
+  const auto source = eccdb::adapters::makeDrcSource(design, technology, library);
+  source->beginRun();
+  auto shapes = source->resultShapes();
+  source->endRun();
+  return shapes;
+}
+
+std::vector<ids::Shape> legacyDrcResultShapes()
+{
+  return eccdb::test::legacyIdrcResultShapes(DRCI);
+}
+
 std::vector<eccdb::test::structured::CanonicalNet> canonicalSpecialNets(const eccdb::DesignStore& design)
 {
   std::vector<eccdb::test::structured::CanonicalNet> result;
@@ -621,18 +627,18 @@ Database wrapCurrentSource()
 
 void expectWrappedEqual(Database& left, Database& right)
 {
-  const std::string mismatch = RTI.compareWrappedDatabase(left, right);
+  const std::string mismatch = eccdb::test::compareIrtWrappedDatabase(left, right);
   ASSERT_TRUE(mismatch.empty()) << mismatch;
 }
 
-std::pair<Database, Database> wrapIdbAndEntt(const std::filesystem::path& lef, const std::filesystem::path& def)
+std::pair<Database, Database> wrapIdbAndEccdb(const std::filesystem::path& lef, const std::filesystem::path& def)
 {
   eccdb::TechStore tech;
   std::unique_ptr<eccdb::LibraryStore> library;
   std::unique_ptr<eccdb::DesignStore> design;
 
   // SI2 LEF/DEF parsers are process-global. Clear leftover callback and
-  // parser state before starting the EnTT import sequence.
+  // parser state before starting the EccDB import sequence.
   static_cast<void>(LefDefParser::lefrClear());
   static_cast<void>(LefDefParser::defrClear());
   eccdb::LefTechImporter(tech).import(lef);
@@ -643,13 +649,13 @@ std::pair<Database, Database> wrapIdbAndEntt(const std::filesystem::path& lef, c
   loadIntoIdb(lef, def);
 
   Logger::initInst();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   Database idb_database = wrapCurrentSource();
-  RTI.setDesignSource(design.get(), &tech, library.get());
-  Database entt_database = wrapCurrentSource();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, design.get(), &tech, library.get());
+  Database eccdb_database = wrapCurrentSource();
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
-  return {std::move(idb_database), std::move(entt_database)};
+  return {std::move(idb_database), std::move(eccdb_database)};
 }
 
 using RoutedSegmentKey = std::tuple<std::string, int32_t, int32_t, int32_t, int32_t, int32_t, int32_t>;
@@ -756,7 +762,7 @@ RoutedSnapshot runIdbRoutingOnce(const std::filesystem::path& lef, const std::fi
                                  const std::filesystem::path& temp_directory)
 {
   loadIntoIdb(lef, def);
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   std::map<std::string, std::any> config{{"-temp_directory_path", temp_directory.string()},
                                          {"-thread_number", routingThreadNumber()},
                                          {"-output_inter_result", 0},
@@ -766,12 +772,12 @@ RoutedSnapshot runIdbRoutingOnce(const std::filesystem::path& lef, const std::fi
   RTI.runRT();
   RoutedSnapshot snapshot = captureRoutedSnapshot();
   RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
   return snapshot;
 }
 
-RoutedSnapshot runEnttRoutingOnce(const std::filesystem::path& lef, const std::filesystem::path& def,
+RoutedSnapshot runEccdbRoutingOnce(const std::filesystem::path& lef, const std::filesystem::path& def,
                                   const std::filesystem::path& temp_directory)
 {
   eccdb::TechStore tech;
@@ -783,7 +789,7 @@ RoutedSnapshot runEnttRoutingOnce(const std::filesystem::path& lef, const std::f
   auto design = std::make_unique<eccdb::DesignStore>(tech.techRegistry(), library->libraryRegistry());
   eccdb::DefDesignImporter(*design).import(def);
 
-  RTI.setDesignSource(design.get(), &tech, library.get());
+  eccdb::adapters::bindRtSource(RTI, design.get(), &tech, library.get());
   std::map<std::string, std::any> config{{"-temp_directory_path", temp_directory.string()},
                                          {"-thread_number", routingThreadNumber()},
                                          {"-output_inter_result", 0},
@@ -793,7 +799,7 @@ RoutedSnapshot runEnttRoutingOnce(const std::filesystem::path& lef, const std::f
   RTI.runRT();
   RoutedSnapshot snapshot = captureRoutedSnapshot();
   RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
   return snapshot;
 }
@@ -818,7 +824,7 @@ RoutedSnapshot runIdbRoutingAndWriteDef(const std::filesystem::path& lef, const 
                                         const std::filesystem::path& temp_directory, const std::filesystem::path& output_def)
 {
   loadIntoIdb(lef, def);
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   RTI.initRT(buildOnlyConfig(temp_directory));
   RTI.runRT();
   RoutedSnapshot snapshot = captureRoutedSnapshot();
@@ -827,19 +833,19 @@ RoutedSnapshot runIdbRoutingAndWriteDef(const std::filesystem::path& lef, const 
   if (!std::filesystem::is_regular_file(output_def) || std::filesystem::file_size(output_def) == 0u) {
     throw std::runtime_error("iDB did not write routed DEF: " + output_def.string());
   }
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
   return snapshot;
 }
 
-RoutedSnapshot runEnttRoutingAndWriteback(EnttDesignFixture& fixture, const std::filesystem::path& temp_directory)
+RoutedSnapshot runEccdbRoutingAndWriteback(EccdbDesignFixture& fixture, const std::filesystem::path& temp_directory)
 {
-  RTI.setDesignSource(&fixture.design, &fixture.technology, &fixture.library);
+  eccdb::adapters::bindRtSource(RTI, &fixture.design, &fixture.technology, &fixture.library);
   RTI.initRT(buildOnlyConfig(temp_directory));
   RTI.runRT();
   RoutedSnapshot snapshot = captureRoutedSnapshot();
   RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
   return snapshot;
 }
@@ -997,16 +1003,16 @@ BuiltOrderSnapshot runIdbBuildOnce(const std::filesystem::path& lef, const std::
                                    const std::filesystem::path& temp_directory)
 {
   loadIntoIdb(lef, def);
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   RTI.initRT(buildOnlyConfig(temp_directory));
   BuiltOrderSnapshot snapshot = captureBuiltOrder();
   RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
   return snapshot;
 }
 
-BuiltOrderSnapshot runEnttBuildOnce(const std::filesystem::path& lef, const std::filesystem::path& def,
+BuiltOrderSnapshot runEccdbBuildOnce(const std::filesystem::path& lef, const std::filesystem::path& def,
                                     const std::filesystem::path& temp_directory)
 {
   eccdb::TechStore tech;
@@ -1018,11 +1024,11 @@ BuiltOrderSnapshot runEnttBuildOnce(const std::filesystem::path& lef, const std:
   auto design = std::make_unique<eccdb::DesignStore>(tech.techRegistry(), library->libraryRegistry());
   eccdb::DefDesignImporter(*design).import(def);
 
-  RTI.setDesignSource(design.get(), &tech, library.get());
+  eccdb::adapters::bindRtSource(RTI, design.get(), &tech, library.get());
   RTI.initRT(buildOnlyConfig(temp_directory));
   BuiltOrderSnapshot snapshot = captureBuiltOrder();
   RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   dmInst->reset();
   return snapshot;
 }
@@ -1195,7 +1201,7 @@ std::pair<std::filesystem::path, std::filesystem::path> routedCaseLefDef(const I
 
 }  // namespace
 
-void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path& root, const char* skip_message)
+void compareIdbAndEccdb(const Ispd18Case& test_case, const std::filesystem::path& root, const char* skip_message)
 {
   if (root.empty()) {
     GTEST_SKIP() << skip_message;
@@ -1206,15 +1212,15 @@ void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path&
   const auto shifted_def = workspace.path(test_case.name + ".shifted.def");
   writeOriginShiftedDef(original_def, shifted_def);
 
-  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, shifted_def);
-  expectWrappedEqual(idb_database, entt_database);
+  auto [idb_database, eccdb_database] = wrapIdbAndEccdb(lef, shifted_def);
+  expectWrappedEqual(idb_database, eccdb_database);
 }
 
 class IspdRoutedWritebackDifferentialTest : public testing::TestWithParam<IspdRoutedWritebackCase>
 {
 };
 
-TEST_P(IspdRoutedWritebackDifferentialTest, NativeEnttMatchesLegacyIdbAfterRouting)
+TEST_P(IspdRoutedWritebackDifferentialTest, NativeEccdbMatchesLegacyIdbAfterRouting)
 {
   const auto& test_case = GetParam();
   const auto root = test_case.corpus == IspdCorpus::k2018 ? ispd18Source() : ispd19Source();
@@ -1228,11 +1234,11 @@ TEST_P(IspdRoutedWritebackDifferentialTest, NativeEnttMatchesLegacyIdbAfterRouti
   const auto compatible_lef = workspace.path(test_case.parameter_name + "-uniform-pitch.lef");
   const auto input_def = workspace.path(test_case.parameter_name + "-origin-zero.def");
   const auto idb_output_def = workspace.path(test_case.parameter_name + "-idb-routed.def");
-  const auto entt_output_def = workspace.path(test_case.parameter_name + "-entt-routed.def");
+  const auto eccdb_output_def = workspace.path(test_case.parameter_name + "-eccdb-routed.def");
   const auto idb_snapshot_path = workspace.path(test_case.parameter_name + "-idb.snapshot");
-  const auto entt_snapshot_path = workspace.path(test_case.parameter_name + "-entt.snapshot");
+  const auto eccdb_snapshot_path = workspace.path(test_case.parameter_name + "-eccdb.snapshot");
   const auto idb_log = workspace.path(test_case.parameter_name + "-idb.log");
-  const auto entt_log = workspace.path(test_case.parameter_name + "-entt.log");
+  const auto eccdb_log = workspace.path(test_case.parameter_name + "-eccdb.log");
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
   writeOriginShiftedDef(original_def, input_def);
 
@@ -1240,42 +1246,41 @@ TEST_P(IspdRoutedWritebackDifferentialTest, NativeEnttMatchesLegacyIdbAfterRouti
     const auto snapshot = runIdbRoutingAndWriteDef(compatible_lef, input_def, workspace.path("idb-run"), idb_output_def);
     writeRoutedSnapshot(idb_snapshot_path, snapshot);
   });
-  const pid_t entt_pid = launchRoutingWorker(entt_log, [&] {
-    EnttDesignFixture fixture(compatible_lef, input_def);
-    const auto snapshot = runEnttRoutingAndWriteback(fixture, workspace.path("entt-run"));
-    eccdb::DefDesignExporter(fixture.design).write(entt_output_def);
-    writeRoutedSnapshot(entt_snapshot_path, snapshot);
+  const pid_t eccdb_pid = launchRoutingWorker(eccdb_log, [&] {
+    EccdbDesignFixture fixture(compatible_lef, input_def);
+    const auto snapshot = runEccdbRoutingAndWriteback(fixture, workspace.path("eccdb-run"));
+    eccdb::DefDesignExporter(fixture.design).write(eccdb_output_def);
+    writeRoutedSnapshot(eccdb_snapshot_path, snapshot);
   });
 
   const int idb_status = waitRoutingWorker(idb_pid);
-  const int entt_status = waitRoutingWorker(entt_pid);
+  const int eccdb_status = waitRoutingWorker(eccdb_pid);
   ASSERT_TRUE(workerSucceeded(idb_status)) << "iDB routing worker failed; inspect " << idb_log;
-  ASSERT_TRUE(workerSucceeded(entt_status)) << "EnTT routing worker failed; inspect " << entt_log;
+  ASSERT_TRUE(workerSucceeded(eccdb_status)) << "EccDB routing worker failed; inspect " << eccdb_log;
 
   const auto idb_snapshot = readRoutedSnapshot(idb_snapshot_path);
-  const auto entt_snapshot = readRoutedSnapshot(entt_snapshot_path);
+  const auto eccdb_snapshot = readRoutedSnapshot(eccdb_snapshot_path);
   SCOPED_TRACE(test_case.parameter_name);
-  expectRoutedSnapshotsEqual(idb_snapshot, entt_snapshot);
+  expectRoutedSnapshotsEqual(idb_snapshot, eccdb_snapshot);
 
-  EnttDesignFixture input(compatible_lef, input_def);
-  EnttDesignFixture actual(compatible_lef, entt_output_def);
+  EccdbDesignFixture input(compatible_lef, input_def);
+  EccdbDesignFixture actual(compatible_lef, eccdb_output_def);
   ASSERT_EQ(actual.design.netlistStorage().instanceCount(), test_case.component_count);
   ASSERT_LE(actual.design.netlistStorage().instanceCount(), test_case.component_limit);
   EXPECT_EQ(canonicalSpecialNets(actual.design), canonicalSpecialNets(input.design));
   EXPECT_GT(actual.design.routingStorage().wireCount(), 0u);
 
-  EnttDesignFixture expected(compatible_lef, idb_output_def);
+  EccdbDesignFixture expected(compatible_lef, idb_output_def);
   // iRT does not modify design VIA definitions. The legacy iDB DEF writer does
   // not preserve their ordering and all generated-VIA metadata, so compare the
-  // routed NET references here and leave full VIA round-trip coverage to EnTT.
+  // routed NET references here and leave full VIA round-trip coverage to EccDB.
   expectWritebackSemanticsEqual(expected.design, actual.design, false);
 
-  DRCI.setDesignSource(&expected.design, &expected.technology, &expected.library);
-  const auto idb_shapes = canonicalDrcShapes(DRCI.buildResultShapeList(), enttNetNames(expected.design));
-  DRCI.setDesignSource(&actual.design, &actual.technology, &actual.library);
-  const auto entt_shapes = canonicalDrcShapes(DRCI.buildResultShapeList(), enttNetNames(actual.design));
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
-  EXPECT_EQ(entt_shapes, idb_shapes);
+  const auto idb_shapes = canonicalDrcShapes(nativeDrcResultShapes(expected.design, expected.technology, expected.library),
+                                             eccdbNetNames(expected.design));
+  const auto eccdb_shapes = canonicalDrcShapes(nativeDrcResultShapes(actual.design, actual.technology, actual.library),
+                                               eccdbNetNames(actual.design));
+  EXPECT_EQ(eccdb_shapes, idb_shapes);
 }
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1318,7 +1323,7 @@ TEST(SelfCheck, TwoIdbWrapsMatch)
   loadIntoIdb(lef, shifted_def);
 
   Logger::initInst();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   Database left = wrapCurrentSource();
   Database right = wrapCurrentSource();
   expectWrappedEqual(left, right);
@@ -1328,12 +1333,12 @@ TEST(SelfCheck, TwoIdbWrapsMatch)
   auto& net = right.get_net_list().front();
   // A derived cache difference is not an imported geometry difference.
   net.get_bounding_box().set_real_rect(PlanarRect(-10, -20, 30, 40));
-  EXPECT_TRUE(RTI.compareWrappedDatabase(left, right).empty());
+  EXPECT_TRUE(eccdb::test::compareIrtWrappedDatabase(left, right).empty());
   ASSERT_FALSE(net.get_pin_list().empty());
   auto& shapes = net.get_pin_list().front().get_routing_shape_list();
   ASSERT_FALSE(shapes.empty());
   shapes.front().set_real_ll_x(shapes.front().get_real_ll_x() + 1);
-  EXPECT_NE(RTI.compareWrappedDatabase(left, right).find("routing_shapes"), std::string::npos);
+  EXPECT_NE(eccdb::test::compareIrtWrappedDatabase(left, right).find("routing_shapes"), std::string::npos);
 }
 
 TEST(SelfCheck, RoutedBoundingBoxesSurviveSnapshotAndDetectDifferences)
@@ -1352,13 +1357,13 @@ TEST(SelfCheck, RoutedBoundingBoxesSurviveSnapshotAndDetectDifferences)
   EXPECT_NONFATAL_FAILURE(expectRoutedSnapshotsEqual(expected, actual), "net_bounding_boxes");
 }
 
-TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
+TEST(Writeback, NativeEccdbMatchesLegacyIdbDefAndRoundTrips)
 {
   TemporaryWorkspace workspace;
   const auto lef = workspace.path("writeback.lef");
   const auto input_def = workspace.path("writeback.def");
   const auto idb_output_def = workspace.path("idb-output.def");
-  const auto entt_output_def = workspace.path("entt-output.def");
+  const auto eccdb_output_def = workspace.path("eccdb-output.def");
   writeText(lef, kGeneratedViaLef);
   writeText(input_def, kWritebackDef);
 
@@ -1369,19 +1374,19 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
   ASSERT_GT(std::filesystem::file_size(idb_output_def), 0u);
   dmInst->reset();
 
-  EnttDesignFixture actual(lef, input_def);
+  EccdbDesignFixture actual(lef, input_def);
   const auto special_id = actual.design.netlistStorage().findSpecialNet("VDD");
   ASSERT_TRUE(special_id);
   const auto special_before = eccdb::test::structured::canonicalNet(actual.design, special_id);
-  runInjectedWriteback(workspace.path("entt-run"), &actual.design, &actual.technology, &actual.library);
+  runInjectedWriteback(workspace.path("eccdb-run"), &actual.design, &actual.technology, &actual.library);
 
-  EnttDesignFixture expected(lef, idb_output_def);
+  EccdbDesignFixture expected(lef, idb_output_def);
   expectWritebackSemanticsEqual(expected.design, actual.design);
   EXPECT_EQ(special_before, eccdb::test::structured::canonicalNet(actual.design, special_id));
 
-  eccdb::DefDesignExporter(actual.design).write(entt_output_def);
+  eccdb::DefDesignExporter(actual.design).write(eccdb_output_def);
   eccdb::DesignStore roundtripped(actual.technology.techRegistry(), actual.library.libraryRegistry());
-  eccdb::DefDesignImporter(roundtripped).import(entt_output_def);
+  eccdb::DefDesignImporter(roundtripped).import(eccdb_output_def);
   expectWritebackSemanticsEqual(actual.design, roundtripped);
 
   const auto first_export = eccdb::DefDesignExporter(actual.design).exportText();
@@ -1389,7 +1394,7 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
   const auto first_track_count = actual.design.floorplanStorage().trackGridCount();
   const auto first_gcell_count = actual.design.floorplanStorage().gcellGridCount();
   const auto first_statistics = actual.design.routingStorage().routingStatistics();
-  runInjectedWriteback(workspace.path("entt-repeat-run"), &actual.design, &actual.technology, &actual.library);
+  runInjectedWriteback(workspace.path("eccdb-repeat-run"), &actual.design, &actual.technology, &actual.library);
   const auto second_statistics = actual.design.routingStorage().routingStatistics();
   EXPECT_EQ(actual.design.routingStorage().wireCount(), first_wire_count);
   EXPECT_EQ(actual.design.floorplanStorage().trackGridCount(), first_track_count);
@@ -1397,13 +1402,13 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
   EXPECT_EQ(eccdb::DefDesignExporter(actual.design).exportText(), first_export);
   EXPECT_EQ(special_before, eccdb::test::structured::canonicalNet(actual.design, special_id));
   expectWritebackSemanticsEqual(expected.design, actual.design);
-  std::cout << "[EnTT writeback routing] paths=" << first_statistics.paths.count << "->" << second_statistics.paths.count
+  std::cout << "[EccDB writeback routing] paths=" << first_statistics.paths.count << "->" << second_statistics.paths.count
             << " points=" << first_statistics.points.count << "->" << second_statistics.points.count << " vias="
             << first_statistics.vias.count << "->" << second_statistics.vias.count
             << " rectangles=" << first_statistics.rectangles.count << "->" << second_statistics.rectangles.count << '\n';
 
   loadIntoIdb(lef, idb_output_def);
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
   const auto idb_names = [&]() {
     std::vector<std::string> names;
     auto* idb_design = dmInst->get_idb_def_service()->get_design();
@@ -1415,15 +1420,14 @@ TEST(Writeback, NativeEnttMatchesLegacyIdbDefAndRoundTrips)
     }
     return names;
   }();
-  const auto idb_shapes = canonicalDrcShapes(DRCI.buildResultShapeList(), idb_names);
-  DRCI.setDesignSource(&actual.design, &actual.technology, &actual.library);
-  const auto entt_shapes = canonicalDrcShapes(DRCI.buildResultShapeList(), enttNetNames(actual.design));
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  const auto idb_shapes = canonicalDrcShapes(legacyDrcResultShapes(), idb_names);
+  const auto eccdb_shapes = canonicalDrcShapes(nativeDrcResultShapes(actual.design, actual.technology, actual.library),
+                                               eccdbNetNames(actual.design));
   dmInst->reset();
-  EXPECT_EQ(entt_shapes, idb_shapes);
+  EXPECT_EQ(eccdb_shapes, idb_shapes);
 }
 
-TEST(Writeback, NativeEnttResolvesRepeatedOutputViasAsDesignVias)
+TEST(Writeback, NativeEccdbResolvesRepeatedOutputViasAsDesignVias)
 {
   TemporaryWorkspace workspace;
   const auto lef = workspace.path("design-via-writeback.lef");
@@ -1431,14 +1435,14 @@ TEST(Writeback, NativeEnttResolvesRepeatedOutputViasAsDesignVias)
   writeText(lef, kGeneratedViaLef);
   writeText(input_def, writebackDefWithDesignVia());
 
-  EnttDesignFixture actual(lef, input_def);
+  EccdbDesignFixture actual(lef, input_def);
   auto& routing = actual.design.routingStorage();
   const auto design_via = routing.findVia("DESIGN12");
   ASSERT_TRUE(design_via);
 
   Logger::initInst();
-  RTI.setDesignSource(&actual.design, &actual.technology, &actual.library);
-  RTI.initRT(buildOnlyConfig(workspace.path("entt-run")));
+  eccdb::adapters::bindRtSource(RTI, &actual.design, &actual.technology, &actual.library);
+  RTI.initRT(buildOnlyConfig(workspace.path("eccdb-run")));
 
   const int32_t a_net = rtNetIndex("a_net");
   const int32_t m1 = rtRoutingLayerIndex("M1");
@@ -1453,7 +1457,7 @@ TEST(Writeback, NativeEnttResolvesRepeatedOutputViasAsDesignVias)
   RTDM.getDatabase().get_net_detailed_result_map()[a_net].emplace_back(LayerCoord{600, 200, m1},
                                                                          LayerCoord{600, 200, m2});
   RTI.destroyRT();
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
 
   const auto routed_net = actual.design.netlistStorage().findRegularNet("a_net");
   ASSERT_TRUE(routed_net);
@@ -1473,7 +1477,7 @@ TEST(Writeback, NativeEnttResolvesRepeatedOutputViasAsDesignVias)
   EXPECT_EQ(via_count, 2u);
 }
 
-TEST(Writeback, NativeEnttPreservesUnreportedRegularNetAndBorrowsContext)
+TEST(Writeback, NativeEccdbPreservesUnreportedRegularNetAndBorrowsContext)
 {
   TemporaryWorkspace workspace;
   const auto lef = workspace.path("preserve-unreported.lef");
@@ -1481,7 +1485,7 @@ TEST(Writeback, NativeEnttPreservesUnreportedRegularNetAndBorrowsContext)
   writeText(lef, kGeneratedViaLef);
   writeText(input_def, kWritebackDef);
 
-  EnttDesignFixture actual(lef, input_def);
+  EccdbDesignFixture actual(lef, input_def);
   const auto untouched = actual.design.netlistStorage().findRegularNet("z_net");
   ASSERT_TRUE(untouched);
   const auto before = eccdb::test::structured::canonicalNet(actual.design, untouched);
@@ -1490,14 +1494,14 @@ TEST(Writeback, NativeEnttPreservesUnreportedRegularNetAndBorrowsContext)
 
   // Inject only a_net.  z_net already has a routed Wire in the input DEF and
   // must not be cleared merely because iRT reported no detailed result for it.
-  runInjectedWriteback(workspace.path("entt-run"), &actual.design, &actual.technology, &actual.library, &context,
+  runInjectedWriteback(workspace.path("eccdb-run"), &actual.design, &actual.technology, &actual.library, &context,
                        false);
 
   EXPECT_EQ(eccdb::test::structured::canonicalNet(actual.design, untouched), before);
   EXPECT_GT(context.revision(), before_revision);
 }
 
-TEST(Writeback, NativeEnttAbortDoesNotPublishPartialResultsAndCanRestart)
+TEST(Writeback, NativeEccdbAbortDoesNotPublishPartialResultsAndCanRestart)
 {
   TemporaryWorkspace workspace;
   const auto lef = workspace.path("abort-writeback.lef");
@@ -1505,12 +1509,12 @@ TEST(Writeback, NativeEnttAbortDoesNotPublishPartialResultsAndCanRestart)
   writeText(lef, kGeneratedViaLef);
   writeText(input_def, kWritebackDef);
 
-  EnttDesignFixture actual(lef, input_def);
+  EccdbDesignFixture actual(lef, input_def);
   eccdb::DatabaseContext context(actual.technology, actual.library, actual.design);
   const auto before_revision = context.revision();
   const auto before_export = eccdb::DefDesignExporter(actual.design).exportText();
 
-  runInjectedWriteback(workspace.path("entt-abort"), &actual.design, &actual.technology, &actual.library, &context,
+  runInjectedWriteback(workspace.path("eccdb-abort"), &actual.design, &actual.technology, &actual.library, &context,
                        true, false);
 
   EXPECT_EQ(context.revision(), before_revision);
@@ -1518,8 +1522,56 @@ TEST(Writeback, NativeEnttAbortDoesNotPublishPartialResultsAndCanRestart)
 
   // The native runner detaches after abort. Reattach the same borrowed context
   // for a subsequent invocation and verify normal output is still possible.
-  runInjectedWriteback(workspace.path("entt-after-abort"), &actual.design, &actual.technology, &actual.library, &context);
+  runInjectedWriteback(workspace.path("eccdb-after-abort"), &actual.design, &actual.technology, &actual.library, &context);
   EXPECT_GT(context.revision(), before_revision);
+}
+
+TEST(SourceLifecycle, DetachReturnsToLegacyIdbInput)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("detach-source.lef");
+  const auto native_def = workspace.path("detach-native.def");
+  const auto legacy_def = workspace.path("detach-legacy.def");
+  writeText(lef, kGeneratedViaLef);
+  writeText(native_def, kWritebackDef);
+  writeText(legacy_def, kGeneratedViaDef);
+
+  EccdbDesignFixture native_fixture(lef, native_def);
+  loadIntoIdb(lef, legacy_def);
+
+  Logger::initInst();
+  eccdb::adapters::bindRtSource(RTI, &native_fixture.design, &native_fixture.technology, &native_fixture.library);
+  EXPECT_THROW(eccdb::adapters::bindRtSource(RTI, &native_fixture.design, nullptr, &native_fixture.library), std::invalid_argument);
+  Database native_database = wrapCurrentSource();
+  RTI.initRT(buildOnlyConfig(workspace.path("native-idrc")));
+  RTI.initIDRC();
+  const auto native_drc_shapes = nativeDrcResultShapes(native_fixture.design, native_fixture.technology, native_fixture.library);
+  RTI.destroyIDRC();
+  RTI.abortRT();
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
+  Logger::initInst();
+  Database legacy_database = wrapCurrentSource();
+  RTI.initRT(buildOnlyConfig(workspace.path("legacy-idrc")));
+  RTI.initIDRC();
+  const auto legacy_drc_shapes = legacyDrcResultShapes();
+  RTI.destroyIDRC();
+  RTI.abortRT();
+  dmInst->reset();
+
+  ASSERT_EQ(native_database.get_design_name(), "irt_writeback");
+  ASSERT_EQ(legacy_database.get_design_name(), "generated_via_wrap");
+  EXPECT_EQ(native_database.get_net_list().size(), 2u);
+  EXPECT_TRUE(legacy_database.get_net_list().empty());
+  const auto cut_count = [](const auto& shapes) {
+    return std::count_if(shapes.begin(), shapes.end(), [](const auto& shape) { return !shape.is_routing; });
+  };
+  // The native fixture has two signal segments and a one-cut PG via. The
+  // legacy fixture contains only a generated PG via with ROWCOL 2 3. Their
+  // distinct geometry verifies that detaching RT also switches iDRC's source.
+  EXPECT_EQ(native_drc_shapes.size(), 5u);
+  EXPECT_EQ(cut_count(native_drc_shapes), 1);
+  EXPECT_EQ(legacy_drc_shapes.size(), 8u);
+  EXPECT_EQ(cut_count(legacy_drc_shapes), 6);
 }
 
 TEST(Diagnostic, DISABLED_Ispd19Test2BuildOrder)
@@ -1535,8 +1587,8 @@ TEST(Diagnostic, DISABLED_Ispd19Test2BuildOrder)
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
 
   const auto idb = runIdbBuildOnce(compatible_lef, def, workspace.path("idb-build"));
-  const auto entt = runEnttBuildOnce(compatible_lef, def, workspace.path("entt-build"));
-  const std::string mismatch = compareBuiltOrder(idb, entt);
+  const auto eccdb = runEccdbBuildOnce(compatible_lef, def, workspace.path("eccdb-build"));
+  const std::string mismatch = compareBuiltOrder(idb, eccdb);
   std::cout << "[BUILD_ORDER_DIAGNOSTIC]\n" << (mismatch.empty() ? "equal\n" : mismatch);
   SUCCEED();
 }
@@ -1559,7 +1611,7 @@ TEST(RunSnapshot, Ispd18Sample3IdbOnce)
   writeRoutedSnapshot(output, snapshot);
 }
 
-TEST(RunSnapshot, Ispd18Sample3EnttOnce)
+TEST(RunSnapshot, Ispd18Sample3EccdbOnce)
 {
   const auto root = ispd18Source();
   if (root.empty()) {
@@ -1569,7 +1621,7 @@ TEST(RunSnapshot, Ispd18Sample3EnttOnce)
   const auto [original_lef, def] = ispd18LefDef(root, {"ispd18_sample3"});
   const auto compatible_lef = workspace.path("sample3-uniform-pitch.lef");
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
-  const auto snapshot = runEnttRoutingOnce(compatible_lef, def, workspace.path("run"));
+  const auto snapshot = runEccdbRoutingOnce(compatible_lef, def, workspace.path("run"));
   const auto output = envPath("ECCDB_RT_SNAPSHOT_OUT");
   if (output.empty()) {
     GTEST_FAIL() << "set ECCDB_RT_SNAPSHOT_OUT to the snapshot output path";
@@ -1613,7 +1665,7 @@ TEST(RunSnapshot, Ispd19Test2IdbOnce)
   writeRoutedSnapshot(output, snapshot);
 }
 
-TEST(RunSnapshot, Ispd19Test2EnttOnce)
+TEST(RunSnapshot, Ispd19Test2EccdbOnce)
 {
   const auto root = ispd19Source();
   if (root.empty()) {
@@ -1623,7 +1675,7 @@ TEST(RunSnapshot, Ispd19Test2EnttOnce)
   const auto [original_lef, def] = ispd19LefDef(root, "ispd19_test2");
   const auto compatible_lef = workspace.path("test2-uniform-pitch.lef");
   writeUniformRoutingGridLef(original_lef, compatible_lef, "0.100000", "0.050000");
-  const auto snapshot = runEnttRoutingOnce(compatible_lef, def, workspace.path("run"));
+  const auto snapshot = runEccdbRoutingOnce(compatible_lef, def, workspace.path("run"));
   const auto output = envPath("ECCDB_RT_SNAPSHOT_OUT");
   if (output.empty()) {
     GTEST_FAIL() << "set ECCDB_RT_SNAPSHOT_OUT to the snapshot output path";
@@ -1639,12 +1691,125 @@ TEST(Wrap, GeneratedDefViaMaterializesAtSpecialNetPoint)
   writeText(lef, kGeneratedViaLef);
   writeText(def, kGeneratedViaDef);
 
-  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
+  auto [idb_database, eccdb_database] = wrapIdbAndEccdb(lef, def);
   EXPECT_EQ(idb_database.get_routing_obstacle_list().size(), 2u);
-  EXPECT_EQ(entt_database.get_routing_obstacle_list().size(), 2u);
+  EXPECT_EQ(eccdb_database.get_routing_obstacle_list().size(), 2u);
   EXPECT_EQ(idb_database.get_cut_obstacle_list().size(), 6u);
-  EXPECT_EQ(entt_database.get_cut_obstacle_list().size(), 6u);
-  expectWrappedEqual(idb_database, entt_database);
+  EXPECT_EQ(eccdb_database.get_cut_obstacle_list().size(), 6u);
+  expectWrappedEqual(idb_database, eccdb_database);
+}
+
+TEST(ViaMasterOrdering, ComparatorKeepsNameOnlyTiesEquivalent)
+{
+  const auto make_via = [](std::string_view name, int32_t half_span) {
+    ViaMaster via;
+    via.set_via_name(std::string{name});
+    via.set_below_enclosure(LayerRect{-half_span, -half_span, half_span, half_span, 0});
+    via.set_below_direction(Direction::kHorizontal);
+    via.set_above_enclosure(LayerRect{-half_span, -half_span, half_span, half_span, 1});
+    via.set_above_direction(Direction::kVertical);
+    return via;
+  };
+
+  ViaMaster via_z = make_via("VIA_Z", 80);
+  ViaMaster via_a = make_via("VIA_A", 80);
+  ViaMaster via_narrow = make_via("VIA_NARROW", 40);
+  std::vector<Direction> routing_directions{Direction::kHorizontal, Direction::kVertical};
+  CmpViaMaster compare;
+
+  // The shared comparator keeps physical ties equivalent.  Naming is an
+  // EccDB-adaptor input-order concern, not a router-wide priority.
+  EXPECT_FALSE(compare(via_z, via_a, routing_directions));
+  EXPECT_FALSE(compare(via_a, via_z, routing_directions));
+  EXPECT_TRUE(compare(via_narrow, via_z, routing_directions));
+  EXPECT_FALSE(compare(via_z, via_narrow, routing_directions));
+}
+
+TEST(Wrap, NativeEccdbSortsDefaultViaMaterializationWithoutChangingGeometry)
+{
+  using RectKey = std::array<int32_t, 4>;
+  using ViaGeometryKey = std::tuple<RectKey, RectKey, std::vector<RectKey>>;
+
+  const auto rect_key = [](const PlanarRect& rect) {
+    return RectKey{rect.get_ll_x(), rect.get_ll_y(), rect.get_ur_x(), rect.get_ur_y()};
+  };
+  const auto first_layer_names = [](Database& database) {
+    const auto& layer_vias = database.get_layer_via_master_list();
+    if (layer_vias.empty()) {
+      return std::vector<std::string>{};
+    }
+    std::vector<std::string> names;
+    names.reserve(layer_vias.front().size());
+    for (const ViaMaster& via : layer_vias.front()) {
+      names.push_back(via.get_via_name());
+    }
+    return names;
+  };
+  const auto first_layer_geometries = [&rect_key](Database& database) {
+    std::map<std::string, ViaGeometryKey> geometries;
+    auto& layer_vias = database.get_layer_via_master_list();
+    if (layer_vias.empty()) {
+      return geometries;
+    }
+    for (ViaMaster& via : layer_vias.front()) {
+      std::vector<RectKey> cuts;
+      cuts.reserve(via.get_cut_shape_list().size());
+      for (const PlanarRect& cut : via.get_cut_shape_list()) {
+        cuts.push_back(rect_key(cut));
+      }
+      geometries.emplace(via.get_via_name(),
+                         std::make_tuple(rect_key(via.get_below_enclosure()), rect_key(via.get_above_enclosure()), std::move(cuts)));
+    }
+    return geometries;
+  };
+  const auto lef_with_default_vias = [](std::string_view first_name, std::string_view second_name) {
+    std::string lef_text{kGeneratedViaLef};
+    constexpr std::string_view kInsertionPoint{"VIARULE GEN12 GENERATE"};
+    const auto insertion = lef_text.find(kInsertionPoint);
+    if (insertion == std::string::npos) {
+      throw std::runtime_error("missing generated-via insertion point");
+    }
+    const auto make_via = [](std::string_view name) {
+      return "VIA " + std::string{name} + " DEFAULT\n"
+             "  LAYER M1 ;\n"
+             "    RECT -0.08 -0.08 0.08 0.08 ;\n"
+             "  LAYER V1 ;\n"
+             "    RECT -0.04 -0.04 0.04 0.04 ;\n"
+             "  LAYER M2 ;\n"
+             "    RECT -0.08 -0.08 0.08 0.08 ;\n"
+             "END "
+             + std::string{name} + "\n\n";
+    };
+    lef_text.insert(insertion, make_via(first_name) + make_via(second_name));
+    return lef_text;
+  };
+
+  TemporaryWorkspace workspace;
+  const std::array<std::array<std::string_view, 2>, 2> source_orders{
+      std::array<std::string_view, 2>{"VIA_Z", "VIA_A"}, std::array<std::string_view, 2>{"VIA_A", "VIA_Z"}};
+  const std::vector<std::string> expected_native_order{"VIA12", "VIA_A", "VIA_Z"};
+
+  for (std::size_t index = 0; index < source_orders.size(); ++index) {
+    const auto lef = workspace.path("default-via-order-" + std::to_string(index) + ".lef");
+    const auto def = workspace.path("default-via-order-" + std::to_string(index) + ".def");
+    writeText(lef, lef_with_default_vias(source_orders[index][0], source_orders[index][1]));
+    writeText(def, kGeneratedViaDef);
+
+    EccdbDesignFixture fixture(lef, def);
+    Logger::initInst();
+    eccdb::adapters::bindRtSource(RTI, &fixture.design, &fixture.technology, &fixture.library);
+    Database native_database = wrapCurrentSource();
+    eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
+
+    loadIntoIdb(lef, def);
+    Database legacy_database = wrapCurrentSource();
+    dmInst->reset();
+
+    EXPECT_EQ(first_layer_names(native_database), expected_native_order);
+    EXPECT_EQ(first_layer_names(legacy_database),
+              (std::vector<std::string>{"VIA12", std::string{source_orders[index][0]}, std::string{source_orders[index][1]}}));
+    EXPECT_EQ(first_layer_geometries(native_database), first_layer_geometries(legacy_database));
+  }
 }
 
 TEST(Wrap, GeneratedDefViaAppliesOriginAndOffset)
@@ -1659,7 +1824,7 @@ TEST(Wrap, GeneratedDefViaAppliesOriginAndOffset)
   def_text.insert(row_col + std::string_view{"  + ROWCOL 2 3\n"}.size(), "  + ORIGIN 10 -20\n  + OFFSET 3 4 -5 -6\n");
   writeText(def, def_text);
 
-  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
+  auto [idb_database, eccdb_database] = wrapIdbAndEccdb(lef, def);
   const auto has_routing_rect = [](Database& database, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
     return std::any_of(database.get_routing_obstacle_list().begin(), database.get_routing_obstacle_list().end(),
                        [=](const auto& obstacle) {
@@ -1672,9 +1837,9 @@ TEST(Wrap, GeneratedDefViaAppliesOriginAndOffset)
   // to only the bottom and top routing metal enclosures.
   EXPECT_TRUE(has_routing_rect(idb_database, 813, 809, 1213, 1159));
   EXPECT_TRUE(has_routing_rect(idb_database, 785, 779, 1225, 1169));
-  EXPECT_TRUE(has_routing_rect(entt_database, 813, 809, 1213, 1159));
-  EXPECT_TRUE(has_routing_rect(entt_database, 785, 779, 1225, 1169));
-  expectWrappedEqual(idb_database, entt_database);
+  EXPECT_TRUE(has_routing_rect(eccdb_database, 813, 809, 1213, 1159));
+  EXPECT_TRUE(has_routing_rect(eccdb_database, 785, 779, 1225, 1169));
+  expectWrappedEqual(idb_database, eccdb_database);
 }
 
 TEST(Wrap, OmittedRoutingAreaUsesLegacySentinel)
@@ -1690,11 +1855,11 @@ TEST(Wrap, OmittedRoutingAreaUsesLegacySentinel)
   writeText(lef, lef_text);
   writeText(def, kGeneratedViaDef);
 
-  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
-  expectWrappedEqual(idb_database, entt_database);
+  auto [idb_database, eccdb_database] = wrapIdbAndEccdb(lef, def);
+  expectWrappedEqual(idb_database, eccdb_database);
 }
 
-TEST(Wrap, NativeEnttIncludesRoutingBlockage)
+TEST(Wrap, NativeEccdbIncludesRoutingBlockage)
 {
   TemporaryWorkspace workspace;
   const auto lef = workspace.path("routing-blockage.lef");
@@ -1706,10 +1871,10 @@ TEST(Wrap, NativeEnttIncludesRoutingBlockage)
   def_text.insert(end_design, "BLOCKAGES 1 ;\n- LAYER M1 RECT ( 1400 1400 ) ( 1600 1600 ) ;\nEND BLOCKAGES\n");
   writeText(def, def_text);
 
-  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
+  auto [idb_database, eccdb_database] = wrapIdbAndEccdb(lef, def);
   EXPECT_EQ(idb_database.get_routing_obstacle_list().size(), 3u);
-  EXPECT_EQ(entt_database.get_routing_obstacle_list().size(), 3u);
-  expectWrappedEqual(idb_database, entt_database);
+  EXPECT_EQ(eccdb_database.get_routing_obstacle_list().size(), 3u);
+  expectWrappedEqual(idb_database, eccdb_database);
 }
 
 TEST(Writeback, IdbGeneratedViaPreservesOriginAndOffset)
@@ -1732,7 +1897,7 @@ TEST(Writeback, IdbGeneratedViaPreservesOriginAndOffset)
   EXPECT_NE(output_text.find("+ OFFSET 3 4 -5 -6"), std::string::npos);
   dmInst->reset();
 
-  auto [idb_roundtrip, entt_roundtrip] = wrapIdbAndEntt(lef, output);
+  auto [idb_roundtrip, eccdb_roundtrip] = wrapIdbAndEccdb(lef, output);
   const auto has_routing_rect = [](Database& database, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
     return std::any_of(database.get_routing_obstacle_list().begin(), database.get_routing_obstacle_list().end(),
                        [=](const auto& obstacle) {
@@ -1742,7 +1907,7 @@ TEST(Writeback, IdbGeneratedViaPreservesOriginAndOffset)
   };
   EXPECT_TRUE(has_routing_rect(idb_roundtrip, 813, 809, 1213, 1159));
   EXPECT_TRUE(has_routing_rect(idb_roundtrip, 785, 779, 1225, 1169));
-  expectWrappedEqual(idb_roundtrip, entt_roundtrip);
+  expectWrappedEqual(idb_roundtrip, eccdb_roundtrip);
 }
 
 TEST(Writeback, IdbGeneratedViaExplicitZeroUsesEquivalentDefaults)
@@ -1768,7 +1933,7 @@ TEST(Writeback, IdbGeneratedViaExplicitZeroUsesEquivalentDefaults)
   EXPECT_EQ(output_text.find("+ OFFSET 0 0 0 0"), std::string::npos);
   dmInst->reset();
 
-  auto [idb_roundtrip, entt_roundtrip] = wrapIdbAndEntt(lef, output);
+  auto [idb_roundtrip, eccdb_roundtrip] = wrapIdbAndEccdb(lef, output);
   const auto has_routing_rect = [](Database& database, int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
     return std::any_of(database.get_routing_obstacle_list().begin(), database.get_routing_obstacle_list().end(),
                        [=](const auto& obstacle) {
@@ -1778,7 +1943,7 @@ TEST(Writeback, IdbGeneratedViaExplicitZeroUsesEquivalentDefaults)
   };
   EXPECT_TRUE(has_routing_rect(idb_roundtrip, 800, 825, 1200, 1175));
   EXPECT_TRUE(has_routing_rect(idb_roundtrip, 780, 805, 1220, 1195));
-  expectWrappedEqual(idb_roundtrip, entt_roundtrip);
+  expectWrappedEqual(idb_roundtrip, eccdb_roundtrip);
 }
 
 TEST(Wrap, ExternalLefDef)
@@ -1792,78 +1957,78 @@ TEST(Wrap, ExternalLefDef)
     throw std::runtime_error("missing external wrapper differential LEF/DEF");
   }
 
-  auto [idb_database, entt_database] = wrapIdbAndEntt(lef, def);
-  expectWrappedEqual(idb_database, entt_database);
+  auto [idb_database, eccdb_database] = wrapIdbAndEccdb(lef, def);
+  expectWrappedEqual(idb_database, eccdb_database);
 }
 
-TEST(Wrap, Ispd18Sample) { compareIdbAndEntt({"ispd18_sample"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Sample2) { compareIdbAndEntt({"ispd18_sample2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Sample3) { compareIdbAndEntt({"ispd18_sample3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test1) { compareIdbAndEntt({"ispd18_test1"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test2) { compareIdbAndEntt({"ispd18_test2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test3) { compareIdbAndEntt({"ispd18_test3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test4) { compareIdbAndEntt({"ispd18_test4"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test5) { compareIdbAndEntt({"ispd18_test5"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test6) { compareIdbAndEntt({"ispd18_test6"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test7) { compareIdbAndEntt({"ispd18_test7"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test8) { compareIdbAndEntt({"ispd18_test8"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test9) { compareIdbAndEntt({"ispd18_test9"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test10) { compareIdbAndEntt({"ispd18_test10"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Sample) { compareIdbAndEccdb({"ispd18_sample"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Sample2) { compareIdbAndEccdb({"ispd18_sample2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Sample3) { compareIdbAndEccdb({"ispd18_sample3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test1) { compareIdbAndEccdb({"ispd18_test1"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test2) { compareIdbAndEccdb({"ispd18_test2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test3) { compareIdbAndEccdb({"ispd18_test3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test4) { compareIdbAndEccdb({"ispd18_test4"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test5) { compareIdbAndEccdb({"ispd18_test5"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test6) { compareIdbAndEccdb({"ispd18_test6"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test7) { compareIdbAndEccdb({"ispd18_test7"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test8) { compareIdbAndEccdb({"ispd18_test8"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test9) { compareIdbAndEccdb({"ispd18_test9"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test10) { compareIdbAndEccdb({"ispd18_test10"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd19Sample)
 {
-  compareIdbAndEntt({"ispd19_sample"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Sample2)
 {
-  compareIdbAndEntt({"ispd19_sample2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Sample3)
 {
-  compareIdbAndEntt({"ispd19_sample3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Sample4)
 {
-  compareIdbAndEntt({"ispd19_sample4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test1)
 {
-  compareIdbAndEntt({"ispd19_test1"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test1"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test2)
 {
-  compareIdbAndEntt({"ispd19_test2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test3)
 {
-  compareIdbAndEntt({"ispd19_test3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test4)
 {
-  compareIdbAndEntt({"ispd19_test4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test5)
 {
-  compareIdbAndEntt({"ispd19_test5"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test5"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test6)
 {
-  compareIdbAndEntt({"ispd19_test6"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test6"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test7)
 {
-  compareIdbAndEntt({"ispd19_test7"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test7"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test8)
 {
-  compareIdbAndEntt({"ispd19_test8"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test8"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test9)
 {
-  compareIdbAndEntt({"ispd19_test9"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test9"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test10)
 {
-  compareIdbAndEntt({"ispd19_test10"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test10"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 
 }  // namespace irt

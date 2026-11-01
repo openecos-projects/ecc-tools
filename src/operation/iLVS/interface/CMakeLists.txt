@@ -8,14 +8,12 @@ endif()
 
 add_library(ilvs_interface
     ${ILVS_INTERFACE}/LVSInterface.cpp
-    ${CMAKE_SOURCE_DIR}/src/database/eccdb/adapters/ilvs/LVSInterfaceEccdb.cpp
 )
 
 target_link_libraries(ilvs_interface
     PRIVATE
     ilvs_source
     idm
-    eccdb_core
 )
 
 target_include_directories(ilvs_interface

@@ -27,7 +27,9 @@
 #include <string>
 #include <vector>
 
-#include "stage/StageSummary.hh"
+namespace icts {
+struct SynthesisTraceStatusRecord;
+}
 
 namespace icts {
 

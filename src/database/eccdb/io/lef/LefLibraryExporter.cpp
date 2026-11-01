@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "lef/LefLibraryExporter.h"
 
@@ -27,7 +12,10 @@
 #include <vector>
 
 #include "lef/LefExportFormat.h"
+#include "antenna/AntennaService.h"
 #include "library/LibraryStore.h"
+#include "tech/common/AntennaRuleTypes.h"
+#include "library/master_term/model/MasterTermComponents.h"
 #include "tech/TechStore.h"
 
 namespace eccdb {
@@ -185,6 +173,37 @@ std::string_view portClassName(LibraryMasterPortClass value)
   throw std::invalid_argument("PORT has no class");
 }
 
+std::string_view antennaMetricName(AntennaMetric metric)
+{
+  switch (metric) {
+    case AntennaMetric::kSize:
+      return "ANTENNASIZE";
+    case AntennaMetric::kMetalArea:
+      return "ANTENNAMETALAREA";
+    case AntennaMetric::kMetalLength:
+      return "ANTENNAMETALLENGTH";
+    case AntennaMetric::kGateArea:
+      return "ANTENNAGATEAREA";
+    case AntennaMetric::kDiffArea:
+      return "ANTENNADIFFAREA";
+    case AntennaMetric::kPartialMetalArea:
+      return "ANTENNAPARTIALMETALAREA";
+    case AntennaMetric::kPartialMetalSideArea:
+      return "ANTENNAPARTIALMETALSIDEAREA";
+    case AntennaMetric::kPartialCutArea:
+      return "ANTENNAPARTIALCUTAREA";
+    case AntennaMetric::kMaxAreaCar:
+      return "ANTENNAMAXAREACAR";
+    case AntennaMetric::kMaxSideAreaCar:
+      return "ANTENNAMAXSIDEAREACAR";
+    case AntennaMetric::kMaxCutCar:
+      return "ANTENNAMAXCUTCAR";
+    default:
+      break;
+  }
+  throw std::invalid_argument("unsupported PIN antenna metric for LEF export");
+}
+
 class LibraryWriter
 {
  public:
@@ -322,10 +341,57 @@ class LibraryWriter
     if (term.shape != LibraryMasterTermShape::kNone) {
       _output << "    SHAPE " << termShapeName(term.shape) << " ;\n";
     }
+    AntennaService antenna_service(_library);
+    if (const auto* antenna = antenna_service.masterTermAntenna(id); antenna != nullptr) {
+      writeAntenna(*antenna);
+    }
     for (const auto port : _library.masterPortStorage().masterPorts(id)) {
       writePort(_library.masterPortStorage().masterPort(port));
     }
     _output << "  END " << term.name << "\n";
+  }
+
+  void writeAntennaValue(const AntennaValue& value, std::string_view indent)
+  {
+    _output << indent << antennaMetricName(value.metric) << ' ' << value.value << " ;\n";
+  }
+
+  void writeAntennaLayerValue(const AntennaLayerValue& value, std::string_view indent)
+  {
+    _output << indent << antennaMetricName(value.metric) << ' ' << value.value;
+    if (!value.layer.empty()) {
+      _output << " LAYER " << value.layer;
+    }
+    _output << " ;\n";
+  }
+
+  void writeAntennaModel(const AntennaModel& model, std::string_view indent)
+  {
+    if (!model.oxide.empty()) {
+      _output << indent << "ANTENNAMODEL " << model.oxide << " ;\n";
+    }
+    for (const auto& value : model.values) {
+      writeAntennaValue(value, indent);
+    }
+    for (const auto& value : model.layer_values) {
+      writeAntennaLayerValue(value, indent);
+    }
+    // PWL data belongs to routing/cut-layer antenna rules, not MACRO PIN
+    // declarations.  Keep the component lossless in memory, but do not emit
+    // invalid PIN syntax here.
+  }
+
+  void writeAntenna(const LibraryMasterTermAntenna& antenna)
+  {
+    for (const auto& value : antenna.values) {
+      writeAntennaValue(value, "    ");
+    }
+    for (const auto& value : antenna.layer_values) {
+      writeAntennaLayerValue(value, "    ");
+    }
+    for (const auto& model : antenna.models) {
+      writeAntennaModel(model, "    ");
+    }
   }
 
   void writePort(const LibraryMasterPort& port)

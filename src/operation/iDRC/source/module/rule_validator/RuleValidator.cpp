@@ -275,12 +275,13 @@ using MetalShortNetPolysetMap = std::map<int32_t, std::map<int32_t, GTLPolySetIn
 using MetalShortObsPolysetMap = std::map<int32_t, GTLPolySetInt>;
 
 void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* drc_shape, bool is_env_shape);
-void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape);
+void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets,
+                              DRCShape* drc_shape, bool is_env_shape);
 void prepareRoutingNet(int32_t net_idx, RVRoutingNet& routing_net, RVLayerData& rv_layer_data,
                        std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs, bool need_polygon_only);
 void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std::pair<GTLRectInt, int32_t>>& env_rect_rtree_inputs);
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
-                                   MetalShortObsPolysetMap& obs_polysets);
+                                   MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets);
 
 }  // namespace
 
@@ -293,16 +294,17 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
   layer_data.clear();
   MetalShortNetPolysetMap metal_short_metal_polysets;
   MetalShortObsPolysetMap metal_short_obs_polysets;
+  MetalShortNetPolysetMap metal_short_fixed_polysets;
   for (DRCShape* drc_shape : rv_cluster.get_drc_env_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, true);
     if (need_metal_short) {
-      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, metal_short_fixed_polysets, drc_shape, true);
     }
   }
   for (DRCShape* drc_shape : rv_cluster.get_drc_result_shape_list()) {
     addShapeToLayerData(layer_data, drc_shape, false);
     if (need_metal_short) {
-      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, drc_shape);
+      addShapeToMetalShortData(metal_short_metal_polysets, metal_short_obs_polysets, metal_short_fixed_polysets, drc_shape, false);
     }
   }
 
@@ -317,141 +319,13 @@ void RuleValidator::prepareRVCluster(RVCluster& rv_cluster)
     std::vector<std::pair<GTLRectInt, int32_t>> env_rect_rtree_inputs;
     env_rect_rtree_inputs.reserve(env_rect_count);
     for (auto& [net_idx, routing_net] : rv_layer_data.nets) {
-#if 0
-      std::vector<BoundaryData> env_boundary_pool;
-      bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> env_boundary_rtree;
-      const GTLPolySetInt* env_polyset = nullptr;
-      GTLPolySetInt delta_polyset;
-      DeltaRectRTree delta_rect_rtree;
-      bool has_delta_geometry = false;
-      {
-        auto layer_env_it = env_routing_polysets.find(layer_idx);
-        if (layer_env_it != env_routing_polysets.end()) {
-          auto net_env_it = layer_env_it->second.find(net_idx);
-          if (net_env_it != layer_env_it->second.end()) {
-            env_polyset = &net_env_it->second;
-            delta_polyset = routing_net.polyset;
-            delta_polyset -= *env_polyset;
-            has_delta_geometry = !gtl::empty(delta_polyset);
-            if (has_delta_geometry) {
-              std::vector<GTLRectInt> delta_rect_list;
-              gtl::get_max_rectangles(delta_rect_list, delta_polyset);
-              delta_rect_rtree = DeltaRectRTree(delta_rect_list);
-            }
-          }
-        }
-      }
-
-      auto build_env_boundary_rtree = [&]() {
-        if (env_polyset == nullptr || !has_delta_geometry || !env_boundary_rtree.empty()) {
-          return;
-        }
-
-        std::vector<std::pair<GTLRectInt, int32_t>> env_boundary_rtree_inputs;
-        std::vector<GTLHolePolyInt> env_hole_poly_list;
-        env_polyset->get(env_hole_poly_list);
-        for (GTLHolePolyInt& env_hole_poly : env_hole_poly_list) {
-          std::vector<int32_t> env_ring_boundary_ids;
-          collectBoundaryEdges(env_hole_poly, false, -1, env_boundary_pool, env_ring_boundary_ids);
-          for (int32_t boundary_id : env_ring_boundary_ids) {
-            env_boundary_rtree_inputs.push_back({env_boundary_pool[boundary_id].edge, boundary_id});
-          }
-          for (auto iter = env_hole_poly.begin_holes(); iter != env_hole_poly.end_holes(); iter++) {
-            GTLPolyInt gtl_poly = *iter;
-            GTLHolePolyInt env_hole_boundary;
-            env_hole_boundary.set(gtl_poly.begin(), gtl_poly.end());
-            collectBoundaryEdges(env_hole_boundary, true, -1, env_boundary_pool, env_ring_boundary_ids);
-            for (int32_t boundary_id : env_ring_boundary_ids) {
-              env_boundary_rtree_inputs.push_back({env_boundary_pool[boundary_id].edge, boundary_id});
-            }
-          }
-        }
-        env_boundary_rtree = decltype(env_boundary_rtree)(env_boundary_rtree_inputs);
-      };
-
-      std::vector<GTLHolePolyInt> gtl_hole_poly_list;
-      routing_net.polyset.get(gtl_hole_poly_list);
-      routing_net.polygon_begin = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
-      routing_net.max_rect_begin = static_cast<int32_t>(rv_layer_data.max_rect_pool.size());
-      routing_net.boundary_begin = static_cast<int32_t>(rv_layer_data.boundary_pool.size());
-      for (GTLHolePolyInt& gtl_hole_poly : gtl_hole_poly_list) {
-        int32_t polygon_id = static_cast<int32_t>(rv_layer_data.polygon_pool.size());
-        rv_layer_data.polygon_pool.push_back(
-            {net_idx, static_cast<int32_t>(rv_layer_data.max_rect_pool.size()), 0, static_cast<int32_t>(rv_layer_data.boundary_pool.size()), 0});
-        PolygonData& polygon_data = rv_layer_data.polygon_pool.back();
-        polygon_data.hole_poly = gtl_hole_poly;
-
-        std::vector<GTLRectInt> gtl_rect_list;
-        gtl::get_max_rectangles(gtl_rect_list, gtl_hole_poly);
-        bool is_polygon_env = (env_polyset != nullptr) && !gtl_rect_list.empty();
-        for (GTLRectInt& gtl_rect : gtl_rect_list) {
-          MaxRectData max_rect_data;
-          max_rect_data.rect = gtl_rect;
-          max_rect_data.polygon_id = polygon_id;
-          if (env_polyset != nullptr) {
-            if (!has_delta_geometry) {
-              max_rect_data.isEnv = true;
-            } else {
-              std::vector<GTLRectInt> delta_overlap_list;
-              delta_rect_rtree.query(bgi::intersects(gtl_rect), std::back_inserter(delta_overlap_list));
-              max_rect_data.isEnv = true;
-              for (auto& delta_rect : delta_overlap_list) {
-                PlanarRect delta_planar_rect = DRCUTIL.convertToPlanarRect(delta_rect);
-                PlanarRect max_rect = DRCUTIL.convertToPlanarRect(max_rect_data.rect);
-                if (DRCUTIL.isOpenOverlap(delta_planar_rect, max_rect)) {
-                  max_rect_data.isEnv = false;
-                  break;
-                }
-              }
-            }
-          }
-          is_polygon_env = is_polygon_env && max_rect_data.isEnv;
-
-          rv_layer_data.max_rect_pool.push_back(max_rect_data);
-          int32_t max_rect_id = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - 1;
-          rect_rtree_inputs.push_back({gtl_rect, max_rect_id});
-        }
-        polygon_data.max_rect_count = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - polygon_data.max_rect_begin;
-        polygon_data.isEnv = is_polygon_env;
-
-        if (!is_polygon_env) {
-          build_env_boundary_rtree();
-        }
-        std::vector<int32_t> ring_boundary_ids;
-        collectBoundaryEdges(gtl_hole_poly, false, polygon_id, rv_layer_data.boundary_pool, ring_boundary_ids);
-        for (int32_t boundary_id : ring_boundary_ids) {
-          BoundaryData& boundary_data = rv_layer_data.boundary_pool[boundary_id];
-          if (env_polyset != nullptr) {
-            boundary_data.isEnv = is_polygon_env ? true : isBoundaryCoveredByEnv(boundary_data, env_boundary_rtree, env_boundary_pool);
-          }
-          boundary_rtree_inputs.push_back({boundary_data.edge, boundary_id});
-        }
-        for (auto iter = gtl_hole_poly.begin_holes(); iter != gtl_hole_poly.end_holes(); iter++) {
-          GTLPolyInt gtl_poly = *iter;
-          GTLHolePolyInt check_hole_poly;
-          check_hole_poly.set(gtl_poly.begin(), gtl_poly.end());
-          collectBoundaryEdges(check_hole_poly, true, polygon_id, rv_layer_data.boundary_pool, ring_boundary_ids);
-          for (int32_t boundary_id : ring_boundary_ids) {
-            BoundaryData& boundary_data = rv_layer_data.boundary_pool[boundary_id];
-            if (env_polyset != nullptr) {
-              boundary_data.isEnv = is_polygon_env ? true : isBoundaryCoveredByEnv(boundary_data, env_boundary_rtree, env_boundary_pool);
-            }
-            boundary_rtree_inputs.push_back({boundary_data.edge, boundary_id});
-          }
-        }
-        polygon_data.boundary_count = static_cast<int32_t>(rv_layer_data.boundary_pool.size()) - polygon_data.boundary_begin;
-      }
-      routing_net.polygon_count = static_cast<int32_t>(rv_layer_data.polygon_pool.size()) - routing_net.polygon_begin;
-      routing_net.max_rect_count = static_cast<int32_t>(rv_layer_data.max_rect_pool.size()) - routing_net.max_rect_begin;
-      routing_net.boundary_count = static_cast<int32_t>(rv_layer_data.boundary_pool.size()) - routing_net.boundary_begin;
-#endif
       prepareRoutingNet(net_idx, routing_net, rv_layer_data, env_rect_rtree_inputs, need_polygon_only);
     }
     if (!need_polygon_only) {
       buildLayerSpatialIndexes(rv_layer_data, env_rect_rtree_inputs);
     }
     if (need_metal_short) {
-      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets);
+      buildMetalShortSpatialIndexes(layer_entry.first, rv_layer_data, metal_short_metal_polysets, metal_short_obs_polysets, metal_short_fixed_polysets);
     }
   }
 }
@@ -688,7 +562,8 @@ void addShapeToLayerData(std::map<int32_t, RVLayerData>& layer_data, DRCShape* d
   }
 }
 
-void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, DRCShape* drc_shape)
+void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets,
+                              DRCShape* drc_shape, bool is_env_shape)
 {
   if (!drc_shape->get_is_routing()) {
     return;
@@ -696,8 +571,11 @@ void addShapeToMetalShortData(MetalShortNetPolysetMap& metal_polysets, MetalShor
   GTLRectInt rect = DRCUTIL.convertToGTLRectInt(drc_shape->get_rect());
   if (drc_shape->get_is_obs()) {
     obs_polysets[drc_shape->get_layer_idx()] += rect;
-  } else {
-    metal_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
+    return;
+  }
+  metal_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
+  if (is_env_shape && drc_shape->get_net_idx() != -1) {
+    fixed_polysets[drc_shape->get_layer_idx()][drc_shape->get_net_idx()] += rect;
   }
 }
 
@@ -828,7 +706,7 @@ void buildLayerSpatialIndexes(RVLayerData& rv_layer_data, const std::vector<std:
 }
 
 void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data, MetalShortNetPolysetMap& metal_polysets,
-                                   MetalShortObsPolysetMap& obs_polysets)
+                                   MetalShortObsPolysetMap& obs_polysets, MetalShortNetPolysetMap& fixed_polysets)
 {
   std::vector<IndexedRect> metal_rtree_inputs;
   auto layer_metal_it = metal_polysets.find(layer_idx);
@@ -849,6 +727,16 @@ void buildMetalShortSpatialIndexes(int32_t layer_idx, RVLayerData& rv_layer_data
     gtl::get_max_rectangles(obs_rtree_inputs, layer_obs_it->second);
   }
   rv_layer_data.metal_short_obs_rtree = decltype(rv_layer_data.metal_short_obs_rtree)(obs_rtree_inputs);
+
+  auto layer_fixed_it = fixed_polysets.find(layer_idx);
+  if (layer_fixed_it != fixed_polysets.end()) {
+    for (auto& [net_idx, polyset] : layer_fixed_it->second) {
+      std::vector<GTLRectInt> max_rect_list;
+      gtl::get_max_rectangles(max_rect_list, polyset);
+      std::vector<GTLRectInt>& fixed_rect_list = rv_layer_data.metal_short_fixed_rects[net_idx];
+      fixed_rect_list.insert(fixed_rect_list.end(), max_rect_list.begin(), max_rect_list.end());
+    }
+  }
 }
 
 }  // namespace

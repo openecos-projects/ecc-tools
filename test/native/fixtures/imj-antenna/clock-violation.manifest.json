@@ -1,0 +1,4 @@
+{
+  "lef_files": ["tech.lef", "gate.lef"],
+  "def_file": "clock-violation.def"
+}

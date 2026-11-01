@@ -26,12 +26,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <initializer_list>
 #include <memory>
 #include <optional>
-#include <ranges>
 #include <utility>
 #include <vector>
 
+#include "FastSTA.hh"
 #include "Type.hh"
 #include "io/Wrapper.hh"
 #include "liberty/Lib.hh"
@@ -48,13 +49,6 @@ auto convertLibCapToPf(idb::LibCell* lib_cell, double cap_value) -> double
     return cap_value;
   }
   return idb::ConvertCapUnit(owner_lib->get_cap_unit(), idb::CapacitiveUnit::kPF, cap_value);
-}
-
-auto storedPortCapToPf(double cap_value) -> double
-{
-  // LibParserCpp normalizes scalar Liberty pin capacitance and cap-limit
-  // attributes to pF. LUT axes remain in the library-declared unit.
-  return cap_value;
 }
 
 auto convertLibTimeToNs(idb::LibCell* lib_cell, double time_value) -> double
@@ -89,7 +83,7 @@ auto queryLibPortCapacitancePf(idb::LibCell* lib_cell, idb::LibPort* lib_port) -
   if (!cap_value.has_value()) {
     return std::nullopt;
   }
-  const double cap_pf = storedPortCapToPf(*cap_value);
+  const double cap_pf = *cap_value;
   return std::isfinite(cap_pf) && cap_pf >= 0.0 ? std::optional<double>{cap_pf} : std::nullopt;
 }
 
@@ -353,7 +347,7 @@ auto extractCellArcFromLibCell(Wrapper& wrapper, idb::LibCell* lib_cell, idb::Li
 
   std::optional<double> output_cap_limit_pf = std::nullopt;
   if (auto cap_limit = output_port->get_port_cap_limit(idb::AnalysisMode::kMax); cap_limit.has_value() && std::isfinite(*cap_limit) && *cap_limit > 0.0) {
-    const double cap_limit_pf = storedPortCapToPf(*cap_limit);
+    const double cap_limit_pf = *cap_limit;
     if (std::isfinite(cap_limit_pf) && cap_limit_pf > 0.0) {
       output_cap_limit_pf = cap_limit_pf;
     }

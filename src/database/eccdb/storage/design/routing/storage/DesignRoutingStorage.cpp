@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "design/routing/storage/DesignRoutingStorage.h"
 
@@ -633,12 +618,15 @@ Rect segmentBounds(const DesignRoutingStorage::registry_type& design, const Tech
   const int64_t begin_y = segment.begin.position.y;
   const int64_t end_x = segment.end.position.x;
   const int64_t end_y = segment.end.position.y;
-  const bool truncated = (shape.flags & DesignWirePathFlag::kHasShape) != 0u
-                         && attributes != nullptr && !attributes->shape.empty();
+  // Manhattan DEF SPECIALNETS default to flush endpoints, even without SHAPE.
+  // An explicit endpoint extension overrides that default, including on STRIPE
+  // and FOLLOWPIN paths. Regular NETS default to a half-width extension.
+  const auto& wire = design.get<const DesignWire>(shape.wire.entity());
+  const bool truncated = design.all_of<DesignSpecialNet>(wire.net.entity()) && (begin_x == end_x || begin_y == end_y);
   const bool begin_has_extension = truncated || (segment.begin.flags & DesignWirePointFlag::kHasExtension) != 0u;
   const bool end_has_extension = truncated || (segment.end.flags & DesignWirePointFlag::kHasExtension) != 0u;
-  const int64_t begin_extension = !truncated && begin_has_extension ? segment.begin.extension : 0;
-  const int64_t end_extension = !truncated && end_has_extension ? segment.end.extension : 0;
+  const int64_t begin_extension = (segment.begin.flags & DesignWirePointFlag::kHasExtension) != 0u ? segment.begin.extension : 0;
+  const int64_t end_extension = (segment.end.flags & DesignWirePointFlag::kHasExtension) != 0u ? segment.end.extension : 0;
   if (begin_y == end_y && begin_x != end_x) {
     const int64_t left = begin_x < end_x ? begin_x - (begin_has_extension ? begin_extension : lower_half)
                                          : end_x - (end_has_extension ? end_extension : lower_half);

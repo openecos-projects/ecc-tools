@@ -21,7 +21,11 @@
  * @brief Tests for CTS process-memory sampling and allocator release evidence.
  */
 
+#include <features.h>
 #include <gtest/gtest.h>
+
+#include <optional>
+#include <string>
 
 #include "Utility.hh"
 

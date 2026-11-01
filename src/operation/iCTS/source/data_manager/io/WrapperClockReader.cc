@@ -23,9 +23,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
-#include <map>
 #include <memory>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,7 +41,7 @@
 #include "LibParserCpp.hh"
 #include "Logger.hh"
 #include "Wrapper.hh"
-#include "CtsEccdbAdapter.hh"
+#include "CtsDesignSource.hh"
 #include "adapter/sdc/SDCClockReader.hh"
 #include "builder.h"
 #include "def_service.h"
@@ -513,6 +512,10 @@ auto classifyCtsInstFromIdbInst(const Wrapper& wrapper, idb::IdbInstance* idb_in
     return {.type = InstType::kMacroBlock, .role = "macro_clock_sink", .reason = "idb_macro_block", .input_pin_name = {}, .output_pin_name = {}};
   }
 
+  if (cell_master != nullptr && cell_master->is_pad()) {
+    return {.type = InstType::kIoPad, .role = "io_pad", .reason = "idb_io_pad", .input_pin_name = {}, .output_pin_name = {}};
+  }
+
   auto* lib_cell = findLibCell(wrapper, idb_inst);
   const auto clock_input_pins = collectClockInputPins(idb_inst);
   auto* primary_clock_pin = clock_input_pins.empty() ? nullptr : clock_input_pins.front();
@@ -665,6 +668,20 @@ class Wrapper::CtsClockReader
       if (clock == nullptr) {
         clearClockReadData();
         return false;
+      }
+    }
+    // Re-assert the model shape the trace proved, once every pin and instance has been
+    // materialized: pin-level classification cannot see which stage the trace crossed,
+    // and it runs again for pins outside the traced path.
+    for (const auto& clock_target : clock_targets) {
+      for (const auto& step : clock_target.propagation_steps) {
+        if (step.kind != ClockTracePropagationKind::kClockMux) {
+          continue;
+        }
+        auto* cts_inst = _design->findInst(step.inst_name);
+        if (cts_inst != nullptr && !cts_inst->is_mux()) {
+          cts_inst->set_type(InstType::kMux);
+        }
       }
     }
     return true;
@@ -890,6 +907,16 @@ class Wrapper::CtsClockReader
       if (input_net == nullptr || output_net == nullptr || input_pin == nullptr || output_pin == nullptr || cts_inst == nullptr) {
         return nullptr;
       }
+      if (step.kind == ClockTracePropagationKind::kClockMux || step.kind == ClockTracePropagationKind::kIoPad) {
+        // LEF marks a pad's PAD pin bidirectional, and an undecidable-select stage is not
+        // classified as a mux by liberty alone. The trace step is the evidence for how
+        // this instance takes part in the clock network, so it decides the model shape.
+        if (step.kind == ClockTracePropagationKind::kIoPad) {
+          input_pin->set_type(PinType::kIn);
+        } else if (!cts_inst->is_mux()) {
+          cts_inst->set_type(InstType::kMux);
+        }
+      }
       input_pin->set_net(input_net);
       output_pin->set_net(output_net);
       input_net->add_load(input_pin);
@@ -914,6 +941,12 @@ class Wrapper::CtsClockReader
           break;
         case ClockTracePropagationKind::kClockGate:
           kind = ClockPropagationKind::kClockGate;
+          break;
+        case ClockTracePropagationKind::kIoPad:
+          kind = ClockPropagationKind::kIoPad;
+          break;
+        case ClockTracePropagationKind::kClockMux:
+          kind = ClockPropagationKind::kClockMux;
           break;
       }
       const auto arc_status = clock->addPropagationArc({.inst = cts_inst,
@@ -1222,21 +1255,21 @@ class Wrapper::CtsClockReader
 
 auto Wrapper::readClocks(Design& design, const std::vector<std::pair<std::string, std::string>>& clock_net_pairs) -> bool
 {
-  if (_native_adapter != nullptr) {
+  if (_design_source != nullptr) {
     std::vector<ClockTraceClockTarget> targets;
     targets.reserve(clock_net_pairs.size());
     for (const auto& [clock_name, net_name] : clock_net_pairs) {
       targets.push_back(ClockTraceClockTarget{.clock_name = clock_name, .clock_net_name = net_name});
     }
-    return _native_adapter->readTraceClockTargets(design, targets);
+    return _design_source->readTraceClockTargets(design, targets);
   }
   return CtsClockReader(*this, design).readClocks(clock_net_pairs);
 }
 
 auto Wrapper::readTraceClockTargets(Design& design, const std::vector<ClockTraceClockTarget>& clock_targets) -> bool
 {
-  if (_native_adapter != nullptr) {
-    return _native_adapter->readTraceClockTargets(design, clock_targets);
+  if (_design_source != nullptr) {
+    return _design_source->readTraceClockTargets(design, clock_targets);
   }
   return CtsClockReader(*this, design).readTraceClockTargets(clock_targets);
 }

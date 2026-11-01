@@ -1,36 +1,24 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+
+#include "MJInterfaceEccdb.h"
 
 #include "MJInterface.hpp"
 
+#include "AntennaEccdb.h"
+#include "MetalFillEccdb.h"
+
 #include <algorithm>
 #include <any>
-#include <cmath>
 #include <cstdint>
-#include <fstream>
-#include <iomanip>
 #include <limits>
 #include <map>
-#include <span>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sstream>
-#include <type_traits>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -44,19 +32,14 @@
 
 #include "context/DatabaseContext.h"
 #include "design/DesignStore.h"
-#include "design/constraint/model/ConstraintComponents.h"
-#include "design/fill/model/FillComponents.h"
 #include "design/floorplan/model/FloorplanComponents.h"
 #include "design/global/model/DesignGlobalComponents.h"
 #include "design/netlist/model/NetlistComponents.h"
 #include "library/LibraryStore.h"
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/site/model/SiteComponents.h"
-#include "service/geometry/GeometryEditService.h"
-#include "service/geometry/GeometryQueryService.h"
 #include "service/instance/InstanceService.h"
 #include "tech/TechStore.h"
-#include "tech/routing_layer/model/RoutingLayerComponents.h"
 
 namespace imj {
 namespace {
@@ -94,8 +77,6 @@ struct FillerPlacement
   eccdb::DesignOrientation orientation = eccdb::DesignOrientation::kN;
 };
 
-constexpr std::size_t kMaxNativeMetalFillsPerLayer = 64u;
-
 std::string configString(const std::map<std::string, std::any>& config, std::string_view key)
 {
   const auto found = config.find(std::string{key});
@@ -105,7 +86,7 @@ std::string configString(const std::map<std::string, std::any>& config, std::str
   if (const auto* value = std::any_cast<std::string>(&found->second); value != nullptr) {
     return *value;
   }
-  throw std::invalid_argument("iZH native option '" + std::string{key} + "' must be a string");
+  throw std::invalid_argument("iMJ native option '" + std::string{key} + "' must be a string");
 }
 
 int32_t configPositiveInt(const std::map<std::string, std::any>& config, std::string_view key, int32_t default_value)
@@ -116,11 +97,11 @@ int32_t configPositiveInt(const std::map<std::string, std::any>& config, std::st
   }
   if (const auto* value = std::any_cast<int32_t>(&found->second); value != nullptr) {
     if (*value <= 0) {
-      throw std::invalid_argument("iZH native option '" + std::string{key} + "' must be positive");
+      throw std::invalid_argument("iMJ native option '" + std::string{key} + "' must be positive");
     }
     return *value;
   }
-  throw std::invalid_argument("iZH native option '" + std::string{key} + "' must be an integer");
+  throw std::invalid_argument("iMJ native option '" + std::string{key} + "' must be an integer");
 }
 
 std::vector<std::string> splitNames(std::string names)
@@ -145,9 +126,20 @@ std::vector<std::string> splitNames(std::string names)
   return result;
 }
 
-bool isCoreFiller(const eccdb::LibraryCellMaster& master) noexcept
+bool isCoreFiller(const eccdb::LibraryStore& library, const eccdb::LibraryCellMaster& master)
 {
-  return master.core_filler || master.type == eccdb::LibraryCellMasterType::kCoreSpacer;
+  if (master.type < eccdb::LibraryCellMasterType::kCore || master.width == 0u || master.height == 0u) {
+    return false;
+  }
+  if (master.terms.empty()) {
+    return master.core_filler || master.type == eccdb::LibraryCellMasterType::kCoreSpacer;
+  }
+  // Some PDKs declare fillers as CLASS CORE with PG terminals rather than
+  // CLASS CORE SPACER. Use the same electrical criterion as iMJ's iDB source.
+  return std::all_of(master.terms.begin(), master.terms.end(), [&](const auto term_id) {
+    const auto use = library.masterTermStorage().masterTerm(term_id).use;
+    return use == eccdb::LibraryMasterTermUse::kPower || use == eccdb::LibraryMasterTermUse::kGround;
+  });
 }
 
 bool isPlaced(eccdb::DesignPlacementStatus status) noexcept
@@ -213,19 +205,19 @@ std::vector<FillerMaster> collectFillerMasters(const eccdb::LibraryStore& librar
   std::vector<FillerMaster> result;
   const auto add_master = [&](eccdb::LibraryCellMasterId id) {
     const auto& master = library.cellMasterStorage().cellMaster(id);
-    if (!isCoreFiller(master)) {
-      throw std::invalid_argument("iZH native filler master is not a core filler: " + master.name);
+    if (!isCoreFiller(library, master)) {
+      throw std::invalid_argument("iMJ native filler master is not a core filler: " + master.name);
     }
     if (master.width == 0u || master.width > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
         || static_cast<int32_t>(master.width) % site_width != 0) {
-      throw std::invalid_argument("iZH native filler master width is not aligned to the row site: " + master.name);
+      throw std::invalid_argument("iMJ native filler master width is not aligned to the row site: " + master.name);
     }
     result.push_back({.id = id, .name = master.name, .site_count = static_cast<int32_t>(master.width) / site_width});
   };
 
   if (requested.empty()) {
     for (const auto id : library.cellMasterStorage().cellMasters()) {
-      if (isCoreFiller(library.cellMasterStorage().cellMaster(id))) {
+      if (isCoreFiller(library, library.cellMasterStorage().cellMaster(id))) {
         add_master(id);
       }
     }
@@ -233,7 +225,7 @@ std::vector<FillerMaster> collectFillerMasters(const eccdb::LibraryStore& librar
     for (const auto& name : requested) {
       const auto id = library.cellMasterStorage().findCellMaster(name);
       if (!id) {
-        throw std::invalid_argument("iZH native filler master does not exist: " + name);
+        throw std::invalid_argument("iMJ native filler master does not exist: " + name);
       }
       add_master(id);
     }
@@ -245,296 +237,58 @@ std::vector<FillerMaster> collectFillerMasters(const eccdb::LibraryStore& librar
     return lhs.name < rhs.name;
   });
   if (result.empty()) {
-    throw std::invalid_argument("iZH native filler insertion requires at least one core filler master");
+    throw std::invalid_argument("iMJ native filler insertion requires at least one core filler master");
   }
   return result;
 }
 
-std::string nextFillerName(const eccdb::DesignNetlistStorage& netlist, const std::string& master_name, uint32_t& sequence)
+std::string nextFillerName(std::set<std::string, std::less<>>& occupied, const std::string& master_name, uint32_t& sequence)
 {
-  for (;;) {
-    const auto candidate = master_name + "_" + std::to_string(sequence++);
-    if (!netlist.findInstance(candidate)) {
-      return candidate;
-    }
+  const auto base = master_name + "_" + std::to_string(sequence++);
+  if (occupied.insert(base).second) {
+    return base;
   }
-}
-
-int32_t effectiveWidth(const eccdb::TechRoutingLayer& layer)
-{
-  return layer.min_width > 0 ? layer.min_width : layer.width;
-}
-
-int32_t ceilDivPositive(int64_t dividend, int32_t divisor)
-{
-  if (divisor <= 0 || dividend < 0) {
-    throw std::invalid_argument("iZH native metal fill received invalid routing pitch");
+  for (uint64_t suffix = 0;; ++suffix) {
+    auto candidate = base + std::to_string(suffix);
+    if (occupied.insert(candidate).second) return candidate;
   }
-  const int64_t result = (dividend + divisor - 1) / divisor;
-  if (result > std::numeric_limits<int32_t>::max()) {
-    throw std::overflow_error("iZH native metal fill track count exceeds int32");
-  }
-  return static_cast<int32_t>(result);
-}
-
-std::vector<int32_t> fallbackTracks(const eccdb::Rect& die, bool horizontal, int32_t start, int32_t pitch, int32_t width)
-{
-  const int32_t lower = horizontal ? die.ll_y : die.ll_x;
-  const int32_t upper = horizontal ? die.ur_y : die.ur_x;
-  const int32_t lower_half = width / 2;
-  const int32_t upper_half = width - lower_half;
-  if (pitch <= 0 || upper - lower <= width) {
-    return {};
-  }
-  const int64_t first = start >= lower + lower_half
-                            ? start
-                            : static_cast<int64_t>(start) + static_cast<int64_t>(ceilDivPositive(static_cast<int64_t>(lower + lower_half) - start, pitch)) * pitch;
-  std::vector<int32_t> tracks;
-  for (int64_t coordinate = first; coordinate + upper_half <= upper && tracks.size() < kMaxNativeMetalFillsPerLayer * 8u; coordinate += pitch) {
-    if (coordinate >= std::numeric_limits<int32_t>::min() && coordinate <= std::numeric_limits<int32_t>::max()) {
-      tracks.push_back(static_cast<int32_t>(coordinate));
-    }
-  }
-  return tracks;
-}
-
-bool hasGeometry(const eccdb::GeometryQueryService& query, eccdb::Rect rectangle, eccdb::TechRoutingLayerId layer)
-{
-  eccdb::GeometryQueryFilter filter;
-  filter.layer = eccdb::TechLayerId{layer.entity()}.packed();
-  return query.hasShapes(rectangle, filter);
-}
-
-struct NativeAntennaRules
-{
-  double gate_area = 0.0;
-  std::map<std::string, double> max_area_ratio;
-  std::string source_file;
-};
-
-double parsePositiveDouble(std::string_view text, std::string_view description)
-{
-  std::size_t consumed = 0;
-  double value = 0.0;
-  try {
-    value = std::stod(std::string{text}, &consumed);
-  } catch (const std::exception&) {
-    throw std::invalid_argument("iZH native antenna rule has an invalid " + std::string{description} + ": " + std::string{text});
-  }
-  if (consumed != text.size() || !std::isfinite(value) || value <= 0.0) {
-    throw std::invalid_argument("iZH native antenna rule has an invalid " + std::string{description} + ": " + std::string{text});
-  }
-  return value;
-}
-
-NativeAntennaRules loadAntennaRules(const std::map<std::string, std::any>& config)
-{
-  const auto found = config.find("-antenna_rule_file");
-  if (found == config.end()) {
-    throw std::invalid_argument("iZH native antenna checking requires -antenna_rule_file (GATE_AREA/LAYER provider input)");
-  }
-  const auto* file = std::any_cast<std::string>(&found->second);
-  if (file == nullptr || file->empty()) {
-    throw std::invalid_argument("iZH native antenna option '-antenna_rule_file' must be a non-empty string");
-  }
-
-  NativeAntennaRules rules;
-  rules.source_file = *file;
-  std::ifstream input(*file);
-  if (!input) {
-    throw std::invalid_argument("iZH native antenna rule file cannot be opened: " + *file);
-  }
-  std::string line;
-  std::size_t line_number = 0;
-  while (std::getline(input, line)) {
-    ++line_number;
-    if (const auto comment = line.find('#'); comment != std::string::npos) {
-      line.erase(comment);
-    }
-    std::istringstream tokens(line);
-    std::string kind;
-    if (!(tokens >> kind)) {
-      continue;
-    }
-    if (kind == "GATE_AREA") {
-      std::string value;
-      std::string trailing;
-      if (!(tokens >> value) || (tokens >> trailing)) {
-        throw std::invalid_argument("iZH native antenna rule line " + std::to_string(line_number)
-                                    + " must be 'GATE_AREA <positive-area>'");
-      }
-      if (rules.gate_area != 0.0) {
-        throw std::invalid_argument("iZH native antenna rule repeats GATE_AREA at line " + std::to_string(line_number));
-      }
-      rules.gate_area = parsePositiveDouble(value, "GATE_AREA");
-      continue;
-    }
-    if (kind == "LAYER") {
-      std::string name;
-      std::string ratio;
-      std::string trailing;
-      if (!(tokens >> name >> ratio) || (tokens >> trailing) || name.empty()) {
-        throw std::invalid_argument("iZH native antenna rule line " + std::to_string(line_number)
-                                    + " must be 'LAYER <routing-layer> <positive-ratio>'");
-      }
-      const auto [unused, inserted] = rules.max_area_ratio.emplace(name, parsePositiveDouble(ratio, "layer ratio"));
-      if (!inserted) {
-        throw std::invalid_argument("iZH native antenna rule repeats layer '" + name + "'");
-      }
-      continue;
-    }
-    throw std::invalid_argument("iZH native antenna rule line " + std::to_string(line_number)
-                                + " has unknown directive '" + kind + "'");
-  }
-  if (rules.gate_area <= 0.0 || rules.max_area_ratio.empty()) {
-    throw std::invalid_argument("iZH native antenna rule file must define GATE_AREA and at least one LAYER rule");
-  }
-  for (const auto& [key, value] : config) {
-    if (key != "-antenna_rule_file" && key != "-config") {
-      throw std::invalid_argument("iZH native antenna option is not supported: " + key);
-    }
-  }
-  return rules;
-}
-
-double routeShapeArea(const eccdb::DesignRoutingStorage& routing,
-                      eccdb::GeometryShapeId shape_id,
-                      const eccdb::DesignRouteShape& shape,
-                      const eccdb::DesignRouteShapeAttributes* attributes,
-                      const eccdb::TechRoutingLayer& layer)
-{
-  return std::visit(
-      [&](const auto& geometry) -> double {
-        using Geometry = std::remove_cvref_t<decltype(geometry)>;
-        if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteSegment>) {
-          const auto width = (shape.flags & eccdb::DesignWirePathFlag::kHasWidth) != 0u && attributes != nullptr
-                                 ? attributes->width
-                                 : effectiveWidth(layer);
-          if (width <= 0) {
-            throw std::invalid_argument("iZH native antenna route has no positive width on a routed layer");
-          }
-          const auto dx = static_cast<double>(geometry.end.position.x) - geometry.begin.position.x;
-          const auto dy = static_cast<double>(geometry.end.position.y) - geometry.begin.position.y;
-          return std::hypot(dx, dy) * static_cast<double>(width);
-        } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRoutePatch>) {
-          const auto width = static_cast<int64_t>(geometry.rectangle.ur_x) - geometry.rectangle.ll_x;
-          const auto height = static_cast<int64_t>(geometry.rectangle.ur_y) - geometry.rectangle.ll_y;
-          return width > 0 && height > 0 ? static_cast<double>(width) * static_cast<double>(height) : 0.0;
-        } else if constexpr (std::is_same_v<Geometry, eccdb::DesignRouteVia>) {
-          const auto bounds = routing.shapeBoundingBox(shape_id);
-          const auto width = static_cast<int64_t>(bounds.ur_x) - bounds.ll_x;
-          const auto height = static_cast<int64_t>(bounds.ur_y) - bounds.ll_y;
-          return width > 0 && height > 0 ? static_cast<double>(width) * static_cast<double>(height) : 0.0;
-        } else {
-          return 0.0;
-        }
-      },
-      shape.geometry);
-}
-
-std::vector<eccdb::DesignFillInput> buildMetalFillInputs(eccdb::DatabaseContext& context,
-                                                          const std::vector<eccdb::TechRoutingLayerId>& layers)
-{
-  const auto& design = context.design();
-  if (!design.globalStorage().hasDieArea()) {
-    throw std::invalid_argument("iZH native metal fill requires a die area");
-  }
-  const auto die = design.globalStorage().dieBounds();
-  if (die.ur_x <= die.ll_x || die.ur_y <= die.ll_y) {
-    throw std::invalid_argument("iZH native metal fill requires a non-empty die area");
-  }
-
-  const auto* technology = context.technology();
-  if (technology == nullptr) {
-    throw std::logic_error("iZH native metal fill requires a TechStore");
-  }
-  const auto& floorplan = design.floorplanStorage();
-  eccdb::GeometryQueryService query{context};
-  std::vector<eccdb::DesignFillInput> result;
-
-  for (const auto layer_id : layers) {
-    const auto& layer = technology->routingLayerStorage().routingLayer(layer_id);
-    const int32_t width = effectiveWidth(layer);
-    if (width <= 0) {
-      throw std::invalid_argument("iZH native metal fill requires a positive routing width");
-    }
-    const bool horizontal = layer.direction == eccdb::TechRoutingDirection::kHorizontal;
-    if (!horizontal && layer.direction != eccdb::TechRoutingDirection::kVertical) {
-      throw std::invalid_argument("iZH native metal fill only supports horizontal or vertical routing layers");
-    }
-
-    const auto axis = horizontal ? eccdb::DesignAxis::kY : eccdb::DesignAxis::kX;
-    auto tracks = floorplan.trackCoordinates(layer_id, axis);
-    if (tracks.empty()) {
-      const int32_t start = horizontal ? layer.offset_y : layer.offset_x;
-      const int32_t pitch = horizontal ? layer.pitch_y : layer.pitch_x;
-      tracks = fallbackTracks(die, horizontal, start, pitch, width);
-    }
-    if (tracks.empty()) {
-      throw std::invalid_argument("iZH native metal fill requires tracks or a positive layer pitch");
-    }
-
-    const int32_t pitch = horizontal ? layer.pitch_y : layer.pitch_x;
-    const int32_t spacing = std::max(width, layer.fill_active_spacing);
-    const std::size_t track_step = pitch > 0 ? static_cast<std::size_t>(std::max(1, ceilDivPositive(static_cast<int64_t>(width) + spacing, pitch))) : 1u;
-    const int32_t lower_half = width / 2;
-    const int32_t upper_half = width - lower_half;
-    const int64_t raw_min_length = layer.area > 0 ? (layer.area + width - 1) / width : width;
-    const int32_t min_length = static_cast<int32_t>(std::min<int64_t>(std::max<int64_t>(raw_min_length, width), std::numeric_limits<int32_t>::max()));
-
-    eccdb::DesignFillInput input{.layer = eccdb::TechLayerId{layer_id.entity()}};
-    for (std::size_t index = 0; index < tracks.size() && input.rectangles.size() < kMaxNativeMetalFillsPerLayer; index += track_step) {
-      const int32_t track = tracks[index];
-      eccdb::Rect rectangle;
-      if (horizontal) {
-        rectangle = {.ll_x = die.ll_x + spacing, .ll_y = track - lower_half, .ur_x = die.ur_x - spacing, .ur_y = track + upper_half};
-      } else {
-        rectangle = {.ll_x = track - lower_half, .ll_y = die.ll_y + spacing, .ur_x = track + upper_half, .ur_y = die.ur_y - spacing};
-      }
-      const int64_t length = horizontal ? static_cast<int64_t>(rectangle.ur_x) - rectangle.ll_x : static_cast<int64_t>(rectangle.ur_y) - rectangle.ll_y;
-      if (rectangle.ll_x < die.ll_x || rectangle.ll_y < die.ll_y || rectangle.ur_x > die.ur_x || rectangle.ur_y > die.ur_y || length < min_length) {
-        continue;
-      }
-      const eccdb::Rect clearance{.ll_x = rectangle.ll_x - spacing,
-                                  .ll_y = rectangle.ll_y - spacing,
-                                  .ur_x = rectangle.ur_x + spacing,
-                                  .ur_y = rectangle.ur_y + spacing};
-      if (!hasGeometry(query, clearance, layer_id)) {
-        input.rectangles.push_back(rectangle);
-      }
-    }
-    if (!input.rectangles.empty()) {
-      result.push_back(std::move(input));
-    }
-  }
-  return result;
 }
 
 }  // namespace
 
-void MJInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_map)
+namespace detail {
+
+void insertFillerEccdb(eccdb::DatabaseContext& context, MJConfigMap& config_map)
 {
-  if (_database_context == nullptr || _database_context->library() == nullptr) {
-    throw std::logic_error("iZH native filler insertion requires a complete DatabaseContext");
+  if (context.library() == nullptr) {
+    throw std::logic_error("iMJ native filler insertion requires a complete DatabaseContext");
   }
-  auto& context = *_database_context;
   auto& design = context.design();
   const auto& library = *context.library();
   const auto min_filler_sites = configPositiveInt(config_map, "-min_filler_width", 1);
   const auto requested = splitNames(configString(config_map, "-filler"));
   const auto& floorplan = design.floorplanStorage();
-  const auto rows = floorplan.rows();
+  auto rows = floorplan.rows();
   if (rows.empty()) {
-    throw std::invalid_argument("iZH native filler insertion requires placement rows");
+    throw std::invalid_argument("iMJ native filler insertion requires placement rows");
   }
 
   std::vector<FillerPlacement> placements;
-  uint32_t sequence = 0;
+  // Filler numbering follows physical row order and is independent of ECS
+  // storage traversal. Each master has its own insertion ordinal.
+  std::sort(rows.begin(), rows.end(), [&](const auto lhs_id, const auto rhs_id) {
+    const auto& lhs = floorplan.row(lhs_id);
+    const auto& rhs = floorplan.row(rhs_id);
+    return std::tie(lhs.origin.y, lhs.origin.x, lhs.name) < std::tie(rhs.origin.y, rhs.origin.x, rhs.name);
+  });
+  std::map<std::string, uint32_t> sequences;
+  std::set<std::string, std::less<>> occupied;
   const auto& netlist = design.netlistStorage();
   std::vector<Box> placement_obstacles;
   netlist.forEachInstance([&](eccdb::DesignInstanceId,
                               const eccdb::DesignInstance& instance,
                               std::span<const eccdb::DesignInstanceTermId>) {
+    occupied.insert(instance.name);
     if (!isPlaced(instance.placement_status)) {
       return;
     }
@@ -562,12 +316,13 @@ void MJInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_
   for (const auto row_id : rows) {
     const auto& row = floorplan.row(row_id);
     const auto& site = library.siteStorage().site(row.site);
-    if (site.width <= 0 || site.height <= 0 || row.repeat_count_x == 0u) {
-      throw std::invalid_argument("iZH native filler insertion found an invalid row site");
+    const auto site_width = row.step_x > 0 ? row.step_x : site.width;
+    if (site_width <= 0 || site.height <= 0 || row.repeat_count_x == 0u) {
+      throw std::invalid_argument("iMJ native filler insertion found an invalid row site");
     }
-    auto masters = masters_by_site_width.find(site.width);
+    auto masters = masters_by_site_width.find(site_width);
     if (masters == masters_by_site_width.end()) {
-      masters = masters_by_site_width.emplace(site.width, collectFillerMasters(library, site.width, requested)).first;
+      masters = masters_by_site_width.emplace(site_width, collectFillerMasters(library, site_width, requested)).first;
     }
     const auto repeat_y = std::max<uint32_t>(row.repeat_count_y, 1u);
     for (uint32_t y_index = 0; y_index < repeat_y; ++y_index) {
@@ -575,13 +330,13 @@ void MJInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_
       std::vector<bool> available(row.repeat_count_x, true);
       const Box row_bounds{.ll_x = row.origin.x,
                            .ll_y = row_y,
-                           .ur_x = static_cast<int64_t>(row.origin.x) + static_cast<int64_t>(site.width) * row.repeat_count_x,
+                           .ur_x = static_cast<int64_t>(row.origin.x) + static_cast<int64_t>(site_width) * row.repeat_count_x,
                            .ur_y = row_y + site.height};
       // The R-tree may return a box merely touching this row. The canonical
       // half-open boundary rule remains in markBlockedSites, so selection is
       // an acceleration only and does not alter filler placement semantics.
       const auto mark_candidate = [&](const PlacementIndexValue& candidate) {
-        markBlockedSites(available, row.origin.x, row_y, site.width, site.height, placement_obstacles[candidate.second]);
+        markBlockedSites(available, row.origin.x, row_y, site_width, site.height, placement_obstacles[candidate.second]);
       };
       placement_index.query(boost::geometry::index::intersects(indexBox(row_bounds)), boost::make_function_output_iterator(mark_candidate));
 
@@ -609,8 +364,8 @@ void MJInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_
             break;
           }
           placements.push_back({.master = chosen->id,
-                                .name = nextFillerName(netlist, chosen->name, sequence),
-                                .origin = {.x = static_cast<int32_t>(static_cast<int64_t>(row.origin.x) + cursor * site.width),
+                                .name = nextFillerName(occupied, chosen->name, sequences[chosen->name]),
+                                .origin = {.x = static_cast<int32_t>(static_cast<int64_t>(row.origin.x) + cursor * site_width),
                                            .y = static_cast<int32_t>(row_y)},
                                 .orientation = row.orientation});
           cursor += static_cast<std::size_t>(chosen->site_count);
@@ -640,128 +395,34 @@ void MJInterface::insertFillerFromEccdb(std::map<std::string, std::any>& config_
   }
 }
 
-void MJInterface::insertMetalFromEccdb(std::map<std::string, std::any>& config_map)
+void insertMetalEccdb(eccdb::DatabaseContext& context, MJConfigMap& config_map)
 {
-  if (_database_context == nullptr || _database_context->technology() == nullptr) {
-    throw std::logic_error("iZH native metal fill requires a complete DatabaseContext");
-  }
-  auto& context = *_database_context;
-  const auto& technology = *context.technology();
-  const auto min_name = configString(config_map, "-min_fill_layer");
-  const auto max_name = configString(config_map, "-max_fill_layer");
-
-  std::vector<eccdb::TechRoutingLayerId> routing_layers;
-  for (const auto generic : technology.layerSequence()) {
-    const auto routing = eccdb::TechRoutingLayerId{generic.entity()};
-    if (technology.routingLayerStorage().contains(routing)) {
-      routing_layers.push_back(routing);
-    }
-  }
-  if (routing_layers.empty()) {
-    throw std::invalid_argument("iZH native metal fill requires routing layers");
-  }
-
-  const auto find_layer = [&](const std::string& name) {
-    if (name.empty()) {
-      return -1;
-    }
-    const auto generic = technology.findLayer(name);
-    if (!generic) {
-      throw std::invalid_argument("iZH native metal fill layer is not a routing layer: " + name);
-    }
-    const auto routing = eccdb::TechRoutingLayerId{generic.entity()};
-    if (!technology.routingLayerStorage().contains(routing)) {
-      throw std::invalid_argument("iZH native metal fill layer is not a routing layer: " + name);
-    }
-    const auto found = std::find(routing_layers.begin(), routing_layers.end(), routing);
-    return static_cast<int32_t>(std::distance(routing_layers.begin(), found));
-  };
-  const int32_t first = min_name.empty() ? 0 : find_layer(min_name);
-  const int32_t last = max_name.empty() ? static_cast<int32_t>(routing_layers.size()) - 1 : find_layer(max_name);
-  if (first < 0 || last < first) {
-    throw std::invalid_argument("iZH native metal fill layer range is invalid");
-  }
-  const std::vector<eccdb::TechRoutingLayerId> selected(routing_layers.begin() + first, routing_layers.begin() + last + 1);
-  const auto inputs = buildMetalFillInputs(context, selected);
-
-  std::vector<eccdb::DesignFillId> created;
-  created.reserve(inputs.size());
-  eccdb::GeometryEditService edits{context};
-  try {
-    for (auto input : inputs) {
-      created.push_back(edits.createFill(std::move(input)));
-    }
-  } catch (...) {
-    for (auto it = created.rbegin(); it != created.rend(); ++it) {
-      static_cast<void>(edits.destroyFill(*it));
-    }
-    throw;
-  }
+  imj::insertMetalEccdb(context, config_map);
 }
 
-void MJInterface::checkAntennaFromEccdb(std::map<std::string, std::any>& config_map)
+NativeAntennaSummary checkAntennaEccdb(eccdb::DatabaseContext& context, MJConfigMap& config_map)
 {
-  if (_database_context == nullptr) {
-    throw std::logic_error("iZH native antenna checking requires a DatabaseContext");
-  }
-  const auto rules = loadAntennaRules(config_map);
-  const auto& design = _database_context->design();
-  const auto& netlist = design.netlistStorage();
-  const auto& routing = design.routingStorage();
-  const auto* technology = _database_context->technology();
-  if (technology == nullptr) {
-    throw std::logic_error("iZH native antenna checking requires a TechStore");
-  }
-
-  NativeAntennaSummary summary;
-  summary.rule_file = rules.source_file;
-  constexpr std::size_t kMaxReportedViolations = 64u;
-  netlist.forEachRegularNet([&](eccdb::DesignNetId net_id, const eccdb::DesignNet& net) {
-    ++summary.net_count;
-    const auto terminals = netlist.instanceTerms(net_id);
-    if (terminals.empty()) {
-      return;
-    }
-    ++summary.connected_net_count;
-    const auto wires = routing.wires(net_id);
-    summary.wire_count += wires.size();
-    std::map<std::string, double> area_by_layer;
-    for (const auto wire_id : wires) {
-      routing.forEachShape(wire_id, [&](eccdb::GeometryShapeId shape_id,
-                                       const eccdb::DesignRouteShape& shape,
-                                       const eccdb::DesignRouteShapeAttributes* attributes) {
-        const auto generic_layer = eccdb::TechLayerId{shape.layer.entity()};
-        if (!technology->routingLayerStorage().contains(eccdb::TechRoutingLayerId{generic_layer.entity()})) {
-          throw std::invalid_argument("iZH native antenna route references a non-routing layer");
-        }
-        const auto& layer = technology->routingLayerStorage().routingLayer(eccdb::TechRoutingLayerId{generic_layer.entity()});
-        const auto area = routeShapeArea(routing, shape_id, shape, attributes, layer);
-        if (area > 0.0) {
-          area_by_layer[technology->layerInfo(generic_layer).name] += area;
-        }
-      });
-    }
-
-    const auto gate_area = rules.gate_area * static_cast<double>(terminals.size());
-    for (const auto& [layer_name, area] : area_by_layer) {
-      const auto rule = rules.max_area_ratio.find(layer_name);
-      if (rule == rules.max_area_ratio.end()) {
-        throw std::invalid_argument("iZH native antenna rule file has no rule for routed layer: " + layer_name);
-      }
-      const auto ratio = area / gate_area;
-      if (ratio <= rule->second) {
-        continue;
-      }
-      ++summary.violation_count;
-      if (summary.violations.size() < kMaxReportedViolations) {
-        std::ostringstream message;
-        message << net.name << ":" << layer_name << " ratio=" << std::setprecision(8) << ratio << " limit=" << rule->second;
-        summary.violations.push_back(message.str());
-      }
-    }
-  });
-  summary.checked = true;
-  _last_antenna_summary = std::move(summary);
+  return imj::checkAntennaEccdb(context, config_map);
 }
+
+}  // namespace detail
 
 }  // namespace imj
+
+namespace eccdb::adapters {
+
+void bindMjSource(imj::MJInterface& interface, DatabaseContext* context)
+{
+  if (context == nullptr) {
+    interface.clearDesignOperations();
+    return;
+  }
+
+  interface.setDesignOperations({
+      .insert_filler = [context](imj::MJConfigMap& config) { imj::detail::insertFillerEccdb(*context, config); },
+      .insert_metal = [context](imj::MJConfigMap& config) { imj::detail::insertMetalEccdb(*context, config); },
+      .check_antenna = [context](imj::MJConfigMap& config) { return imj::detail::checkAntennaEccdb(*context, config); },
+  });
+}
+
+}  // namespace eccdb::adapters

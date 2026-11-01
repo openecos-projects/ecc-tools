@@ -28,6 +28,7 @@ set(ISTA_SOURCE ${HOME_ISTA}/source)
 
 add_subdirectory(${ISTA_INTERFACE})
 add_subdirectory(${ISTA_SOURCE})
+include(${HOME_ISTA}/Architecture.cmake)
 
 if (BUILD_TESTING)
     add_subdirectory(${HOME_ISTA}/test)

@@ -25,7 +25,6 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
-#include <ostream>
 
 #include "Logger.hh"
 #include "bound_skew_tree/component/Components.hh"

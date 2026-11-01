@@ -1,6 +1,4 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// ***************************************************************************************
 
 #include <gtest/gtest.h>
 
@@ -15,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "CtsEccdbAdapter.hh"
 #include "CTSAPI.hh"
 #include "Wrapper.hh"
 #include "adapter/sdc/SDCClockReader.hh"
@@ -136,10 +135,25 @@ auto containsId(std::span<const Id> values, Id id) -> bool
 class NativeCtsEccdbAdapterTest : public testing::Test
 {
  protected:
+  auto makeSource(std::string sdc_path = {}, adapter::icts::CtsLibertyCellLookup liberty_cell_lookup = {}) const
+      -> std::shared_ptr<adapter::icts::CtsEccdbAdapter>
+  {
+    return std::make_shared<adapter::icts::CtsEccdbAdapter>(*context, std::move(liberty_cell_lookup), std::move(sdc_path));
+  }
+
   void SetUp() override
   {
     static_cast<void>(technology.createRoutingLayer(TechLayerInfo{.name = "M1"},
                                                     TechRoutingLayer{.direction = TechRoutingDirection::kHorizontal,
+                                                                     .width = 100,
+                                                                     .resistance = 0.1,
+                                                                     .capacitance = 0.001,
+                                                                     .edge_capacitance = 0.0001}));
+    // Keep the technology layer sequence realistic: CUT layers occupy a
+    // sequence position but do not consume a routing level.
+    static_cast<void>(technology.createCutLayer(TechLayerInfo{.name = "VIA0"}, TechCutLayer{.width = 90}));
+    static_cast<void>(technology.createRoutingLayer(TechLayerInfo{.name = "M2"},
+                                                    TechRoutingLayer{.direction = TechRoutingDirection::kVertical,
                                                                      .width = 100,
                                                                      .resistance = 0.1,
                                                                      .capacitance = 0.001,
@@ -241,8 +255,8 @@ class NativeCtsEccdbAdapterTest : public testing::Test
 TEST_F(NativeCtsEccdbAdapterTest, TracesSdcPortAndMaterializesWithoutIdbDesign)
 {
   ::icts::Wrapper wrapper;
-  wrapper.initNative(context.get());
-  ASSERT_TRUE(wrapper.is_native());
+  wrapper.init(makeSource());
+  ASSERT_TRUE(wrapper.hasDesignSource());
   ASSERT_TRUE(wrapper.is_design_ready());
 
   const auto clock_data = makeClockData();
@@ -264,11 +278,72 @@ TEST_F(NativeCtsEccdbAdapterTest, TracesSdcPortAndMaterializesWithoutIdbDesign)
   EXPECT_EQ(clock->get_loads().size(), 2U);
 }
 
+TEST_F(NativeCtsEccdbAdapterTest, NamedSignalRoutingAnchorOverridesNumericCtsLayer)
+{
+  // The CTS model layer need not identify the lowest signal metal.  In a
+  // technology with local interconnect, treating it as the named platform
+  // anchor changes the signal RC model even though all layers are valid.
+  static_cast<void>(technology.createRoutingLayer(TechLayerInfo{.name = "M3"},
+                                                  TechRoutingLayer{.direction = TechRoutingDirection::kHorizontal,
+                                                                   .width = 100,
+                                                                   .resistance = 1.0,
+                                                                   .capacitance = 0.001,
+                                                                   .edge_capacitance = 0.0001}));
+  static_cast<void>(technology.createRoutingLayer(TechLayerInfo{.name = "M4"},
+                                                  TechRoutingLayer{.direction = TechRoutingDirection::kVertical,
+                                                                   .width = 100,
+                                                                   .resistance = 1.0,
+                                                                   .capacitance = 0.001,
+                                                                   .edge_capacitance = 0.0001}));
+  ::icts::Wrapper wrapper;
+  wrapper.init(makeSource({}, [](const std::string&) -> idb::LibCell* { return nullptr; }));
+  const auto graph = wrapper.collectTimingGraph(4U, "M1");
+  const auto& authority = graph.signal_routing_authority;
+  ASSERT_TRUE(authority.complete()) << authority.diagnostic;
+  EXPECT_EQ(authority.anchor_name, "M1");
+  EXPECT_EQ(authority.horizontal->name, "M1");
+  EXPECT_EQ(authority.vertical->name, "M2");
+
+  const auto invalid = wrapper.collectTimingGraph(1U, "missing-metal");
+  EXPECT_FALSE(invalid.signal_routing_authority.complete());
+  EXPECT_EQ(invalid.signal_routing_authority.status, ::icts::WrapperSignalRoutingStatus::kAnchorUnavailable);
+}
+
+TEST_F(NativeCtsEccdbAdapterTest, NumericRoutingLevelWinsOverEarlierSequenceFallback)
+{
+  // M2 has sequence 2, so the legacy ordinal fallback for 3 would select it
+  // first. M3 is the real routing level 3 and must take precedence. The CUT
+  // creates the meaningful sequence gap that exposed the old combined search.
+  static_cast<void>(technology.createCutLayer(TechLayerInfo{.name = "VIA1"}, TechCutLayer{.width = 90}));
+  static_cast<void>(technology.createRoutingLayer(TechLayerInfo{.name = "M3"},
+                                                  TechRoutingLayer{.direction = TechRoutingDirection::kHorizontal,
+                                                                   .width = 100,
+                                                                   .resistance = 1.0,
+                                                                   .capacitance = 0.001,
+                                                                   .edge_capacitance = 0.0001}));
+  static_cast<void>(technology.createRoutingLayer(TechLayerInfo{.name = "M4"},
+                                                  TechRoutingLayer{.direction = TechRoutingDirection::kVertical,
+                                                                   .width = 100,
+                                                                   .resistance = 1.0,
+                                                                   .capacitance = 0.001,
+                                                                   .edge_capacitance = 0.0001}));
+
+  ::icts::Wrapper wrapper;
+  wrapper.init(makeSource({}, [](const std::string&) -> idb::LibCell* { return nullptr; }));
+  const auto graph = wrapper.collectTimingGraph(3U);
+  const auto& authority = graph.signal_routing_authority;
+  ASSERT_TRUE(authority.complete()) << authority.diagnostic;
+  EXPECT_EQ(authority.anchor_name, "M3");
+  EXPECT_EQ(authority.anchor_order, 3U);
+  EXPECT_EQ(authority.horizontal->name, "M3");
+  EXPECT_EQ(authority.vertical->name, "M4");
+}
+
 TEST_F(NativeCtsEccdbAdapterTest, TracesOverlappingSdcReferencesOnlyOnceInFirstMatchOrder)
 {
   const auto extra_clock_net = design.netlistStorage().createNet(DesignNet{.name = "clk_aux", .use = DesignSignalUse::kClock});
   ::icts::Wrapper wrapper;
-  wrapper.initNative(context.get());
+  wrapper.init(makeSource());
 
   auto clock_data = makeClockData();
   auto& declaration = clock_data.clocks.front();
@@ -297,7 +372,7 @@ TEST_F(NativeCtsEccdbAdapterTest, TracesOverlappingSdcReferencesOnlyOnceInFirstM
 TEST_F(NativeCtsEccdbAdapterTest, WritesBufferTreeThroughServicesAndPreservesFanout)
 {
   ::icts::Wrapper wrapper;
-  wrapper.initNative(context.get());
+  wrapper.init(makeSource());
   const auto clock_data = makeClockData();
   const auto trace = wrapper.traceSdcClocks(::icts::SdcClockTraceInput{.clock_data = &clock_data, .max_fanout = 32U});
   ASSERT_TRUE(trace.ok()) << trace.message;
@@ -399,7 +474,7 @@ TEST_F(NativeCtsEccdbAdapterTest, RejectsAmbiguousPowerRailBindingsBeforeWriting
   netlist.connect(conflicting_power, alternate_supply);
 
   ::icts::Wrapper wrapper;
-  wrapper.initNative(context.get());
+  wrapper.init(makeSource());
   ::icts::Design cts_design;
   auto* clock = makeBufferedClockTree(wrapper, cts_design, "cts_buf_ambiguous");
   ASSERT_NE(clock, nullptr);
@@ -420,7 +495,7 @@ TEST_F(NativeCtsEccdbAdapterTest, MaterializesRectOnlyClockPinLocationsWithIdbCo
   const auto m1 = technology.findLayer("M1");
   ASSERT_TRUE(m1);
   const auto via1 = technology.createCutLayer(TechLayerInfo{.name = "VIA1"}, TechCutLayer{.width = 90});
-  const auto m2 = technology.createRoutingLayer(TechLayerInfo{.name = "M2"}, TechRoutingLayer{.width = 100});
+  const auto m2 = technology.createRoutingLayer(TechLayerInfo{.name = "M3"}, TechRoutingLayer{.width = 100});
   const auto site = library.siteStorage().createSite(LibrarySite{.name = "WITNESS_SITE", .width = 100, .height = 100});
   const auto master = library.cellMasterStorage().createCellMaster(
       LibraryCellMaster{.name = "DFFQX1H7R_WITNESS", .type = LibraryCellMasterType::kCore, .site = site, .width = 4400, .height = 1400});
@@ -464,7 +539,7 @@ TEST_F(NativeCtsEccdbAdapterTest, MaterializesRectOnlyClockPinLocationsWithIdbCo
   }
 
   ::icts::Wrapper wrapper;
-  wrapper.initNative(context.get());
+  wrapper.init(makeSource());
   const auto clock_data = makeClockData();
   const auto trace = wrapper.traceSdcClocks(::icts::SdcClockTraceInput{.clock_data = &clock_data, .max_fanout = 32U});
   ASSERT_TRUE(trace.ok()) << trace.message;
@@ -478,31 +553,36 @@ TEST_F(NativeCtsEccdbAdapterTest, MaterializesRectOnlyClockPinLocationsWithIdbCo
   }
 }
 
-TEST_F(NativeCtsEccdbAdapterTest, AbortReleasesNativeSourcesAndAllowsRestart)
+TEST_F(NativeCtsEccdbAdapterTest, DestroyReleasesDesignSourceAndAllowsRestart)
 {
   TemporaryDirectory files{"abort-restart"};
   const auto config_path = files.path() / "cts.json";
   const auto sdc_path = files.path() / "cts.sdc";
   const auto work_dir = files.path() / "work";
   ASSERT_TRUE(writeTextFile(config_path, R"json({"buffer_type":["BUF_X1"],"routing_layer":[1]})json"));
-  ASSERT_TRUE(writeTextFile(sdc_path, "create_clock -name CLK -period 1 [get_nets clk_src]\n"));
+  // This lifecycle test intentionally does not provide a Liberty model.  Keep
+  // timing initialization out of scope; native timing-graph coverage is
+  // exercised by the real paired flow and must require Liberty data.
+  ASSERT_TRUE(writeTextFile(sdc_path, ""));
 
   auto& api = ::icts::CTSAPI::getInst();
   (void) ::icts::CTSAPI::abortCTS();
-  api.setDesignSource(*context);
-  api.setSdcPath(sdc_path.string());
-  api.setLibertyCellLookup([](const std::string&) -> idb::LibCell* { return nullptr; });
+  auto first_source = makeSource(sdc_path.string(), [](const std::string&) -> idb::LibCell* { return nullptr; });
+  std::weak_ptr<adapter::icts::CtsEccdbAdapter> first_source_observer = first_source;
+  api.setDesignSource(first_source);
+  first_source.reset();
   const auto first = ::icts::CTSAPI::init(config_path.string(), work_dir.string());
   ASSERT_TRUE(first.ok()) << first.message;
-  EXPECT_TRUE(::icts::CTSAPI::abortCTS().ok());
+  EXPECT_FALSE(first_source_observer.expired());
+  EXPECT_TRUE(::icts::CTSAPI::destroyCTS().ok());
+  EXPECT_TRUE(first_source_observer.expired());
   EXPECT_EQ(::icts::CTSAPI::runCTS().code, ::icts::CTSStatusCode::kNotInitialized);
 
-  api.setDesignSource(*context);
-  api.setSdcPath(sdc_path.string());
-  api.setLibertyCellLookup([](const std::string&) -> idb::LibCell* { return nullptr; });
+  auto second_source = makeSource(sdc_path.string(), [](const std::string&) -> idb::LibCell* { return nullptr; });
+  api.setDesignSource(second_source);
   const auto second = ::icts::CTSAPI::init(config_path.string(), work_dir.string());
   EXPECT_TRUE(second.ok()) << second.message;
-  EXPECT_TRUE(::icts::CTSAPI::abortCTS().ok());
+  EXPECT_TRUE(::icts::CTSAPI::destroyCTS().ok());
 }
 
 }  // namespace

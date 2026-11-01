@@ -19,15 +19,12 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <map>
 #include <set>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "AdjacentCutSpacingRule.hpp"
 #include "DataManager.hpp"
 #include "GDSPlotter.hpp"
 #include "IdbBlockages.h"
@@ -35,36 +32,34 @@
 #include "Monitor.hpp"
 #include "RuleValidator.hpp"
 #include "Utility.hpp"
-#include "design/DesignStore.h"
-#include "context/DatabaseContext.h"
 #include "feature_manager.h"
 #include "idm.h"
 #include "utility/logger/Logger.hpp"
 namespace idrc {
 namespace {
 
+std::string getNetName(int32_t net_idx, const std::vector<idb::IdbNet*>& net_list,
+                       const std::vector<idb::IdbSpecialNet*>& special_net_list, const std::string& fallback_name);
+
 // DEF routing points describe a centerline.  Unlike generic query expansion,
 // its physical wire envelope must remain outside the die when the centerline
 // is on a die edge; RuleValidator::verifyOutOfDie consumes that geometry.
-PlanarRect wireSegmentEnvelope(const PlanarCoord& first, const PlanarCoord& second, int32_t half_width)
+PlanarRect wireSegmentEnvelope(const PlanarCoord& first, const PlanarCoord& second, int32_t ll_x_offset,
+                               int32_t ll_y_offset, int32_t ur_x_offset, int32_t ur_y_offset)
 {
-  // Keep the legacy handling of an unsupported oblique segment.  DEF detailed
-  // routes reaching this projection are Manhattan, but changing the fallback
-  // here would silently broaden invalid input that the old implementation did
-  // not broaden.
   if (first.get_x() != second.get_x() && first.get_y() != second.get_y()) {
-    PlanarCoord start = first;
-    PlanarCoord end = second;
-    if (!CmpPlanarCoordByXASC{}(start, end)) {
-      std::swap(start, end);
-    }
-    return PlanarRect(start, end);
+    DRCLOG.error(Loc::current(), "The segment is oblique!");
   }
 
-  return PlanarRect(std::min(first.get_x(), second.get_x()) - half_width,
-                    std::min(first.get_y(), second.get_y()) - half_width,
-                    std::max(first.get_x(), second.get_x()) + half_width,
-                    std::max(first.get_y(), second.get_y()) + half_width);
+  // Offsets belong to the geometrically lower/upper endpoints, not the
+  // source-point order.  The caller resolves a DEF flush-point extension
+  // before this projection, including explicit zero extensions.  Do not use
+  // Utility::getEnlargedRect here: its generic lower-side expansion clamps
+  // coordinates at zero, which hides real out-of-die routing geometry.
+  return PlanarRect(std::min(first.get_x(), second.get_x()) - ll_x_offset,
+                    std::min(first.get_y(), second.get_y()) - ll_y_offset,
+                    std::max(first.get_x(), second.get_x()) + ur_x_offset,
+                    std::max(first.get_y(), second.get_y()) + ur_y_offset);
 }
 
 }  // namespace
@@ -93,8 +88,9 @@ void DRCInterface::destroyInst()
 
 void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enable_quiet)
 {
-  _last_violation_counts.clear();
-  refreshEccdbNetIndex();
+  if (_design_source) {
+    _design_source->beginRun();
+  }
   Logger::initInst();
   DRCLOG.setQuiet(enable_quiet);
   // clang-format off
@@ -114,7 +110,7 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
   DRCLOG.info(Loc::current(), "Starting...");
 
   DataManager::initInst();
-  DRCDM.input(config_map);
+  input(config_map);
   GDSPlotter::initInst();
   DRCGP.init();
   RuleValidator::initInst();
@@ -125,51 +121,29 @@ void DRCInterface::initDRC(std::map<std::string, std::any> config_map, bool enab
 
 void DRCInterface::runDRC()
 {
-  checkDef();
-  destroyDRC();
-}
-
-void DRCInterface::checkDef()
-{
-  _last_violation_counts.clear();
   bool origin_quiet = DRCLOG.isQuiet();
   DRCLOG.disableQuiet();
 
   std::map<std::string, std::vector<ids::Violation>> type_violation_map;
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
+  if (_design_source) {
     std::set<size_t> obs_shape_idx_set;
-    std::vector<ids::Shape> env_shape_list = buildEnvShapeListFromEnTT(&obs_shape_idx_set);
-    for (ids::Violation& ids_violation : getViolationList(env_shape_list, buildResultShapeListFromEnTT(), {}, {}, obs_shape_idx_set)) {
+    std::vector<ids::Shape> env_shape_list = _design_source->environmentShapes(&obs_shape_idx_set);
+    for (ids::Violation& ids_violation : getViolationList(env_shape_list, _design_source->resultShapes(), {}, {}, obs_shape_idx_set)) {
       type_violation_map[ids_violation.violation_type].push_back(std::move(ids_violation));
     }
   } else {
-    std::vector<DRCShape> env_shape_list = buildEnvDrcShapeList();
-    std::vector<DRCShape> result_shape_list = buildResultDrcShapeList();
+    std::vector<DRCShape> env_shape_list = buildEnvShapeList();
+    std::vector<DRCShape> result_shape_list = buildResultShapeList();
     for (ids::Violation& ids_violation : getViolationList(std::move(env_shape_list), std::move(result_shape_list), {}, {})) {
       type_violation_map[ids_violation.violation_type].push_back(std::move(ids_violation));
     }
-  }
-  for (const auto& [type, violations] : type_violation_map) {
-    _last_violation_counts.emplace(type, violations.size());
   }
   printSummary(type_violation_map);
   outputViolationJson(type_violation_map);
   outputViolationFile(type_violation_map);
   outputTofeature(type_violation_map);
 
-  if (origin_quiet) {
-    DRCLOG.enableQuiet();
-  }
-}
-
-const std::map<std::string, std::size_t>& DRCInterface::lastViolationCounts() const noexcept
-{
-  return _last_violation_counts;
-}
-
-void DRCInterface::destroyDRC()
-{
-  finishDRC(true);
+  DRCLOG.setQuiet(origin_quiet);
 }
 
 void DRCInterface::abortDRC()
@@ -180,22 +154,18 @@ void DRCInterface::abortDRC()
   RuleValidator::destroyInst();
   GDSPlotter::destroyInst();
   DataManager::destroyInst();
-  _last_violation_counts.clear();
   _drc_initialized = false;
-  clearEccdbNetIndex();
+  if (_design_source) {
+    _design_source->endRun();
+  }
   Logger::destroyInst();
 }
 
-void DRCInterface::finishDRC(bool write_output)
+void DRCInterface::destroyDRC()
 {
   if (!_drc_initialized) {
     return;
   }
-
-  // Keep the lifecycle argument for callers that share the other operation
-  // interfaces.  The current iDRC DataManager has no output phase: violation
-  // artifacts are emitted by checkDef(), before teardown.
-  (void) write_output;
 
   auto monitor = Monitor::create();
   DRCLOG.info(Loc::current(), "Starting...");
@@ -205,7 +175,9 @@ void DRCInterface::finishDRC(bool write_output)
   GDSPlotter::destroyInst();
   DataManager::destroyInst();
   _drc_initialized = false;
-  clearEccdbNetIndex();
+  if (_design_source) {
+    _design_source->endRun();
+  }
 
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 
@@ -245,8 +217,8 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
   std::vector<DRCShape> drc_result_shape_list;
   drc_result_shape_list.reserve(ids_result_shape_list.size());
   const int32_t regular_net_num
-      = _design != nullptr
-            ? _eccdb_regular_net_count
+      = _design_source
+            ? _design_source->regularNetCount()
             : static_cast<int32_t>(dmInst->get_idb_def_service()->get_design()->get_net_list()->get_net_list().size());
   for (const ids::Shape& ids_result_shape : ids_result_shape_list) {
     drc_result_shape_list.push_back(convertToDRCShape(ids_result_shape));
@@ -265,13 +237,139 @@ std::vector<ids::Violation> DRCInterface::getViolationList(const std::vector<ids
                           std::move(drc_check_region_list));
 }
 
-std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape> drc_env_shape_list,
-                                                           std::vector<DRCShape> drc_result_shape_list,
-                                                           std::set<ViolationType> drc_check_type_set,
+// 1. assume no instance is placed within "spacing" distance, only check routing shapes
+// 2. assume macros are seperated at least "spacing" distance, parallel check each macro
+std::vector<Violation> DRCInterface::getMacroViolationList(std::vector<DRCShape> drc_result_shape_list,
                                                            std::vector<DRCShape> drc_check_region_list)
 {
-  std::vector<Violation> violation_list = DRCRV.verify(std::move(drc_env_shape_list), std::move(drc_result_shape_list),
-                                                       std::move(drc_check_type_set), std::move(drc_check_region_list));
+  const std::vector<MacroObs>& macro_obs_list = DRCDM.getDatabase().get_macro_obs_list();
+
+  int32_t thread_num = std::min(static_cast<int32_t>(macro_obs_list.size()), omp_get_max_threads());
+  std::vector<std::vector<Violation>> violation_list_list(macro_obs_list.size());
+#pragma omp parallel for num_threads(std::max(thread_num, 1))
+  for (int32_t i = 0; i < static_cast<int32_t>(macro_obs_list.size()); i++) {
+    const MacroObs& macro_obs = macro_obs_list[i];
+    std::vector<Violation>& violation_list = violation_list_list[i];
+    for (const MacroObsLayer& macro_obs_layer : macro_obs.obs_layer_list) {
+      PlanarRect check_rect = DRCUTIL.getEnlargedRect(macro_obs_layer.bounding_box, macro_obs_layer.min_spacing);
+      if (!drc_check_region_list.empty()) {
+        bool is_in_check_region = false;
+        for (const DRCShape& drc_check_region : drc_check_region_list) {
+          if (DRCUTIL.isClosedOverlap(check_rect, drc_check_region.get_rect())) {
+            is_in_check_region = true;
+            break;
+          }
+        }
+        if (!is_in_check_region) {
+          continue;
+        }
+      }
+      std::map<int32_t, GTLPolySetInt> net_polyset_map;
+      for (const DRCShape& drc_result_shape : drc_result_shape_list) {
+        if (drc_result_shape.get_layer_idx() != macro_obs_layer.layer_idx
+            || drc_result_shape.get_is_routing() != macro_obs_layer.is_routing) {
+          continue;
+        }
+        if (!DRCUTIL.isClosedOverlap(check_rect, drc_result_shape.get_rect())) {
+          continue;
+        }
+        net_polyset_map[drc_result_shape.get_net_idx()] += DRCUTIL.convertToGTLRectInt(drc_result_shape.get_rect());
+      }
+
+      for (auto& [net_idx, net_polyset] : net_polyset_map) {
+        std::vector<GTLRectInt> max_rect_list;
+        gtl::get_max_rectangles(max_rect_list, net_polyset);
+        std::vector<PlanarRect> violation_rect_list;
+        for (const GTLRectInt& max_rect : max_rect_list) {
+          PlanarRect result_rect = DRCUTIL.convertToPlanarRect(max_rect);
+          // exempt wires which are overlapped with macro pin
+          if (isMacroPinOverlapped(macro_obs_layer.pin_rect_list, result_rect)) {
+            continue;
+          }
+          for (const PlanarRect& obs_rect : macro_obs_layer.obs_rect_list) {
+            if (macro_obs_layer.min_spacing <= DRCUTIL.getEuclideanDistance(obs_rect, result_rect)) {
+              continue;
+            }
+            violation_rect_list.push_back(DRCUTIL.getSpacingRect(obs_rect, result_rect));
+          }
+        }
+
+        // polygon_90_set only keeps areas, zero-area violations (line/point) are dropped by clean()
+        GTLPolySetInt violation_polyset;
+        std::vector<PlanarRect> zero_area_violation_rect_list;
+        for (PlanarRect& violation_rect : violation_rect_list) {
+          if (violation_rect.getArea() == 0) {
+            zero_area_violation_rect_list.push_back(violation_rect);
+          } else {
+            violation_polyset += DRCUTIL.convertToGTLRectInt(violation_rect);
+          }
+        }
+        std::vector<GTLRectInt> merged_rect_list;
+        gtl::get_max_rectangles(merged_rect_list, violation_polyset);
+
+        std::vector<PlanarRect> final_violation_rect_list;
+        final_violation_rect_list.reserve(merged_rect_list.size() + zero_area_violation_rect_list.size());
+        for (const GTLRectInt& merged_rect : merged_rect_list) {
+          final_violation_rect_list.push_back(DRCUTIL.convertToPlanarRect(merged_rect));
+        }
+        final_violation_rect_list.insert(final_violation_rect_list.end(), zero_area_violation_rect_list.begin(),
+                                         zero_area_violation_rect_list.end());
+
+        // zero-area violations can not be merged by polygon set, remove duplicated ones at last
+        std::vector<PlanarRect> unique_violation_rect_list;
+        unique_violation_rect_list.reserve(final_violation_rect_list.size());
+        for (const PlanarRect& violation_rect : final_violation_rect_list) {
+          if (violation_rect.getArea() != 0) {
+            unique_violation_rect_list.push_back(violation_rect);
+            continue;
+          }
+          bool is_duplicated = false;
+          for (const PlanarRect& kept_rect : unique_violation_rect_list) {
+            if (DRCUTIL.isInside(kept_rect, violation_rect)) {
+              is_duplicated = true;
+              break;
+            }
+          }
+          if (!is_duplicated) {
+            unique_violation_rect_list.push_back(violation_rect);
+          }
+        }
+
+        for (const PlanarRect& violation_rect : unique_violation_rect_list) {
+          Violation violation;
+          violation.set_violation_type(ViolationType::kMacroObsSpacing);
+          violation.set_is_routing(true);
+          violation.set_violation_net_set({net_idx});
+          violation.set_required_size(macro_obs_layer.min_spacing);
+          violation.set_layer_idx(macro_obs_layer.layer_idx);
+          violation.set_rect(violation_rect);
+          violation_list.push_back(std::move(violation));
+        }
+      }
+    }
+  }
+
+  std::vector<Violation> violation_list;
+  for (std::vector<Violation>& sub_violation_list : violation_list_list) {
+    violation_list.insert(violation_list.end(), sub_violation_list.begin(), sub_violation_list.end());
+  }
+  std::sort(violation_list.begin(), violation_list.end(), CmpViolation());
+  violation_list.erase(std::unique(violation_list.begin(), violation_list.end()), violation_list.end());
+  return violation_list;
+}
+
+bool DRCInterface::isMacroPinOverlapped(const std::vector<PlanarRect>& pin_rect_list, const PlanarRect& rect)
+{
+  for (const PlanarRect& pin_rect : pin_rect_list) {
+    if (DRCUTIL.isOpenOverlap(pin_rect, rect)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<ids::Violation> DRCInterface::convertToIDSViolationList(const std::vector<Violation>& violation_list)
+{
   std::vector<ids::Violation> ids_violation_list;
   ids_violation_list.reserve(violation_list.size());
   for (const Violation& violation : violation_list) {
@@ -290,6 +388,21 @@ std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape>
   return ids_violation_list;
 }
 
+std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape> drc_env_shape_list,
+                                                           std::vector<DRCShape> drc_result_shape_list,
+                                                           std::set<ViolationType> drc_check_type_set,
+                                                           std::vector<DRCShape> drc_check_region_list)
+{
+  std::vector<Violation> violation_list = DRCRV.verify(std::move(drc_env_shape_list), drc_result_shape_list, std::move(drc_check_type_set),
+                                                       drc_check_region_list);
+  bool need_check_macro = drc_check_type_set.empty() || DRCUTIL.exist(drc_check_type_set, ViolationType::kMacroObsSpacing);
+  if (need_check_macro) {
+    std::vector<Violation> macro_violation_list = getMacroViolationList(std::move(drc_result_shape_list), std::move(drc_check_region_list));
+    violation_list.insert(violation_list.end(), macro_violation_list.begin(), macro_violation_list.end());
+  }
+  return convertToIDSViolationList(violation_list);
+}
+
 #endif
 
 #endif
@@ -302,7 +415,11 @@ std::vector<ids::Violation> DRCInterface::getViolationList(std::vector<DRCShape>
 
 void DRCInterface::input(std::map<std::string, std::any>& config_map)
 {
-  DRCDM.input(config_map);
+  if (_design_source) {
+    DRCDM.input(config_map, [this] { wrapDatabase(); });
+  } else {
+    DRCDM.input(config_map);
+  }
 }
 
 void DRCInterface::wrapConfig(std::map<std::string, std::any>& config_map)
@@ -310,80 +427,21 @@ void DRCInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   DRCDM.wrapConfig(config_map);
 }
 
-void DRCInterface::setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
-                                   eccdb::LibraryStore* library)
+void DRCInterface::setDesignSource(std::shared_ptr<DRCDesignSource> source)
 {
-  clearEccdbNetIndex();
-  _database_context = nullptr;
-  _design = design;
-  _tech = tech;
-  _library = library;
-}
-
-void DRCInterface::setDesignSource(eccdb::DatabaseContext& context)
-{
-  setDesignSource(&context);
-}
-
-void DRCInterface::setDesignSource(eccdb::DatabaseContext* context)
-{
-  clearEccdbNetIndex();
-  _database_context = context;
-  if (_database_context == nullptr) {
-    _design = nullptr;
-    _tech = nullptr;
-    _library = nullptr;
-    return;
+  if (_design_source) {
+    _design_source->endRun();
   }
-  _design = &_database_context->design();
-  _tech = _database_context->technology();
-  _library = _database_context->library();
-}
-
-void DRCInterface::clearEccdbNetIndex()
-{
-  _eccdb_regular_net_count = 0;
-  _eccdb_net_names.clear();
-}
-
-void DRCInterface::refreshEccdbNetIndex()
-{
-  clearEccdbNetIndex();
-  if (_design == nullptr) {
-    return;
-  }
-
-  const auto& netlist = _design->netlistStorage();
-  const auto regular_nets = netlist.regularNets();
-  const auto special_nets = netlist.specialNets();
-  _eccdb_regular_net_count = static_cast<int32_t>(regular_nets.size());
-  _eccdb_net_names.reserve(regular_nets.size() + special_nets.size());
-  for (const auto net : regular_nets) {
-    _eccdb_net_names.push_back(netlist.net(net).name);
-  }
-  for (const auto net : special_nets) {
-    _eccdb_net_names.push_back(netlist.net(net).name);
-  }
+  _design_source = std::move(source);
 }
 
 void DRCInterface::wrapDatabase()
 {
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    wrapDatabaseFromEnTT();
+  if (_design_source) {
+    _design_source->wrapDatabase();
   } else {
-    wrapDatabaseFromIdb();
+    DRCDM.wrapDatabase();
   }
-}
-
-void DRCInterface::wrapDatabaseFromIdb()
-{
-  wrapDBInfo();
-  wrapMicronDBU();
-  wrapManufactureGrid();
-  wrapDie();
-  wrapDesignRule();
-  wrapLayerList();
-  wrapLayerInfo();
 }
 
 void DRCInterface::wrapDBInfo()
@@ -455,28 +513,6 @@ void DRCInterface::output()
 
 #if 1  // check
 
-std::vector<ids::Shape> DRCInterface::buildEnvShapeList()
-{
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    return buildEnvShapeListFromEnTT(nullptr);
-  }
-
-  std::vector<DRCShape> drc_shape_list = buildEnvDrcShapeList();
-  std::vector<ids::Shape> shape_list;
-  shape_list.reserve(drc_shape_list.size());
-  for (const DRCShape& drc_shape : drc_shape_list) {
-    ids::Shape shape;
-    shape.net_idx = drc_shape.get_net_idx();
-    shape.ll_x = drc_shape.get_ll_x();
-    shape.ll_y = drc_shape.get_ll_y();
-    shape.ur_x = drc_shape.get_ur_x();
-    shape.ur_y = drc_shape.get_ur_y();
-    shape.layer_idx = drc_shape.get_layer_idx();
-    shape.is_routing = drc_shape.get_is_routing();
-    shape_list.push_back(shape);
-  }
-  return shape_list;
-}
 namespace {
 
 size_t getViaRectCount(idb::IdbVia* idb_via);
@@ -486,7 +522,7 @@ void appendWireViaShapeList(std::vector<DRCShape>& shape_list, idb::IdbVia* idb_
 
 }  // namespace
 
-std::vector<DRCShape> DRCInterface::buildEnvDrcShapeList()
+std::vector<DRCShape> DRCInterface::buildEnvShapeList()
 {
   std::vector<DRCShape> env_shape_list;
   Monitor monitor;
@@ -706,7 +742,7 @@ bool DRCInterface::isSkipping(idb::IdbNet* idb_net)
   return false;
 }
 
-std::vector<DRCShape> DRCInterface::buildResultDrcShapeList()
+std::vector<DRCShape> DRCInterface::buildResultShapeList()
 {
   std::vector<DRCShape> result_shape_list;
   Monitor monitor;
@@ -782,7 +818,8 @@ std::vector<DRCShape> DRCInterface::buildResultDrcShapeList()
             ll_y_offset = lower_end_ext.value_or(half_width);
             ur_y_offset = upper_end_ext.value_or(half_width);
           }
-          PlanarRect rect = DRCUTIL.getEnlargedRect(first_coord, second_coord, ll_x_offset, ll_y_offset, ur_x_offset, ur_y_offset);
+          PlanarRect rect = wireSegmentEnvelope(first_coord, second_coord, ll_x_offset, ll_y_offset, ur_x_offset,
+                                                 ur_y_offset);
           DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()), LayerRect(rect, idb_segment->get_layer()->get_id()), true);
           drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
           result_shape_list.push_back(std::move(drc_shape));
@@ -799,7 +836,7 @@ std::vector<DRCShape> DRCInterface::buildResultDrcShapeList()
                                 idb_segment->get_delta_rect()->get_high_x(), idb_segment->get_delta_rect()->get_high_y());
           PlanarRect rect = DRCUTIL.getOffsetRect(delta_rect, offset_coord);
           DRCShape drc_shape(static_cast<int32_t>(idb_net->get_id()), LayerRect(rect, idb_segment->get_layer()->get_id()), true);
-          drc_shape.set_source_type(ids::Shape::SourceType::kRegularWire);
+          drc_shape.set_source_type(ids::Shape::SourceType::kPatch);
           result_shape_list.push_back(std::move(drc_shape));
         }
       }
@@ -830,65 +867,19 @@ std::vector<DRCShape> DRCInterface::buildResultDrcShapeList()
   return result_shape_list;
 }
 
-std::vector<ids::Shape> DRCInterface::buildResultShapeList()
-{
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    return buildResultShapeListFromEnTT();
-  }
-
-  std::vector<DRCShape> drc_shape_list = buildResultDrcShapeList();
-  std::vector<ids::Shape> shape_list;
-  shape_list.reserve(drc_shape_list.size());
-  for (const DRCShape& drc_shape : drc_shape_list) {
-    ids::Shape shape;
-    shape.net_idx = drc_shape.get_net_idx();
-    shape.ll_x = drc_shape.get_ll_x();
-    shape.ll_y = drc_shape.get_ll_y();
-    shape.ur_x = drc_shape.get_ur_x();
-    shape.ur_y = drc_shape.get_ur_y();
-    shape.layer_idx = drc_shape.get_layer_idx();
-    shape.is_routing = drc_shape.get_is_routing();
-    shape_list.push_back(shape);
-  }
-  return shape_list;
-}
-
 std::string DRCInterface::getNetName(int32_t net_idx)
 {
   if (net_idx == -1) {
     return "obs";
   }
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    if (_drc_initialized) {
-      if (net_idx >= 0 && static_cast<size_t>(net_idx) < _eccdb_net_names.size()) {
-        return _eccdb_net_names[static_cast<size_t>(net_idx)];
-      }
-      return DRCUTIL.getString("<invalid_entt_net:", net_idx, ">");
-    }
-    // Outside an initialized run, preserve live lookup for standalone API use.
-    const auto regular_nets = _design->netlistStorage().regularNets();
-    if (net_idx >= 0 && net_idx < static_cast<int32_t>(regular_nets.size())) {
-      return _design->netlistStorage().net(regular_nets[static_cast<size_t>(net_idx)]).name;
-    }
-    const auto special_nets = _design->netlistStorage().specialNets();
-    const int32_t special_net_idx = net_idx - static_cast<int32_t>(regular_nets.size());
-    if (special_net_idx >= 0 && special_net_idx < static_cast<int32_t>(special_nets.size())) {
-      return _design->netlistStorage().net(special_nets[static_cast<size_t>(special_net_idx)]).name;
-    }
-    return DRCUTIL.getString("<invalid_entt_net:", net_idx, ">");
+  if (_design_source) {
+    return _design_source->netName(net_idx, _drc_initialized);
   }
 
   auto* idb_design = dmInst->get_idb_def_service()->get_design();
   const std::vector<idb::IdbNet*>& idb_net_list = idb_design->get_net_list()->get_net_list();
-  if (net_idx >= 0 && net_idx < static_cast<int32_t>(idb_net_list.size())) {
-    return idb_net_list[net_idx]->get_net_name();
-  }
   const std::vector<idb::IdbSpecialNet*>& special_nets = idb_design->get_special_net_list()->get_net_list();
-  const int32_t special_net_idx = net_idx - static_cast<int32_t>(idb_net_list.size());
-  if (special_net_idx >= 0 && special_net_idx < static_cast<int32_t>(special_nets.size())) {
-    return special_nets[static_cast<size_t>(special_net_idx)]->get_net_name();
-  }
-  return DRCUTIL.getString("<invalid_idb_net:", net_idx, ">");
+  return idrc::getNetName(net_idx, idb_net_list, special_nets, DRCUTIL.getString("<invalid_idb_net:", net_idx, ">"));
 }
 
 void DRCInterface::printSummary(std::map<std::string, std::vector<ids::Violation>>& type_violation_map)

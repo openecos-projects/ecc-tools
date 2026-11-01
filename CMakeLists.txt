@@ -193,6 +193,11 @@ endif()
 # Disable building tests and examples in libfort project
 set(FORT_ENABLE_TESTING OFF CACHE INTERNAL "")
 
+if(BUILD_PYTHON)
+    # Extension modules need headers and module support, not libpython embedding.
+    find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
+endif()
+
 add_subdirectory(src/third_party)
 add_subdirectory(src/utility)
 add_subdirectory(src/apps)

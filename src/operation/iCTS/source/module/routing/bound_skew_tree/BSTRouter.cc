@@ -25,7 +25,6 @@
 
 #include <cmath>
 #include <memory>
-#include <ostream>
 #include <utility>
 #include <vector>
 

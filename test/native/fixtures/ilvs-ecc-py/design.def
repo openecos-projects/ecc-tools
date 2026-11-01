@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: MulanPSL-2.0
+# Copyright (c) 2026 Peng Cheng Laboratory
+
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN top ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 4000 1000 ) ;
+
+COMPONENTS 2 ;
+  - U0 BUF + PLACED ( 1000 0 ) N ;
+  - U1 BUF + PLACED ( 2000 0 ) N ;
+END COMPONENTS
+
+PINS 2 ;
+  - IN + NET IN + DIRECTION INPUT + USE SIGNAL
+    + LAYER M1 ( 0 400 ) ( 100 600 )
+    + FIXED ( 0 0 ) N ;
+  - OUT + NET OUT + DIRECTION OUTPUT + USE SIGNAL
+    + LAYER M1 ( 0 400 ) ( 100 600 )
+    + FIXED ( 3900 0 ) N ;
+END PINS
+
+NETS 3 ;
+  - IN ( PIN IN ) ( U0 A ) + USE SIGNAL
+    + ROUTED M1 ( 50 500 ) ( 1050 500 ) ;
+  - MID ( U0 Y ) ( U1 A ) + USE SIGNAL
+    + ROUTED M1 ( 1950 500 ) ( 2050 500 ) ;
+  - OUT ( U1 Y ) ( PIN OUT ) + USE SIGNAL
+    + ROUTED M1 ( 2950 500 ) ( 3950 500 ) ;
+END NETS
+
+END DESIGN

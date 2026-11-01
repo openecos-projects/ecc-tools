@@ -68,10 +68,3 @@ endfunction()
 add_subdirectory(toolkit)
 add_subdirectory(data_manager)
 add_subdirectory(module)
-
-if(TARGET eccdb_core)
-  add_subdirectory(
-    ${HOME_DATABASE}/eccdb/tests/adapters/icts
-    ${CMAKE_CURRENT_BINARY_DIR}/eccdb_icts_adapter_tests
-  )
-endif()

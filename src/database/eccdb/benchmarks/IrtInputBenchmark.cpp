@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <malloc.h>
 #include <omp.h>
@@ -37,6 +22,7 @@
 #include "Database.hpp"
 #include "Logger.hpp"
 #include "RTInterface.hpp"
+#include "adapters/irt/RTInterfaceEccdb.h"
 #include "design/DesignStore.h"
 #include "idm.h"
 #include "def/DefDesignImporter.h"
@@ -251,9 +237,9 @@ void run(const Options& options)
   irt::Logger::initInst();
   irt::DataManager::initInst();
   if (options.source == "entt") {
-    RTI.setDesignSource(entt.design.get(), entt.tech.get(), entt.library.get());
+    eccdb::adapters::bindRtSource(RTI, entt.design.get(), entt.tech.get(), entt.library.get());
   } else {
-    RTI.setDesignSource(nullptr, nullptr, nullptr);
+    eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   }
 
   const Memory before = settledMemory();
@@ -277,7 +263,7 @@ void run(const Options& options)
   }
   writeJson(*destination, options, before, after, elapsed_ns, counts);
 
-  RTI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindRtSource(RTI, nullptr, nullptr, nullptr);
   irt::DataManager::destroyInst();
   irt::Logger::destroyInst();
   if (options.source == "idb") {

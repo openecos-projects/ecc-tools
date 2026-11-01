@@ -25,7 +25,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -48,15 +47,7 @@ class IdbPin;
 template <typename T>
 class IdbCoordinate;
 class LibCell;
-class LibLibrary;
 }  // namespace idb
-
-namespace eccdb {
-class DatabaseContext;
-namespace adapter::icts {
-class CtsEccdbAdapter;
-}
-}  // namespace eccdb
 
 namespace idm {
 class RawLibertyGeneration;
@@ -64,6 +55,7 @@ class RawLibertyGeneration;
 
 namespace icts {
 
+class CtsDesignSource;
 class Clock;
 class Config;
 class Design;
@@ -299,8 +291,6 @@ struct WrapperTimingGraph
 class Wrapper
 {
  public:
-  using LibertyCellLookup = std::function<idb::LibCell*(const std::string&)>;
-
   Wrapper();
   ~Wrapper();
 
@@ -312,10 +302,8 @@ class Wrapper
 
   // Initialize with idb builder
   auto init(idb::IdbBuilder* idb) -> void;
-  // Borrow the caller-owned EccDB context.  Unlike the legacy path, this
-  // branch never consults the process-wide iDB design.
-  auto initNative(eccdb::DatabaseContext* context, LibertyCellLookup liberty_cell_lookup = {}) -> void;
-  auto setNativeLibertyCellLookup(LibertyCellLookup liberty_cell_lookup) -> void;
+  // Use a backend without exposing its database types to CTS.
+  auto init(std::shared_ptr<CtsDesignSource> source) -> void;
 
   // Reset wrapper
   auto reset() -> void;
@@ -368,9 +356,9 @@ class Wrapper
   auto queryDbUnit() const -> std::optional<int32_t>;
   auto is_design_ready() const -> bool;
   auto is_layout_ready() const -> bool;
-  auto is_native() const -> bool { return _native_adapter != nullptr; }
+  auto hasDesignSource() const -> bool { return _design_source != nullptr; }
   auto querySdcUnits() const -> std::optional<SdcUnits>;
-  auto querySupplyVoltage() const -> std::optional<double>;
+  auto queryCellSupplyVoltage(const std::string& cell_master) const -> std::optional<double>;
   auto queryLibertyRevision() const -> std::uint64_t;
   static auto queryParallelWorkerCount() -> std::size_t;
   auto queryWireResistance(int routing_layer, double length_um, std::optional<double> wire_width_um = std::nullopt) const -> std::optional<double>;
@@ -416,7 +404,10 @@ class Wrapper
   auto writeClocks(Design& design, const std::vector<Clock*>& clocks) -> bool;
   auto collectLogicCellGeometries() const -> std::vector<WrapperCellGeometry>;
   auto queryInstGeometry(const std::string& inst_name) const -> std::optional<WrapperCellGeometry>;
-  auto collectTimingGraph() const -> WrapperTimingGraph;
+  // An external source maps model routing layers to its physical technology.
+  // The legacy iDB implementation retains its platform-configured anchor.
+  auto collectTimingGraph(std::optional<unsigned> routing_layer = std::nullopt,
+                          std::string_view routing_anchor_name = {}) const -> WrapperTimingGraph;
   auto withinCore(int32_t point_x, int32_t point_y) const -> std::optional<bool>;
 
  private:
@@ -457,8 +448,7 @@ class Wrapper
   mutable std::uint64_t _liberty_revision = 0U;
   mutable std::shared_ptr<const idm::RawLibertyGeneration> _liberty_generation;
   mutable std::unordered_map<std::string, idb::LibCell*> _lib_cell_by_master;
-  LibertyCellLookup _native_liberty_cell_lookup;
-  std::unique_ptr<eccdb::adapter::icts::CtsEccdbAdapter> _native_adapter;
+  std::shared_ptr<CtsDesignSource> _design_source;
 
   std::unordered_map<Inst*, idb::IdbInstance*> _cts2idb_inst_map;
   std::unordered_map<idb::IdbInstance*, Inst*> _idb2cts_inst_map;

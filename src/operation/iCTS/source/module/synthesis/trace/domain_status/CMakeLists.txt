@@ -2,7 +2,7 @@ add_library(icts_source_module_synthesis_trace_domain_status ${ICTS_MODULE_SYNTH
 
 target_link_libraries(
   icts_source_module_synthesis_trace_domain_status
-  PUBLIC
+  PRIVATE
   icts_source_data_manager
 )
 

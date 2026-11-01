@@ -23,13 +23,15 @@
 
 #include "evaluation/qor/QOREvaluation.hh"
 
+#include <stdint.h>
+
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "Logger.hh"
-#include "config/Config.hh"
 #include "design/Clock.hh"
 #include "design/ClockDAG.hh"
 #include "design/Design.hh"

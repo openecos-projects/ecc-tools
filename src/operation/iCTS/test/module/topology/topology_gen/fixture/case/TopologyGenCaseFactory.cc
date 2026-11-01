@@ -27,6 +27,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "data_manager/design/fixture/data/GeneratedPins.hh"
 #include "data_manager/design/fixture/data/TestDataGenerator.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"

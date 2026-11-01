@@ -56,19 +56,9 @@ bool getHasCoord(const spef::Coord& coord)
   return coord.x >= 0.0 && coord.y >= 0.0;
 }
 
-std::string getSemanticLayoutName(const std::string& name)
+std::string getNormalizedSpefName(const std::string& name)
 {
-  // LayoutData keeps the raw DEF spelling.  Normalize it once before it is
-  // compared with names supplied by the already-expanded SPEF Exchange.
   return spef::removeEscapes(spef::stripQuotes(name));
-}
-
-std::string getExpandedSpefName(const std::string& name)
-{
-  // SpefReader::expandName() has already consumed SPEF escape pairs.  A
-  // second removeEscapes() would erase a literal backslash represented by
-  // "\\\\" in the source SPEF.
-  return spef::stripQuotes(name);
 }
 
 GTLPointInt getPoint(const spef::Coord& coord, int32_t dbu_per_micron)
@@ -170,7 +160,7 @@ std::unordered_map<std::string, int32_t> getLayoutNetIdxMap(LayoutData& layout_d
   for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(net_list.size()); ++net_idx) {
     std::string& net_name = net_list[net_idx].get_net_name();
     if (!net_name.empty()) {
-      net_name_to_idx_map[getSemanticLayoutName(net_name)] = net_idx;
+      net_name_to_idx_map[getNormalizedSpefName(net_name)] = net_idx;
     }
   }
   return net_name_to_idx_map;
@@ -181,7 +171,7 @@ std::unordered_map<std::string, std::string> getLayoutPinNameMap(Net& net)
   std::unordered_map<std::string, std::string> normalized_name_to_pin_name_map;
   normalized_name_to_pin_name_map.reserve(net.get_pin_list().size());
   for (Pin& pin : net.get_pin_list()) {
-    normalized_name_to_pin_name_map[getSemanticLayoutName(pin.get_pin_name())] = pin.get_pin_name();
+    normalized_name_to_pin_name_map[getNormalizedSpefName(pin.get_pin_name())] = pin.get_pin_name();
   }
   return normalized_name_to_pin_name_map;
 }
@@ -271,7 +261,7 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data, LayerTable& layer_t
   std::unordered_map<std::string, std::string> pin_name_map = getLayoutPinNameMap(layout_data.get_net_list()[net_idx]);
 
   for (const spef::ConnEntry& conn : spef_net.conns) {
-    std::string node_name = getExpandedSpefName(conn.pin_port_name);
+    std::string node_name = getNormalizedSpefName(conn.pin_port_name);
     if (node_name_to_info_map.find(node_name) != node_name_to_info_map.end()) {
       continue;
     }
@@ -301,8 +291,8 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data, LayerTable& layer_t
   }
 
   for (const spef::ResCap& res : spef_net.ress) {
-    std::string first_node_name = getExpandedSpefName(res.node1);
-    std::string second_node_name = getExpandedSpefName(res.node2);
+    std::string first_node_name = getNormalizedSpefName(res.node1);
+    std::string second_node_name = getNormalizedSpefName(res.node2);
     std::unordered_map<std::string, NodeInfo>::iterator first_node_it = node_name_to_info_map.find(first_node_name);
     std::unordered_map<std::string, NodeInfo>::iterator second_node_it = node_name_to_info_map.find(second_node_name);
     if (first_node_it == node_name_to_info_map.end() || second_node_it == node_name_to_info_map.end()) {
@@ -389,7 +379,7 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
   std::unordered_map<std::string, int32_t> layout_net_name_to_idx_map = detail::getLayoutNetIdxMap(layout_data);
   std::vector<detail::NetTopo> net_topo_list(net_num);
   for (const spef::Net& spef_net : exchange->nets) {
-    std::unordered_map<std::string, int32_t>::iterator net_idx_it = layout_net_name_to_idx_map.find(detail::getExpandedSpefName(spef_net.name));
+    std::unordered_map<std::string, int32_t>::iterator net_idx_it = layout_net_name_to_idx_map.find(detail::getNormalizedSpefName(spef_net.name));
     if (net_idx_it == layout_net_name_to_idx_map.end()) {
       RCXLOG.warn(Loc::current(), (strict ? "run_rcx_from_topology failed" : "run_rcx_from_topology warning"), ": net not found in layout, net=", spef_net.name,
                   ".");

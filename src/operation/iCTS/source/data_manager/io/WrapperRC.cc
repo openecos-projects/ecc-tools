@@ -23,14 +23,14 @@
 #include <cmath>
 #include <cstddef>
 #include <optional>
-#include <ostream>
+#include <vector>
 
 #include "IdbLayer.h"
 #include "IdbLayout.h"
 #include "IdbUnits.h"
 #include "Logger.hh"
 #include "Wrapper.hh"
-#include "CtsEccdbAdapter.hh"
+#include "CtsDesignSource.hh"
 #include "config/Config.hh"
 #include "routing/ClockRouteSegmentRC.hh"
 
@@ -182,8 +182,8 @@ auto isValidCapacitanceProfile(const Wrapper::WireCapacitanceProfile& profile) -
 
 auto Wrapper::queryWireResistance(int routing_layer, double length_um, std::optional<double> wire_width_um) const -> std::optional<double>
 {
-  if (_native_adapter != nullptr) {
-    return _native_adapter->queryWireResistance(routing_layer, length_um, wire_width_um);
+  if (_design_source != nullptr) {
+    return _design_source->queryWireResistance(routing_layer, length_um, wire_width_um);
   }
   if (routing_layer <= 0 || !std::isfinite(length_um) || length_um < 0.0) {
     return std::nullopt;
@@ -205,8 +205,8 @@ auto Wrapper::queryWireResistance(int routing_layer, double length_um, std::opti
 
 auto Wrapper::queryWireCapacitance(int routing_layer, double length_um, std::optional<double> wire_width_um) const -> std::optional<double>
 {
-  if (_native_adapter != nullptr) {
-    const auto profile = _native_adapter->queryWireCapacitanceProfile(routing_layer, length_um, wire_width_um);
+  if (_design_source != nullptr) {
+    const auto profile = _design_source->queryWireCapacitanceProfile(routing_layer, length_um, wire_width_um);
     return profile.has_value() ? std::optional<double>{profile->total_cap_pf} : std::nullopt;
   }
   if (routing_layer <= 0 || !std::isfinite(length_um) || length_um < 0.0) {
@@ -230,10 +230,10 @@ auto Wrapper::queryWireCapacitance(int routing_layer, double length_um, std::opt
 auto Wrapper::queryRequiredWireResistance(int routing_layer, double length_um, std::optional<double> wire_width_um) const -> double
 {
   requireWireRcQuery("resistance", routing_layer, length_um);
-  if (_native_adapter != nullptr) {
-    const auto resistance = _native_adapter->queryWireResistance(routing_layer, length_um, wire_width_um);
+  if (_design_source != nullptr) {
+    const auto resistance = _design_source->queryWireResistance(routing_layer, length_um, wire_width_um);
     if (!resistance.has_value()) {
-      CTSLOG.error(Loc::current(), "Wrapper: EccDB wire resistance is unavailable.");
+      CTSLOG.error(Loc::current(), "Wrapper: external source wire resistance is unavailable.");
     }
     return requireFiniteNonNegative(resistance.value_or(0.0), "resistance");
   }
@@ -248,10 +248,10 @@ auto Wrapper::queryRequiredWireResistance(int routing_layer, double length_um, s
 auto Wrapper::queryRequiredWireCapacitance(int routing_layer, double length_um, std::optional<double> wire_width_um) const -> double
 {
   requireWireRcQuery("capacitance", routing_layer, length_um);
-  if (_native_adapter != nullptr) {
-    const auto profile = _native_adapter->queryWireCapacitanceProfile(routing_layer, length_um, wire_width_um);
+  if (_design_source != nullptr) {
+    const auto profile = _design_source->queryWireCapacitanceProfile(routing_layer, length_um, wire_width_um);
     if (!profile.has_value()) {
-      CTSLOG.error(Loc::current(), "Wrapper: EccDB wire capacitance is unavailable.");
+      CTSLOG.error(Loc::current(), "Wrapper: external source wire capacitance is unavailable.");
     }
     return requireFiniteNonNegative(profile.has_value() ? profile->total_cap_pf : 0.0, "capacitance");
   }
@@ -266,20 +266,13 @@ auto Wrapper::queryRequiredWireCapacitance(int routing_layer, double length_um, 
 auto Wrapper::queryRequiredWireCapacitanceProfile(int routing_layer, double length_um, std::optional<double> wire_width_um) const -> WireCapacitanceProfile
 {
   requireWireRcQuery("capacitance", routing_layer, length_um);
-  if (_native_adapter != nullptr) {
-    const auto profile = _native_adapter->queryWireCapacitanceProfile(routing_layer, length_um, wire_width_um);
+  if (_design_source != nullptr) {
+    const auto profile = _design_source->queryWireCapacitanceProfile(routing_layer, length_um, wire_width_um);
     if (!profile.has_value()) {
-      CTSLOG.error(Loc::current(), "Wrapper: EccDB wire capacitance profile is unavailable.");
+      CTSLOG.error(Loc::current(), "Wrapper: external source wire capacitance profile is unavailable.");
     }
-    const auto native = profile.value_or(eccdb::adapter::icts::CtsEccdbWireCapacitanceProfile{
-        .timing_coupling_factor = kOppositeSwitchingCouplingFactor});
-    return requireCapacitanceProfile(Wrapper::WireCapacitanceProfile{.area_cap_pf = native.area_cap_pf,
-                                                                       .edge_cap_pf = native.edge_cap_pf,
-                                                                       .ground_cap_pf = native.ground_cap_pf,
-                                                                       .coupling_cap_pf = native.coupling_cap_pf,
-                                                                       .timing_coupling_factor = native.timing_coupling_factor,
-                                                                       .total_cap_pf = native.total_cap_pf,
-                                                                       .timing_effective_cap_pf = native.timing_effective_cap_pf});
+    return requireCapacitanceProfile(profile.value_or(WireCapacitanceProfile{
+        .timing_coupling_factor = kOppositeSwitchingCouplingFactor}));
   }
   if (length_um == 0.0) {
     return WireCapacitanceProfile{.timing_coupling_factor = kOppositeSwitchingCouplingFactor};

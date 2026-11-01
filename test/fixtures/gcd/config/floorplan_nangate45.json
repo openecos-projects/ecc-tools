@@ -1,0 +1,44 @@
+{
+  "ifp": {"temp_directory_path": "work", "thread_number": 16},
+  "macro_placer": {
+    "macro_placement_halo": 0.0,
+    "macro_routing_halo": 0.0,
+    "macro_location_path": ""
+  },
+  "die_builder": {
+    "mode": "die_size",
+    "site_name": "FreePDK45_38x28_10R_NP_162NW_34O",
+    "margin": {"left_micron": 10.07, "right_micron": 10.18, "top_micron": 10.0, "bottom_micron": 11.2},
+    "die_util": {"aspect_ratio": 1.0, "utilization": 0.5},
+    "die_size": {"width_micron": 500.0, "height_micron": 500.0}
+  },
+  "io_placer": {"io_layer_list": ["metal1", "metal2"]},
+  "phy_placer": {
+    "well_tap": {"cell_name": "TAPCELL_X1", "distance_micron": 30.0},
+    "side_endcap": {"left_cell_name": "FILLCELL_X1", "right_cell_name": "FILLCELL_X1"},
+    "edge_endcap": {
+      "top_cell_name_list": ["FILLCELL_X32", "FILLCELL_X16", "FILLCELL_X8", "FILLCELL_X4", "FILLCELL_X2", "FILLCELL_X1"],
+      "bottom_cell_name_list": ["FILLCELL_X32", "FILLCELL_X16", "FILLCELL_X8", "FILLCELL_X4", "FILLCELL_X2", "FILLCELL_X1"]
+    },
+    "boundary_tap": {
+      "top_cell_name_list": ["TAPCELL_X1"],
+      "bottom_cell_name_list": ["TAPCELL_X1"],
+      "rule_micron": 30.0
+    }
+  },
+  "pdn_generator": {
+    "global_connect": [
+      {"net_name": "VDD", "instance_pin_name": "VDD", "is_power": true},
+      {"net_name": "VSS", "instance_pin_name": "VSS", "is_power": false}
+    ],
+    "rail": [{"routing_layer_name": "metal1", "width_micron": 0.14}],
+    "stripe": [
+      {"routing_layer_name": "metal4", "width_micron": 0.56, "pitch_micron": 40.0, "offset_micron": 10.0},
+      {"routing_layer_name": "metal5", "width_micron": 0.56, "pitch_micron": 40.0, "offset_micron": 10.0}
+    ],
+    "connect_layers": [
+      {"bottom_routing_layer_name": "metal1", "top_routing_layer_name": "metal4"},
+      {"bottom_routing_layer_name": "metal4", "top_routing_layer_name": "metal5"}
+    ]
+  }
+}

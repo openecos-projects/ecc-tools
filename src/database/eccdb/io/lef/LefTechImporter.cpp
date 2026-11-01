@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "lef/LefTechImporter.h"
 
@@ -39,6 +24,8 @@
 #include <entt/container/dense_map.hpp>
 #include <entt/container/dense_set.hpp>
 
+#include "tech/common/TechLayerAntennaComponents.h"
+#include "antenna/AntennaService.h"
 #include "lef/detail/LefParserMutex.h"
 #include "lef/detail/LefTechLayerProperties.h"
 #include "lef/detail/LefTechLayerRules.h"
@@ -132,6 +119,7 @@ struct StagedLayer
   TechLayerInfo info;
   StagedLayerPayload payload;
   std::vector<TechProperty> properties;
+  std::optional<TechLayerAntenna> antenna;
 };
 
 struct Staging
@@ -187,6 +175,7 @@ struct PreparedLayer
   TechLayerInfo info;
   PreparedLayerPayload payload;
   std::vector<TechProperty> properties;
+  std::optional<TechLayerAntenna> antenna;
 };
 
 struct PreparedImport
@@ -382,6 +371,115 @@ std::vector<TechProperty> layerProperties(const lefiLayer& source)
   return properties;
 }
 
+void appendAntennaPwl(AntennaModel& target, AntennaMetric metric, lefiAntennaPWL* source)
+{
+  if (source == nullptr) {
+    return;
+  }
+  AntennaPwl pwl{.metric = metric};
+  pwl.points.reserve(static_cast<size_t>(source->numPWL()));
+  for (int index = 0; index < source->numPWL(); ++index) {
+    pwl.points.push_back(AntennaPwlPoint{.x = source->PWLdiffusion(index), .y = source->PWLratio(index)});
+  }
+  target.pwls.push_back(std::move(pwl));
+  target.flags |= AntennaModelFlag::kHasPwls;
+}
+
+void appendAntennaValue(AntennaModel& target, AntennaMetric metric, double value, uint32_t flags = 0)
+{
+  target.values.push_back(AntennaValue{.metric = metric, .flags = flags, .value = value});
+  target.flags |= AntennaModelFlag::kHasValues;
+}
+
+AntennaModel stageAntennaModel(lefiAntennaModel& source, bool cut_layer)
+{
+  AntennaModel target;
+  if (source.antennaOxide() != nullptr) {
+    target.oxide = source.antennaOxide();
+  }
+
+  if (source.hasAntennaAreaRatio()) appendAntennaValue(target, AntennaMetric::kAreaRatio, source.antennaAreaRatio());
+  if (source.hasAntennaDiffAreaRatio()) appendAntennaValue(target, AntennaMetric::kDiffAreaRatio, source.antennaDiffAreaRatio());
+  if (source.hasAntennaCumAreaRatio()) appendAntennaValue(target, AntennaMetric::kCumAreaRatio, source.antennaCumAreaRatio());
+  if (source.hasAntennaCumDiffAreaRatio()) appendAntennaValue(target, AntennaMetric::kCumDiffAreaRatio, source.antennaCumDiffAreaRatio());
+  if (source.hasAntennaAreaFactor()) {
+    appendAntennaValue(target, cut_layer ? AntennaMetric::kCutAreaFactor : AntennaMetric::kAreaFactor,
+                       source.antennaAreaFactor(),
+                       source.hasAntennaAreaFactorDUO() ? AntennaValueFlag::kDiffuseOnly : 0u);
+  }
+  if (source.hasAntennaSideAreaRatio()) appendAntennaValue(target, AntennaMetric::kSideAreaRatio, source.antennaSideAreaRatio());
+  if (source.hasAntennaDiffSideAreaRatio()) {
+    appendAntennaValue(target, AntennaMetric::kDiffSideAreaRatio, source.antennaDiffSideAreaRatio());
+  }
+  if (source.hasAntennaCumSideAreaRatio()) {
+    appendAntennaValue(target, AntennaMetric::kCumSideAreaRatio, source.antennaCumSideAreaRatio());
+  }
+  if (source.hasAntennaCumDiffSideAreaRatio()) {
+    appendAntennaValue(target, AntennaMetric::kCumDiffSideAreaRatio, source.antennaCumDiffSideAreaRatio());
+  }
+  if (source.hasAntennaSideAreaFactor()) {
+    appendAntennaValue(target, AntennaMetric::kSideAreaFactor, source.antennaSideAreaFactor(),
+                       source.hasAntennaSideAreaFactorDUO() ? AntennaValueFlag::kDiffuseOnly : 0u);
+  }
+  if (source.hasAntennaCumRoutingPlusCut()) {
+    appendAntennaValue(target, AntennaMetric::kCumRoutingPlusCut, 1.0, AntennaValueFlag::kBoolean);
+    target.flags |= AntennaModelFlag::kHasBooleanValues;
+  }
+  if (source.hasAntennaGatePlusDiff()) appendAntennaValue(target, AntennaMetric::kGatePlusDiff, source.antennaGatePlusDiff());
+  if (source.hasAntennaAreaMinusDiff()) appendAntennaValue(target, AntennaMetric::kAreaMinusDiff, source.antennaAreaMinusDiff());
+
+  appendAntennaPwl(target, AntennaMetric::kDiffAreaRatioPwl,
+                   source.hasAntennaDiffAreaRatioPWL() ? source.antennaDiffAreaRatioPWL() : nullptr);
+  appendAntennaPwl(target, AntennaMetric::kCumDiffAreaRatioPwl,
+                   source.hasAntennaCumDiffAreaRatioPWL() ? source.antennaCumDiffAreaRatioPWL() : nullptr);
+  appendAntennaPwl(target, AntennaMetric::kDiffSideAreaRatioPwl,
+                   source.hasAntennaDiffSideAreaRatioPWL() ? source.antennaDiffSideAreaRatioPWL() : nullptr);
+  appendAntennaPwl(target, AntennaMetric::kCumDiffSideAreaRatioPwl,
+                   source.hasAntennaCumDiffSideAreaRatioPWL() ? source.antennaCumDiffSideAreaRatioPWL() : nullptr);
+  appendAntennaPwl(target, AntennaMetric::kAreaDiffReducePwl,
+                   source.hasAntennaAreaDiffReducePWL() ? source.antennaAreaDiffReducePWL() : nullptr);
+  return target;
+}
+
+std::optional<TechLayerAntenna> stageLayerAntenna(lefiLayer& source, bool cut_layer)
+{
+  TechLayerAntenna target;
+  target.models.reserve(static_cast<size_t>(source.numAntennaModel()) + 1u);
+  for (int index = 0; index < source.numAntennaModel(); ++index) {
+    auto* model = source.antennaModel(index);
+    if (model != nullptr) {
+      auto staged = stageAntennaModel(*model, cut_layer);
+      // lefiLayer allocates all lower oxide slots when a file starts at (for
+      // example) OXIDE3.  Those slots carry an oxide name but no rule and are
+      // parser bookkeeping, not source declarations.
+      if (!staged.values.empty() || !staged.layer_values.empty() || !staged.pwls.empty()) {
+        target.models.push_back(std::move(staged));
+      }
+    }
+  }
+
+  // LEF 5.3 stores these two technology-layer values outside ANTENNAMODEL.
+  // Keep them in the same default model so a read/write cycle does not drop
+  // legacy technology files.
+  if (source.hasAntennaLength() || source.hasAntennaArea()) {
+    // These legacy values belong to the default/OXIDE1 slot.  The first
+    // parser model may be OXIDE2 or another explicit model, so using front()
+    // would attach the values to the wrong oxide.
+    const auto default_model = std::find_if(target.models.begin(), target.models.end(), [](const AntennaModel& model) {
+      return model.oxide.empty() || model.oxide == "OXIDE1";
+    });
+    auto& model = default_model == target.models.end() ? target.models.emplace_back() : *default_model;
+    if (source.hasAntennaLength()) appendAntennaValue(model, AntennaMetric::kLengthFactor, source.antennaLength());
+    if (source.hasAntennaArea()) appendAntennaValue(model, AntennaMetric::kAreaFactor, source.antennaArea());
+  }
+
+  if (target.models.empty()) {
+    return std::nullopt;
+  }
+  target.flags |= TechLayerAntennaFlag::kHasModels;
+  return target;
+}
+
 StagedRoutingLayer stageRoutingLayer(lefiLayer& source)
 {
   StagedRoutingLayer result;
@@ -557,7 +655,10 @@ StagedLayer stageLayer(lefiLayer& source)
   } else {
     throw std::runtime_error("unsupported LEF LAYER TYPE " + type + ": " + info.name);
   }
-  return StagedLayer{.info = std::move(info), .payload = std::move(payload), .properties = std::move(properties)};
+  return StagedLayer{.info = std::move(info),
+                     .payload = std::move(payload),
+                     .properties = std::move(properties),
+                     .antenna = stageLayerAntenna(source, type == "CUT")};
 }
 
 template <typename Function>
@@ -980,7 +1081,10 @@ PreparedImport prepareImport(const Staging& staging)
     } else {
       payload = TechOverlapLayer{};
     }
-    prepared.layers.push_back(PreparedLayer{.info = layer.info, .payload = std::move(payload), .properties = layer.properties});
+    prepared.layers.push_back(PreparedLayer{.info = layer.info,
+                                            .payload = std::move(payload),
+                                            .properties = layer.properties,
+                                            .antenna = layer.antenna});
   }
 
   entt::dense_map<std::string, size_t> layer_indexes;
@@ -1066,6 +1170,7 @@ void rollbackImport(TechStore& database) noexcept
 
 void commitImport(TechStore& database, const PreparedImport& prepared)
 {
+  AntennaService antenna_service(database);
   entt::dense_map<std::string, TechLayerId> layer_ids;
   const auto layerId = [&layer_ids](const std::string& name) {
     const auto found = layer_ids.find(name);
@@ -1108,6 +1213,9 @@ void commitImport(TechStore& database, const PreparedImport& prepared)
         id = TechLayerId{database.createOverlapLayer(layer.info).entity()};
       }
       layer_ids.emplace(layer.info.name, id);
+      if (layer.antenna) {
+        antenna_service.setLayerAntenna(id, *layer.antenna);
+      }
       for (const auto& property : layer.properties) {
         database.appendLayerProperty(id, property);
       }

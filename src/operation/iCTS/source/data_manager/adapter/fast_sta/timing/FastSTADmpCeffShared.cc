@@ -27,6 +27,7 @@
 #include <optional>
 #include <utility>
 
+#include "FastSTA.hh"
 #include "FastSTADmpCeffSolver.hh"
 #include "FastSTALibertyModel.hh"
 

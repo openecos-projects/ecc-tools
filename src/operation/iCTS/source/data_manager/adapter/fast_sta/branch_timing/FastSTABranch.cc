@@ -23,14 +23,24 @@
 #include "FastSTABranch.hh"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
+#include "FastSTAClockNetParasitic.hh"
+#include "FastSTAClockTiming.hh"
+#include "FastSTALibertyModel.hh"
 #include "clock_net_parasitic/FastSTAParasitics.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALiberty.hh"
 #include "timing/FastSTATiming.hh"
+#include "timing/TimingConstraints.hh"
 
 namespace icts {
 

@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <variant>
 #include <vector>
@@ -89,6 +74,63 @@ TEST_F(DesignStorageTest, ShapeCrudKeepsIdsBoundingBoxesAndWireOwnership)
   EXPECT_FALSE(routing.contains(segment));
   EXPECT_FALSE(routing.contains(point));
   EXPECT_TRUE(netlist.destroyNet(net));
+}
+
+TEST_F(DesignStorageTest, SpecialNetSegmentsUseFlushDefaultsAndHonorExplicitExtensions)
+{
+  auto& netlist = design.netlistStorage();
+  auto& routing = design.routingStorage();
+  const auto special = netlist.createSpecialNet(DesignNet{.name = "VSS"});
+  const auto wire = routing.createWire(DesignWire{.net = special, .status = DesignWireStatus::kFixed});
+
+  // SPECIALNETS have flush endpoints unless a point explicitly supplies an
+  // extension.  Reverse point order must preserve that endpoint association.
+  const auto flush_reversed = routing.createShape(
+      wire,
+      DesignRouteShape{.wire = wire,
+                       .layer = routing_layer,
+                       .flags = DesignWirePathFlag::kHasWidth,
+                       .geometry = DesignRouteSegment{.begin = {.position = {100, 200}}, .end = {.position = {0, 200}}}},
+      DesignRouteShapeAttributes{.width = 20});
+  EXPECT_EQ(routing.shapeBoundingBox(flush_reversed), (Rect{0, 190, 100, 210}));
+
+  // SHAPE does not discard an explicit extension.  The zero extension on the
+  // lower endpoint is intentional: it must remain flush rather than fall
+  // back to half the width.
+  const auto stripe_with_extensions = routing.createShape(
+      wire,
+      DesignRouteShape{
+          .wire = wire,
+          .layer = routing_layer,
+          .flags = DesignWirePathFlag::kHasWidth | DesignWirePathFlag::kHasShape,
+          .geometry = DesignRouteSegment{.begin = {.position = {100, 10},
+                                                    .flags = DesignWirePointFlag::kHasExtension,
+                                                    .extension = 7},
+                                         .end = {.position = {0, 10},
+                                                 .flags = DesignWirePointFlag::kHasExtension,
+                                                 .extension = 0}}},
+      DesignRouteShapeAttributes{.width = 20, .shape = "STRIPE"});
+  EXPECT_EQ(routing.shapeBoundingBox(stripe_with_extensions), (Rect{0, 0, 107, 20}));
+}
+
+TEST_F(DesignStorageTest, RegularNetSegmentsResolveTheirDesignNdrWidth)
+{
+  auto& netlist = design.netlistStorage();
+  auto& routing = design.routingStorage();
+  const auto ndr = routing.createNonDefaultRule(
+      DesignNonDefaultRule{.name = "WIDE", .layer_rules = {{.layer = TechLayerId{routing_layer.entity()}, .width = 40}}});
+  const auto net = netlist.createNet(
+      DesignNet{.name = "signal", .flags = DesignNetFlag::kHasNonDefaultRule, .design_non_default_rule = ndr});
+  const auto wire = routing.createWire(DesignWire{.net = net});
+  const auto segment = routing.createShape(
+      wire,
+      DesignRouteShape{.wire = wire,
+                       .layer = routing_layer,
+                       .geometry = DesignRouteSegment{.begin = {.position = {0, 0}}, .end = {.position = {100, 0}}}});
+
+  // A regular NET without an explicit WIDTH uses the design NDR width and
+  // its ordinary half-width endpoint extensions.
+  EXPECT_EQ(routing.shapeBoundingBox(segment), (Rect{-20, -20, 120, 20}));
 }
 
 TEST_F(DesignStorageTest, ShapesKeepLayerTransitionsAndDetectDisconnectedEdit)

@@ -24,8 +24,11 @@
 #include "FastSTABuilder.hh"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <initializer_list>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -33,13 +36,18 @@
 #include <vector>
 
 #include "FastSTA.hh"
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockOverlay.hh"
 #include "FastSTAClockState.hh"
 #include "FastSTAGraphImport.hh"
 #include "FastSTALiberty.hh"
 #include "FastSTALibertyModel.hh"
 #include "FastSTAParasitics.hh"
+#include "Inst.hh"
 #include "Logger.hh"
+#include "Net.hh"
+#include "Pin.hh"
+#include "TimingConstraints.hh"
 #include "design/Clock.hh"
 #include "design/Design.hh"
 #include "io/Wrapper.hh"
@@ -52,8 +60,6 @@ using fast_sta::CollectClocks;
 using fast_sta::CollectRoutes;
 using fast_sta::MergeLibertyCell;
 using fast_sta::RequiresPropagationBufferModel;
-
-class Pin;
 
 namespace {
 
@@ -85,7 +91,11 @@ auto collectPropagationBufferModelsAndNetLimits(const FastStaEnvironment& enviro
   std::unordered_map<std::string, std::pair<std::string, std::string>> gate_ports_by_inst;
   for (const auto* clock : clocks) {
     for (const auto& arc : clock->get_propagation_arcs()) {
-      if (arc.kind == ClockPropagationKind::kClockGate && arc.inst != nullptr && arc.input_pin != nullptr && arc.output_pin != nullptr) {
+      // Any stage whose ports liberty cannot derive from bufferPorts needs its arc named
+      // explicitly: a clock gate, an IO pad, or an undecidable-select stage. Only plain
+      // buffers and inverters go through the buffer-model path.
+      if (arc.kind != ClockPropagationKind::kBuffer && arc.kind != ClockPropagationKind::kInverter && arc.inst != nullptr && arc.input_pin != nullptr
+          && arc.output_pin != nullptr) {
         gate_ports_by_inst.emplace(arc.inst->get_name(), std::pair{arc.input_pin->get_name(), arc.output_pin->get_name()});
       }
     }
@@ -106,6 +116,11 @@ auto collectPropagationBufferModelsAndNetLimits(const FastStaEnvironment& enviro
       }
       MergeLibertyCell(*model, context);
       auto& cell = context.liberty_cell_by_master.at(node.cell_master);
+      if (cell.timing_arc.internal_power_tables.empty()) {
+        // Power cannot be modeled for this stage later, so say so here where the model is
+        // still in hand, naming the master the liberty lookup was made for.
+        CTSLOG.warn(Loc::current(), "FastSTA: no internal power table extracted for master \"", node.cell_master, "\" on clock \"", context.clock_name, "\".");
+      }
       cell.timing_arc = model->timing_arc;
       cell.input_port = model->input_port;
       cell.output_port = model->output_port;

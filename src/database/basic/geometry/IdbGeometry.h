@@ -96,11 +96,20 @@ class IdbRect
   IdbRect() : _lx(0), _ly(0), _hx(0), _hy(0){};
   IdbRect(const int32_t lx, const int32_t ly, const int32_t hx, const int32_t hy, int32_t width = -1);
   IdbRect(IdbCoordinate<int32_t>* coord_1, IdbCoordinate<int32_t>* coord_2, int32_t width)
-      : IdbRect(coord_1->get_x(), coord_1->get_y(), coord_2->get_x(), coord_2->get_y(), width)
+      : IdbRect(coord_1 != nullptr ? coord_1->get_x() : 0, coord_1 != nullptr ? coord_1->get_y() : 0,
+                coord_2 != nullptr ? coord_2->get_x() : 0, coord_2 != nullptr ? coord_2->get_y() : 0, width)
   {
   }
   IdbRect(IdbRect const& rect) : _lx(rect._lx), _ly(rect._ly), _hx(rect._hx), _hy(rect._hy) {}
-  IdbRect(IdbRect* rect) : _lx(rect->_lx), _ly(rect->_ly), _hx(rect->_hx), _hy(rect->_hy) {}
+  IdbRect(IdbRect* rect) : _lx(0), _ly(0), _hx(0), _hy(0)
+  {
+    if (rect != nullptr) {
+      _lx = rect->_lx;
+      _ly = rect->_ly;
+      _hx = rect->_hx;
+      _hy = rect->_hy;
+    }
+  }
   ~IdbRect() = default;
 
   // getter
@@ -110,9 +119,21 @@ class IdbRect
   int32_t get_high_x() const { return _hx; }
   int32_t get_high_y() const { return _hy; }
   IdbCoordinate<int32_t> get_high_point() const { return IdbCoordinate<int32_t>(_hx, _hy); }
-  IdbCoordinate<int32_t> get_middle_point() const { return IdbCoordinate<int32_t>((_lx + _hx) / 2, (_ly + _hy) / 2); }
-  int32_t get_middle_point_x() const { return (_lx + _hx) / 2; }
-  int32_t get_middle_point_y() const { return (_ly + _hy) / 2; }
+  IdbCoordinate<int32_t> get_middle_point() const { return IdbCoordinate<int32_t>(get_middle_point_x(), get_middle_point_y()); }
+  int32_t get_middle_point_x() const
+  {
+    if ((_lx < 0) != (_hx < 0)) {
+      return (_lx + _hx) / 2;
+    }
+    return _lx / 2 + _hx / 2 + (_lx % 2 + _hx % 2) / 2;
+  }
+  int32_t get_middle_point_y() const
+  {
+    if ((_ly < 0) != (_hy < 0)) {
+      return (_ly + _hy) / 2;
+    }
+    return _ly / 2 + _hy / 2 + (_ly % 2 + _hy % 2) / 2;
+  }
 
   int32_t get_width() const { return std::abs(_hx - _lx); }
   int32_t get_height() const { return std::abs(_hy - _ly); }
@@ -168,6 +189,9 @@ class IdbRect
 
   bool containPoint(IdbCoordinate<int32_t>* point)
   {
+    if (point == nullptr) {
+      return false;
+    }
     return point->get_x() >= _lx && point->get_x() <= _hx && point->get_y() >= _ly && point->get_y() <= _hy ? true : false;
   }
 

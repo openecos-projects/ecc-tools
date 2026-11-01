@@ -156,16 +156,6 @@ struct CmpViaMaster
         }
       }
     }
-    // Deterministic tie-break for geometrically equivalent via masters. The
-    // adapter source order is not stable across iDB and EnTT.
-    if (sort_status == SortStatus::kEqual) {
-      if (a.get_via_name() < b.get_via_name()) {
-        return true;
-      }
-      if (a.get_via_name() > b.get_via_name()) {
-        return false;
-      }
-    }
     if (sort_status == SortStatus::kTrue) {
       return true;
     } else if (sort_status == SortStatus::kFalse) {

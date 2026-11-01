@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "lef/LefLibraryImporter.h"
 
@@ -30,6 +15,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -44,6 +30,8 @@
 #include "lefiMisc.hpp"
 #include "lefiUnits.hpp"
 #include "lefrReader.hpp"
+#include "antenna/AntennaService.h"
+#include "library/master_term/model/MasterTermComponents.h"
 
 namespace eccdb {
 namespace {
@@ -150,6 +138,7 @@ struct StagedObs
 struct StagedTerm
 {
   LibraryMasterTerm term;
+  LibraryMasterTermAntenna antenna;
   std::vector<StagedPort> ports;
 };
 
@@ -197,7 +186,13 @@ struct PreparedMaster
 {
   LibraryCellMaster master;
   std::optional<std::string> site;
-  std::vector<std::pair<LibraryMasterTerm, std::vector<LibraryMasterPortInput>>> terms;
+  struct Term
+  {
+    LibraryMasterTerm term;
+    LibraryMasterTermAntenna antenna;
+    std::vector<LibraryMasterPortInput> ports;
+  };
+  std::vector<Term> terms;
   LibraryMasterObsInput obs;
 };
 
@@ -733,6 +728,106 @@ LibraryMasterTermShape termShape(const char* value)
   throw std::runtime_error("unsupported LEF PIN SHAPE: " + shape);
 }
 
+void appendAntennaValue(LibraryMasterTermAntenna& target, AntennaMetric metric, double value, const char* layer)
+{
+  if (layer != nullptr && *layer != '\0') {
+    target.layer_values.push_back(AntennaLayerValue{.metric = metric, .layer = layer, .value = value});
+    target.flags |= LibraryMasterTermAntennaFlag::kHasLayerValues;
+  } else {
+    target.values.push_back(AntennaValue{.metric = metric, .value = value});
+    target.flags |= LibraryMasterTermAntennaFlag::kHasValues;
+  }
+}
+
+void appendAntennaModelValue(AntennaModel& target, AntennaMetric metric, double value, const char* layer)
+{
+  if (layer != nullptr && *layer != '\0') {
+    target.layer_values.push_back(AntennaLayerValue{.metric = metric, .layer = layer, .value = value});
+    target.flags |= AntennaModelFlag::kHasLayerValues;
+  } else {
+    target.values.push_back(AntennaValue{.metric = metric, .value = value});
+    target.flags |= AntennaModelFlag::kHasValues;
+  }
+}
+
+template <typename Value, typename Layer>
+void appendPinAntennaArray(LibraryMasterTermAntenna& target, int count, Value&& value, Layer&& layer, AntennaMetric metric)
+{
+  for (int index = 0; index < count; ++index) {
+    appendAntennaValue(target, metric, value(index), layer(index));
+  }
+}
+
+template <typename Value, typename Layer>
+void appendPinAntennaModelArray(AntennaModel& target, int count, Value&& value, Layer&& layer, AntennaMetric metric)
+{
+  for (int index = 0; index < count; ++index) {
+    appendAntennaModelValue(target, metric, value(index), layer(index));
+  }
+}
+
+LibraryMasterTermAntenna stagePinAntenna(const lefiPin& source)
+{
+  LibraryMasterTermAntenna result;
+  appendPinAntennaArray(result, source.numAntennaSize(), [&](int index) { return source.antennaSize(index); },
+                        [&](int index) { return source.antennaSizeLayer(index); }, AntennaMetric::kSize);
+  appendPinAntennaArray(result, source.numAntennaMetalArea(), [&](int index) { return source.antennaMetalArea(index); },
+                        [&](int index) { return source.antennaMetalAreaLayer(index); }, AntennaMetric::kMetalArea);
+  appendPinAntennaArray(result, source.numAntennaMetalLength(), [&](int index) { return source.antennaMetalLength(index); },
+                        [&](int index) { return source.antennaMetalLengthLayer(index); }, AntennaMetric::kMetalLength);
+  appendPinAntennaArray(result, source.numAntennaPartialMetalArea(), [&](int index) { return source.antennaPartialMetalArea(index); },
+                        [&](int index) { return source.antennaPartialMetalAreaLayer(index); }, AntennaMetric::kPartialMetalArea);
+  appendPinAntennaArray(result, source.numAntennaPartialMetalSideArea(),
+                        [&](int index) { return source.antennaPartialMetalSideArea(index); },
+                        [&](int index) { return source.antennaPartialMetalSideAreaLayer(index); }, AntennaMetric::kPartialMetalSideArea);
+  appendPinAntennaArray(result, source.numAntennaPartialCutArea(), [&](int index) { return source.antennaPartialCutArea(index); },
+                        [&](int index) { return source.antennaPartialCutAreaLayer(index); }, AntennaMetric::kPartialCutArea);
+  appendPinAntennaArray(result, source.numAntennaDiffArea(), [&](int index) { return source.antennaDiffArea(index); },
+                        [&](int index) { return source.antennaDiffAreaLayer(index); }, AntennaMetric::kDiffArea);
+
+  result.models.reserve(static_cast<size_t>(source.numAntennaModel()));
+  for (int index = 0; index < source.numAntennaModel(); ++index) {
+    const auto* source_model = source.antennaModel(index);
+    if (source_model == nullptr) {
+      throw std::runtime_error("LEF PIN returned a null ANTENNAMODEL");
+    }
+    AntennaModel model;
+    if (const auto* oxide = source_model->antennaOxide(); oxide != nullptr) {
+      model.oxide = oxide;
+    }
+    appendPinAntennaModelArray(model, source_model->numAntennaGateArea(),
+                               [&](int item) { return source_model->antennaGateArea(item); },
+                               [&](int item) { return source_model->antennaGateAreaLayer(item); }, AntennaMetric::kGateArea);
+    appendPinAntennaModelArray(model, source_model->numAntennaMaxAreaCar(),
+                               [&](int item) { return source_model->antennaMaxAreaCar(item); },
+                               [&](int item) { return source_model->antennaMaxAreaCarLayer(item); }, AntennaMetric::kMaxAreaCar);
+    appendPinAntennaModelArray(model, source_model->numAntennaMaxSideAreaCar(),
+                               [&](int item) { return source_model->antennaMaxSideAreaCar(item); },
+                               [&](int item) { return source_model->antennaMaxSideAreaCarLayer(item); }, AntennaMetric::kMaxSideAreaCar);
+    appendPinAntennaModelArray(model, source_model->numAntennaMaxCutCar(),
+                               [&](int item) { return source_model->antennaMaxCutCar(item); },
+                               [&](int item) { return source_model->antennaMaxCutCarLayer(item); }, AntennaMetric::kMaxCutCar);
+    if (!model.values.empty() || !model.layer_values.empty() || !model.oxide.empty() || source_model->hasReturn()) {
+      model.flags |= (!model.values.empty() ? AntennaModelFlag::kHasValues : 0u)
+                     | (!model.layer_values.empty() ? AntennaModelFlag::kHasLayerValues : 0u);
+      result.models.push_back(std::move(model));
+    }
+  }
+  if (!result.models.empty()) {
+    result.flags |= LibraryMasterTermAntennaFlag::kHasModels;
+  }
+  return result;
+}
+
+void mergeAntenna(LibraryMasterTermAntenna& target, LibraryMasterTermAntenna source)
+{
+  target.flags |= source.flags;
+  target.values.insert(target.values.end(), std::make_move_iterator(source.values.begin()), std::make_move_iterator(source.values.end()));
+  target.layer_values.insert(target.layer_values.end(), std::make_move_iterator(source.layer_values.begin()),
+                             std::make_move_iterator(source.layer_values.end()));
+  target.models.insert(target.models.end(), std::make_move_iterator(source.models.begin()), std::make_move_iterator(source.models.end()));
+}
+
 LibraryMasterPortClass portClass(const char* value)
 {
   const auto type = upper(requiredText(value, "PORT CLASS"));
@@ -1079,14 +1174,6 @@ void recordUnsupportedPinFields(Staging& staging, const lefiPin& source)
 {
   recordDiagnostic(staging, "PIN FOREIGN", static_cast<size_t>(source.numForeigns()));
   recordDiagnostic(staging, "PIN PROPERTY", static_cast<size_t>(source.numProperties()));
-  recordDiagnostic(staging, "PIN ANTENNAMODEL", static_cast<size_t>(source.numAntennaModel()));
-  recordDiagnostic(staging, "PIN ANTENNASIZE", static_cast<size_t>(source.numAntennaSize()));
-  recordDiagnostic(staging, "PIN ANTENNAMETALAREA", static_cast<size_t>(source.numAntennaMetalArea()));
-  recordDiagnostic(staging, "PIN ANTENNAMETALLENGTH", static_cast<size_t>(source.numAntennaMetalLength()));
-  recordDiagnostic(staging, "PIN ANTENNAPARTIALMETALAREA", static_cast<size_t>(source.numAntennaPartialMetalArea()));
-  recordDiagnostic(staging, "PIN ANTENNAPARTIALMETALSIDEAREA", static_cast<size_t>(source.numAntennaPartialMetalSideArea()));
-  recordDiagnostic(staging, "PIN ANTENNAPARTIALCUTAREA", static_cast<size_t>(source.numAntennaPartialCutArea()));
-  recordDiagnostic(staging, "PIN ANTENNADIFFAREA", static_cast<size_t>(source.numAntennaDiffArea()));
   recordDiagnostic(staging, "PIN LEQ/MUSTJOIN", static_cast<size_t>(source.hasLEQ() + source.hasMustjoin()));
   recordDiagnostic(staging, "PIN NETEXPR", static_cast<size_t>(source.hasNetExpr()));
   recordDiagnostic(staging, "PIN SUPPLY/GROUND SENSITIVITY",
@@ -1233,6 +1320,7 @@ void appendStagedTerm(Staging& staging, StagedTerm term)
   for (auto& port : term.ports) {
     existing->ports.push_back(std::move(port));
   }
+  mergeAntenna(existing->antenna, std::move(term.antenna));
   recordDiagnostic(staging, "MACRO duplicate PIN normalized");
 }
 
@@ -1346,6 +1434,7 @@ int pinCallback(lefrCallbackType_e type, lefiPin* source, lefiUserData user_data
     if (source->hasShape()) {
       target.shape = termShape(source->shape());
     }
+    auto antenna = stagePinAntenna(*source);
     recordUnsupportedPinFields(staging, *source);
     if (directMode(staging)) {
       const auto master_id = directMaster(staging);
@@ -1361,6 +1450,16 @@ int pinCallback(lefrCallbackType_e type, lefiPin* source, lefiUserData user_data
         }
         term_id = existing;
         recordDiagnostic(staging, "MACRO duplicate PIN normalized");
+      }
+      AntennaService antenna_service(*staging.direct_library);
+      if (antenna.flags != 0u) {
+        if (const auto* existing_antenna = antenna_service.masterTermAntenna(term_id); existing_antenna != nullptr) {
+          auto merged = *existing_antenna;
+          mergeAntenna(merged, std::move(antenna));
+          antenna_service.setMasterTermAntenna(term_id, std::move(merged));
+        } else {
+          antenna_service.setMasterTermAntenna(term_id, std::move(antenna));
+        }
       }
       for (int index = 0; index < source->numPorts(); ++index) {
         const auto* port = source->port(index);
@@ -1381,7 +1480,7 @@ int pinCallback(lefrCallbackType_e type, lefiPin* source, lefiUserData user_data
         }
       }
     } else {
-      StagedTerm staged{.term = std::move(target)};
+      StagedTerm staged{.term = std::move(target), .antenna = std::move(antenna)};
       staged.ports.reserve(static_cast<size_t>(source->numPorts()));
       for (int index = 0; index < source->numPorts(); ++index) {
         const auto* port = source->port(index);
@@ -1726,7 +1825,7 @@ std::vector<PreparedMaster> prepareMasters(const Staging& staging, const TechSto
         }
         ports.push_back(std::move(port));
       }
-      target.terms.emplace_back(source_term.term, std::move(ports));
+      target.terms.push_back(PreparedMaster::Term{.term = source_term.term, .antenna = source_term.antenna, .ports = std::move(ports)});
     }
     for (const auto& source_obs : source.obstructions) {
       for (const auto& source_clause : source_obs.clauses) {
@@ -1817,9 +1916,13 @@ void commitImport(LibraryStore& library, std::vector<LibrarySite> sites, std::ve
         source.master.site = found->second;
       }
       const auto master = library.cellMasterStorage().createCellMaster(std::move(source.master));
-      for (auto& [term_component, ports] : source.terms) {
-        const auto term = library.masterTermStorage().createMasterTerm(master, std::move(term_component));
-        for (auto& port : ports) {
+      AntennaService antenna_service(library);
+      for (auto& source_term : source.terms) {
+        const auto term = library.masterTermStorage().createMasterTerm(master, std::move(source_term.term));
+        if (source_term.antenna.flags != 0u) {
+          antenna_service.setMasterTermAntenna(term, std::move(source_term.antenna));
+        }
+        for (auto& port : source_term.ports) {
           static_cast<void>(library.masterPortStorage().createMasterPort(term, std::move(port)));
         }
       }

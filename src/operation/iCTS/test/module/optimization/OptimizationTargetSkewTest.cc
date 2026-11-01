@@ -23,6 +23,8 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
 #include "data_manager/config/Config.hh"
 #include "optimization/preparation/OptimizationPreparation.hh"
 

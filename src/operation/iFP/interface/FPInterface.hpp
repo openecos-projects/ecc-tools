@@ -19,9 +19,12 @@
 #include <any>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "FPDesignSource.hpp"
 
 #if 1  // 前向声明
 
@@ -33,10 +36,6 @@ class IdbVia;
 enum class IdbConnectDirection : uint8_t;
 enum class IdbOrient : uint8_t;
 }  // namespace idb
-
-namespace eccdb {
-class DatabaseContext;
-}  // namespace eccdb
 
 #endif
 
@@ -78,14 +77,12 @@ class FPInterface
 #if 1  // TopData
 
 #if 1  // input
-  // A non-null native source selects the EccDB adapter path.  Clearing it
+  // A non-null source selects an external database adapter. Clearing it
   // restores the legacy iDB path for callers that still use it.
-  void setDesignSource(eccdb::DatabaseContext* context) noexcept;
-  void setDesignSource(eccdb::DatabaseContext& context) noexcept;
+  void setDesignSource(std::shared_ptr<FPDesignSource> source);
   void input(std::map<std::string, std::any>& config_map);
   void wrapConfig(std::map<std::string, std::any>& config_map);
   void wrapDatabase();
-  void wrapDatabaseFromEnTT();
   void wrapDBInfo();
   void wrapMicronDBU();
   void wrapManufactureGrid();
@@ -104,7 +101,6 @@ class FPInterface
 
 #if 1  // output
   void output();
-  void outputToEnTT();
   void outputFloorplan();
   void outputDie();
   void outputCore();
@@ -141,7 +137,7 @@ class FPInterface
 
  private:
   static FPInterface* _fp_interface_instance;
-  eccdb::DatabaseContext* _database_context = nullptr;
+  std::shared_ptr<FPDesignSource> _design_source;
 
   FPInterface() = default;
   FPInterface(const FPInterface& other) = delete;

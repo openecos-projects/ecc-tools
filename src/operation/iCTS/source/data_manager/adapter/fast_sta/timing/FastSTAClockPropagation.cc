@@ -27,19 +27,27 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <queue>
+#include <ranges>
+#include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockState.hh"
+#include "FastSTACondition.hh"
 #include "FastSTAConstraints.hh"
 #include "FastSTADmpCeff.hh"
 #include "FastSTAEvents.hh"
 #include "FastSTALibertyModel.hh"
 #include "FastSTATiming.hh"
 #include "FastSTATimingLookup.hh"
+#include "TimingConstraints.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
 #include "timing/FastSTAClockTiming.hh"
 

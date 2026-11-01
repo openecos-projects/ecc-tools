@@ -529,6 +529,8 @@ auto FilterGlobalEntriesBySinkLoadRegionCoverage(const std::vector<CandidateChar
     covered_ref.split_local_depth = legality.split_local_depth;
     covered_ref.split_triggered_by_fanout = legality.split_triggered_by_fanout;
     covered_ref.split_triggered_by_capacitance = legality.split_triggered_by_capacitance;
+    covered_ref.used_cap_fallback = legality.used_cap_fallback;
+    covered_ref.cap_overrun_pf = legality.total_cap_overrun_pf;
     result.output.entries.push_back(covered_ref);
   }
   return result;

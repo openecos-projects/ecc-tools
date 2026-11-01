@@ -1,21 +1,16 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include "VerilogNetlistImportService.h"
 
 #include <charconv>
+#include <functional>
 #include <map>
-#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -28,13 +23,11 @@
 #include "library/cell_master/model/CellMasterComponents.h"
 #include "library/master_term/model/MasterTermComponents.h"
 #include "verilog/VerilogFrontend.hh"
-#include "verilog/VerilogNetlist.hh"
+#include "verilog/VerilogImportPlan.hh"
 #include "verilog/VerilogTypes.hh"
 
 namespace eccdb {
 namespace {
-using idb::verilog::NetId;
-
 struct IndexedName { std::string base; int32_t index; };
 std::optional<IndexedName> indexed(std::string_view name)
 {
@@ -74,88 +67,50 @@ class LibraryLookup
 {
  public:
   explicit LibraryLookup(const LibraryStore& value) : _library(value) {}
-  const idb::verilog::LibraryCell* operator()(std::string_view name)
+  const idb::verilog::ImportCellInterface* find(std::string_view name)
   {
+    if (const auto cached = _cells.find(std::string(name)); cached != _cells.end()) return &cached->second;
     const auto master = _library.cellMasterStorage().findCellMaster(name);
     if (!master) return nullptr;
-    auto [it, inserted] = _cells.try_emplace(std::string(name));
-    if (inserted) {
-      const auto& cell = _library.cellMasterStorage().cellMaster(master);
-      std::map<std::string, std::map<int32_t, idb::verilog::Direction>> buses;
-      for (const auto term_id : cell.terms) {
-        const auto& term = _library.masterTermStorage().masterTerm(term_id);
-        const auto direction = toDir(term.direction);
-        it->second.ports.emplace(term.name, idb::verilog::PortShape{direction, 1});
-        if (const auto item = indexed(term.name)) buses[item->base][item->index] = direction;
-      }
-      for (const auto& [base, members] : buses) {
-        if (it->second.ports.contains(base) || members.empty()) continue;
-        const auto low = members.begin()->first;
-        const auto high = members.rbegin()->first;
-        if (high - low + 1 != static_cast<int32_t>(members.size())) continue;
-        it->second.ports.emplace(base, idb::verilog::PortShape{members.begin()->second,
-                                                               static_cast<uint32_t>(high - low + 1), false, false,
-                                                               idb::verilog::NetType::wire, false, std::make_pair(high, low)});
-      }
+    idb::verilog::ImportCellInterface result;
+    const auto& cell = _library.cellMasterStorage().cellMaster(master);
+    std::map<std::string, std::map<int32_t, LibraryMasterTermId, std::greater<int32_t>>> buses;
+    for (const auto term_id : cell.terms) {
+      const auto& term = _library.masterTermStorage().masterTerm(term_id);
+      result.ports.emplace(term.name, idb::verilog::ImportCellPort{{term.name}, toDir(term.direction), {}});
+      if (const auto item = indexed(term.name); item && item->index >= 0) buses[item->base].emplace(item->index, term_id);
     }
-    return &it->second;
+    for (const auto& [base, members] : buses) {
+      if (result.ports.contains(base)) continue;
+      const auto high = members.begin()->first;
+      const auto low = members.rbegin()->first;
+      if (high > static_cast<int32_t>(idb::verilog::BitVector::kMaxWidth)
+          || static_cast<int64_t>(high) - low + 1 != static_cast<int64_t>(members.size())) continue;
+      const auto direction = toDir(_library.masterTermStorage().masterTerm(members.begin()->second).direction);
+      idb::verilog::ImportCellPort port{{}, direction, std::pair<int, int>{high, low}};
+      for (const auto& [index, term_id] : members) {
+        const auto& term = _library.masterTermStorage().masterTerm(term_id);
+        if (toDir(term.direction) != direction)
+          throw idb::verilog::detail::Error({}, "inconsistent LEF bus directions: master=" + cell.name + ", port=" + base);
+        port.pins.push_back(term.name);
+      }
+      result.has_buses = true;
+      result.ports.emplace(base, std::move(port));
+    }
+    for (const auto& [name, port] : result.ports)
+      result.semantic.ports.emplace(name, idb::verilog::PortShape{port.direction, static_cast<uint32_t>(port.pins.size()),
+                                                                false, false, idb::verilog::NetType::wire, false, port.range});
+    return &_cells.emplace(std::string(name), std::move(result)).first->second;
+  }
+  const idb::verilog::LibraryCell* lookup(std::string_view name)
+  {
+    const auto* interface = find(name);
+    return interface ? &interface->semantic : nullptr;
   }
  private:
   const LibraryStore& _library;
-  std::map<std::string, idb::verilog::LibraryCell> _cells;
+  std::map<std::string, idb::verilog::ImportCellInterface> _cells;
 };
-
-class Aliases
-{
- public:
-  explicit Aliases(std::size_t count) : _parent(count), _rank(count), _constant(count, idb::verilog::xBit)
-  { std::iota(_parent.begin(), _parent.end(), NetId(0)); }
-  void supply(NetId id, idb::verilog::NetType type)
-  { if (type == idb::verilog::NetType::supply0) _constant[id] = idb::verilog::zeroBit;
-    if (type == idb::verilog::NetType::supply1) _constant[id] = idb::verilog::oneBit; }
-  NetId root(NetId id)
-  {
-    if (idb::verilog::isConstant(id)) return id;
-    auto r = id; while (_parent[r] != r) r = _parent[r];
-    while (_parent[id] != id) { auto next = _parent[id]; _parent[id] = r; id = next; }
-    return r;
-  }
-  NetId canonical(NetId id) { if (idb::verilog::isConstant(id)) return id; const auto r = root(id); return _constant[r] == idb::verilog::xBit ? r : _constant[r]; }
-  void join(NetId a, NetId b, const idb::verilog::SourceLocation& loc)
-  {
-    if (idb::verilog::isConstant(a) || idb::verilog::isConstant(b)) {
-      const auto constant = idb::verilog::isConstant(a) ? a : b;
-      if (constant == idb::verilog::xBit || constant == idb::verilog::zBit) throw idb::verilog::detail::Error(loc, "X/Z net cannot be connected");
-      const auto net = idb::verilog::isConstant(a) ? b : a;
-      const auto r = root(net);
-      if (_constant[r] != idb::verilog::xBit && _constant[r] != constant) throw idb::verilog::detail::Error(loc, "conflicting constant drivers");
-      _constant[r] = constant; return;
-    }
-    auto ra = root(a), rb = root(b); if (ra == rb) return;
-    if (_rank[ra] < _rank[rb]) std::swap(ra, rb);
-    _parent[rb] = ra; if (_rank[ra] == _rank[rb]) ++_rank[ra];
-    if (_constant[ra] != idb::verilog::xBit && _constant[rb] != idb::verilog::xBit && _constant[ra] != _constant[rb])
-      throw idb::verilog::detail::Error(loc, "conflicting constant drivers");
-    if (_constant[ra] == idb::verilog::xBit) _constant[ra] = _constant[rb];
-  }
- private:
-  std::vector<NetId> _parent, _constant; std::vector<uint8_t> _rank;
-};
-
-std::vector<std::string> formalNames(const LibraryStore& library, LibraryCellMasterId master,
-                                     const idb::verilog::LibraryCell& cell, const idb::verilog::PinConnection& port)
-{
-  const auto found = cell.ports.find(port.name);
-  if (found == cell.ports.end() || !found->second.range || indexed(port.name)) return {port.name};
-  const auto [left, right] = *found->second.range; const auto step = left <= right ? 1 : -1;
-  std::vector<std::string> names;
-  for (int32_t index = left;; index += step) {
-    const auto name = port.name + "[" + std::to_string(index) + "]";
-    if (library.masterTermStorage().findMasterTerm(master, name)) names.push_back(name);
-    if (index == right) break;
-  }
-  return names;
-}
 }
 
 VerilogNetlistImportError::VerilogNetlistImportError(std::size_t line, std::string message)
@@ -169,56 +124,48 @@ VerilogNetlistImportResult VerilogNetlistImportService::import(const VerilogNetl
   if (options.file.empty()) throw VerilogNetlistImportError(0, "Verilog input path is empty");
   auto* library = _context.library(); if (library == nullptr) throw VerilogNetlistImportError(0, "Verilog import requires a loaded EccDB library");
   LibraryLookup lookup(*library);
-  const auto result = idb::verilog::compileFiles({options.file.string()}, options.top_module, {}, lookup);
+  auto result = idb::verilog::compileFiles({options.file.string()}, options.top_module, {},
+                                         [&](std::string_view name) { return lookup.lookup(name); });
   if (!result) {
     if (!result.diagnostics.empty()) throw VerilogNetlistImportError(result.diagnostics.front().location.line, result.diagnostics.front().text());
     throw VerilogNetlistImportError(0, "failed to compile Verilog input");
   }
-  const auto& flat = *result.design;
+  auto planned = idb::verilog::makeImportPlan(*result.design, [&](std::string_view name) { return lookup.find(name); });
+  if (!planned) {
+    if (!planned.diagnostics.empty())
+      throw VerilogNetlistImportError(planned.diagnostics.front().location.line, planned.diagnostics.front().text());
+    throw VerilogNetlistImportError(0, "failed to plan Verilog input");
+  }
+  result.design.reset();
+  const auto& plan = *planned.plan;
   auto& design = _context.design();
-  if (!design.globalStorage().hasInfo()) design.globalStorage().setInfo(DesignInfo{.name = flat.top, .database_units_per_micron = 1000});
-  Aliases aliases(flat.nets.size());
-  for (NetId i = 0; i < flat.nets.size(); ++i) aliases.supply(i, flat.nets[i].type);
-  std::size_t alias_count = 0;
-  for (const auto& edge : flat.inouts) { aliases.join(edge.target, edge.source, edge.location); ++alias_count; }
-  for (const auto& edge : flat.assignments) { aliases.join(edge.target, edge.source, edge.location); ++alias_count; }
+  if (!design.globalStorage().hasInfo()) design.globalStorage().setInfo(DesignInfo{.name = plan.top, .database_units_per_micron = 1000});
 
   ConnectivityService connectivity(_context); InstanceService instance_service(_context); auto& netlist = design.netlistStorage();
-  std::unordered_map<NetId, DesignNetId> net_ids;
-  const auto netFor = [&](NetId value) -> DesignNetId {
-    const auto key = aliases.canonical(value); if (key == idb::verilog::xBit || key == idb::verilog::zBit) throw VerilogNetlistImportError(0, "X/Z net cannot be connected");
-    if (const auto found = net_ids.find(key); found != net_ids.end()) return found->second;
-    DesignNet net;
-    if (key == idb::verilog::zeroBit) net = DesignNet{.name = "__ecc_verilog_constant_0", .use = DesignSignalUse::kGround, .source = DesignNetSource::kNetlist};
-    else if (key == idb::verilog::oneBit) net = DesignNet{.name = "__ecc_verilog_constant_1", .use = DesignSignalUse::kPower, .source = DesignNetSource::kNetlist};
-    else net = DesignNet{.name = flat.nets.at(key).name, .use = toUse(flat.nets.at(key).type), .source = DesignNetSource::kNetlist};
-    const auto id = connectivity.createNet(std::move(net)); net_ids.emplace(key, id); return id;
-  };
-  for (NetId i = 0; i < flat.nets.size(); ++i) static_cast<void>(netFor(i));
+  std::vector<DesignNetId> net_ids;
+  net_ids.reserve(plan.nets.size());
+  for (const auto& net : plan.nets) {
+    const auto id = connectivity.createNet(DesignNet{.name = net.name, .use = toUse(net.type), .source = DesignNetSource::kNetlist});
+    net_ids.push_back(id);
+    if (!net.aliases.empty()) connectivity.setNetAliases(id, DesignNetAliases{net.aliases});
+  }
 
-  std::size_t block_terms = 0;
-  for (const auto& port : flat.ports) for (std::size_t bit = 0; bit < port.signal.bits.size(); ++bit) {
-    std::string name = port.name;
-    if (port.range) { const auto index = port.range->first + (port.range->first <= port.range->second ? static_cast<int32_t>(bit) : -static_cast<int32_t>(bit)); name += "[" + std::to_string(index) + "]"; }
-    const auto term = connectivity.createBlockTerm(DesignBlockTerm{.name = name, .direction = toIoDir(port.direction), .use = DesignSignalUse::kSignal});
-    connectivity.connect(term, netFor(port.signal.bits[bit])); ++block_terms;
+  for (const auto& port : plan.ports) {
+    const auto term = connectivity.createBlockTerm(DesignBlockTerm{.name = port.name, .direction = toIoDir(port.direction), .use = DesignSignalUse::kSignal});
+    connectivity.connect(term, net_ids.at(port.net));
   }
 
   std::size_t instance_terms = 0;
-  for (const auto& cell : flat.instances) {
-    const auto master = library->cellMasterStorage().findCellMaster(cell.type); if (!master) throw VerilogNetlistImportError(cell.location.line, "cell master '" + cell.type + "' was not found");
+  for (const auto& cell : plan.instances) {
+    const auto master = library->cellMasterStorage().findCellMaster(cell.master);
     const auto instance = instance_service.create(DesignInstance{.name = cell.name, .master = master, .source = DesignInstanceSource::kNetlist});
-    const auto* interface = lookup(cell.type); if (interface == nullptr) throw VerilogNetlistImportError(cell.location.line, "no Verilog interface for '" + cell.type + "'");
-    for (const auto& port : cell.ports) {
-      if (port.signal.bits.empty()) continue;
-      const auto names = formalNames(*library, master, *interface, port); if (names.size() != port.signal.bits.size()) throw VerilogNetlistImportError(port.location.line, "instance port width mismatch");
-      for (std::size_t bit = 0; bit < names.size(); ++bit) {
-        const auto term = netlist.findInstanceTerm(instance, names[bit]); if (!term) throw VerilogNetlistImportError(port.location.line, "materialized instance terminal missing: " + names[bit]);
-        connectivity.connect(term, netFor(port.signal.bits[bit])); ++instance_terms;
-      }
+    for (const auto& pin : cell.pins) {
+      const auto term = netlist.findInstanceTerm(instance, pin.name);
+      connectivity.connect(term, net_ids.at(pin.net));
+      ++instance_terms;
     }
   }
-  return VerilogNetlistImportResult{.top_module = flat.top, .instances = flat.instances.size(), .instance_terms = instance_terms,
-                                    .block_terms = block_terms, .nets = net_ids.size(), .aliases = alias_count};
+  return VerilogNetlistImportResult{.top_module = plan.top, .instances = plan.instances.size(), .instance_terms = instance_terms,
+                                    .block_terms = plan.ports.size(), .nets = net_ids.size(), .aliases = plan.alias_count};
 }
 }  // namespace eccdb

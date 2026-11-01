@@ -1,19 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of the Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <gtest/gtest.h>
 
@@ -21,11 +7,14 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "ZHInterface.hpp"
+#include "MJInterface.hpp"
+#include "MJInterfaceEccdb.h"
 #include "context/DatabaseContext.h"
 #include "design/DesignStore.h"
 #include "design/constraint/model/ConstraintComponents.h"
@@ -36,20 +25,25 @@
 #include "design/routing/component/RoutingComponents.h"
 #include "library/LibraryStore.h"
 #include "library/cell_master/model/CellMasterComponents.h"
+#include "library/master_port/storage/MasterPortInput.h"
 #include "library/site/model/SiteComponents.h"
+#include "service/antenna/AntennaService.h"
 #include "service/connectivity/ConnectivityService.h"
 #include "service/floorplan/FloorplanService.h"
 #include "service/instance/InstanceService.h"
 #include "service/routing/RoutingService.h"
+#include "tech/common/TechLayerAntennaComponents.h"
+#include "library/master_term/model/MasterTermComponents.h"
 #include "tech/TechStore.h"
+#include "tech/masterslice_layer/model/MastersliceLayerComponents.h"
 #include "tech/routing_layer/model/RoutingLayerComponents.h"
 
 namespace {
 
-class IzhNativeAdapterTest : public testing::Test
+class ImjNativeAdapterTest : public testing::Test
 {
  protected:
-  IzhNativeAdapterTest()
+  ImjNativeAdapterTest()
       : library(technology.techRegistry()),
         design(technology.techRegistry(), library.libraryRegistry(), &technology.geometryRegistry()),
         context(technology, library, design)
@@ -71,7 +65,7 @@ class IzhNativeAdapterTest : public testing::Test
     blocker = library.cellMasterStorage().createCellMaster(
         {.name = "BLOCK", .type = eccdb::LibraryCellMasterType::kCore, .site = site, .width = 20, .height = 10});
 
-    design.globalStorage().setInfo({.name = "izh-native", .database_units_per_micron = 1000});
+    design.globalStorage().setInfo({.name = "imj-native", .database_units_per_micron = 1000});
     eccdb::FloorplanService floorplan{context};
     floorplan.setDieArea({.boundary = {{0, 0}, {100, 0}, {100, 100}, {0, 100}}});
     floorplan.setCoreArea({.boundary = {{0, 0}, {100, 0}, {100, 10}, {0, 10}}});
@@ -92,13 +86,13 @@ class IzhNativeAdapterTest : public testing::Test
                                         .origin = {30, 0},
                                         .orientation = eccdb::DesignOrientation::kN,
                                         .placement_status = eccdb::DesignPlacementStatus::kFixed}));
-    ZHI.setDesignSource(context);
+    eccdb::adapters::bindMjSource(MJI, &context);
   }
 
   void TearDown() override
   {
-    ZHI.setDesignSource(static_cast<eccdb::DatabaseContext*>(nullptr));
-    izh::ZHInterface::destroyInst();
+    eccdb::adapters::bindMjSource(MJI, nullptr);
+    imj::MJInterface::destroyInst();
   }
 
   eccdb::TechStore technology;
@@ -110,13 +104,65 @@ class IzhNativeAdapterTest : public testing::Test
   eccdb::LibraryCellMasterId filler_two;
   eccdb::LibraryCellMasterId filler_one;
   eccdb::LibraryCellMasterId blocker;
+
+  struct RoutedAntennaNet
+  {
+    eccdb::DesignNetId net;
+    eccdb::LibraryMasterTermId term;
+  };
+
+  void setAntennaRule(eccdb::TechLayerId layer, std::vector<eccdb::AntennaValue> values)
+  {
+    eccdb::AntennaModel model{.flags = eccdb::AntennaModelFlag::kHasValues, .values = std::move(values)};
+    eccdb::AntennaService antenna{context};
+    antenna.setLayerAntenna(layer, {.flags = eccdb::TechLayerAntennaFlag::kHasModels, .models = {std::move(model)}});
+  }
+
+  void setM1AntennaRule(std::vector<eccdb::AntennaValue> values)
+  {
+    setAntennaRule(eccdb::TechLayerId{routing_layer.entity()}, std::move(values));
+  }
+
+  RoutedAntennaNet createRoutedAntennaNet(std::string name,
+                                           eccdb::LibraryMasterTermDirection direction,
+                                           eccdb::LibraryMasterTermAntenna antenna_metadata)
+  {
+    const auto master = library.cellMasterStorage().createCellMaster(
+        {.name = name + "_CELL", .type = eccdb::LibraryCellMasterType::kCore, .site = site, .width = 10, .height = 10});
+    const auto term = library.masterTermStorage().createMasterTerm(
+        master, {.name = "A", .direction = direction, .use = eccdb::LibraryMasterTermUse::kSignal});
+    static_cast<void>(library.masterPortStorage().createMasterPort(
+        term,
+        {.layer_clauses = {{.layer = eccdb::TechLayerId{routing_layer.entity()}, .geometry = {.rects = {{0, 15, 10, 25}}}}}}));
+
+    eccdb::AntennaService antenna{context};
+    antenna.setMasterTermAntenna(term, std::move(antenna_metadata));
+
+    eccdb::InstanceService instances{context};
+    const auto instance = instances.create({.name = name + "_inst",
+                                            .master = master,
+                                            .origin = {0, 0},
+                                            .orientation = eccdb::DesignOrientation::kN,
+                                            .placement_status = eccdb::DesignPlacementStatus::kPlaced});
+    eccdb::ConnectivityService connectivity{context};
+    const auto net = connectivity.createNet({.name = std::move(name), .use = eccdb::DesignSignalUse::kSignal});
+    connectivity.connect(design.netlistStorage().findInstanceTerm(instance, term), net);
+    eccdb::RoutingService routing{context};
+    const auto wire = routing.createWire({.net = net, .status = eccdb::DesignWireStatus::kRouted});
+    static_cast<void>(routing.createShape(
+        wire,
+        {.wire = wire,
+         .layer = routing_layer,
+         .geometry = eccdb::DesignRouteSegment{.begin = {.position = {0, 20}}, .end = {.position = {100, 20}}}}));
+    return {.net = net, .term = term};
+  }
 };
 
-TEST_F(IzhNativeAdapterTest, FillerReadsRowsAndWritesDistributionInstances)
+TEST_F(ImjNativeAdapterTest, FillerReadsRowsAndWritesDistributionInstances)
 {
   std::map<std::string, std::any> config{{"-filler", std::string{"FILL2 FILL1"}}, {"-min_filler_width", int32_t{1}}};
 
-  ASSERT_NO_THROW(ZHI.insertFiller(config));
+  ASSERT_NO_THROW(MJI.insertFiller(config));
 
   std::vector<eccdb::DesignInstance> fillers;
   design.netlistStorage().forEachInstance(
@@ -133,7 +179,17 @@ TEST_F(IzhNativeAdapterTest, FillerReadsRowsAndWritesDistributionInstances)
   }
 }
 
-TEST_F(IzhNativeAdapterTest, FillerSpatialRowsPreserveRotatedCrossRowAndTouchingSemantics)
+TEST_F(ImjNativeAdapterTest, ExternalSourceRejectsUnsupportedLegacyStages)
+{
+  EXPECT_TRUE(MJI.hasDesignOperations());
+  EXPECT_THROW(MJI.flattenDef({}), std::logic_error);
+
+  eccdb::adapters::bindMjSource(MJI, nullptr);
+  EXPECT_FALSE(MJI.hasDesignOperations());
+  eccdb::adapters::bindMjSource(MJI, &context);
+}
+
+TEST_F(ImjNativeAdapterTest, FillerSpatialRowsPreserveRotatedCrossRowAndTouchingSemantics)
 {
   eccdb::FloorplanService floorplan{context};
   const auto create_row = [&](std::string name, int32_t y) {
@@ -170,7 +226,7 @@ TEST_F(IzhNativeAdapterTest, FillerSpatialRowsPreserveRotatedCrossRowAndTouching
                                       .placement_status = eccdb::DesignPlacementStatus::kFixed}));
 
   std::map<std::string, std::any> config{{"-filler", std::string{"FILL1"}}, {"-min_filler_width", int32_t{1}}};
-  ASSERT_NO_THROW(ZHI.insertFiller(config));
+  ASSERT_NO_THROW(MJI.insertFiller(config));
 
   std::vector<eccdb::Point> origins;
   design.netlistStorage().forEachInstance(
@@ -187,7 +243,7 @@ TEST_F(IzhNativeAdapterTest, FillerSpatialRowsPreserveRotatedCrossRowAndTouching
   }
 }
 
-TEST_F(IzhNativeAdapterTest, FillerBlocksHardPlacementBlockagesButNotInitialPlacementOnlyBlockages)
+TEST_F(ImjNativeAdapterTest, FillerBlocksHardPlacementBlockagesButNotInitialPlacementOnlyBlockages)
 {
   eccdb::InstanceService instances{context};
   const auto cover = instances.create({.name = "u_cover",
@@ -220,7 +276,7 @@ TEST_F(IzhNativeAdapterTest, FillerBlocksHardPlacementBlockagesButNotInitialPlac
        .rectangles = {{50, 0, 60, 10}}}));
 
   std::map<std::string, std::any> config{{"-filler", std::string{"FILL1"}}, {"-min_filler_width", int32_t{1}}};
-  ASSERT_NO_THROW(ZHI.insertFiller(config));
+  ASSERT_NO_THROW(MJI.insertFiller(config));
 
   std::vector<eccdb::Point> origins;
   design.netlistStorage().forEachInstance(
@@ -235,11 +291,11 @@ TEST_F(IzhNativeAdapterTest, FillerBlocksHardPlacementBlockagesButNotInitialPlac
   EXPECT_EQ(origins, (std::vector<eccdb::Point>{{10, 0}, {20, 0}, {80, 0}, {90, 0}}));
 }
 
-TEST_F(IzhNativeAdapterTest, MetalReadsTracksAndWritesNativeFill)
+TEST_F(ImjNativeAdapterTest, MetalReadsTracksAndWritesNativeFill)
 {
   std::map<std::string, std::any> config{{"-min_fill_layer", std::string{"M1"}}, {"-max_fill_layer", std::string{"M1"}}};
 
-  ASSERT_NO_THROW(ZHI.insertMetal(config));
+  ASSERT_NO_THROW(MJI.insertMetal(config));
 
   ASSERT_EQ(design.fillStorage().fillCount(), 1u);
   const auto fills = design.fillStorage().fills();
@@ -249,63 +305,170 @@ TEST_F(IzhNativeAdapterTest, MetalReadsTracksAndWritesNativeFill)
   EXPECT_FALSE(fill.rectangles.empty());
 }
 
-TEST_F(IzhNativeAdapterTest, AntennaReadsNativeConnectivityAndRouteWithExternalRules)
+TEST_F(ImjNativeAdapterTest, AntennaReadsNativeMetadataAndRouteGeometry)
 {
-  const auto signal_master = library.cellMasterStorage().createCellMaster(
-      {.name = "SIGNAL_CELL", .type = eccdb::LibraryCellMasterType::kCore, .site = site, .width = 10, .height = 10});
-  const auto signal_term = library.masterTermStorage().createMasterTerm(
-      signal_master,
-      {.name = "A", .direction = eccdb::LibraryMasterTermDirection::kInput, .use = eccdb::LibraryMasterTermUse::kSignal});
-  eccdb::InstanceService instances{context};
-  const auto signal_instance = instances.create({.name = "u_signal",
-                                                  .master = signal_master,
-                                                  .origin = {0, 0},
-                                                  .orientation = eccdb::DesignOrientation::kN,
-                                                  .placement_status = eccdb::DesignPlacementStatus::kPlaced});
-  eccdb::ConnectivityService connectivity{context};
-  const auto net = connectivity.createNet({.name = "N_SIGNAL", .use = eccdb::DesignSignalUse::kSignal});
-  connectivity.connect(design.netlistStorage().findInstanceTerm(signal_instance, signal_term), net);
-  eccdb::RoutingService routing{context};
-  const auto wire = routing.createWire({.net = net, .status = eccdb::DesignWireStatus::kRouted});
-  static_cast<void>(routing.createShape(
-      wire,
-      {.wire = wire,
-       .layer = routing_layer,
-       .geometry = eccdb::DesignRouteSegment{.begin = {.position = {0, 20}}, .end = {.position = {100, 20}}}}));
+  createRoutedAntennaNet("N_SIGNAL", eccdb::LibraryMasterTermDirection::kInput,
+                          {.flags = eccdb::LibraryMasterTermAntennaFlag::kHasValues,
+                           .values = {{.metric = eccdb::AntennaMetric::kGateArea, .value = 0.0001}}});
+  setM1AntennaRule({{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 20.0}});
 
-  const auto rule_file = std::filesystem::temp_directory_path() / "ecc_izh_native_antenna.rules";
-  std::error_code cleanup_error;
-  std::filesystem::remove(rule_file, cleanup_error);
-  {
-    std::ofstream output(rule_file);
-    ASSERT_TRUE(output.good());
-    output << "GATE_AREA 1\nLAYER M1 2000\n";
-  }
-  std::map<std::string, std::any> config{{"-antenna_rule_file", rule_file.string()}};
-  ASSERT_NO_THROW(ZHI.checkAntenna(config));
-  const auto& clean_summary = ZHI.lastAntennaSummary();
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& clean_summary = MJI.lastAntennaSummary();
   EXPECT_TRUE(clean_summary.checked);
+  EXPECT_TRUE(clean_summary.coverage_complete);
   EXPECT_EQ(clean_summary.net_count, 1u);
   EXPECT_EQ(clean_summary.connected_net_count, 1u);
   EXPECT_EQ(clean_summary.wire_count, 1u);
   EXPECT_EQ(clean_summary.violation_count, 0u);
+  EXPECT_EQ(clean_summary.pins_missing_antenna_info, 0u);
+  EXPECT_EQ(clean_summary.nets_without_terminal_antenna_info, 0u);
 
-  {
-    std::ofstream output(rule_file, std::ios::trunc);
-    ASSERT_TRUE(output.good());
-    output << "GATE_AREA 1\nLAYER M1 0.5\n";
-  }
-  ASSERT_NO_THROW(ZHI.checkAntenna(config));
-  const auto& violating_summary = ZHI.lastAntennaSummary();
+  setM1AntennaRule({{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 1.0}});
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& violating_summary = MJI.lastAntennaSummary();
   EXPECT_EQ(violating_summary.violation_count, 1u);
   ASSERT_EQ(violating_summary.violations.size(), 1u);
   EXPECT_NE(violating_summary.violations.front().find("N_SIGNAL"), std::string::npos);
-  std::filesystem::remove(rule_file, cleanup_error);
 }
 
-TEST_F(IzhNativeAdapterTest, AntennaRequiresExplicitExternalRules)
+TEST_F(ImjNativeAdapterTest, AntennaWritesReportWhenTechnologyHasNoRules)
 {
-  EXPECT_THROW(ZHI.checkAntenna({}), std::invalid_argument);
+  const auto report = std::filesystem::temp_directory_path() / "ecc_izh_native_antenna_no_rules.report";
+  std::error_code cleanup_error;
+  std::filesystem::remove(report, cleanup_error);
+
+  ASSERT_NO_THROW(MJI.checkAntenna({{"-antenna_report_file", report.string()}}));
+  const auto& summary = MJI.lastAntennaSummary();
+  EXPECT_FALSE(summary.checked);
+  EXPECT_FALSE(summary.coverage_complete);
+  EXPECT_EQ(summary.rule_layer_count, 0u);
+  EXPECT_EQ(summary.report_path, report.string());
+  ASSERT_TRUE(std::filesystem::exists(report));
+  std::ifstream input(report);
+  const std::string text{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+  EXPECT_NE(text.find("checked=0 coverage_complete=0"), std::string::npos);
+  std::filesystem::remove(report, cleanup_error);
+}
+
+TEST_F(ImjNativeAdapterTest, AntennaTreatsDiffusionOnlyTerminalAsValidCoverage)
+{
+  createRoutedAntennaNet("N_DIFF", eccdb::LibraryMasterTermDirection::kOutput,
+                          {.flags = eccdb::LibraryMasterTermAntennaFlag::kHasValues,
+                           .values = {{.metric = eccdb::AntennaMetric::kDiffArea, .value = 0.0001}}});
+  setM1AntennaRule({{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 20.0},
+                    {.metric = eccdb::AntennaMetric::kGatePlusDiff, .value = 1.0}});
+
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& summary = MJI.lastAntennaSummary();
+  EXPECT_TRUE(summary.checked);
+  EXPECT_TRUE(summary.coverage_complete);
+  EXPECT_EQ(summary.nets_without_gate, 1u);
+  EXPECT_EQ(summary.nets_without_terminal_antenna_info, 0u);
+  EXPECT_EQ(summary.pins_missing_antenna_info, 0u);
+  EXPECT_EQ(summary.violation_count, 0u);
+}
+
+TEST_F(ImjNativeAdapterTest, AntennaMarksMultipleOxideModelsAsIncomplete)
+{
+  createRoutedAntennaNet("N_OXIDE", eccdb::LibraryMasterTermDirection::kInput,
+                          {.flags = eccdb::LibraryMasterTermAntennaFlag::kHasValues,
+                           .values = {{.metric = eccdb::AntennaMetric::kGateArea, .value = 0.0001}}});
+  eccdb::AntennaService antenna{context};
+  antenna.setLayerAntenna(
+      eccdb::TechLayerId{routing_layer.entity()},
+      {.flags = eccdb::TechLayerAntennaFlag::kHasModels,
+       .models = {{.flags = eccdb::AntennaModelFlag::kHasValues,
+                   .values = {{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 20.0}}},
+                  {.flags = eccdb::AntennaModelFlag::kHasValues,
+                   .oxide = "OXIDE2",
+                   .values = {{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 10.0}}}}});
+
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& summary = MJI.lastAntennaSummary();
+  EXPECT_TRUE(summary.checked);
+  EXPECT_FALSE(summary.coverage_complete);
+  EXPECT_EQ(summary.unsupported_oxide_model_count, 1u);
+  EXPECT_EQ(summary.pins_missing_antenna_info, 0u);
+  EXPECT_EQ(summary.nets_without_terminal_antenna_info, 0u);
+}
+
+TEST_F(ImjNativeAdapterTest, AntennaDoesNotTreatTopIoPortGeometryAsRoutedWire)
+{
+  setM1AntennaRule({{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 2.0}});
+  eccdb::ConnectivityService connectivity{context};
+  const auto net = connectivity.createNet({.name = "N_TOP_IO_ONLY", .use = eccdb::DesignSignalUse::kSignal});
+  const auto top_io = connectivity.createBlockTerm(
+      {.name = "TOP_IO", .direction = eccdb::DesignIoPinDirection::kInput, .use = eccdb::DesignSignalUse::kSignal},
+      std::vector<eccdb::DesignBlockPinInput>{eccdb::DesignBlockPinInput{
+          .rectangles = {{.layer = eccdb::TechLayerId{routing_layer.entity()}, .rectangle = {0, 0, 10, 10}}}}});
+  connectivity.connect(top_io, net);
+
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& summary = MJI.lastAntennaSummary();
+  EXPECT_TRUE(summary.checked);
+  EXPECT_TRUE(summary.coverage_complete);
+  EXPECT_EQ(summary.net_count, 1u);
+  EXPECT_EQ(summary.connected_net_count, 1u);
+  EXPECT_EQ(summary.wire_count, 0u);
+  EXPECT_EQ(summary.nets_without_gate, 0u);
+  EXPECT_EQ(summary.nets_without_terminal_antenna_info, 0u);
+  EXPECT_EQ(summary.pins_missing_antenna_info, 0u);
+}
+
+TEST_F(ImjNativeAdapterTest, AntennaMarksRoutedWireWithoutTerminalMetadataIncomplete)
+{
+  createRoutedAntennaNet("N_WIRE_NO_METADATA", eccdb::LibraryMasterTermDirection::kInput, {});
+  setM1AntennaRule({{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 2.0}});
+
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& summary = MJI.lastAntennaSummary();
+  EXPECT_TRUE(summary.checked);
+  EXPECT_FALSE(summary.coverage_complete);
+  EXPECT_EQ(summary.wire_count, 1u);
+  EXPECT_EQ(summary.pins_missing_antenna_info, 1u);
+  EXPECT_EQ(summary.nets_without_gate, 1u);
+  EXPECT_EQ(summary.nets_without_terminal_antenna_info, 1u);
+}
+
+TEST_F(ImjNativeAdapterTest, AntennaUsesMastersliceRuleForNativePinGeometry)
+{
+  // This is a native Service/binary compatibility fixture. LEF parsing still
+  // rejects antenna declarations on MASTERSLICE; do not infer LEF legality
+  // from this typed API regression.
+  const auto poly = technology.createMastersliceLayer(
+      {.name = "POLY"}, {.subtype = eccdb::TechMastersliceType::kTrimPoly});
+  const auto master = library.cellMasterStorage().createCellMaster(
+      {.name = "POLY_CELL", .type = eccdb::LibraryCellMasterType::kCore, .site = site, .width = 3000, .height = 1000});
+  const auto term = library.masterTermStorage().createMasterTerm(
+      master, {.name = "A", .direction = eccdb::LibraryMasterTermDirection::kInput, .use = eccdb::LibraryMasterTermUse::kSignal});
+  static_cast<void>(library.masterPortStorage().createMasterPort(
+      term,
+      {.layer_clauses = {{.layer = eccdb::TechLayerId{poly.entity()}, .geometry = {.rects = {{0, 0, 3000, 1000}}}}}}));
+  eccdb::AntennaService antenna{context};
+  antenna.setMasterTermAntenna(term,
+                                {.flags = eccdb::LibraryMasterTermAntennaFlag::kHasValues,
+                                 .values = {{.metric = eccdb::AntennaMetric::kGateArea, .value = 1.0}}});
+  setAntennaRule(eccdb::TechLayerId{poly.entity()}, {{.metric = eccdb::AntennaMetric::kAreaRatio, .value = 2.0}});
+
+  eccdb::InstanceService instances{context};
+  const auto instance = instances.create({.name = "u_poly",
+                                            .master = master,
+                                            .origin = {0, 0},
+                                            .orientation = eccdb::DesignOrientation::kN,
+                                            .placement_status = eccdb::DesignPlacementStatus::kPlaced});
+  eccdb::ConnectivityService connectivity{context};
+  const auto net = connectivity.createNet({.name = "N_POLY", .use = eccdb::DesignSignalUse::kSignal});
+  connectivity.connect(design.netlistStorage().findInstanceTerm(instance, term), net);
+
+  ASSERT_NO_THROW(MJI.checkAntenna({}));
+  const auto& summary = MJI.lastAntennaSummary();
+  EXPECT_TRUE(summary.checked);
+  EXPECT_TRUE(summary.coverage_complete);
+  EXPECT_EQ(summary.rule_layer_count, 1u);
+  ASSERT_EQ(summary.violation_count, 1u);
+  ASSERT_EQ(summary.violations.size(), 1u);
+  const std::string expected_violation{"N_POLY:POLY PAR ratio=3 threshold=2 bbox=(0,0,3,1)"};
+  EXPECT_EQ(summary.violations.front(), expected_violation);
 }
 
 }  // namespace

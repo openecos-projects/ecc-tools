@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <functional>
+
 #include "Config.hpp"
 #include "Database.hpp"
 
@@ -38,7 +40,10 @@ class DataManager
   static DataManager& getInst();
   static void destroyInst();
   // function
-  void input(std::map<std::string, std::any>& config_map);
+  // The caller owns source selection.  Legacy callers leave this empty and
+  // retain the iDB wrapping path; native callers provide their source-aware
+  // wrapper before the common iDRC database build stages run.
+  void input(std::map<std::string, std::any>& config_map, std::function<void()> database_wrapper = {});
 
 #if 1  // 获得唯一的pitch
   int32_t getOnlyPitch();
@@ -74,6 +79,7 @@ class DataManager
   void wrapDie();
   void wrapDesignRule();
   void wrapLayerList();
+  void wrapMacroObsList();
   void wrapTrackAxis(RoutingLayer& routing_layer, idb::IdbLayerRouting* idb_layer);
   void wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLayerRouting* idb_layer);
   void wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_layer);

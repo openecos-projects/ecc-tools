@@ -1,5 +1,10 @@
 # TritonRoute database trace replay
 
+As of 2026-10-28, the native OpenROAD bridge, trace recorder and fork patches
+are maintained as a separate local experiment. Commands below referring to
+`adapters/tritonroute/` describe that historical layout. The standalone ODB
+replayer remains here, with its shared projections in `../benchmarks/odb/`.
+
 ## What Is Recorded
 
 This experiment records semantic database API groups at their actual call sites

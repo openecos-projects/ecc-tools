@@ -15,26 +15,26 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "RTInterface.hpp"
+#include "RTDesignSource.hpp"
+
+#include <utility>
 
 #include "DRCEngine.hpp"
 #include "DRCInterface.hpp"
 #include "DetailedRouter.hpp"
 #include "EarlyRouter.hpp"
 #include "GDSPlotter.hpp"
-#include "LayerAssigner.hpp"
+#include "GlobalRouter.hpp"
 #include "Monitor.hpp"
 #include "PinAccessor.hpp"
 #include "PlanarRect.hpp"
-#include "PlanarRouter.hpp"
 #include "RTHeader.hpp"
-#include "SupplyAnalyzer.hpp"
+#include "TARouter.hpp"
 #include "TOPOBuilder.hpp"
-#include "TrackAssigner.hpp"
 #include "ViolationReporter.hpp"
 #include "feature_irt.h"
 #include "feature_manager.h"
 #include "idm.h"
-#include "context/DatabaseContext.h"
 
 namespace irt {
 
@@ -57,6 +57,11 @@ void RTInterface::destroyInst()
 }
 
 RTInterface::~RTInterface() = default;
+
+void RTInterface::setDesignSource(std::shared_ptr<RTDesignSource> source)
+{
+  _design_source = std::move(source);
+}
 
 #if 1  // 外部调用RT的API
 
@@ -126,27 +131,46 @@ void RTInterface::runRT()
   RTPA.access();
   PinAccessor::destroyInst();
   RTUTIL.releaseMemory("PinAccessor");
+  // outputDef("irt_pa.def");
 
   initRegionRoute();
-  RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  if (region_route.get_enable()) {
-    region_route.set_is_regional_stage(true);
-    RTLOG.info(Loc::current(), "Starting selected-net routing flow");
-    runRoutingFlow();
-    region_route.set_is_regional_stage(false);
-    RTLOG.info(Loc::current(), "Starting full-chip routing flow");
-  }
-  runRoutingFlow();
+
+  GlobalRouter::initInst();
+  RTGR.route();
+  GlobalRouter::destroyInst();
+
+  TARouter::initInst();
+  RTTR.route();
+  TARouter::destroyInst();
+  // outputDef("irt_ta.def");
+
+  DetailedRouter::initInst();
+  RTDR.route();
+  DetailedRouter::destroyInst();
+  RTUTIL.releaseMemory("DetailedRouter");
 
   ViolationReporter::initInst();
   RTVR.report();
   ViolationReporter::destroyInst();
 
   RTTB.destroy();
+  _topo_initialized = false;
   RTGP.destroy();
   RTDE.destroy();
+  _drc_engine_initialized = false;
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void RTInterface::outputDef(const std::string& def_name)
+{
+  const std::string def_path = RTDM.getConfig().temp_directory_path + def_name;
+  RTLOG.info(Loc::current(), "Save def to : ", def_path);
+
+  output();
+  if (!dmInst->saveDef(def_path)) {
+    RTLOG.error(Loc::current(), "Failed to save DEF: ", def_path);
+  }
 }
 
 void RTInterface::initRegionRoute()
@@ -154,7 +178,6 @@ void RTInterface::initRegionRoute()
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
   region_route = RegionRoute();
 
-  // Set the regional routing rectangle here before recompiling. std::nullopt disables regional routing.
   const std::optional<PlanarRect> region_rect;
   if (!region_rect.has_value()) {
     return;
@@ -186,36 +209,6 @@ void RTInterface::initRegionRoute()
              real_rect.get_ur_y(), " for ", region_route.get_net_idx_set().size(), " complete nets across the die");
 }
 
-void RTInterface::runRoutingFlow()
-{
-  SupplyAnalyzer::initInst();
-  RTSA.analyze();
-  SupplyAnalyzer::destroyInst();
-
-  PlanarRouter::initInst();
-  RTPR.generate();
-  PlanarRouter::destroyInst();
-
-  RTDM.getDatabase().get_planar_routing_h_edge_map().free();
-  RTDM.getDatabase().get_planar_routing_v_edge_map().free();
-
-  LayerAssigner::initInst();
-  RTLA.assign();
-  LayerAssigner::destroyInst();
-
-  std::vector<GridMap<RoutingEdge>>().swap(RTDM.getDatabase().get_routing_h_edge_map());
-  std::vector<GridMap<RoutingEdge>>().swap(RTDM.getDatabase().get_routing_v_edge_map());
-
-  TrackAssigner::initInst();
-  RTTA.assign();
-  TrackAssigner::destroyInst();
-
-  DetailedRouter::initInst();
-  RTDR.route();
-  DetailedRouter::destroyInst();
-  RTUTIL.releaseMemory("DetailedRouter");
-}
-
 void RTInterface::destroyRT()
 {
   finishRT(true);
@@ -227,10 +220,8 @@ void RTInterface::abortRT()
   // An exception skips the pair's trailing destroy call, so release them
   // before the persistent DataManager is torn down.
   PinAccessor::destroyInst();
-  SupplyAnalyzer::destroyInst();
-  PlanarRouter::destroyInst();
-  LayerAssigner::destroyInst();
-  TrackAssigner::destroyInst();
+  GlobalRouter::destroyInst();
+  TARouter::destroyInst();
   DetailedRouter::destroyInst();
   ViolationReporter::destroyInst();
   EarlyRouter::destroyInst();
@@ -322,63 +313,12 @@ void RTInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   /////////////////////////////////////////////
 }
 
-void RTInterface::setDesignSource(eccdb::DesignStore* design, eccdb::TechStore* tech,
-                                  eccdb::LibraryStore* library)
-{
-  _owned_database_context.reset();
-  _database_context = nullptr;
-  _design = design;
-  _tech = tech;
-  _library = library;
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    _owned_database_context = std::make_unique<eccdb::DatabaseContext>(*_tech, *_library, *_design);
-    _database_context = _owned_database_context.get();
-  }
-  if (_database_context != nullptr) {
-    DRCI.setDesignSource(_database_context);
-  } else {
-    DRCI.setDesignSource(design, tech, library);
-  }
-}
-
-void RTInterface::setDesignSource(eccdb::DatabaseContext& context)
-{
-  setDesignSource(&context);
-}
-
-void RTInterface::setDesignSource(eccdb::DatabaseContext* context)
-{
-  _owned_database_context.reset();
-  _database_context = context;
-  if (_database_context == nullptr) {
-    _design = nullptr;
-    _tech = nullptr;
-    _library = nullptr;
-    DRCI.setDesignSource(nullptr);
-    return;
-  }
-  _design = &_database_context->design();
-  _tech = _database_context->technology();
-  _library = _database_context->library();
-  DRCI.setDesignSource(_database_context);
-}
-
-eccdb::DatabaseContext& RTInterface::databaseContext() const noexcept
-{
-  return *_database_context;
-}
-
 void RTInterface::wrapDatabase()
 {
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    wrapDatabaseFromEnTT();
-  } else {
-    wrapDatabaseFromIdb();
+  if (_design_source) {
+    _design_source->wrapDatabase(RTDM.getDatabase(), RTDM.getConfig());
+    return;
   }
-}
-
-void RTInterface::wrapDatabaseFromIdb()
-{
   wrapDBInfo();
   wrapMicronDBU();
   wrapManufactureGrid();
@@ -1056,6 +996,15 @@ void RTInterface::wrapMacroList()
     if (idb_instance == nullptr || idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
       continue;
     }
+    idb::IdbCellMaster* idb_cell_master = idb_instance->get_cell_master();
+    if (idb_cell_master->has_macro_property()) {
+      for (idb::macro::ObsSpacing& obs_spacing : idb_cell_master->get_macro_property()->get_obs_spacing_list()) {
+        RTLOG.info(Loc::current(), "macro ", idb_cell_master->get_name(), " obs spacing ", obs_spacing.get_layer()->get_name(),
+                   " = ", obs_spacing.get_min_spacing());
+      }
+    } else {
+      RTLOG.info(Loc::current(), "macro ", idb_cell_master->get_name(), " obs spacing is empty!");
+    }
     idb_instance->set_bounding_box();
     idb::IdbRect* idb_bbox = idb_instance->get_bounding_box();
     if (idb_bbox == nullptr) {
@@ -1371,8 +1320,8 @@ void RTInterface::output()
 
 void RTInterface::outputTrackGrid()
 {
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    outputTrackGridToEnTT();
+  if (_design_source) {
+    _design_source->outputTrackGrid(RTDM.getDatabase());
     return;
   }
   idb::IdbLayers* idb_layer_list = dmInst->get_idb_def_service()->get_layout()->get_layers();
@@ -1420,8 +1369,8 @@ void RTInterface::outputTrackGrid()
 
 void RTInterface::outputGCellGrid()
 {
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    outputGCellGridToEnTT();
+  if (_design_source) {
+    _design_source->outputGCellGrid(RTDM.getDatabase());
     return;
   }
   idb::IdbGCellGridList* idb_gcell_grid_list = dmInst->get_idb_lef_service()->get_layout()->get_gcell_grid_list();
@@ -1449,8 +1398,8 @@ void RTInterface::outputGCellGrid()
 
 void RTInterface::outputNetList()
 {
-  if (_design != nullptr && _tech != nullptr && _library != nullptr) {
-    outputNetListToEnTT();
+  if (_design_source) {
+    _design_source->outputNetList(RTDM);
     return;
   }
   Die& die = RTDM.getDatabase().get_die();
@@ -1710,11 +1659,6 @@ void RTInterface::initIDRC()
   std::map<std::string, std::any> config_map;
   config_map.insert({"-temp_directory_path", RTUTIL.getString(temp_directory_path, "other_tools/idrc/")});
   config_map.insert({"-thread_number", thread_number});
-  if (_database_context != nullptr) {
-    DRCI.setDesignSource(_database_context);
-  } else {
-    DRCI.setDesignSource(_design, _tech, _library);
-  }
   DRCI.initDRC(config_map, true);
   _idrc_initialized = true;
 }

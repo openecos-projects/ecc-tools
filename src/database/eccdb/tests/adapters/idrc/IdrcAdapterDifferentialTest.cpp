@@ -1,20 +1,5 @@
-// ***************************************************************************************
 // SPDX-License-Identifier: MulanPSL-2.0
-// Copyright (c) 2023-2025 Peng Cheng Laboratory
-// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
-// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
-//
-// iEDA is licensed under Mulan PSL v2.
-// You can use this software according to the terms and conditions of the Mulan PSL v2.
-// You may obtain a copy of Mulan PSL v2 at:
-// http://license.coscl.org.cn/MulanPSL2
-//
-// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
-// See the Mulan PSL v2 for more details.
-// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory; Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences; Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -23,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -34,6 +20,9 @@
 #include <vector>
 
 #include "DRCInterface.hpp"
+#include "DRCDesignSource.hpp"
+#include "IdrcWrappedDatabaseCompare.h"
+#include "adapters/idrc/DRCInterfaceEccdb.h"
 #include "DataManager.hpp"
 #include "Database.hpp"
 #include "Logger.hpp"
@@ -231,6 +220,25 @@ END NETS
 END DESIGN
 )DEF";
 
+constexpr std::string_view kFlushProjectionFixtureDef = R"DEF(VERSION 5.8 ;
+DESIGN idrc_flush_projection_fixture ;
+UNITS DISTANCE MICRONS 1000 ;
+
+DIEAREA ( 0 0 ) ( 1000 1000 ) ;
+NETS 3 ;
+- boundary_plain
+  + ROUTED M1 ( 250 0 ) ( 500 0 )
+  ;
+- boundary_reversed_flush
+  + ROUTED M1 ( 500 100 0 ) ( 250 100 )
+  ;
+- boundary_reversed_vertical_flush
+  + ROUTED M1 ( 100 500 0 ) ( 100 250 )
+  ;
+END NETS
+END DESIGN
+)DEF";
+
 class TemporaryWorkspace
 {
  public:
@@ -297,8 +305,51 @@ Database wrapCurrentSource()
 
 void expectWrappedEqual(Database& left, Database& right)
 {
-  const std::string mismatch = DRCI.compareWrappedDatabase(left, right);
+  const std::string mismatch = eccdb::test::compareIdrcWrappedDatabase(left, right);
   ASSERT_TRUE(mismatch.empty()) << mismatch;
+}
+
+std::vector<ids::Shape> legacyEnvironmentShapes()
+{
+  return eccdb::test::legacyIdrcEnvironmentShapes(DRCI);
+}
+
+std::vector<ids::Shape> legacyResultShapes()
+{
+  return eccdb::test::legacyIdrcResultShapes(DRCI);
+}
+
+struct NativeEnvironmentShapes
+{
+  std::vector<ids::Shape> shapes;
+  std::set<size_t> obstacle_indices;
+};
+
+NativeEnvironmentShapes nativeEnvironmentShapeBatch(eccdb::DesignStore& design, eccdb::TechStore& technology,
+                                                     eccdb::LibraryStore& library)
+{
+  const auto source = eccdb::adapters::makeDrcSource(design, technology, library);
+  source->beginRun();
+  NativeEnvironmentShapes batch;
+  batch.shapes = source->environmentShapes(&batch.obstacle_indices);
+  source->endRun();
+  return batch;
+}
+
+std::vector<ids::Shape> nativeEnvironmentShapes(eccdb::DesignStore& design, eccdb::TechStore& technology,
+                                                 eccdb::LibraryStore& library)
+{
+  return nativeEnvironmentShapeBatch(design, technology, library).shapes;
+}
+
+std::vector<ids::Shape> nativeResultShapes(eccdb::DesignStore& design, eccdb::TechStore& technology,
+                                            eccdb::LibraryStore& library)
+{
+  const auto source = eccdb::adapters::makeDrcSource(design, technology, library);
+  source->beginRun();
+  auto shapes = source->resultShapes();
+  source->endRun();
+  return shapes;
 }
 
 using NetNames = std::vector<std::string>;
@@ -318,7 +369,7 @@ NetNames idbNetNames()
   return names;
 }
 
-NetNames enttNetNames(const eccdb::DesignStore& design)
+NetNames eccdbNetNames(const eccdb::DesignStore& design)
 {
   NetNames names;
   for (const auto net : design.netlistStorage().regularNets()) {
@@ -478,7 +529,7 @@ void expectViolationListsEqual(std::string_view tag, const std::vector<ids::Viol
 
 }  // namespace
 
-void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path& root, const char* skip_message)
+void compareIdbAndEccdb(const Ispd18Case& test_case, const std::filesystem::path& root, const char* skip_message)
 {
   if (root.empty()) {
     GTEST_SKIP() << skip_message;
@@ -491,7 +542,7 @@ void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path&
   std::unique_ptr<eccdb::DesignStore> design;
 
   // SI2 LEF/DEF parsers are process-global. Clear leftover callback and
-  // parser state before starting the EnTT import sequence.
+  // parser state before starting the EccDB import sequence.
   static_cast<void>(LefDefParser::lefrClear());
   static_cast<void>(LefDefParser::defrClear());
   eccdb::LefTechImporter(tech).import(lef);
@@ -502,12 +553,12 @@ void compareIdbAndEntt(const Ispd18Case& test_case, const std::filesystem::path&
   loadIspd18IntoIdb(lef, def);
 
   Logger::initInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
   Database idb_database = wrapCurrentSource();
-  DRCI.setDesignSource(design.get(), &tech, library.get());
-  Database entt_database = wrapCurrentSource();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
-  expectWrappedEqual(idb_database, entt_database);
+  eccdb::adapters::bindDrcSource(DRCI, design.get(), &tech, library.get());
+  Database eccdb_database = wrapCurrentSource();
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
+  expectWrappedEqual(idb_database, eccdb_database);
   dmInst->reset();
 }
 
@@ -523,7 +574,7 @@ TEST(SelfCheck, TwoIdbWrapsMatch)
   loadIspd18IntoIdb(lef, def);
 
   Logger::initInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
   Database left = wrapCurrentSource();
   Database right = wrapCurrentSource();
   expectWrappedEqual(left, right);
@@ -551,27 +602,23 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
   eccdb::DefDesignImporter(*design).import(def);
   loadIspd18IntoIdb(lef, def);
   const auto idb_names = idbNetNames();
-  const auto entt_names = enttNetNames(*design);
+  const auto eccdb_names = eccdbNetNames(*design);
 
   Logger::initInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
   DataManager::initInst();
   DRCI.wrapDatabase();
-  const auto idb_env = DRCI.buildEnvShapeList();
-  const auto idb_result = DRCI.buildResultShapeList();
+  const auto idb_env = legacyEnvironmentShapes();
+  const auto idb_result = legacyResultShapes();
   DataManager::destroyInst();
 
-  DRCI.setDesignSource(design.get(), &tech, library.get());
-  DataManager::initInst();
-  DRCI.wrapDatabase();
-  const auto entt_env = DRCI.buildEnvShapeList();
-  const auto entt_result = DRCI.buildResultShapeList();
-  DataManager::destroyInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  const auto eccdb_environment = nativeEnvironmentShapeBatch(*design, tech, *library);
+  const auto& eccdb_env = eccdb_environment.shapes;
+  const auto eccdb_result = nativeResultShapes(*design, tech, *library);
 
-  expectShapeListsEqual("env", idb_env, idb_names, entt_env, entt_names);
-  expectShapeListsEqual("result", idb_result, idb_names, entt_result, entt_names);
-  const auto env_keys = canonicalShapes(entt_env, entt_names);
+  expectShapeListsEqual("env", idb_env, idb_names, eccdb_env, eccdb_names);
+  expectShapeListsEqual("result", idb_result, idb_names, eccdb_result, eccdb_names);
+  const auto env_keys = canonicalShapes(eccdb_env, eccdb_names);
   const auto has_env_shape = [&](const ShapeKey& expected) {
     return std::find(env_keys.begin(), env_keys.end(), expected) != env_keys.end();
   };
@@ -584,6 +631,11 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
   EXPECT_TRUE(has_env_shape(ShapeKey{.net_name = "<invalid>", .layer_idx = 1, .is_routing = true,
                                      .ll_x = 1400, .ll_y = 1400, .ur_x = 1600, .ur_y = 1600}))
       << "routing blockage must be part of the environment";
+  EXPECT_FALSE(eccdb_environment.obstacle_indices.empty()) << "placed macro OBS must retain obstacle provenance";
+  for (const auto index : eccdb_environment.obstacle_indices) {
+    ASSERT_LT(index, eccdb_env.size());
+    EXPECT_TRUE(eccdb_env[index].is_routing) << "only routing obstructions are DRC obstacle inputs";
+  }
   const auto result_keys = canonicalShapes(idb_result, idb_names);
   EXPECT_NE(std::find(result_keys.begin(), result_keys.end(),
                       ShapeKey{.net_name = "a_sig", .layer_idx = 0, .is_routing = true, .ll_x = 50, .ll_y = 250, .ur_x = 550, .ur_y = 350}),
@@ -594,43 +646,57 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
             result_keys.end())
       << "z_sig should retain its semantic net name";
 
-  auto run_violations = [&](bool use_entt_source, std::string_view temp_name) {
-    if (use_entt_source) {
-      DRCI.setDesignSource(design.get(), &tech, library.get());
+  auto run_violations = [&](bool use_eccdb_source, std::string_view temp_name) {
+    std::shared_ptr<DRCDesignSource> source;
+    if (use_eccdb_source) {
+      source = eccdb::adapters::makeDrcSource(*design, tech, *library);
+      DRCI.setDesignSource(source);
     } else {
-      DRCI.setDesignSource(nullptr, nullptr, nullptr);
+      DRCI.setDesignSource(nullptr);
     }
     std::map<std::string, std::any> config_map;
     config_map.insert({"-temp_directory_path", workspace.path(temp_name).string()});
     config_map.insert({"-thread_number", 1});
     DRCI.initDRC(config_map, true);
-    const auto violations = DRCI.getViolationList(DRCI.buildEnvShapeList(), DRCI.buildResultShapeList(), {}, {});
+    const auto environment = source ? source->environmentShapes(nullptr) : legacyEnvironmentShapes();
+    const auto result = source ? source->resultShapes() : legacyResultShapes();
+    const auto violations = DRCI.getViolationList(environment, result, {}, {});
     DRCI.destroyDRC();
+    DRCI.setDesignSource(nullptr);
     return violations;
   };
 
   const auto idb_violations = run_violations(false, "idb-drc");
-  const auto entt_violations = run_violations(true, "entt-drc");
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
-  expectViolationListsEqual("violations", idb_violations, idb_names, entt_violations, entt_names);
+  const auto eccdb_violations = run_violations(true, "eccdb-drc");
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
+  expectViolationListsEqual("violations", idb_violations, idb_names, eccdb_violations, eccdb_names);
 
-  DRCI.setDesignSource(design.get(), &tech, library.get());
+  const auto count_source = eccdb::adapters::makeDrcSource(*design, tech, *library);
+  DRCI.setDesignSource(count_source);
   std::map<std::string, std::any> count_config;
-  count_config.insert({"-temp_directory_path", workspace.path("entt-counts").string()});
+  const auto count_directory = workspace.path("eccdb-counts");
+  count_config.insert({"-temp_directory_path", count_directory.string()});
   count_config.insert({"-thread_number", 1});
   DRCI.initDRC(count_config, true);
-  DRCI.checkDef();
-  const auto cached_counts = DRCI.lastViolationCounts();
-  ASSERT_FALSE(cached_counts.empty()) << "checkDef must expose its violation categories";
-  size_t cached_total = 0;
-  for (const auto& [type, count] : cached_counts) {
-    static_cast<void>(type);
-    cached_total += count;
+  DRCI.runDRC();
+  EXPECT_EQ(DRCDM.getDatabase().get_design_name(), "idrc_shape_fixture")
+      << "runDRC must retain the working model until explicit destroyDRC";
+  EXPECT_FALSE(DRCDM.getDatabase().get_routing_layer_list().empty())
+      << "runDRC must retain wrapped technology until explicit destroyDRC";
+  const auto report_path = count_directory / "violation_map.json";
+  std::ifstream report(report_path, std::ios::binary);
+  if (!report) {
+    ADD_FAILURE() << "runDRC must write " << report_path;
+  } else {
+    const std::string report_text((std::istreambuf_iterator<char>(report)), std::istreambuf_iterator<char>());
+    EXPECT_FALSE(report_text.empty());
+    if (!report_text.empty()) {
+      EXPECT_EQ(report_text.front(), '[');
+    }
+    EXPECT_NE(report_text.find("\"type\""), std::string::npos);
   }
-  EXPECT_GT(cached_total, 0U);
   DRCI.destroyDRC();
-  EXPECT_EQ(DRCI.lastViolationCounts(), cached_counts);
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  DRCI.setDesignSource(nullptr);
   dmInst->reset();
 
   const auto special = design->netlistStorage().findSpecialNet("VDD");
@@ -638,10 +704,8 @@ TEST(Shapes, GeneratedViaAndRegularWireMatch)
   const auto m2 = eccdb::TechRoutingLayerId{tech.findLayer("M2").entity()};
   static_cast<void>(design->geometryStorage().appendNetShape(
       special, eccdb::DesignNetRectangle{.layer = m2, .rectangle = {1500, 300, 1600, 400}}));
-  DRCI.setDesignSource(design.get(), &tech, library.get());
-  const auto standalone_result = DRCI.buildResultShapeListFromEnTT();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
-  const auto standalone_keys = canonicalShapes(standalone_result, enttNetNames(*design));
+  const auto standalone_result = nativeResultShapes(*design, tech, *library);
+  const auto standalone_keys = canonicalShapes(standalone_result, eccdbNetNames(*design));
   EXPECT_NE(std::find(standalone_keys.begin(), standalone_keys.end(),
                       ShapeKey{.net_name = "VDD", .layer_idx = 1, .is_routing = true,
                                .ll_x = 1500, .ll_y = 300, .ur_x = 1600, .ur_y = 400}),
@@ -672,22 +736,17 @@ TEST(Shapes, GeneratedViaOriginOffsetMatchesAndShiftsOnlyMetal)
   loadIspd18IntoIdb(lef, def);
 
   Logger::initInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
   DataManager::initInst();
   DRCI.wrapDatabase();
-  const auto idb_result = DRCI.buildResultShapeList();
+  const auto idb_result = legacyResultShapes();
   DataManager::destroyInst();
 
-  DRCI.setDesignSource(&design, &tech, &library);
-  DataManager::initInst();
-  DRCI.wrapDatabase();
-  const auto entt_result = DRCI.buildResultShapeList();
-  DataManager::destroyInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  const auto eccdb_result = nativeResultShapes(design, tech, library);
 
   const auto idb_names = idbNetNames();
-  const auto entt_names = enttNetNames(design);
-  expectShapeListsEqual("generated via origin/offset", idb_result, idb_names, entt_result, entt_names);
+  const auto eccdb_names = eccdbNetNames(design);
+  expectShapeListsEqual("generated via origin/offset", idb_result, idb_names, eccdb_result, eccdb_names);
 
   const auto result_keys = canonicalShapes(idb_result, idb_names);
   const auto has_result = [&](const ShapeKey& expected) {
@@ -721,25 +780,20 @@ TEST(Shapes, BoundaryWireKeepsNegativeEnvelopeAndViaFootprint)
   loadIspd18IntoIdb(lef, def);
 
   Logger::initInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
   DataManager::initInst();
   DRCI.wrapDatabase();
-  const auto idb_env = DRCI.buildEnvShapeList();
-  const auto idb_result = DRCI.buildResultShapeList();
+  const auto idb_env = legacyEnvironmentShapes();
+  const auto idb_result = legacyResultShapes();
   DataManager::destroyInst();
 
-  DRCI.setDesignSource(&design, &tech, &library);
-  DataManager::initInst();
-  DRCI.wrapDatabase();
-  const auto entt_env = DRCI.buildEnvShapeList();
-  const auto entt_result = DRCI.buildResultShapeList();
-  DataManager::destroyInst();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  const auto eccdb_env = nativeEnvironmentShapes(design, tech, library);
+  const auto eccdb_result = nativeResultShapes(design, tech, library);
 
   const auto idb_names = idbNetNames();
-  const auto entt_names = enttNetNames(design);
-  expectShapeListsEqual("boundary env", idb_env, idb_names, entt_env, entt_names);
-  expectShapeListsEqual("boundary result", idb_result, idb_names, entt_result, entt_names);
+  const auto eccdb_names = eccdbNetNames(design);
+  expectShapeListsEqual("boundary env", idb_env, idb_names, eccdb_env, eccdb_names);
+  expectShapeListsEqual("boundary result", idb_result, idb_names, eccdb_result, eccdb_names);
 
   const auto env_keys = canonicalShapes(idb_env, idb_names);
   const auto result_keys = canonicalShapes(idb_result, idb_names);
@@ -763,6 +817,60 @@ TEST(Shapes, BoundaryWireKeepsNegativeEnvelopeAndViaFootprint)
                                    .ll_x = 420, .ll_y = -80, .ur_x = 580, .ur_y = 80}))
       << "the upper routing footprint of VIA12 must retain negative coordinates";
 
+  dmInst->reset();
+}
+
+TEST(Shapes, IdbProjectionPreservesNegativeEnvelopeAndFlushExtension)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("flush-projection.lef");
+  const auto def = workspace.path("flush-projection.def");
+  writeText(lef, kShapeFixtureLef);
+  writeText(def, kFlushProjectionFixtureDef);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+  loadIspd18IntoIdb(lef, def);
+  const auto idb_names = idbNetNames();
+  const auto eccdb_names = eccdbNetNames(design);
+
+  Logger::initInst();
+  eccdb::adapters::bindDrcSource(DRCI, nullptr, nullptr, nullptr);
+  DataManager::initInst();
+  DRCI.wrapDatabase();
+  const auto idb_result = legacyResultShapes();
+  DataManager::destroyInst();
+
+  const auto eccdb_result = nativeResultShapes(design, tech, library);
+
+  expectShapeListsEqual("flush extension result", idb_result, idb_names, eccdb_result, eccdb_names);
+  const auto idb_keys = canonicalShapes(idb_result, idb_names);
+  const auto eccdb_keys = canonicalShapes(eccdb_result, eccdb_names);
+  const auto has_shape = [](const std::vector<ShapeKey>& keys, const ShapeKey& expected) {
+    return std::find(keys.begin(), keys.end(), expected) != keys.end();
+  };
+  const auto expect_for_both = [&](const ShapeKey& expected) {
+    EXPECT_TRUE(has_shape(idb_keys, expected)) << "iDB projection misses " << shapeToString(expected);
+    EXPECT_TRUE(has_shape(eccdb_keys, expected)) << "EccDB projection misses " << shapeToString(expected);
+  };
+
+  expect_for_both(ShapeKey{.net_name = "boundary_plain", .layer_idx = 0, .is_routing = true,
+                            .ll_x = 200, .ll_y = -50, .ur_x = 550, .ur_y = 50});
+  // The input starts at x=500 and marks that endpoint flush with ext=0. Its
+  // metal must end at x=500, while the reversed plain endpoint expands by
+  // half the M1 width to x=200.
+  expect_for_both(ShapeKey{.net_name = "boundary_reversed_flush", .layer_idx = 0, .is_routing = true,
+                            .ll_x = 200, .ll_y = 50, .ur_x = 500, .ur_y = 150});
+  // Cover the matching vertical branch: the first point is the geometrically
+  // upper endpoint despite appearing first in the DEF path.
+  expect_for_both(ShapeKey{.net_name = "boundary_reversed_vertical_flush", .layer_idx = 0, .is_routing = true,
+                            .ll_x = 50, .ll_y = 200, .ur_x = 150, .ur_y = 500});
   dmInst->reset();
 }
 
@@ -796,7 +904,7 @@ TEST(NetIndex, EccdbRunSnapshotTracksShapeOrdinalsAndRefreshesAfterStructuralCha
   const auto expect_snapshot = [&]() {
     const auto regular = netlist.regularNets();
     const auto special = netlist.specialNets();
-    const auto names = enttNetNames(design);
+    const auto names = eccdbNetNames(design);
     EXPECT_EQ(names.size(), regular.size() + special.size());
     for (size_t index = 0; index < regular.size(); ++index) {
       EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(index)), netlist.net(regular[index]).name);
@@ -805,17 +913,18 @@ TEST(NetIndex, EccdbRunSnapshotTracksShapeOrdinalsAndRefreshesAfterStructuralCha
       EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(regular.size() + index)), netlist.net(special[index]).name);
     }
     EXPECT_EQ(DRCI.getNetName(-1), "obs");
-    EXPECT_EQ(DRCI.getNetName(-2), "<invalid_entt_net:-2>");
+    EXPECT_EQ(DRCI.getNetName(-2), "<invalid_eccdb_net:-2>");
     EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(names.size())),
-              "<invalid_entt_net:" + std::to_string(names.size()) + ">");
+              "<invalid_eccdb_net:" + std::to_string(names.size()) + ">");
     return names;
   };
 
   Logger::initInst();
-  DRCI.setDesignSource(&design, &tech, &library);
+  const auto source = eccdb::adapters::makeDrcSource(design, tech, library);
+  DRCI.setDesignSource(source);
   init("net-index-initial");
   const auto initial_names = expect_snapshot();
-  const auto initial_shapes = DRCI.buildResultShapeList();
+  const auto initial_shapes = source->resultShapes();
   ASSERT_FALSE(initial_shapes.empty());
   const auto shape_name = [&](int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y) {
     const auto shape = std::find_if(initial_shapes.begin(), initial_shapes.end(), [&](const ids::Shape& candidate) {
@@ -850,7 +959,7 @@ TEST(NetIndex, EccdbRunSnapshotTracksShapeOrdinalsAndRefreshesAfterStructuralCha
   EXPECT_NE(std::find(refreshed_names.begin(), refreshed_names.end(), "late_special_0"), refreshed_names.end());
   EXPECT_NE(std::find(refreshed_names.begin(), refreshed_names.end(), "late_special_1"), refreshed_names.end());
 
-  const auto refreshed_shapes = DRCI.buildResultShapeList();
+  const auto refreshed_shapes = source->resultShapes();
   const auto late_shape = std::find_if(refreshed_shapes.begin(), refreshed_shapes.end(), [](const ids::Shape& candidate) {
     return candidate.ll_x == 1700 && candidate.ll_y == 300 && candidate.ur_x == 1800 && candidate.ur_y == 400;
   });
@@ -860,10 +969,10 @@ TEST(NetIndex, EccdbRunSnapshotTracksShapeOrdinalsAndRefreshesAfterStructuralCha
 
   // Once the run ends, the public lookup intentionally returns to the live
   // source; this also proves destroy cleared the stale run table.
-  const auto live_names = enttNetNames(design);
+  const auto live_names = eccdbNetNames(design);
   ASSERT_FALSE(live_names.empty());
   EXPECT_EQ(DRCI.getNetName(static_cast<int32_t>(live_names.size() - 1)), live_names.back());
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
+  DRCI.setDesignSource(nullptr);
 }
 
 TEST(Source, DatabaseContextCanAttachAndDetachNativeSource)
@@ -886,19 +995,72 @@ TEST(Source, DatabaseContextCanAttachAndDetachNativeSource)
 
   Logger::initInst();
   eccdb::DatabaseContext context(tech, library, design);
-  DRCI.setDesignSource(context);
-  const auto from_reference = DRCI.buildResultShapeList();
-  DRCI.setDesignSource(&context);
-  const auto from_pointer = DRCI.buildResultShapeList();
-  DRCI.setDesignSource(nullptr);
-  const auto after_detach = DRCI.buildResultShapeList();
-  DRCI.setDesignSource(&context);
-  const auto after_reattach = DRCI.buildResultShapeList();
-  DRCI.setDesignSource(nullptr);
+  const auto run_bound_source = [&](std::string_view directory, std::string_view expected_design_name) {
+    std::map<std::string, std::any> config;
+    config.emplace("-temp_directory_path", workspace.path(directory).string());
+    config.emplace("-thread_number", 1);
+    DRCI.initDRC(std::move(config), true);
+    EXPECT_EQ(DRCDM.getDatabase().get_design_name(), expected_design_name);
+    DRCI.destroyDRC();
+  };
 
-  expectShapeListsEqual("context pointer", from_reference, enttNetNames(design), from_pointer, enttNetNames(design));
-  expectShapeListsEqual("context detach", from_reference, enttNetNames(design), after_detach, idbNetNames());
-  expectShapeListsEqual("context reattach", from_reference, enttNetNames(design), after_reattach, enttNetNames(design));
+  eccdb::adapters::bindDrcSource(DRCI, context);
+  run_bound_source("context-reference", "idrc_shape_fixture");
+  const auto from_reference = nativeResultShapes(design, tech, library);
+  eccdb::adapters::bindDrcSource(DRCI, &context);
+  run_bound_source("context-pointer", "idrc_shape_fixture");
+  const auto from_pointer = nativeResultShapes(design, tech, library);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr);
+  run_bound_source("context-detach", "idrc_shape_fixture");
+  const auto after_detach = legacyResultShapes();
+  eccdb::adapters::bindDrcSource(DRCI, &context);
+  run_bound_source("context-reattach", "idrc_shape_fixture");
+  const auto after_reattach = nativeResultShapes(design, tech, library);
+  eccdb::adapters::bindDrcSource(DRCI, nullptr);
+
+  expectShapeListsEqual("context pointer", from_reference, eccdbNetNames(design), from_pointer, eccdbNetNames(design));
+  expectShapeListsEqual("context detach", from_reference, eccdbNetNames(design), after_detach, idbNetNames());
+  expectShapeListsEqual("context reattach", from_reference, eccdbNetNames(design), after_reattach, eccdbNetNames(design));
+  dmInst->reset();
+}
+
+TEST(Source, PublicInitUsesNativeDatabaseWrapperWithoutIdb)
+{
+  TemporaryWorkspace workspace;
+  const auto lef = workspace.path("native-init.lef");
+  const auto def = workspace.path("native-init.def");
+  writeText(lef, kShapeFixtureLef);
+  writeText(def, kShapeFixtureDef);
+
+  eccdb::TechStore tech;
+  static_cast<void>(LefDefParser::lefrClear());
+  static_cast<void>(LefDefParser::defrClear());
+  eccdb::LefTechImporter(tech).import(lef);
+  eccdb::LibraryStore library{tech.techRegistry()};
+  eccdb::LefLibraryImporter(tech, library).import(lef);
+  eccdb::DesignStore design{tech.techRegistry(), library.libraryRegistry()};
+  eccdb::DefDesignImporter(design).import(def);
+
+  // Do not populate iDB.  This exercises initDRC's public native path, which
+  // previously re-entered DataManager's unconditional iDB wrapper.
+  dmInst->reset();
+  Logger::initInst();
+  const auto source = eccdb::adapters::makeDrcSource(design, tech, library);
+  DRCI.setDesignSource(source);
+  std::map<std::string, std::any> config;
+  config.emplace("-temp_directory_path", workspace.path("native-init-drc").string());
+  config.emplace("-thread_number", 1);
+  DRCI.initDRC(std::move(config), true);
+
+  auto& database = DRCDM.getDatabase();
+  EXPECT_EQ(database.get_design_name(), "idrc_shape_fixture");
+  EXPECT_EQ(database.get_micron_dbu(), 1000);
+  EXPECT_EQ(database.get_routing_layer_list().size(), 2U);
+  EXPECT_EQ(database.get_cut_layer_list().size(), 1U);
+  EXPECT_FALSE(source->resultShapes().empty());
+
+  DRCI.destroyDRC();
+  DRCI.setDesignSource(nullptr);
   dmInst->reset();
 }
 
@@ -930,10 +1092,8 @@ END DESIGN
   eccdb::DefDesignImporter(design).import(def);
 
   Logger::initInst();
-  DRCI.setDesignSource(&design, &tech, &library);
-  const auto shapes = DRCI.buildResultShapeListFromEnTT();
-  DRCI.setDesignSource(nullptr, nullptr, nullptr);
-  const auto keys = canonicalShapes(shapes, enttNetNames(design));
+  const auto shapes = nativeResultShapes(design, tech, library);
+  const auto keys = canonicalShapes(shapes, eccdbNetNames(design));
   const auto has_shape = [&](const ShapeKey& expected) {
     return std::find(keys.begin(), keys.end(), expected) != keys.end();
   };
@@ -948,74 +1108,74 @@ END DESIGN
       << "the RECT after VIA12 belongs to M2";
 }
 
-TEST(Wrap, Ispd18Sample) { compareIdbAndEntt({"ispd18_sample"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Sample2) { compareIdbAndEntt({"ispd18_sample2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Sample3) { compareIdbAndEntt({"ispd18_sample3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test1) { compareIdbAndEntt({"ispd18_test1"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test2) { compareIdbAndEntt({"ispd18_test2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test3) { compareIdbAndEntt({"ispd18_test3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test4) { compareIdbAndEntt({"ispd18_test4"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test5) { compareIdbAndEntt({"ispd18_test5"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test6) { compareIdbAndEntt({"ispd18_test6"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test7) { compareIdbAndEntt({"ispd18_test7"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test8) { compareIdbAndEntt({"ispd18_test8"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test9) { compareIdbAndEntt({"ispd18_test9"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
-TEST(Wrap, Ispd18Test10) { compareIdbAndEntt({"ispd18_test10"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Sample) { compareIdbAndEccdb({"ispd18_sample"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Sample2) { compareIdbAndEccdb({"ispd18_sample2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Sample3) { compareIdbAndEccdb({"ispd18_sample3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test1) { compareIdbAndEccdb({"ispd18_test1"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test2) { compareIdbAndEccdb({"ispd18_test2"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test3) { compareIdbAndEccdb({"ispd18_test3"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test4) { compareIdbAndEccdb({"ispd18_test4"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test5) { compareIdbAndEccdb({"ispd18_test5"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test6) { compareIdbAndEccdb({"ispd18_test6"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test7) { compareIdbAndEccdb({"ispd18_test7"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test8) { compareIdbAndEccdb({"ispd18_test8"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test9) { compareIdbAndEccdb({"ispd18_test9"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
+TEST(Wrap, Ispd18Test10) { compareIdbAndEccdb({"ispd18_test10"}, ispd18Source(), "set ECCDB_ISPD18_ROOT to the extracted ISPD18 corpus"); }
 TEST(Wrap, Ispd19Sample)
 {
-  compareIdbAndEntt({"ispd19_sample"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Sample2)
 {
-  compareIdbAndEntt({"ispd19_sample2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Sample3)
 {
-  compareIdbAndEntt({"ispd19_sample3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Sample4)
 {
-  compareIdbAndEntt({"ispd19_sample4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_sample4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test1)
 {
-  compareIdbAndEntt({"ispd19_test1"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test1"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test2)
 {
-  compareIdbAndEntt({"ispd19_test2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test2"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test3)
 {
-  compareIdbAndEntt({"ispd19_test3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test3"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test4)
 {
-  compareIdbAndEntt({"ispd19_test4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test4"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test5)
 {
-  compareIdbAndEntt({"ispd19_test5"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test5"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test6)
 {
-  compareIdbAndEntt({"ispd19_test6"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test6"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test7)
 {
-  compareIdbAndEntt({"ispd19_test7"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test7"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test8)
 {
-  compareIdbAndEntt({"ispd19_test8"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test8"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test9)
 {
-  compareIdbAndEntt({"ispd19_test9"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test9"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 TEST(Wrap, Ispd19Test10)
 {
-  compareIdbAndEntt({"ispd19_test10"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
+  compareIdbAndEccdb({"ispd19_test10"}, ispd19Source(), "set ECCDB_ISPD19_ROOT to the extracted ISPD19 corpus");
 }
 
 }  // namespace idrc

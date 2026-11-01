@@ -42,6 +42,7 @@ enum class InstType
   kClockLogic,    // clock-derived combinational logic boundary
   kBoundaryLoad,  // non-propagating clock-net load
   kMacroBlock,    // hard macro / block-class cell
+  kIoPad,         // IO pad crossed on the clock path (LEF CLASS PAD)
   kUnknown
 };
 
@@ -91,6 +92,7 @@ class Inst
   auto is_clock_logic() const -> bool { return _type == InstType::kClockLogic; }
   auto is_boundary_load() const -> bool { return _type == InstType::kBoundaryLoad; }
   auto is_macro_block() const -> bool { return _type == InstType::kMacroBlock; }
+  auto is_io_pad() const -> bool { return _type == InstType::kIoPad; }
   auto is_sequential_sink() const -> bool { return is_flipflop() || is_latch(); }
   auto is_clock_boundary() const -> bool { return is_clock_gate() || is_mux() || is_clock_logic() || is_boundary_load(); }
 

@@ -16,7 +16,7 @@
 #include "idm.h"
 
 namespace ista {
-struct TimingSnapshot;
+struct TimingData;
 }
 
 namespace python_interface {
@@ -58,9 +58,9 @@ inline bool isPlacementFixed(idb::IdbInstance* node)
 struct PyPlaceDB
 {
  public:
-  unsigned int num_nodes;           ///< number of nodes, including terminals and terminal_NIs
-  unsigned int num_terminals;       ///< number of terminals, essentially fixed macros
-  unsigned int num_terminal_NIs;    ///< number of terminal_NIs, essentially IO pins
+  unsigned int num_nodes;         ///< number of nodes, including terminals and terminal_NIs
+  unsigned int num_terminals;     ///< number of terminals, essentially fixed macros
+  unsigned int num_terminal_NIs;  ///< number of terminal_NIs, essentially IO pins
   unsigned int m2_pg_rail_blockage_rects;
   pybind11::list m2_pg_rail_boxes;
   pybind11::list m2_pg_rail_density_boxes;
@@ -98,7 +98,12 @@ struct PyPlaceDB
   // Timing export.  Indices are design-pin ids, times are ps, capacitances
   // are pF, and CSR offsets are half-open [start, end) ranges.
   int timing_schema_version = 0;
+  int hold_schema_version = 0;
+  std::string timing_preparation_mode = "complete";
   pybind11::list timing_diagnostics;
+  pybind11::dict timing_sparse;
+  pybind11::dict timing_min_sparse;
+  pybind11::dict timing_preparation;
   pybind11::list timing_clock_names;
   pybind11::list timing_clock_info;
   double timing_source_time_unit_ps = 1.0;
@@ -116,6 +121,19 @@ struct PyPlaceDB
   pybind11::list endpoints_constraint_max_reason;
   pybind11::list endpoints_timing_check_max_valid;
   pybind11::list endpoints_timing_check_max_reason;
+  pybind11::list endpoints_min_valid;
+  pybind11::list endpoints_min_reason;
+  pybind11::list endpoints_timing_check_min_valid;
+  pybind11::list endpoints_timing_check_min_reason;
+  pybind11::list startpoints_min_valid;
+  pybind11::list min_inrdelays;
+  pybind11::list min_infdelays;
+  pybind11::list min_inrtrans;
+  pybind11::list min_inftrans;
+  pybind11::list min_outcaps_rise;
+  pybind11::list min_outcaps_fall;
+  pybind11::list hold_launches;
+  pybind11::list hold_contexts;
   pybind11::list clock_pins;
   pybind11::list FF_ids;
   pybind11::list clk_pin_r_aat;
@@ -136,6 +154,8 @@ struct PyPlaceDB
   pybind11::list backend_endpoint_fRAT;
   pybind11::list backend_endpoint_rSlew;
   pybind11::list backend_endpoint_fSlew;
+  pybind11::list backend_endpoint_min_rSlew;
+  pybind11::list backend_endpoint_min_fSlew;
   pybind11::list backend_endpoint_min_rAAT;
   pybind11::list backend_endpoint_min_fAAT;
   pybind11::list backend_endpoint_min_rRAT;
@@ -196,12 +216,17 @@ struct PyPlaceDB
   pybind11::list pin_2_libpin_offset;
   pybind11::list flat_lib_pin_offset_x;
   pybind11::list flat_lib_pin_offset_y;
+  pybind11::list flat_lib_pin_names;
   pybind11::list flat_lib_pin_cap;
   pybind11::list flat_lib_pin_rcap;
   pybind11::list flat_lib_pin_fcap;
+  pybind11::list flat_lib_pin_min_rcap;
+  pybind11::list flat_lib_pin_min_fcap;
   pybind11::list flat_lib_pin_cap_limit;
   pybind11::list flat_lib_pin_slew_limit;
   pybind11::list flat_libarc_info;
+  pybind11::list flat_libarc_check_types;
+  pybind11::list flat_libarc_is_latch_data;
   pybind11::list f_delay_flat_luts_values;
   pybind11::list f_delay_flat_luts_trans_table;
   pybind11::list f_delay_flat_luts_cap_table;
@@ -268,28 +293,28 @@ struct PyPlaceDB
   double total_space_area;  ///< total placeable space area excluding fixed cells.
                             ///< This is not the exact area, because we cannot exclude the overlapping fixed cells
                             ///< within a bin.
-  double total_fixed_node_area;  ///< sum of fixed body and synthetic obstacle rectangles.
 
   int num_movable_pins;
 
   PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true)
+            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true, bool timing_model_only = false)
   {
-    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
-        include_m2_pg_rail_density);
+    set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage, include_m2_pg_rail_density,
+        timing_model_only);
   }
 
   const std::vector<bool>& getNodeIsHardMacro() const { return _node_is_hard_macro; }
   const std::vector<bool>& getMacroWritebackCandidate() const { return _macro_writeback_candidate; }
-  std::size_t writeMacroPlacementBack(
-      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
-      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
+  std::size_t writeMacroPlacementBack(const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
+                                      const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
   pybind11::dict applySizing(const std::vector<int>& cell_ids, const std::vector<std::string>& target_master_names);
   pybind11::dict applyBufferActions(const pybind11::list& actions, const std::string& action_digest);
 
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-           bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true);
-  void init_timing(const ista::TimingSnapshot& snapshot, idm::DataManager* db);
+           bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true, bool timing_model_only = false);
+  void init_timing(const ista::TimingData& snapshot, idm::DataManager* db);
+  void init_min_timing(const ista::TimingData& snapshot);
+  void init_sparse_timing(const ista::TimingData& snapshot);
   void init_routability(idm::DataManager* db, std::vector<IdbInstance*> inst_resort_list);
   std::vector<std::vector<float>> getCongestionMap(string method = "max", string stage = "egr3D", string resolve_congestion = "low");
 
