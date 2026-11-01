@@ -31,6 +31,7 @@
 #include "HTreeTopologyChar.hh"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/constraint/Constraint.hh"
+#include "synthesis/htree/region/SinkLoadRegion.hh"
 #include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 
 namespace icts {
@@ -43,7 +44,6 @@ namespace icts::htree {
 class RootDriverCompensationPass;
 class SegmentFrontierCatalog;
 struct BufferPatternLibrary;
-struct SinkLoadRegionLegalityContext;
 
 struct CandidateBuildEvaluation
 {
@@ -54,6 +54,9 @@ struct CandidateBuildEvaluation
   std::vector<HTree::LevelPlan> levels;
   bool success = false;
   std::string failure_reason;
+  SinkLoadRegionViolation failure_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::size_t coverage_rejected_count = 0U;
   std::optional<unsigned> failure_level = std::nullopt;
   std::optional<unsigned> failure_length_idx = std::nullopt;
   std::size_t final_frontier_count = 0U;
@@ -104,6 +107,8 @@ struct CandidateCharRefFilterOutput
 struct CandidateCharRefFilterSummary
 {
   std::string first_failure_reason;
+  SinkLoadRegionViolation first_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure first_recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
 };
 
 struct CandidateCharRefFilterBuild

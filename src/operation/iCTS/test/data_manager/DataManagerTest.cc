@@ -21,8 +21,6 @@
  * @brief Tests for process-wide CTS state ownership and reset behavior.
  */
 
-#include <gtest/gtest.h>
-
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
@@ -36,6 +34,7 @@
 #include "Design.hh"
 #include "QOR.hh"
 #include "data_manager/DataManager.hh"
+#include "gtest/gtest.h"
 #include "module/synthesis/Synthesis.hh"
 #include "stage/StageSummary.hh"
 

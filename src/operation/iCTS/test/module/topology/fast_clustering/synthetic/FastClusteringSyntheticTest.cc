@@ -21,7 +21,6 @@
  * @brief Synthetic fast clustering API and legality regression tests.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -42,6 +41,7 @@
 #include "data_manager/design/fixture/data/GeneratedPins.hh"
 #include "data_manager/design/fixture/data/pin_factory/PinFactory.hh"
 #include "data_manager/spatial/Point.hh"
+#include "gtest/gtest.h"
 #include "module/topology/clustering/Clustering.hh"
 #include "module/topology/config/TopologyConfig.hh"
 #include "module/topology/fast_clustering/FastClustering.hh"

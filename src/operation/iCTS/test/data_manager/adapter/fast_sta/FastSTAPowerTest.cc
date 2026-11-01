@@ -15,8 +15,6 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <initializer_list>
 #include <limits>
@@ -32,6 +30,7 @@
 #include "FastSTATiming.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "fixture/FastSTATestModel.hh"
+#include "gtest/gtest.h"
 #include "liberty/FastSTALibertyModel.hh"
 
 namespace icts_test {

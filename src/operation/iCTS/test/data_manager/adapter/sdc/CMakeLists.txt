@@ -4,6 +4,7 @@ icts_add_test_executable(
     ${ICTS_TEST}/data_manager/adapter/sdc/ClockTraceTest.cc
     ${ICTS_TEST}/data_manager/adapter/sdc/SdcConstraintStatusTest.cc
     ${ICTS_TEST}/data_manager/adapter/sdc/SdcCaseAnalysisTest.cc
+    ${ICTS_TEST}/data_manager/adapter/sdc/SDCGeneratedClockResolverTest.cc
   LIBS
     icts_source_data_manager_adapter_sdc
     ista_sdc_frontend

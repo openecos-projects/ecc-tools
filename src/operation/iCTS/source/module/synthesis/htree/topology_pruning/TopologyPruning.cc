@@ -28,7 +28,6 @@
 #include <iterator>
 #include <limits>
 #include <optional>
-#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -286,16 +285,6 @@ auto ComposeHTreeFrontierEntries(const std::vector<HTreeTopologyChar>& upstream,
   return {std::move(frontier_entries), combiner.get_next_id()};
 }
 
-auto CountBoundaryFeasibleHTreeChars(const std::vector<HTreeTopologyChar>& entries, const BoundaryConstraints& boundary_constraints) -> std::size_t
-{
-  if (!HasBoundaryConstraints(boundary_constraints) || !boundary_constraints.top_input_slew_covering_idx.has_value()) {
-    return entries.size();
-  }
-
-  return static_cast<std::size_t>(std::ranges::count_if(
-      entries, [&](const HTreeTopologyChar& entry) -> bool { return entry.get_input_slew_idx() >= *boundary_constraints.top_input_slew_covering_idx; }));
-}
-
 auto BuildPatternSearch(const std::vector<HTree::LevelPlan>& levels, const SegmentFrontierCatalog& segment_frontier_catalog,
                         const BufferPatternLibrary& segment_pattern_library, const BoundaryConstraints& boundary_constraints, const Tree& topology,
                         RootDriverCompensationPass& compensation_pass, const HTreeFanoutPruningConfig& fanout_config) -> PatternSearchBuild
@@ -485,25 +474,6 @@ auto BuildLocalDelayPowerPareto(const std::vector<HTreeTopologyChar>& entries) -
   return retained_entries;
 }
 
-auto FilterSinkLoadRegionCoveredEntries(const std::vector<HTreeTopologyChar>& entries, const Tree& topology,
-                                        const TopologyPatternLibrary& topology_pattern_library, const BufferPatternLibrary& segment_pattern_library,
-                                        SinkLoadRegionLegalityContext& legality_context) -> std::vector<HTreeTopologyChar>
-{
-  std::vector<HTreeTopologyChar> filtered_entries;
-  filtered_entries.reserve(entries.size());
-  for (const auto& entry : entries) {
-    const auto& legality = ResolveSinkLoadRegionLegality(topology, entry.get_pattern_id(), topology_pattern_library, segment_pattern_library, legality_context);
-    if (!legality.legal) {
-      continue;
-    }
-    if (legality.required_leaf_load_cap_covering_idx.has_value() && entry.get_leaf_load_cap_idx() < *legality.required_leaf_load_cap_covering_idx) {
-      continue;
-    }
-    filtered_entries.push_back(entry);
-  }
-  return filtered_entries;
-}
-
 }  // namespace
 
 auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const SegmentFrontierCatalog& segment_frontier_catalog,
@@ -538,7 +508,6 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     std::vector<HTreeTopologyChar> feasible_raw_frontier;
     candidate_sink_load_region_filter = FilterSinkLoadRegionLegalEntries(topology_assembly.frontier, topology, result.topology_pattern_library,
                                                                          segment_pattern_library, sink_load_region_legality_context);
-    result.feasible_solution_count = CountBoundaryFeasibleHTreeChars(topology_assembly.frontier, boundary_constraints);
     feasible_raw_frontier = FilterBoundaryFeasibleHTreeChars(topology_assembly.frontier, boundary_constraints);
     feasible_sink_load_region_filter = FilterSinkLoadRegionLegalEntries(feasible_raw_frontier, topology, result.topology_pattern_library,
                                                                         segment_pattern_library, sink_load_region_legality_context);
@@ -552,14 +521,18 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     result.used_cap_fallback = feasible_sink_load_region_filter.summary.any_used_cap_fallback;
     result.cap_overrun_pf = feasible_sink_load_region_filter.summary.max_cap_overrun_pf;
     result.cap_fallback_detail = feasible_sink_load_region_filter.summary.first_cap_fallback_detail;
+    result.coverage_rejected_count = feasible_sink_load_region_filter.summary.coverage_rejected_count;
     if (result.candidate_frontier_entries.empty() && !candidate_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = candidate_sink_load_region_filter.summary.first_failure_reason;
+      result.failure_violation = candidate_sink_load_region_filter.summary.first_violation;
+      result.recovery_failure = candidate_sink_load_region_filter.summary.first_recovery_failure;
     }
     if (result.feasible_frontier_entries.empty() && result.failure_reason.empty() && !feasible_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = feasible_sink_load_region_filter.summary.first_failure_reason;
+      result.failure_violation = feasible_sink_load_region_filter.summary.first_violation;
+      result.recovery_failure = feasible_sink_load_region_filter.summary.first_recovery_failure;
     }
   } else {
-    result.feasible_solution_count = result.candidate_solution_count;
     SinkLoadRegionEntryFilterBuild feasible_sink_load_region_filter;
     feasible_sink_load_region_filter = FilterSinkLoadRegionLegalEntries(topology_assembly.frontier, topology, result.topology_pattern_library,
                                                                         segment_pattern_library, sink_load_region_legality_context);
@@ -572,10 +545,14 @@ auto EvaluateCandidateBuild(const std::vector<HTree::LevelPlan>& levels, const S
     result.used_cap_fallback = feasible_sink_load_region_filter.summary.any_used_cap_fallback;
     result.cap_overrun_pf = feasible_sink_load_region_filter.summary.max_cap_overrun_pf;
     result.cap_fallback_detail = feasible_sink_load_region_filter.summary.first_cap_fallback_detail;
+    result.coverage_rejected_count = feasible_sink_load_region_filter.summary.coverage_rejected_count;
     if (result.feasible_frontier_entries.empty() && !feasible_sink_load_region_filter.summary.first_failure_reason.empty()) {
       result.failure_reason = feasible_sink_load_region_filter.summary.first_failure_reason;
+      result.failure_violation = feasible_sink_load_region_filter.summary.first_violation;
+      result.recovery_failure = feasible_sink_load_region_filter.summary.first_recovery_failure;
     }
   }
+  result.feasible_solution_count = result.feasible_frontier_entries.size();
   if (!result.feasible_frontier_entries.empty()) {
     result.best_char = SelectBestHTreeChar(result.feasible_frontier_entries);
   } else if (has_boundary_constraints && fanout_config.allow_boundary_relaxation) {
@@ -599,13 +576,35 @@ auto ReduceCandidateBuildEvaluationForGlobalSelection(CandidateBuildEvaluation& 
                                                       const BufferPatternLibrary& segment_pattern_library, SinkLoadRegionLegalityContext& legality_context,
                                                       bool retain_relaxed_candidates) -> void
 {
-  evaluation.feasible_frontier_entries = BuildLocalDelayPowerPareto(FilterSinkLoadRegionCoveredEntries(
-      evaluation.feasible_frontier_entries, topology, evaluation.topology_pattern_library, segment_pattern_library, legality_context));
+  auto covered_feasible = FilterSinkLoadRegionLegalEntries(evaluation.feasible_frontier_entries, topology, evaluation.topology_pattern_library,
+                                                           segment_pattern_library, legality_context);
+  evaluation.coverage_rejected_count += covered_feasible.summary.coverage_rejected_count;
+  evaluation.feasible_solution_count = covered_feasible.output.entries.size();
+  evaluation.feasible_frontier_entries = BuildLocalDelayPowerPareto(covered_feasible.output.entries);
+  SinkLoadRegionEntryFilterSummary candidate_summary;
   if (retain_relaxed_candidates) {
-    evaluation.candidate_frontier_entries = BuildLocalDelayPowerPareto(FilterSinkLoadRegionCoveredEntries(
-        evaluation.candidate_frontier_entries, topology, evaluation.topology_pattern_library, segment_pattern_library, legality_context));
+    auto covered_candidate = FilterSinkLoadRegionLegalEntries(evaluation.candidate_frontier_entries, topology, evaluation.topology_pattern_library,
+                                                              segment_pattern_library, legality_context);
+    evaluation.candidate_frontier_entries = BuildLocalDelayPowerPareto(covered_candidate.output.entries);
+    candidate_summary = std::move(covered_candidate.summary);
   } else {
     std::vector<HTreeTopologyChar>().swap(evaluation.candidate_frontier_entries);
+  }
+  const auto& selectable_entries = evaluation.feasible_frontier_entries.empty() && retain_relaxed_candidates ? evaluation.candidate_frontier_entries
+                                                                                                             : evaluation.feasible_frontier_entries;
+  evaluation.best_char = SelectBestHTreeChar(selectable_entries);
+  evaluation.success = evaluation.best_char.has_value();
+  if (evaluation.success) {
+    evaluation.failure_reason.clear();
+    evaluation.failure_violation = SinkLoadRegionViolation::kNone;
+    evaluation.recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  } else {
+    const auto& failure_summary = !covered_feasible.summary.first_failure_reason.empty() ? covered_feasible.summary : candidate_summary;
+    if (!failure_summary.first_failure_reason.empty()) {
+      evaluation.failure_reason = failure_summary.first_failure_reason;
+      evaluation.failure_violation = failure_summary.first_violation;
+      evaluation.recovery_failure = failure_summary.first_recovery_failure;
+    }
   }
   CompactCandidateEvaluationTopologyPatterns(evaluation);
 }

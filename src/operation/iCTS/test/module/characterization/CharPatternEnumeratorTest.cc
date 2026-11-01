@@ -6,8 +6,6 @@
 // iEDA is licensed under Mulan PSL v2.
 // ***************************************************************************************
 
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -15,6 +13,7 @@
 #include "characterization/builder/CharBuilderImpl.hh"
 #include "characterization/builder/CharTopologyPlanner.hh"
 #include "characterization/pattern/CharPatternEnumerator.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

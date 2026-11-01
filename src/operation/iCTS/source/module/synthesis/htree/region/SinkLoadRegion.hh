@@ -47,7 +47,6 @@ namespace htree {
 
 struct BufferPatternLibrary;
 struct TopologyPatternLibrary;
-struct SinkLoadRegionSplitPlan;
 
 struct CapDistributionStats
 {
@@ -96,6 +95,57 @@ enum class SinkLoadRegionViolation
   kFanout,
   kRoutingFailed,
   kCapacitance,
+  kBoundaryLoadCoverage,
+};
+
+// Local split remediation for a boundary group that exceeds fanout or
+// capacitance legality. The boundary driver fans out to local buffers; each
+// local buffer either drives a legal sink subgroup or another compact local
+// split. This models a legal local branch tree without changing the global
+// H-tree fanout/cap contract.
+struct SinkLoadRegionSplitNode
+{
+  std::vector<Pin*> loads;
+  Point<int> center;
+  std::vector<SinkLoadRegionSplitNode> children;
+};
+
+enum class SinkLoadRegionRecoveryFailure
+{
+  kNone,
+  kEmptyLoadGroup,
+  kPinCapUnavailable,
+  kSingleLoadCapacitance,
+  kNoBufferCandidate,
+  kNoProgress,
+  kDepthLimit,
+  kBufferLimit,
+  kRoutingFailed,
+};
+
+struct SinkLoadRegionSplitPlan
+{
+  std::size_t boundary_node_id = std::numeric_limits<std::size_t>::max();
+  Point<int> anchor;
+  std::vector<Pin*> original_loads;
+  bool feasible = false;
+  bool required = false;
+  bool triggered_by_fanout = false;
+  bool triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
+  std::string warning_detail;
+  SinkLoadRegionRecoveryFailure failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::string failure_reason;
+  double root_cap_pf = 0.0;
+  unsigned local_depth = 0U;
+  std::size_t buffer_count = 0U;
+  std::size_t leaf_group_count = 0U;
+  std::vector<SinkLoadRegionSplitNode> children;
+  // First-level child groups retained for existing diagnostics and tests. The
+  // split tree above is the source of truth for materialization.
+  std::vector<std::vector<Pin*>> subgroups;
+  std::vector<Point<int>> centers;
 };
 
 struct SinkLoadRegionLegalitySummary
@@ -103,6 +153,7 @@ struct SinkLoadRegionLegalitySummary
   bool legal = false;
   bool monotone_hard_fail = false;
   SinkLoadRegionViolation violation = SinkLoadRegionViolation::kMissingTopologyRoot;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
   std::string failure_reason;
   CapDistributionStats cap_distribution;
   double required_leaf_load_cap_pf = 0.0;
@@ -156,6 +207,9 @@ struct SinkLoadRegionEntryFilterOutput
 struct SinkLoadRegionEntryFilterSummary
 {
   std::string first_failure_reason;
+  SinkLoadRegionViolation first_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure first_recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::size_t coverage_rejected_count = 0U;
   std::size_t max_split_group_count = 0U;
   std::size_t max_split_extra_buffer_count = 0U;
   unsigned max_split_local_depth = 0U;
@@ -170,56 +224,6 @@ struct SinkLoadRegionEntryFilterBuild
 {
   SinkLoadRegionEntryFilterOutput output;
   SinkLoadRegionEntryFilterSummary summary;
-};
-
-// Local split remediation for a boundary group that exceeds fanout or
-// capacitance legality. The boundary driver fans out to local buffers; each
-// local buffer either drives a legal sink subgroup or another compact local
-// split. This models a legal local branch tree without changing the global
-// H-tree fanout/cap contract.
-struct SinkLoadRegionSplitNode
-{
-  std::vector<Pin*> loads;
-  Point<int> center;
-  std::vector<SinkLoadRegionSplitNode> children;
-};
-
-enum class SinkLoadRegionRecoveryFailure
-{
-  kNone,
-  kEmptyLoadGroup,
-  kPinCapUnavailable,
-  kSingleLoadCapacitance,
-  kNoBufferCandidate,
-  kNoProgress,
-  kDepthLimit,
-  kBufferLimit,
-  kRoutingFailed,
-};
-
-struct SinkLoadRegionSplitPlan
-{
-  std::size_t boundary_node_id = std::numeric_limits<std::size_t>::max();
-  Point<int> anchor;
-  std::vector<Pin*> original_loads;
-  bool feasible = false;
-  bool required = false;
-  bool triggered_by_fanout = false;
-  bool triggered_by_capacitance = false;
-  bool used_cap_fallback = false;
-  double cap_overrun_pf = 0.0;
-  std::string warning_detail;
-  SinkLoadRegionRecoveryFailure failure = SinkLoadRegionRecoveryFailure::kNone;
-  std::string failure_reason;
-  double root_cap_pf = 0.0;
-  unsigned local_depth = 0U;
-  std::size_t buffer_count = 0U;
-  std::size_t leaf_group_count = 0U;
-  std::vector<SinkLoadRegionSplitNode> children;
-  // First-level child groups retained for existing diagnostics and tests. The
-  // split tree above is the source of truth for materialization.
-  std::vector<std::vector<Pin*>> subgroups;
-  std::vector<Point<int>> centers;
 };
 
 auto SplitSinkLoadRegionGroup(const std::vector<Pin*>& loads, std::size_t max_fanout) -> SinkLoadRegionSplitPlan;

@@ -23,8 +23,6 @@
 
 #include "synthesis/htree/solution/Solution.hh"
 
-#include <ostream>
-
 #include "Logger.hh"
 #include "synthesis/htree/synthesis_state/SynthesisState.hh"
 

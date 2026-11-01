@@ -21,12 +21,12 @@
  * @brief Unit coverage for selected sink-load-region plan materialization decisions.
  */
 
-#include <gtest/gtest.h>
-
+#include <string>
 #include <vector>
 
 #include "Pin.hh"
 #include "Point.hh"
+#include "gtest/gtest.h"
 #include "synthesis/htree/embedding/Embedding.hh"
 #include "synthesis/htree/region/SinkLoadRegion.hh"
 

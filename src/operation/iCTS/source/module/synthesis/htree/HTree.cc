@@ -142,8 +142,7 @@ auto HTreeBuilder::build() -> htree::DiagnosticBuild
         }
       }
     }
-    const bool capacitance_failure = selection.failure_reason.find("cap") != std::string::npos;
-    if (!can_deepen || !capacitance_failure || config.target_depth.has_value()) {
+    if (!can_deepen || !selection.hasRecoverableCapacitanceFailure() || config.target_depth.has_value()) {
       break;
     }
     const unsigned current_depth = levels.size() <= 1U ? 0U : static_cast<unsigned>(levels.size() - 1U);
