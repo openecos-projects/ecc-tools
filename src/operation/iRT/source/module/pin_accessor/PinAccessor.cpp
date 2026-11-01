@@ -1737,6 +1737,7 @@ void PinAccessor::buildBoxEnvironment(PABox& pa_box)
 void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
 {
   int32_t detection_distance = RTDM.getDatabase().get_detection_distance();
+  std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::vector<PANet>& pa_net_list = pa_model.get_pa_net_list();
   ScaleAxis& box_track_axis = pa_box.get_box_track_axis();
   std::vector<GridMap<PANode>>& layer_node_map = pa_box.get_layer_node_map();
@@ -1745,7 +1746,8 @@ void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
   for (auto& [pa_net_idx, access_point_set] : pa_box.get_net_access_point_map()) {
     std::vector<PAPin>& pa_pin_list = pa_net_list[pa_net_idx].get_pa_pin_list();
     for (AccessPoint* access_point : access_point_set) {
-      if (pa_pin_list[access_point->get_pin_idx()].get_is_core()) {
+      PAPin& pa_pin = pa_pin_list[access_point->get_pin_idx()];
+      if (pa_pin.get_is_core()) {
         if (!RTUTIL.existTrackGrid(access_point->get_real_coord(), box_track_axis)) {
           continue;
         }
@@ -1763,6 +1765,7 @@ void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
           }
         }
       } else {
+        std::vector<Orientation> exempt_orientation_list = getExemptOrientationList(pa_pin, routing_layer_list[access_point->get_layer_idx()].isPreferH());
         auto rtree_iter = routing_fixed_rect_rtree_map.find(access_point->get_layer_idx());
         PlanarRect real_rect = RTUTIL.getEnlargedRect(access_point->get_real_coord(), detection_distance);
         if (!RTUTIL.existTrackGrid(real_rect, box_track_axis)) {
@@ -1788,14 +1791,36 @@ void PinAccessor::exemptPinShape(PAModel& pa_model, PABox& pa_box)
             if (within_shape) {
               continue;
             }
-            for (Orientation orient : {Orientation::kEast, Orientation::kWest, Orientation::kSouth, Orientation::kNorth}) {
-              pa_node.delFixedRectNet(orient, -1);
+            for (Orientation orientation : exempt_orientation_list) {
+              pa_node.delFixedRectNet(orientation, -1);
             }
           }
         }
       }
     }
   }
+}
+
+std::vector<Orientation> PinAccessor::getExemptOrientationList(PAPin& pa_pin, bool prefer_horizontal)
+{
+  if (pa_pin.get_is_macro()) {
+    switch (pa_pin.get_macro_pin_edge()) {
+      case MacroPinEdge::kNorth:
+        return {Orientation::kNorth};
+      case MacroPinEdge::kSouth:
+        return {Orientation::kSouth};
+      case MacroPinEdge::kEast:
+        return {Orientation::kEast};
+      case MacroPinEdge::kWest:
+        return {Orientation::kWest};
+      default:
+        break;
+    }
+  }
+  if (prefer_horizontal) {
+    return {Orientation::kEast, Orientation::kWest};
+  }
+  return {Orientation::kSouth, Orientation::kNorth};
 }
 
 std::vector<int32_t> PinAccessor::initTaskSchedule(PABox& pa_box)

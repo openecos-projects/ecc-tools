@@ -78,7 +78,13 @@ void addCellArc(const std::string& from, const std::string& to, const std::strin
   database.get_timing_library().get_cell_map()["boundary"].get_cell_arc_list().push_back(cell_arc);
 }
 
-void checkMode(int32_t output_enable, bool clock_mode, bool constant_data = false, bool with_vcd = false)
+void checkMode(
+    int32_t output_enable,
+    bool clock_mode,
+    bool constant_data = false,
+    bool with_vcd = false,
+    bool pin_propagation = false
+)
 {
   DataManager::initInst();
   DelayCalculator::initInst();
@@ -148,7 +154,11 @@ void checkMode(int32_t output_enable, bool clock_mode, bool constant_data = fals
   }
   if (clock_mode) {
     command("create_clock -name package_clock -period 12 [get_ports external]");
-    command("set_propagated_clock [get_clocks package_clock]");
+    command("set_clock_transition 0.4 [get_clocks package_clock]");
+    command(
+        pin_propagation ? "set_propagated_clock [get_ports external]"
+                        : "set_propagated_clock [get_clocks package_clock]"
+    );
     command("create_generated_clock -name forwarded -source [get_ports external] -divide_by 1 [get_pins buffer/sense]");
     command("set_propagated_clock [get_clocks forwarded]");
   }
@@ -185,6 +195,12 @@ void checkMode(int32_t output_enable, bool clock_mode, bool constant_data = fals
   PWCP.propagate();
   ClockPropagator::destroyInst();
   if (clock_mode) {
+    if (pin_propagation)
+      require(
+          database.get_timing_point_map().at("external").get_clock_slew_map()[AnalysisType::kMax][TransType::kRise]
+              == 0.0,
+          "pin propagation did not enable physical clock slew"
+      );
     require(
         database.get_timing_point_map().at("buffer:sense").get_is_clock_point(),
         "top clock did not reach core through PAD"
@@ -369,6 +385,7 @@ int main()
     checkMode(mode, false);
   }
   checkMode(0, true);
+  checkMode(0, true, false, false, true);
   checkMode(1, false, true);
   checkMode(0, false, false, true);
   checkMode(1, false, true, true);

@@ -19,10 +19,63 @@
 #include "PWHeader.hpp"
 #include "TimingCaseValue.hpp"
 #include "TimingClock.hpp"
+#include "ElectricalLimits.hpp"
+#include "TimingDerates.hpp"
+#include "TimingException.hpp"
 #include "TimingPortConstraint.hpp"
 #include "TransType.hpp"
 
 namespace ipw {
+
+class TimingClockUncertainty
+{
+ public:
+  const std::set<std::string>& get_from_clocks() const { return _from_clocks; }
+  const std::set<std::string>& get_to_clocks() const { return _to_clocks; }
+  TransType get_from_trans_type() const { return _from_trans_type; }
+  TransType get_to_trans_type() const { return _to_trans_type; }
+  bool get_setup() const { return _setup; }
+  bool get_hold() const { return _hold; }
+  double get_value() const { return _value; }
+
+  void set_from_clocks(std::set<std::string> value) { _from_clocks = std::move(value); }
+  void set_to_clocks(std::set<std::string> value) { _to_clocks = std::move(value); }
+  void set_from_trans_type(TransType value) { _from_trans_type = value; }
+  void set_to_trans_type(TransType value) { _to_trans_type = value; }
+  void set_setup(bool value) { _setup = value; }
+  void set_hold(bool value) { _hold = value; }
+  void set_value(double value) { _value = value; }
+
+  bool matches(
+      std::string_view from_clock,
+      TransType from_trans_type,
+      std::string_view to_clock,
+      TransType to_trans_type,
+      AnalysisType analysis_type
+  ) const
+  {
+    return (analysis_type == AnalysisType::kMax ? _setup : _hold)
+           && (_from_clocks.empty() || _from_clocks.contains(std::string(from_clock)))
+           && (_to_clocks.empty() || _to_clocks.contains(std::string(to_clock)))
+           && (_from_trans_type == TransType::kNone || _from_trans_type == from_trans_type)
+           && (_to_trans_type == TransType::kNone || _to_trans_type == to_trans_type);
+  }
+
+  int specificity() const
+  {
+    return (!_from_clocks.empty() ? 4 : 0) + (!_to_clocks.empty() ? 4 : 0)
+           + (_from_trans_type != TransType::kNone ? 1 : 0) + (_to_trans_type != TransType::kNone ? 1 : 0);
+  }
+
+ private:
+  std::set<std::string> _from_clocks;
+  std::set<std::string> _to_clocks;
+  TransType _from_trans_type = TransType::kNone;
+  TransType _to_trans_type = TransType::kNone;
+  bool _setup = true;
+  bool _hold = true;
+  double _value = 0.0;
+};
 
 class TimingConstraint
 {
@@ -30,6 +83,13 @@ class TimingConstraint
   TimingConstraint() = default;
   ~TimingConstraint() = default;
   // getter
+  auto& clockPinConstraints() { return _clock_pin_constraints; }
+  void setClockUncertainty(const TimingClockUncertainty& uncertainty);
+  void removeClockUncertainty(const TimingClockUncertainty& filter);
+
+  ElectricalLimits& electricalLimits() { return _electrical_limits; }
+  TimingDerates& timingDerates() { return _timing_derates; }
+  const auto& get_net_load_map() const { return _net_load_map; }
   std::map<std::string, TimingClock>& get_clock_map() { return _clock_map; }
   std::map<std::string, TimingPortConstraint>& get_port_constraint_map() { return _port_constraint_map; }
   // 透明比较器：find() 可以直接吃 string_view，热路径上不再为每次查询构造临时 std::string。
@@ -42,6 +102,11 @@ class TimingConstraint
   {
     return _effective_case_analysis_map;
   }
+  std::vector<TimingException>& get_path_exception_list() { return _path_exception_list; }
+  std::vector<TimingClockGroup>& get_clock_group_list() { return _clock_group_list; }
+  std::vector<TimingClockUncertainty>& get_clock_uncertainty_list() { return _clock_uncertainty_list; }
+  std::optional<double>& get_max_fanout() { return _max_fanout; }
+  std::map<std::string, double>& get_port_max_fanout_map() { return _port_max_fanout_map; }
   // setter
   // function
   void clear_net_load() { _net_load_map.clear(); }
@@ -94,6 +159,14 @@ class TimingConstraint
   }
 
  private:
+  std::map<std::string, std::map<std::string, ClockPinConstraint>> _clock_pin_constraints;
+  ElectricalLimits _electrical_limits;
+  TimingDerates _timing_derates;
+  std::vector<TimingException> _path_exception_list;
+  std::vector<TimingClockGroup> _clock_group_list;
+  std::vector<TimingClockUncertainty> _clock_uncertainty_list;
+  std::optional<double> _max_fanout;
+  std::map<std::string, double> _port_max_fanout_map;
   std::map<std::string, TimingClock> _clock_map;
   std::map<std::string, TimingPortConstraint> _port_constraint_map;
   std::map<std::string, TimingCaseValue, std::less<>> _case_analysis_map;

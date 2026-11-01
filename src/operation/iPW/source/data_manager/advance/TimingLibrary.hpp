@@ -48,6 +48,8 @@ class TimingLibrary
   {
     _library_name_list = library_name_list;
   }
+  const std::vector<std::string>& get_cell_name_list() const { return _cell_name_list; }
+  void set_cell_name_list(std::vector<std::string> names) { _cell_name_list = std::move(names); }
   // 按需 wrap 回调：SDC 命令可能引用设计里未实例化的库 cell。
   // 实现放在 interface 层（PWInterface 持有 idb 库对象），这里只留 hook，避免反向依赖。
   using CellWrapResolver = std::function<bool(const std::string&)>;
@@ -112,6 +114,7 @@ class TimingLibrary
   // function
 
  private:
+  std::vector<std::string> _cell_name_list;
   std::optional<std::string> _leakage_power_unit;
   double _nom_voltage = 0.0;
   double _slew_lower_threshold_pct_rise = 0.3;

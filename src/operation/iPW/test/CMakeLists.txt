@@ -11,3 +11,8 @@ add_executable(test_ipw_sdc_compatibility EXCLUDE_FROM_ALL sdc_compatibility_tes
 target_link_libraries(test_ipw_sdc_compatibility PRIVATE ipw_sdc_command ipw_data_manager)
 add_test(NAME ipw_sdc_compatibility COMMAND test_ipw_sdc_compatibility)
 set_tests_properties(ipw_sdc_compatibility PROPERTIES TIMEOUT 30)
+
+add_executable(test_ipw_sdc_parity EXCLUDE_FROM_ALL sdc_parity_test.cpp)
+target_link_libraries(test_ipw_sdc_parity PRIVATE ipw_sdc_command ipw_data_manager)
+add_test(NAME ipw_sdc_parity COMMAND test_ipw_sdc_parity)
+set_tests_properties(ipw_sdc_parity PROPERTIES TIMEOUT 30)

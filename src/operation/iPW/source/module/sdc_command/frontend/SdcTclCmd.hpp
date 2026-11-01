@@ -28,6 +28,7 @@ class SdcTclCmd : public ecc::TclCmd
   SdcTclCmd(const char* cmd_name);
   ~SdcTclCmd() override = default;
 
+  std::vector<Tcl_Obj*> getOptionObjects(const std::string& name);
   int execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
 
  protected:
@@ -35,12 +36,13 @@ class SdcTclCmd : public ecc::TclCmd
   void setTclError(std::string error_message) { _error_message = std::move(error_message); }
   void warn(const std::string& message) const;
   void setResult(std::vector<std::string> result, SdcObjectType type = SdcObjectType::kNone);
-  std::vector<Tcl_Obj*> getOptionObjects(const std::string& name);
+  const std::vector<std::pair<std::string, std::string>>& getOptionValueList() const { return _option_value_list; }
 
  private:
   void resetExecutionState();
   void setInterpreterError(Tcl_Interp* interp) const;
 
+  std::vector<std::pair<std::string, std::string>> _option_value_list;
   std::string _error_message;
   std::vector<std::string> _list_result;
   SdcObjectType _list_result_type = SdcObjectType::kNone;

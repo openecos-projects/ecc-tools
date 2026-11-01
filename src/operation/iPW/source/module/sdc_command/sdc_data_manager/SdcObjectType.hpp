@@ -7,6 +7,14 @@ enum class SdcObjectType
 {
   kNone,
   kPort,
+  kPin,
+  kCell,
+  kClock,
+  kDesign,
+  kLibrary,
+  kLibCell,
+  kLibPin,
+  kDelayCorner,
   kNet
 };
 

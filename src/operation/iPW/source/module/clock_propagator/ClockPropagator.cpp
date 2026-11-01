@@ -317,13 +317,38 @@ void ClockPropagator::updateEffectiveClockSlew(CPModel& cp_model, std::string& c
 {
   Database& database = PWDM.getDatabase();
   TimingClock& timing_clock = database.get_timing_constraint().get_clock_map().at(clock_name);
+  std::map<int32_t, bool> propagated_modes;
   for (int32_t vertex_idx : database.get_graph_order_list()) {
     if (!cp_model.has_clock_state(vertex_idx, clock_name)) {
       continue;
     }
     TimingPoint& timing_point = database.get_graph_vertex_list()[vertex_idx].get_timing_point();
     ClockSlewState& state = cp_model.get_clock_state(vertex_idx, clock_name);
-    if (timing_clock.get_is_propagated()) {
+    auto& vertex = database.get_graph_vertex_list()[vertex_idx];
+    bool propagated = timing_clock.get_is_propagated();
+    bool inherited = false;
+    const auto& sources = timing_clock.get_source_list();
+    const bool is_root = std::find(sources.begin(), sources.end(), vertex.get_pin_name()) != sources.end();
+    if (!is_root) {
+      for (auto arc_idx : vertex.get_incoming_arc_list()) {
+        auto& arc = database.get_arc_list()[arc_idx];
+        auto mode = propagated_modes.find(arc.get_source_vertex_idx());
+        if (isDisableArc(arc) || mode == propagated_modes.end())
+          continue;
+        propagated = inherited ? propagated || mode->second : mode->second;
+        inherited = true;
+      }
+    }
+    const auto& pin_constraints = database.get_timing_constraint().clockPinConstraints();
+    if (auto pin = pin_constraints.find(vertex.get_pin_name()); pin != pin_constraints.end()) {
+      for (const auto& selector : {std::string(), clock_name}) {
+        auto constraint = pin->second.find(selector);
+        if (constraint != pin->second.end() && constraint->second.propagated.has_value())
+          propagated = *constraint->second.propagated;
+      }
+    }
+    propagated_modes[vertex_idx] = propagated;
+    if (propagated) {
       state.set_slew_map(state.get_physical_slew_map());
     } else {
       std::map<AnalysisType, std::map<TransType, double>>& slew_map = state.get_slew_map();
