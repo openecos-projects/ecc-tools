@@ -21,13 +21,12 @@
  * @brief Unit tests for automatic and explicitly configured H-tree characterization grids.
  */
 
-#include <gtest/gtest.h>
-
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "characterization/Characterization.hh"
+#include "gtest/gtest.h"
 #include "module/synthesis/htree/characterization/wirelength/WirelengthGrid.hh"
 #include "synthesis/htree/characterization/Characterization.hh"
 

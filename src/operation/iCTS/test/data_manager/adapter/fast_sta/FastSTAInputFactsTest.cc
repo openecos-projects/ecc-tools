@@ -21,7 +21,6 @@
  * @brief Parsed Liberty and SDC facts must retain their meaning through timing evaluation.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -49,6 +48,7 @@
 #include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"

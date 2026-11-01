@@ -25,8 +25,6 @@
 #else
 #include <tcl.h>
 #endif
-#include <gtest/gtest.h>
-
 #include <filesystem>
 #include <initializer_list>
 #include <map>
@@ -39,6 +37,7 @@
 #include "SDCClockReader.hh"
 #include "SdcCommand.hpp"
 #include "TimingConstraints.hh"
+#include "gtest/gtest.h"
 #include "sdc/Sdc.hpp"
 #include "toolkit/io/TestArtifactIO.hh"
 

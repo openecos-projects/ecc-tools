@@ -21,8 +21,6 @@
  * @brief Numerical timing, parasitic and power regression tests.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -51,6 +49,7 @@
 #include "design/Inst.hh"
 #include "design/Pin.hh"
 #include "fixture/FastSTATestModel.hh"
+#include "gtest/gtest.h"
 #include "liberty/FastSTACondition.hh"
 #include "liberty/FastSTALibertyModel.hh"
 #include "timing/FastSTAClockTiming.hh"

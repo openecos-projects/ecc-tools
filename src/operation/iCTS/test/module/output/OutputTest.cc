@@ -21,14 +21,13 @@
  * @brief Verifies that output consumes only committed evaluation state.
  */
 
-#include <gtest/gtest.h>
-
 #include <optional>
 #include <string>
 #include <utility>
 
 #include "QOR.hh"
 #include "data_manager/DataManager.hh"
+#include "gtest/gtest.h"
 #include "module/evaluation/qor/QOREvaluation.hh"
 #include "module/output/Output.hh"
 #include "stage/StageSummary.hh"

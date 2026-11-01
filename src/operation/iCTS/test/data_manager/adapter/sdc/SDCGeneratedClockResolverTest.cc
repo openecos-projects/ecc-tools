@@ -21,8 +21,6 @@
  * @brief Generated-waveform data processing after shared SDC import.
  */
 
-#include <gtest/gtest.h>
-
 #include <optional>
 #include <string>
 #include <utility>
@@ -30,6 +28,7 @@
 
 #include "SDCGeneratedClockResolver.hh"
 #include "TimingConstraints.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

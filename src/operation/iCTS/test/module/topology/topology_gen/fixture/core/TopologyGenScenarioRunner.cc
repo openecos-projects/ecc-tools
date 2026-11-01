@@ -20,8 +20,6 @@
  * @date 2026-04-11
  * @brief Thin scenario runner for topology generation tests.
  */
-#include <gtest/gtest.h>
-
 #include <filesystem>
 #include <string>
 #include <type_traits>
@@ -29,6 +27,7 @@
 
 #include "Logger.hh"
 #include "data_manager/design/fixture/data/GeneratedPins.hh"
+#include "gtest/gtest.h"
 #include "module/topology/TopologyGen.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"
