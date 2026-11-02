@@ -26,6 +26,7 @@
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
 #include "PatchGeometry.hpp"
+#include "PlanarCoord.hpp"
 #include "RTInterface.hpp"
 #include "Utility.hpp"
 
@@ -111,88 +112,130 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
    * prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, size, offset, schedule_interval, fixed_rect_unit, routed_rect_unit,
    * violation_unit, max_routed_times, max_candidate_patch_num, all_violation_update, reroute_clean_box
    */
-  std::vector<DRIterParam> dr_iter_param_list;
+  std::vector<DRIterParam> normal_param_list;
   // clang-format off
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
 
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, fixed_rect_unit, routed_rect_unit, violation_unit, 9, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 2 * violation_unit, 12, 10, true);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 2 * violation_unit, 12, 10, true);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 6, 3, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 2 * violation_unit, 12, 10, false, true);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, 2 * fixed_rect_unit, 2 * routed_rect_unit, 2 * violation_unit, 12, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10, false, true);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 2 * violation_unit, 12, 10, true);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 12, 6, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 2 * violation_unit, 12, 10, true);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 6, 3, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 2 * violation_unit, 12, 10, false, true);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, false, true);
 
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10, false, true);
-
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, false, true);
-
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
-  dr_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10, false, true);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 10, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10);
+  normal_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 5, 2, 4 * fixed_rect_unit, 4 * routed_rect_unit, 8 * violation_unit, 12, 10, false, true);
   // clang-format on
 
-  std::vector<DRIterParam> repair_iter_param_list;
-  // clang-format off
-  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  repair_iter_param_list.emplace_back(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 1, 4 * fixed_rect_unit, 4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
-  // clang-format on
+  DRIterParam repair_param_10(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 10, 0, 1, 4 * fixed_rect_unit,
+                              4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  DRIterParam repair_param_20(prefer_wire_unit, non_prefer_wire_unit, off_track_wire_unit, bend_unit, via_unit, 20, 0, 1, 4 * fixed_rect_unit,
+                              4 * routed_rect_unit, 4 * violation_unit, 12, 10, true);
+  std::vector<DRIterParam> final_repair_param_list;
+  final_repair_param_list.push_back(repair_param_10);
+  final_repair_param_list.push_back(repair_param_20);
 
+  std::vector<DRStep> step_list;
+  int32_t normal_iter = 0;
+  for (DRIterParam& normal_param : normal_param_list) {
+    ++normal_iter;
+    step_list.push_back({false, normal_param, 0});
+    if (normal_iter == 7 || normal_iter == 10 || normal_iter == 13) {
+      step_list.push_back({true, repair_param_10, 100});
+    }
+  }
+  int32_t normal_iter_num = static_cast<int32_t>(normal_param_list.size());
+
+  int32_t step_iter = 0;
+  normal_iter = 0;
   int32_t prev_violation_num = 0;
   bool abort_routing = false;
-  for (int32_t i = 0, iter = 1; i < static_cast<int32_t>(dr_iter_param_list.size()); i++, iter++) {
-    Monitor monitor;
-    int32_t iter_num = static_cast<int32_t>(dr_iter_param_list.size());
-    RTLOG.info(Loc::current(), "***** Begin iteration ", iter, "/", iter_num, "(", RTUTIL.getPercentage(iter, iter_num), ") *****");
+  for (DRStep& step : step_list) {
+    ++step_iter;
+    if (!step.is_repair) {
+      ++normal_iter;
+      runNormalIteration(dr_model, step.iter_param, normal_iter, normal_iter_num, step_iter);
 
-    // debugPlotDRModel(dr_model, "before");
-    setDRIterParam(dr_model, iter, dr_iter_param_list[i]);
-    initDRBoxMap(dr_model);
-    buildBoxSchedule(dr_model);
-    pruneAbnormalPatch(dr_model);
-    splitNetResult(dr_model);
-    // debugPlotDRModel(dr_model, "middle");
-    routeDRBoxMap(dr_model);
-    updateDRModel(dr_model);
-    updateNetResult(dr_model);
-    updateNetPatch(dr_model);
-    updateViolation(dr_model);
-    freeDRBoxMap(dr_model);
-    patchFinalMinArea(dr_model);
-    updateBestResult(dr_model);
-    // debugPlotDRModel(dr_model, "after");
-    updateSummary(dr_model);
-    printSummary(dr_model);
-    outputNetCSV(dr_model);
-    outputViolationCSV(dr_model);
+      int32_t curr_violation_num = getRouteViolationNum(dr_model);
+      if (9 <= normal_iter && prev_violation_num + 1000 < curr_violation_num) {
+        RTLOG.warn(Loc::current(), "***** Violations increased by more than 1000 in normal iteration ", normal_iter, ", stop iterating *****");
+        abort_routing = true;
+        break;
+      }
+      prev_violation_num = curr_violation_num;
 
-    RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", iter_num, "(", RTUTIL.getPercentage(iter, iter_num), ")", monitor.getStatsInfo(),
-               "*****");
-
-    int32_t curr_violation_num = getRouteViolationNum(dr_model);
-    if (9 <= iter && prev_violation_num + 1000 < curr_violation_num) {
-      RTLOG.warn(Loc::current(), "***** Violations increased by more than 1000 in iteration ", iter, ", stop iterating *****");
-      abort_routing = true;
-      break;
+      dr_model.set_initial_routing(false);
+      if (stopIteration(dr_model)) {
+        break;
+      }
+      continue;
     }
-    prev_violation_num = curr_violation_num;
 
-    dr_model.set_initial_routing(false);
+    int32_t violation_num = getRouteViolationNum(dr_model);
+    if (violation_num == 0 || violation_num >= step.max_violation_num) {
+      RTLOG.info(Loc::current(), "Skip repair after normal_iter=", normal_iter, " violation_num=", violation_num, " limit=", step.max_violation_num);
+      continue;
+    }
+    runRepairIteration(dr_model, step.iter_param, step_iter);
+    updateBestResult(dr_model);
+
     if (stopIteration(dr_model)) {
       break;
     }
   }
+
   selectBestResult(dr_model);
   if (!abort_routing) {
-    repairViolation(dr_model, repair_iter_param_list);
+    for (DRIterParam& repair_param : final_repair_param_list) {
+      if (stopIteration(dr_model)) {
+        break;
+      }
+      ++step_iter;
+      runRepairIteration(dr_model, repair_param, step_iter);
+    }
   }
   uploadDRModel(dr_model);
+}
+
+void DetailedRouter::runNormalIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t normal_iter, int32_t normal_iter_num, int32_t step_iter)
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "***** Begin normal iteration ", normal_iter, "/", normal_iter_num, "(", RTUTIL.getPercentage(normal_iter, normal_iter_num), ") *****");
+
+  // debugPlotDRModel(dr_model, "before");
+  setDRIterParam(dr_model, step_iter, iter_param);
+
+  initDRBoxMap(dr_model);
+  buildBoxSchedule(dr_model);
+  pruneAbnormalPatch(dr_model);
+  splitNetResult(dr_model);
+  // debugPlotDRModel(dr_model, "middle");
+  routeDRBoxMap(dr_model);
+  updateDRModel(dr_model);
+  updateNetResult(dr_model);
+  updateNetPatch(dr_model);
+  updateViolation(dr_model);
+  freeDRBoxMap(dr_model);
+  patchFinalMinArea(dr_model);
+  updateBestResult(dr_model);
+  // debugPlotDRModel(dr_model, "after");
+  updateSummary(dr_model);
+  printSummary(dr_model);
+  outputNetCSV(dr_model);
+  outputViolationCSV(dr_model);
+
+  RTLOG.info(Loc::current(), "***** End normal iteration ", normal_iter, "/", normal_iter_num, "(", RTUTIL.getPercentage(normal_iter, normal_iter_num), ")",
+             monitor.getStatsInfo(), " *****");
 }
 
 void DetailedRouter::setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param)
@@ -3244,82 +3287,80 @@ void DetailedRouter::selectBestResult(DRModel& dr_model)
   best_result = DRModelResult();
 }
 
-void DetailedRouter::repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list)
+bool DetailedRouter::runRepairIteration(DRModel& dr_model, DRIterParam& repair_iter_param, int32_t step_iter)
 {
   constexpr int32_t max_repair_box_size = 50;
-  int32_t repair_iter_num = static_cast<int32_t>(repair_iter_param_list.size());
-  for (int32_t i = 0, repair_iter = 1; i < repair_iter_num; i++, repair_iter++) {
-    updateViolation(dr_model);
-    int32_t origin_violation_num = getRouteViolationNum(dr_model);
-    if (origin_violation_num == 0) {
-      break;
-    }
+  updateViolation(dr_model);
+  int32_t origin_violation_num = getRouteViolationNum(dr_model);
+  if (origin_violation_num == 0) {
+    return false;
+  }
 
-    Monitor monitor;
-    RTLOG.info(Loc::current(), "***** Begin violation repair iteration ", repair_iter, "/", repair_iter_num, " *****");
-    dr_model.get_previous_result() = dr_model.get_curr_result();
-    DRIterParam& repair_iter_param = repair_iter_param_list[i];
-    setDRIterParam(dr_model, dr_model.get_iter() + 1, repair_iter_param);
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "***** Begin repair step ", step_iter, " *****");
+  dr_model.get_previous_result() = dr_model.get_curr_result();
+  setDRIterParam(dr_model, step_iter, repair_iter_param);
 
-    int32_t expand_size = std::max(1, repair_iter_param.get_size() / 2);
-    std::vector<PlanarRect> repair_box_rect_list = getRepairBoxRectList(dr_model.get_curr_result().get_route_violation_list(), expand_size);
-    std::vector<PlanarRect> routable_box_rect_list;
-    routable_box_rect_list.reserve(repair_box_rect_list.size());
-    for (const PlanarRect& repair_box_rect : repair_box_rect_list) {
-      int32_t x_size = repair_box_rect.getXSpan() + 1;
-      int32_t y_size = repair_box_rect.getYSpan() + 1;
-      if (x_size > max_repair_box_size || y_size > max_repair_box_size) {
-        RTLOG.warn(Loc::current(), "Skipping violation repair box in iteration ", repair_iter, ": grid_rect=", repair_box_rect.get_ll_x(), ",",
-                   repair_box_rect.get_ll_y(), "-", repair_box_rect.get_ur_x(), ",", repair_box_rect.get_ur_y(), ", size=", x_size, "x", y_size,
-                   " GCells exceeds the limit ", max_repair_box_size);
-        continue;
-      }
-      routable_box_rect_list.push_back(repair_box_rect);
-    }
-    repair_box_rect_list = std::move(routable_box_rect_list);
-    if (repair_box_rect_list.empty()) {
-      RTLOG.warn(Loc::current(), "Skipping violation repair iteration ", repair_iter, " because no box is within the size limit");
+  int32_t expand_size = std::max(1, repair_iter_param.get_size() / 2);
+  std::vector<PlanarRect> repair_box_rect_list = getRepairBoxRectList(dr_model.get_curr_result().get_route_violation_list(), expand_size);
+  std::vector<PlanarRect> routable_box_rect_list;
+  routable_box_rect_list.reserve(repair_box_rect_list.size());
+  for (const PlanarRect& repair_box_rect : repair_box_rect_list) {
+    int32_t x_size = repair_box_rect.getXSpan() + 1;
+    int32_t y_size = repair_box_rect.getYSpan() + 1;
+    if (x_size > max_repair_box_size || y_size > max_repair_box_size) {
+      RTLOG.warn(Loc::current(), "Skipping repair box in step ", step_iter, ": grid_rect=", repair_box_rect.get_ll_x(), ",", repair_box_rect.get_ll_y(), "-",
+                 repair_box_rect.get_ur_x(), ",", repair_box_rect.get_ur_y(), ", size=", x_size, "x", y_size, " GCells exceeds the limit ",
+                 max_repair_box_size);
       continue;
     }
-    RTLOG.info(Loc::current(), "Routing ", repair_box_rect_list.size(), " violation-centered boxes with ", expand_size, " GCells expansion");
-
-    splitNetResultByGCell(dr_model);
-    size_t repaired_box_num = 0;
-    for (size_t box_idx = 0; box_idx < repair_box_rect_list.size(); box_idx++) {
-      Monitor box_monitor;
-      DRBox dr_box;
-      initRepairDRBox(dr_model, dr_box, repair_box_rect_list[box_idx], repair_iter, static_cast<int32_t>(box_idx));
-      splitRepairBoxResult(dr_model, dr_box);
-      buildRepairNetEnvironment(dr_model, dr_box);
-      buildAccessPoint(dr_box);
-      buildRepairRouteViolation(dr_model, dr_box);
-      initDRTaskList(dr_model, dr_box);
-      updateBestResult(dr_box);
-      routeDRBox(dr_model, dr_box);
-      updateRepairDRModel(dr_model, dr_box.get_curr_result());
-      repaired_box_num++;
-      RTLOG.info(Loc::current(), "Repaired ", repaired_box_num, "/", repair_box_rect_list.size(), "(",
-                 RTUTIL.getPercentage(repaired_box_num, repair_box_rect_list.size()), ") boxes", box_monitor.getStatsInfo());
-    }
-
-    updateNetResult(dr_model);
-    updateNetPatch(dr_model);
-    updateViolation(dr_model);
-    int32_t curr_violation_num = getRouteViolationNum(dr_model);
-    if (curr_violation_num >= origin_violation_num) {
-      dr_model.get_curr_result() = dr_model.get_previous_result();
-      RTLOG.info(Loc::current(), "Restored the input result because violation repair changed the violation count from ", origin_violation_num, " to ",
-                 curr_violation_num);
-    } else {
-      RTLOG.info(Loc::current(), "Accepted violation repair with violation count reduced from ", origin_violation_num, " to ", curr_violation_num);
-    }
-
-    updateSummary(dr_model);
-    printSummary(dr_model);
-    outputNetCSV(dr_model);
-    outputViolationCSV(dr_model);
-    RTLOG.info(Loc::current(), "***** End violation repair iteration ", repair_iter, "/", repair_iter_num, monitor.getStatsInfo(), " *****");
+    routable_box_rect_list.push_back(repair_box_rect);
   }
+  repair_box_rect_list = std::move(routable_box_rect_list);
+  if (repair_box_rect_list.empty()) {
+    RTLOG.warn(Loc::current(), "Skipping repair step ", step_iter, " because no box is within the size limit");
+    return false;
+  }
+  RTLOG.info(Loc::current(), "Routing ", repair_box_rect_list.size(), " violation-centered boxes with ", expand_size, " GCells expansion");
+
+  splitNetResultByGCell(dr_model);
+  size_t repaired_box_num = 0;
+  for (size_t box_idx = 0; box_idx < repair_box_rect_list.size(); box_idx++) {
+    Monitor box_monitor;
+    DRBox dr_box;
+    initRepairDRBox(dr_model, dr_box, repair_box_rect_list[box_idx], step_iter, static_cast<int32_t>(box_idx));
+    splitRepairBoxResult(dr_model, dr_box);
+    buildRepairNetEnvironment(dr_model, dr_box);
+    buildAccessPoint(dr_box);
+    buildRepairRouteViolation(dr_model, dr_box);
+    initDRTaskList(dr_model, dr_box);
+    updateBestResult(dr_box);
+    routeDRBox(dr_model, dr_box);
+    updateRepairDRModel(dr_model, dr_box.get_curr_result());
+    repaired_box_num++;
+    RTLOG.info(Loc::current(), "Repaired ", repaired_box_num, "/", repair_box_rect_list.size(), "(",
+               RTUTIL.getPercentage(repaired_box_num, repair_box_rect_list.size()), ") boxes", box_monitor.getStatsInfo());
+  }
+
+  updateNetResult(dr_model);
+  updateNetPatch(dr_model);
+  updateViolation(dr_model);
+  int32_t curr_violation_num = getRouteViolationNum(dr_model);
+  bool accepted = curr_violation_num < origin_violation_num;
+  if (!accepted) {
+    dr_model.get_curr_result() = dr_model.get_previous_result();
+    RTLOG.info(Loc::current(), "Restored the input result because repair step changed the violation count from ", origin_violation_num, " to ",
+               curr_violation_num);
+  } else {
+    RTLOG.info(Loc::current(), "Accepted repair step with violation count reduced from ", origin_violation_num, " to ", curr_violation_num);
+  }
+
+  updateSummary(dr_model);
+  printSummary(dr_model);
+  outputNetCSV(dr_model);
+  outputViolationCSV(dr_model);
+  RTLOG.info(Loc::current(), "***** End repair step ", step_iter, " *****", monitor.getStatsInfo());
+  return accepted;
 }
 
 std::vector<PlanarRect> DetailedRouter::getRepairBoxRectList(const std::vector<Violation>& violation_list, int32_t expand_size)
@@ -3395,7 +3436,8 @@ void DetailedRouter::splitRepairBoxResult(DRModel& dr_model, DRBox& dr_box)
       LayerCoord& first = segment.get_first();
       LayerCoord& second = segment.get_second();
       PlanarCoord midpoint((first.get_x() + second.get_x()) / 2, (first.get_y() + second.get_y()) / 2);
-      if (RTUTIL.isInside(box_rect, midpoint)) {
+      bool is_inside = RTUTIL.isInside(box_rect, midpoint);
+      if (is_inside) {
         box_result.get_net_own_result_map()[net_idx].push_back(std::move(segment));
       } else {
         remaining_segment_list.push_back(std::move(segment));
@@ -3463,7 +3505,8 @@ void DetailedRouter::buildRepairRouteViolation(DRModel& dr_model, DRBox& dr_box)
   PlanarRect& box_rect = dr_box.get_box_rect().get_real_rect();
   std::vector<Violation>& box_violation_list = dr_box.get_curr_result().get_route_violation_list();
   for (Violation& violation : dr_model.get_curr_result().get_route_violation_list()) {
-    if (RTUTIL.isInside(box_rect, violation.get_violation_shape().get_real_rect().getMidPoint())) {
+    bool is_inside = RTUTIL.isInside(box_rect, violation.get_violation_shape().get_real_rect().getMidPoint());
+    if (is_inside) {
       box_violation_list.push_back(violation);
     }
   }

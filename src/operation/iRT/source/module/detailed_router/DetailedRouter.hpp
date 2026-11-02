@@ -56,9 +56,18 @@ class DetailedRouter
   ~DetailedRouter() = default;
   DetailedRouter& operator=(const DetailedRouter& other) = delete;
   DetailedRouter& operator=(DetailedRouter&& other) = delete;
+
+  struct DRStep
+  {
+    bool is_repair = false;
+    DRIterParam iter_param;
+    int32_t max_violation_num = 0;
+  };
+
   // function
   DRModel initDRModel();
   void routeDRModel(DRModel& dr_model);
+  void runNormalIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t normal_iter, int32_t normal_iter_num, int32_t step_iter);
   void setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param);
   void initDRBoxMap(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
@@ -163,7 +172,7 @@ class DetailedRouter
   void updateBestResult(DRModel& dr_model);
   bool stopIteration(DRModel& dr_model);
   void selectBestResult(DRModel& dr_model);
-  void repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list);
+  bool runRepairIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t step_iter);
   std::vector<PlanarRect> getRepairBoxRectList(const std::vector<Violation>& violation_list, int32_t expand_size);
   void mergeRepairBoxRectList(std::vector<PlanarRect>& repair_box_rect_list);
   void initRepairDRBox(DRModel& dr_model, DRBox& dr_box, const PlanarRect& grid_rect, int32_t repair_iter, int32_t box_idx);
