@@ -18,8 +18,8 @@
 
 #include <unordered_map>
 
-#include "py_path_utils.h"
 #include "STAInterface.hpp"
+#include "py_path_utils.h"
 
 namespace python_interface {
 

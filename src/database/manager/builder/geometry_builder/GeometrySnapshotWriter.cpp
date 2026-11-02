@@ -1,9 +1,5 @@
 #include "GeometrySnapshotWriter.h"
 
-#include "ClockTreeSchema.h"
-#include "GeometrySnapshotSchema.h"
-#include "json.hpp"
-
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -15,6 +11,10 @@
 #include <system_error>
 #include <unordered_map>
 #include <vector>
+
+#include "ClockTreeSchema.h"
+#include "GeometrySnapshotSchema.h"
+#include "json.hpp"
 
 namespace ecc::geometry {
 namespace {
@@ -47,8 +47,8 @@ struct SnapshotManifestPaths
   std::string clock_tree_strings;
 };
 
-std::vector<char> make_geometry_file_bytes(GeometryFileKind file_kind, uint32_t record_size, uint64_t record_count,
-                                           const void* data, uint64_t data_size)
+std::vector<char> make_geometry_file_bytes(GeometryFileKind file_kind, uint32_t record_size, uint64_t record_count, const void* data,
+                                           uint64_t data_size)
 {
   GeometryFileHeader header;
   header.file_kind = file_kind;
@@ -94,7 +94,7 @@ bool write_drc_file(const std::filesystem::path& path, const GeometryDrcDistribu
       for (const GeometryDrcViolation& violation : violations) {
         nlohmann::json entry = {
             {"llx", violation.bbox.lx}, {"lly", violation.bbox.ly}, {"urx", violation.bbox.hx},
-            {"ury", violation.bbox.hy}, {"net", violation.nets}, {"inst", violation.instances},
+            {"ury", violation.bbox.hy}, {"net", violation.nets},    {"inst", violation.instances},
         };
         if (violation.required_size) {
           entry["required_size"] = *violation.required_size;
@@ -151,8 +151,7 @@ std::filesystem::path resolve_manifest_path(const std::filesystem::path& output_
   return path.is_absolute() ? path : output_dir / path;
 }
 
-bool write_or_reuse_file(const std::filesystem::path& output_dir, const std::filesystem::path& epoch_dir,
-                         const std::string& file_prefix,
+bool write_or_reuse_file(const std::filesystem::path& output_dir, const std::filesystem::path& epoch_dir, const std::string& file_prefix,
                          const std::unordered_map<std::string, std::string>& previous_manifest, const std::string& key,
                          const std::string& filename, const std::vector<char>& bytes, std::string& manifest_value,
                          SnapshotWriteResult& result)
@@ -259,9 +258,8 @@ bool validate_clock_tree(const ClockTreeSnapshot& snapshot)
 {
   const ClockTreeMetaRecord& meta = snapshot.meta;
   if (meta.schema_version != kClockTreeSchemaVersion || meta.clock_count != snapshot.clocks.size()
-      || meta.node_count != snapshot.nodes.size() || meta.edge_count != snapshot.edges.size()
-      || meta.timing_count != snapshot.timing.size() || meta.string_size != snapshot.strings.size()
-      || meta.root_count != snapshot.roots.size()) {
+      || meta.node_count != snapshot.nodes.size() || meta.edge_count != snapshot.edges.size() || meta.timing_count != snapshot.timing.size()
+      || meta.string_size != snapshot.strings.size() || meta.root_count != snapshot.roots.size()) {
     return false;
   }
   if (!string_reference_valid(snapshot, meta.rc_corner_offset, meta.rc_corner_size)
@@ -275,8 +273,7 @@ bool validate_clock_tree(const ClockTreeSnapshot& snapshot)
     }
   }
   for (const ClockRecord& clock : snapshot.clocks) {
-    if (clock.clock_id >= snapshot.clocks.size()
-        || (clock.master_clock_id != UINT32_MAX && clock.master_clock_id >= snapshot.clocks.size())
+    if (clock.clock_id >= snapshot.clocks.size() || (clock.master_clock_id != UINT32_MAX && clock.master_clock_id >= snapshot.clocks.size())
         || static_cast<uint64_t>(clock.root_node_first) + clock.root_node_count > snapshot.roots.size()
         || static_cast<uint64_t>(clock.node_first) + clock.node_count > snapshot.nodes.size()
         || static_cast<uint64_t>(clock.edge_first) + clock.edge_count > snapshot.edges.size()
@@ -294,9 +291,8 @@ bool validate_clock_tree(const ClockTreeSnapshot& snapshot)
     }
   }
   for (const ClockEdgeRecord& edge : snapshot.edges) {
-    if (edge.edge_id >= snapshot.edges.size() || edge.from_node >= snapshot.nodes.size()
-        || edge.to_node >= snapshot.nodes.size() || edge.from_node == edge.to_node
-        || !string_reference_valid(snapshot, edge.net_offset, edge.net_size)
+    if (edge.edge_id >= snapshot.edges.size() || edge.from_node >= snapshot.nodes.size() || edge.to_node >= snapshot.nodes.size()
+        || edge.from_node == edge.to_node || !string_reference_valid(snapshot, edge.net_offset, edge.net_size)
         || !string_reference_valid(snapshot, edge.cell_offset, edge.cell_size)) {
       return false;
     }
@@ -336,8 +332,8 @@ uint64_t create_epoch_directory(const std::filesystem::path& output_dir, std::fi
   return 0;
 }
 
-bool publish_manifest(const std::filesystem::path& output_dir, const SnapshotWriteResult& result,
-                      const SnapshotManifestPaths& paths, const SnapshotWriteOptions& options)
+bool publish_manifest(const std::filesystem::path& output_dir, const SnapshotWriteResult& result, const SnapshotManifestPaths& paths,
+                      const SnapshotWriteOptions& options)
 {
   const std::filesystem::path manifest_path = output_dir / "geometry.manifest";
   const std::filesystem::path temporary_path = output_dir / "geometry.manifest.tmp";
@@ -466,11 +462,10 @@ bool write_layer_metadata_file(const std::filesystem::path& path, std::span<cons
           "enclosure_below\tenclosure_above\tlef58_rule_count\n";
   for (const GeometryLayerMetadata& layer : layers) {
     file << layer.layer_id << '\t' << layer.order << '\t' << sanitize_layer_text(layer.type, "unknown") << '\t'
-         << sanitize_layer_text(layer.direction, "unknown") << '\t' << layer.width << '\t' << layer.pitch_x << '\t'
-         << layer.pitch_y << '\t' << sanitize_layer_text(layer.name, "L" + std::to_string(layer.layer_id)) << '\t'
-         << layer.min_spacing << '\t' << layer.min_area << '\t' << layer.min_step << '\t' << layer.cut_spacing << '\t'
-         << sanitize_layer_text(layer.enclosure_below, "") << '\t' << sanitize_layer_text(layer.enclosure_above, "") << '\t'
-         << layer.lef58_rule_count << '\n';
+         << sanitize_layer_text(layer.direction, "unknown") << '\t' << layer.width << '\t' << layer.pitch_x << '\t' << layer.pitch_y << '\t'
+         << sanitize_layer_text(layer.name, "L" + std::to_string(layer.layer_id)) << '\t' << layer.min_spacing << '\t' << layer.min_area
+         << '\t' << layer.min_step << '\t' << layer.cut_spacing << '\t' << sanitize_layer_text(layer.enclosure_below, "") << '\t'
+         << sanitize_layer_text(layer.enclosure_above, "") << '\t' << layer.lef58_rule_count << '\n';
   }
 
   return static_cast<bool>(file);
@@ -486,8 +481,8 @@ bool write_site_metadata_file(const std::filesystem::path& path, std::span<const
   file << "name\tclass\tsymmetry\torient\twidth\theight\tis_overlap\n";
   for (const GeometrySiteMetadata& site : sites) {
     file << sanitize_layer_text(site.name, "") << '\t' << sanitize_layer_text(site.site_class, "unknown") << '\t'
-         << sanitize_layer_text(site.symmetry, "") << '\t' << sanitize_layer_text(site.orient, "") << '\t' << site.width
-         << '\t' << site.height << '\t' << (site.is_overlap ? 1 : 0) << '\n';
+         << sanitize_layer_text(site.symmetry, "") << '\t' << sanitize_layer_text(site.orient, "") << '\t' << site.width << '\t'
+         << site.height << '\t' << (site.is_overlap ? 1 : 0) << '\n';
   }
 
   return static_cast<bool>(file);
@@ -503,9 +498,9 @@ bool write_master_metadata_file(const std::filesystem::path& path, std::span<con
   file << "name\ttype\tsite\tsymmetry\torigin_x\torigin_y\twidth\theight\tterm_count\tobs_count\n";
   for (const GeometryMasterMetadata& master : masters) {
     file << sanitize_layer_text(master.name, "") << '\t' << sanitize_layer_text(master.master_type, "unknown") << '\t'
-         << sanitize_layer_text(master.site, "") << '\t' << sanitize_layer_text(master.symmetry, "") << '\t'
-         << master.origin_x << '\t' << master.origin_y << '\t' << master.width << '\t' << master.height << '\t'
-         << master.term_count << '\t' << master.obs_count << '\n';
+         << sanitize_layer_text(master.site, "") << '\t' << sanitize_layer_text(master.symmetry, "") << '\t' << master.origin_x << '\t'
+         << master.origin_y << '\t' << master.width << '\t' << master.height << '\t' << master.term_count << '\t' << master.obs_count
+         << '\n';
   }
 
   return static_cast<bool>(file);
@@ -524,10 +519,9 @@ bool write_via_metadata_file(const std::filesystem::path& path, std::span<const 
     file << sanitize_layer_text(via.name, "") << '\t' << sanitize_layer_text(via.master_name, "") << '\t'
          << sanitize_layer_text(via.via_type, "unknown") << '\t' << sanitize_layer_text(via.rule_name, "") << '\t'
          << sanitize_layer_text(via.bottom_layer, "") << '\t' << sanitize_layer_text(via.cut_layer, "") << '\t'
-         << sanitize_layer_text(via.top_layer, "") << '\t' << via.cut_width << '\t' << via.cut_height << '\t'
-         << via.cut_spacing_x << '\t' << via.cut_spacing_y << '\t' << via.enclosure_bottom_x << '\t'
-         << via.enclosure_bottom_y << '\t' << via.enclosure_top_x << '\t' << via.enclosure_top_y << '\t'
-         << via.rows << '\t' << via.cols << '\t' << (via.is_default ? 1 : 0) << '\n';
+         << sanitize_layer_text(via.top_layer, "") << '\t' << via.cut_width << '\t' << via.cut_height << '\t' << via.cut_spacing_x << '\t'
+         << via.cut_spacing_y << '\t' << via.enclosure_bottom_x << '\t' << via.enclosure_bottom_y << '\t' << via.enclosure_top_x << '\t'
+         << via.enclosure_top_y << '\t' << via.rows << '\t' << via.cols << '\t' << (via.is_default ? 1 : 0) << '\n';
   }
 
   return static_cast<bool>(file);
@@ -542,16 +536,15 @@ bool write_grid_metadata_file(const std::filesystem::path& path, std::span<const
 
   file << "type\tindex\tdirection\tstart\tstep\tcount\twidth\tlayers\n";
   for (const GeometryGridMetadata& grid : grids) {
-    file << sanitize_layer_text(grid.grid_type, "unknown") << '\t' << grid.index << '\t'
-         << sanitize_layer_text(grid.direction, "unknown") << '\t' << grid.start << '\t' << grid.step << '\t'
-         << grid.count << '\t' << grid.width << '\t' << join_metadata_names(grid.layer_names) << '\n';
+    file << sanitize_layer_text(grid.grid_type, "unknown") << '\t' << grid.index << '\t' << sanitize_layer_text(grid.direction, "unknown")
+         << '\t' << grid.start << '\t' << grid.step << '\t' << grid.count << '\t' << grid.width << '\t'
+         << join_metadata_names(grid.layer_names) << '\n';
   }
 
   return static_cast<bool>(file);
 }
 
-bool write_connectivity_metadata_file(const std::filesystem::path& path,
-                                      std::span<const GeometryConnectivityMetadata> connectivity)
+bool write_connectivity_metadata_file(const std::filesystem::path& path, std::span<const GeometryConnectivityMetadata> connectivity)
 {
   std::ofstream file(path);
   if (!file) {
@@ -561,9 +554,8 @@ bool write_connectivity_metadata_file(const std::filesystem::path& path,
   file << "net\tkind\tendpoint_type\tinstance\tpin\tmaster\n";
   for (const GeometryConnectivityMetadata& endpoint : connectivity) {
     file << sanitize_layer_text(endpoint.net_name, "") << '\t' << sanitize_layer_text(endpoint.net_kind, "other") << '\t'
-         << sanitize_layer_text(endpoint.endpoint_type, "unknown") << '\t'
-         << sanitize_layer_text(endpoint.instance_name, "") << '\t' << sanitize_layer_text(endpoint.pin_name, "") << '\t'
-         << sanitize_layer_text(endpoint.master_name, "") << '\n';
+         << sanitize_layer_text(endpoint.endpoint_type, "unknown") << '\t' << sanitize_layer_text(endpoint.instance_name, "") << '\t'
+         << sanitize_layer_text(endpoint.pin_name, "") << '\t' << sanitize_layer_text(endpoint.master_name, "") << '\n';
   }
 
   return static_cast<bool>(file);
@@ -593,9 +585,9 @@ bool write_bus_metadata_file(const std::filesystem::path& path, std::span<const 
 
   file << "name\ttype\tleft\tright\tnet_count\tpin_count\tnets\tpins\n";
   for (const GeometryBusMetadata& bus : buses) {
-    file << sanitize_layer_text(bus.name, "") << '\t' << sanitize_layer_text(bus.bus_type, "unknown") << '\t' << bus.left
-         << '\t' << bus.right << '\t' << bus.net_count << '\t' << bus.pin_count << '\t'
-         << join_metadata_names(bus.net_names) << '\t' << join_metadata_names(bus.pin_names) << '\n';
+    file << sanitize_layer_text(bus.name, "") << '\t' << sanitize_layer_text(bus.bus_type, "unknown") << '\t' << bus.left << '\t'
+         << bus.right << '\t' << bus.net_count << '\t' << bus.pin_count << '\t' << join_metadata_names(bus.net_names) << '\t'
+         << join_metadata_names(bus.pin_names) << '\n';
   }
 
   return static_cast<bool>(file);
@@ -610,8 +602,8 @@ bool write_group_metadata_file(const std::filesystem::path& path, std::span<cons
 
   file << "name\tregion\tinstance_count\tinstances\n";
   for (const GeometryGroupMetadata& group : groups) {
-    file << sanitize_layer_text(group.name, "") << '\t' << sanitize_layer_text(group.region_name, "") << '\t'
-         << group.instance_count << '\t' << join_metadata_names(group.instance_names) << '\n';
+    file << sanitize_layer_text(group.name, "") << '\t' << sanitize_layer_text(group.region_name, "") << '\t' << group.instance_count
+         << '\t' << join_metadata_names(group.instance_names) << '\n';
   }
 
   return static_cast<bool>(file);
@@ -631,8 +623,7 @@ std::vector<char> make_clock_tree_meta_bytes(const ClockTreeSnapshot& snapshot)
   std::memcpy(bytes.data(), &header, sizeof(header));
   std::memcpy(bytes.data() + sizeof(header), &snapshot.meta, sizeof(ClockTreeMetaRecord));
   if (!snapshot.clocks.empty()) {
-    std::memcpy(bytes.data() + sizeof(header) + sizeof(ClockTreeMetaRecord), snapshot.clocks.data(),
-                static_cast<size_t>(clocks_size));
+    std::memcpy(bytes.data() + sizeof(header) + sizeof(ClockTreeMetaRecord), snapshot.clocks.data(), static_cast<size_t>(clocks_size));
   }
   if (!snapshot.roots.empty()) {
     std::memcpy(bytes.data() + sizeof(header) + sizeof(ClockTreeMetaRecord) + clocks_size, snapshot.roots.data(),
@@ -710,57 +701,48 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   meta.next_shape_id = next_shape_id_from_records(records);
 
   const std::string file_prefix = (std::filesystem::path("epochs") / std::to_string(result.epoch)).generic_string();
-  const std::unordered_map<std::string, std::string> previous_manifest =
-      read_manifest_values(options.output_dir / "geometry.manifest");
+  const std::unordered_map<std::string, std::string> previous_manifest = read_manifest_values(options.output_dir / "geometry.manifest");
   SnapshotManifestPaths paths;
 
-  const bool wrote_meta = write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "meta",
-                                              "geometry.meta.bin",
-                                              make_geometry_file_bytes(GeometryFileKind::kMeta, sizeof(GeometryMetaRecord), 1, &meta,
-                                                                       sizeof(meta)),
-                                              paths.meta, result);
-  const bool wrote_shapes =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "shapes", "geometry.shapes.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kShapes, sizeof(ShapeRecord), result.shape_count,
-                                                   records.data(), records.size_bytes()),
-                          paths.shapes, result);
-  const bool wrote_owners =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "owners", "geometry.owners.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kOwners, sizeof(OwnerRef), result.owner_count,
-                                                   owners.data(), owners.size_bytes()),
-                          paths.owners, result);
-  const bool wrote_payload = write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "payload",
-                                                 "geometry.payload.bin",
-                                                 make_geometry_file_bytes(GeometryFileKind::kPayload, 1, result.payload_size,
-                                                                          payloads.data(), payloads.size_bytes()),
-                                                 paths.payload, result);
-  const bool wrote_names =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "names", "geometry.names.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kNames, 1, name_payloads.size(), name_payloads.data(),
-                                                   name_payloads.size_bytes()),
-                          paths.names, result);
-  const bool wrote_name_index =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "name_index", "geometry.name_index.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kNameIndex, sizeof(GeometryNameRecord),
-                                                   name_records.size(), name_records.data(), name_records.size_bytes()),
-                          paths.name_index, result);
-  const bool wrote_sidmap =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "sidmap", "geometry.sidmap.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kSidMap, sizeof(GeometrySidMapRecord),
-                                                   sidmap_records.size(), sidmap_records.data(),
-                                                   static_cast<uint64_t>(sidmap_records.size() * sizeof(GeometrySidMapRecord))),
-                          paths.sidmap, result);
-  const bool wrote_delta =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "delta", "geometry.delta.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kDelta, sizeof(GeometryDeltaEvent), delta_events.size(),
-                                                   delta_events.data(), delta_events.size_bytes()),
-                          paths.delta, result);
-  const bool wrote_view =
-      write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "view", "geometry.view.bin",
-                          make_geometry_file_bytes(GeometryFileKind::kView, sizeof(GeometryViewTileRecord),
-                                                   view_records.size(), view_records.data(),
-                                                   static_cast<uint64_t>(view_records.size() * sizeof(GeometryViewTileRecord))),
-                          paths.view, result);
+  const bool wrote_meta = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "meta", "geometry.meta.bin",
+      make_geometry_file_bytes(GeometryFileKind::kMeta, sizeof(GeometryMetaRecord), 1, &meta, sizeof(meta)), paths.meta, result);
+  const bool wrote_shapes = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "shapes", "geometry.shapes.bin",
+      make_geometry_file_bytes(GeometryFileKind::kShapes, sizeof(ShapeRecord), result.shape_count, records.data(), records.size_bytes()),
+      paths.shapes, result);
+  const bool wrote_owners = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "owners", "geometry.owners.bin",
+      make_geometry_file_bytes(GeometryFileKind::kOwners, sizeof(OwnerRef), result.owner_count, owners.data(), owners.size_bytes()),
+      paths.owners, result);
+  const bool wrote_payload = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "payload", "geometry.payload.bin",
+      make_geometry_file_bytes(GeometryFileKind::kPayload, 1, result.payload_size, payloads.data(), payloads.size_bytes()), paths.payload,
+      result);
+  const bool wrote_names = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "names", "geometry.names.bin",
+      make_geometry_file_bytes(GeometryFileKind::kNames, 1, name_payloads.size(), name_payloads.data(), name_payloads.size_bytes()),
+      paths.names, result);
+  const bool wrote_name_index
+      = write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "name_index", "geometry.name_index.bin",
+                            make_geometry_file_bytes(GeometryFileKind::kNameIndex, sizeof(GeometryNameRecord), name_records.size(),
+                                                     name_records.data(), name_records.size_bytes()),
+                            paths.name_index, result);
+  const bool wrote_sidmap = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "sidmap", "geometry.sidmap.bin",
+      make_geometry_file_bytes(GeometryFileKind::kSidMap, sizeof(GeometrySidMapRecord), sidmap_records.size(), sidmap_records.data(),
+                               static_cast<uint64_t>(sidmap_records.size() * sizeof(GeometrySidMapRecord))),
+      paths.sidmap, result);
+  const bool wrote_delta
+      = write_or_reuse_file(output_dir, epoch_dir, file_prefix, previous_manifest, "delta", "geometry.delta.bin",
+                            make_geometry_file_bytes(GeometryFileKind::kDelta, sizeof(GeometryDeltaEvent), delta_events.size(),
+                                                     delta_events.data(), delta_events.size_bytes()),
+                            paths.delta, result);
+  const bool wrote_view = write_or_reuse_file(
+      output_dir, epoch_dir, file_prefix, previous_manifest, "view", "geometry.view.bin",
+      make_geometry_file_bytes(GeometryFileKind::kView, sizeof(GeometryViewTileRecord), view_records.size(), view_records.data(),
+                               static_cast<uint64_t>(view_records.size() * sizeof(GeometryViewTileRecord))),
+      paths.view, result);
 
   paths.layers = (std::filesystem::path(file_prefix) / "geometry.layers.txt").generic_string();
   paths.sites = (std::filesystem::path(file_prefix) / "geometry.sites.txt").generic_string();
@@ -782,25 +764,21 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
     paths.clock_tree_edges = (std::filesystem::path(file_prefix) / "geometry.clock_tree.edges.bin").generic_string();
     paths.clock_tree_timing = (std::filesystem::path(file_prefix) / "geometry.clock_tree.timing.bin").generic_string();
     paths.clock_tree_strings = (std::filesystem::path(file_prefix) / "geometry.clock_tree.strings.bin").generic_string();
-    wrote_clock_tree =
-        write_file_bytes(output_dir / paths.clock_tree_meta, make_clock_tree_meta_bytes(clock_tree))
-        && write_file_bytes(
-            output_dir / paths.clock_tree_nodes,
-            make_geometry_file_bytes(GeometryFileKind::kClockTreeNodes, sizeof(ClockNodeRecord), clock_tree.nodes.size(),
-                                     clock_tree.nodes.data(), clock_tree.nodes.size() * sizeof(ClockNodeRecord)))
-        && write_file_bytes(
-            output_dir / paths.clock_tree_edges,
-            make_geometry_file_bytes(GeometryFileKind::kClockTreeEdges, sizeof(ClockEdgeRecord), clock_tree.edges.size(),
-                                     clock_tree.edges.data(), clock_tree.edges.size() * sizeof(ClockEdgeRecord)))
-        && write_file_bytes(
-            output_dir / paths.clock_tree_timing,
-            make_geometry_file_bytes(GeometryFileKind::kClockTreeTiming, sizeof(ClockTimingRecord),
-                                     clock_tree.timing.size(), clock_tree.timing.data(),
-                                     clock_tree.timing.size() * sizeof(ClockTimingRecord)))
-        && write_file_bytes(
-            output_dir / paths.clock_tree_strings,
-            make_geometry_file_bytes(GeometryFileKind::kClockTreeStrings, 1, clock_tree.strings.size(),
-                                     clock_tree.strings.data(), clock_tree.strings.size()));
+    wrote_clock_tree
+        = write_file_bytes(output_dir / paths.clock_tree_meta, make_clock_tree_meta_bytes(clock_tree))
+          && write_file_bytes(output_dir / paths.clock_tree_nodes,
+                              make_geometry_file_bytes(GeometryFileKind::kClockTreeNodes, sizeof(ClockNodeRecord), clock_tree.nodes.size(),
+                                                       clock_tree.nodes.data(), clock_tree.nodes.size() * sizeof(ClockNodeRecord)))
+          && write_file_bytes(output_dir / paths.clock_tree_edges,
+                              make_geometry_file_bytes(GeometryFileKind::kClockTreeEdges, sizeof(ClockEdgeRecord), clock_tree.edges.size(),
+                                                       clock_tree.edges.data(), clock_tree.edges.size() * sizeof(ClockEdgeRecord)))
+          && write_file_bytes(
+              output_dir / paths.clock_tree_timing,
+              make_geometry_file_bytes(GeometryFileKind::kClockTreeTiming, sizeof(ClockTimingRecord), clock_tree.timing.size(),
+                                       clock_tree.timing.data(), clock_tree.timing.size() * sizeof(ClockTimingRecord)))
+          && write_file_bytes(output_dir / paths.clock_tree_strings,
+                              make_geometry_file_bytes(GeometryFileKind::kClockTreeStrings, 1, clock_tree.strings.size(),
+                                                       clock_tree.strings.data(), clock_tree.strings.size()));
     if (!wrote_clock_tree) {
       return result;
     }
@@ -811,24 +789,22 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   const bool wrote_masters = write_master_metadata_file(output_dir / paths.masters, options.masters);
   const bool wrote_vias = write_via_metadata_file(output_dir / paths.vias, options.vias);
   const bool wrote_grids = write_grid_metadata_file(output_dir / paths.grids, options.grids);
-  const bool wrote_connectivity =
-      write_connectivity_metadata_file(output_dir / paths.connectivity, options.connectivity);
+  const bool wrote_connectivity = write_connectivity_metadata_file(output_dir / paths.connectivity, options.connectivity);
   const bool wrote_nets = write_net_metadata_file(output_dir / paths.nets, options.nets);
   const bool wrote_buses = write_bus_metadata_file(output_dir / paths.buses, options.buses);
   const bool wrote_groups = write_group_metadata_file(output_dir / paths.groups, options.groups);
   const bool wrote_drc = !options.drc || write_drc_file(output_dir / paths.drc, *options.drc);
-  result.written_side_file_count +=
-      static_cast<uint64_t>(wrote_layers) + static_cast<uint64_t>(wrote_sites) + static_cast<uint64_t>(wrote_masters)
-      + static_cast<uint64_t>(wrote_vias) + static_cast<uint64_t>(wrote_grids) + static_cast<uint64_t>(wrote_connectivity)
-      + static_cast<uint64_t>(wrote_nets) + static_cast<uint64_t>(wrote_buses) + static_cast<uint64_t>(wrote_groups)
-      + static_cast<uint64_t>(options.clock_tree.has_value()) * 5U;
+  result.written_side_file_count += static_cast<uint64_t>(wrote_layers) + static_cast<uint64_t>(wrote_sites)
+                                    + static_cast<uint64_t>(wrote_masters) + static_cast<uint64_t>(wrote_vias)
+                                    + static_cast<uint64_t>(wrote_grids) + static_cast<uint64_t>(wrote_connectivity)
+                                    + static_cast<uint64_t>(wrote_nets) + static_cast<uint64_t>(wrote_buses)
+                                    + static_cast<uint64_t>(wrote_groups) + static_cast<uint64_t>(options.clock_tree.has_value()) * 5U;
   if (options.drc && wrote_drc) {
     ++result.written_side_file_count;
   }
-  const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index
-                           && wrote_sidmap && wrote_delta && wrote_view && wrote_layers && wrote_sites && wrote_masters
-                           && wrote_vias && wrote_grids && wrote_connectivity && wrote_nets && wrote_buses && wrote_groups
-                           && wrote_drc && wrote_clock_tree;
+  const bool wrote_files = wrote_meta && wrote_shapes && wrote_owners && wrote_payload && wrote_names && wrote_name_index && wrote_sidmap
+                           && wrote_delta && wrote_view && wrote_layers && wrote_sites && wrote_masters && wrote_vias && wrote_grids
+                           && wrote_connectivity && wrote_nets && wrote_buses && wrote_groups && wrote_drc && wrote_clock_tree;
   const bool wrote_manifest = wrote_files && publish_manifest(options.output_dir, result, paths, options);
 
   result.ok = wrote_files && wrote_manifest;

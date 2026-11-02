@@ -1,9 +1,9 @@
 #pragma once
 
-#include "ClockTreeSnapshot.h"
-
 #include <optional>
 #include <string>
+
+#include "ClockTreeSnapshot.h"
 
 namespace idb {
 class IdbDesign;
@@ -24,8 +24,7 @@ struct ClockTreeCollectOptions
   double temperature_c = 0.0;
 };
 
-std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout,
-                                                             const GeometryStore& store,
+std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout, const GeometryStore& store,
                                                              const ClockTreeCollectOptions& options);
 
 }  // namespace ecc::geometry

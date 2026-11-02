@@ -288,12 +288,12 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
       edges.push_back(std::move(edge));
     }
     std::sort(edges.begin(), edges.end(), [](const ClockTreeEdgeData& lhs, const ClockTreeEdgeData& rhs) {
-      return std::tie(lhs.from, lhs.to, lhs.cell_arc, lhs.net_name, lhs.cell_master)
-             < std::tie(rhs.from, rhs.to, rhs.cell_arc, rhs.net_name, rhs.cell_master);
+      return std::tie(lhs.from, lhs.to, lhs.cell_arc, lhs.net_name, lhs.cell_master) < std::tie(rhs.from, rhs.to, rhs.cell_arc, rhs.net_name, rhs.cell_master);
     });
-    edges.erase(std::unique(edges.begin(), edges.end(), [](const ClockTreeEdgeData& lhs, const ClockTreeEdgeData& rhs) {
-                  return lhs.from == rhs.from && lhs.to == rhs.to && lhs.cell_arc == rhs.cell_arc && lhs.net_name == rhs.net_name;
-                }),
+    edges.erase(std::unique(edges.begin(), edges.end(),
+                            [](const ClockTreeEdgeData& lhs, const ClockTreeEdgeData& rhs) {
+                              return lhs.from == rhs.from && lhs.to == rhs.to && lhs.cell_arc == rhs.cell_arc && lhs.net_name == rhs.net_name;
+                            }),
                 edges.end());
 
     std::map<std::string, std::size_t> edge_indegree;
@@ -316,10 +316,11 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
       const Pin& pin = database.network().pins().at(name);
       const ClockState* state = clockStateFor(database.graph(), pin, exported.name);
       states.push_back(state);
-      const auto arrival = state == nullptr ? std::nullopt : finiteNs(state->waveform(kSourceEdge) != nullptr
-                                                                         ? state->waveform(kSourceEdge)->physicalArrival(kAnalysis, kSourceEdge)
-                                                                         : std::nullopt,
-                                                                     time_unit);
+      const auto arrival
+          = state == nullptr
+                ? std::nullopt
+                : finiteNs(state->waveform(kSourceEdge) != nullptr ? state->waveform(kSourceEdge)->physicalArrival(kAnalysis, kSourceEdge) : std::nullopt,
+                           time_unit);
       if (arrival.has_value()) {
         any_timing = true;
         if (root_pins.contains(name)) {

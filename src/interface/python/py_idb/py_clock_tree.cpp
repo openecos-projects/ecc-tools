@@ -1,7 +1,5 @@
 #include "py_clock_tree.h"
 
-#include "ClockTreeSchema.h"
-
 #include <pybind11/stl.h>
 
 #include <algorithm>
@@ -13,6 +11,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include "ClockTreeSchema.h"
 
 namespace python_interface {
 namespace {
@@ -256,10 +256,8 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
     }
     const std::string rc_corner = string_or(data, "rc_corner", filler ? "TYPICAL" : "cts_faststa_estimated_rc");
     const std::string liberty_corner = string_or(data, "liberty_corner", filler ? "TYP" : "");
-    ecc::geometry::set_string_reference(snapshot, snapshot.meta.rc_corner_offset, snapshot.meta.rc_corner_size,
-                                       rc_corner);
-    ecc::geometry::set_string_reference(snapshot, snapshot.meta.liberty_corner_offset,
-                                       snapshot.meta.liberty_corner_size, liberty_corner);
+    ecc::geometry::set_string_reference(snapshot, snapshot.meta.rc_corner_offset, snapshot.meta.rc_corner_size, rc_corner);
+    ecc::geometry::set_string_reference(snapshot, snapshot.meta.liberty_corner_offset, snapshot.meta.liberty_corner_size, liberty_corner);
 
     std::unordered_map<std::string, std::uint32_t> clock_id_by_name;
     for (std::size_t clock_index = 0U; clock_index < clocks.size(); ++clock_index) {
@@ -275,8 +273,8 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
       const auto name = string_or(clock_dict, "name", "clock" + std::to_string(clock_index));
       ecc::geometry::set_string_reference(snapshot, clock.name_offset, clock.name_size, name);
       clock.flags = ecc::geometry::kClockNameValid | ecc::geometry::kClockTopologyValid;
-      clock.source_edge = static_cast<std::uint8_t>(
-          transition_or(string_or(clock_dict, "source_edge", "rise"), ClockEdgeTransition::kRise));
+      clock.source_edge
+          = static_cast<std::uint8_t>(transition_or(string_or(clock_dict, "source_edge", "rise"), ClockEdgeTransition::kRise));
       clock.node_first = static_cast<std::uint32_t>(snapshot.nodes.size());
 
       std::vector<std::string> clock_diagnostics = string_list(clock_dict, "diagnostics");
@@ -324,8 +322,7 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
           node.y = value_or<std::int32_t>(node_dict, "y_dbu", 0);
           ecc::geometry::set_string_reference(snapshot, node.instance_offset, node.instance_size, instance_name);
           ecc::geometry::set_string_reference(snapshot, node.pin_offset, node.pin_size, pin_name);
-          ecc::geometry::set_string_reference(snapshot, node.master_offset, node.master_size,
-                                             string_or(node_dict, "master"));
+          ecc::geometry::set_string_reference(snapshot, node.master_offset, node.master_size, string_or(node_dict, "master"));
           if (value_or<bool>(node_dict, "position_valid", false)) {
             node.flags |= ecc::geometry::kClockNodePositionValid;
           }
@@ -347,8 +344,8 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
           const auto edge_dict = pybind11::cast<pybind11::dict>(value);
           std::uint64_t from_local = 0U;
           std::uint64_t to_local = 0U;
-          if (!edge_dict.contains("from") || !read_id_value(edge_dict["from"], from_local)
-              || !edge_dict.contains("to") || !read_id_value(edge_dict["to"], to_local)) {
+          if (!edge_dict.contains("from") || !read_id_value(edge_dict["from"], from_local) || !edge_dict.contains("to")
+              || !read_id_value(edge_dict["to"], to_local)) {
             clock_note("edge " + std::to_string(edge_index) + " has invalid endpoints; edge skipped");
             continue;
           }
@@ -366,15 +363,11 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
           edge.edge_id = static_cast<std::uint32_t>(snapshot.edges.size());
           edge.from_node = from->second;
           edge.to_node = to->second;
-          edge.kind = static_cast<std::uint8_t>(value_or<bool>(edge_dict, "cell_arc", false) ? ClockEdgeKind::kCell
-                                                                                              : ClockEdgeKind::kNet);
-          edge.polarity = static_cast<std::uint8_t>(value_or<bool>(edge_dict, "negative_unate", false)
-                                                        ? ClockEdgeTransition::kFall
-                                                        : ClockEdgeTransition::kRise);
-          ecc::geometry::set_string_reference(snapshot, edge.net_offset, edge.net_size,
-                                             string_or(edge_dict, "net_name"));
-          ecc::geometry::set_string_reference(snapshot, edge.cell_offset, edge.cell_size,
-                                             string_or(edge_dict, "cell_master"));
+          edge.kind = static_cast<std::uint8_t>(value_or<bool>(edge_dict, "cell_arc", false) ? ClockEdgeKind::kCell : ClockEdgeKind::kNet);
+          edge.polarity = static_cast<std::uint8_t>(value_or<bool>(edge_dict, "negative_unate", false) ? ClockEdgeTransition::kFall
+                                                                                                       : ClockEdgeTransition::kRise);
+          ecc::geometry::set_string_reference(snapshot, edge.net_offset, edge.net_size, string_or(edge_dict, "net_name"));
+          ecc::geometry::set_string_reference(snapshot, edge.cell_offset, edge.cell_size, string_or(edge_dict, "cell_master"));
           snapshot.edges.push_back(edge);
           (void) value_or<std::uint64_t>(edge_dict, "object_ref", 0U);
         }
@@ -396,8 +389,7 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
             clock_note("root " + std::to_string(root_index) + " references an unknown node; root skipped");
             continue;
           }
-          if (std::find(snapshot.roots.begin() + clock.root_node_first, snapshot.roots.end(), found->second)
-              != snapshot.roots.end()) {
+          if (std::find(snapshot.roots.begin() + clock.root_node_first, snapshot.roots.end(), found->second) != snapshot.roots.end()) {
             continue;
           }
           snapshot.roots.push_back(found->second);
@@ -426,25 +418,23 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
             const auto state = pybind11::cast<pybind11::dict>(state_value);
             ClockTimingRecord timing;
             timing.node_id = node->second;
-            timing.source_edge = static_cast<std::uint8_t>(
-                transition_or(string_or(state, "source_edge", "rise"), ClockEdgeTransition::kRise));
-            timing.local_edge = static_cast<std::uint8_t>(
-                transition_or(string_or(state, "local_edge", "rise"), ClockEdgeTransition::kRise));
+            timing.source_edge
+                = static_cast<std::uint8_t>(transition_or(string_or(state, "source_edge", "rise"), ClockEdgeTransition::kRise));
+            timing.local_edge
+                = static_cast<std::uint8_t>(transition_or(string_or(state, "local_edge", "rise"), ClockEdgeTransition::kRise));
             if (state.contains("predecessor") && !state["predecessor"].is_none()) {
               std::uint64_t predecessor = 0U;
               if (!read_id_value(state["predecessor"], predecessor)) {
                 clock_note("timing predecessor for node " + std::to_string(local_id) + " is invalid");
               } else if (const auto found = local_to_global.find(predecessor); found != local_to_global.end()) {
                 if (found->second == node->second) {
-                  clock_note("timing predecessor for node " + std::to_string(local_id)
-                             + " is itself; predecessor ignored");
+                  clock_note("timing predecessor for node " + std::to_string(local_id) + " is itself; predecessor ignored");
                 } else {
                   timing.predecessor_node = found->second;
                   timing.flags |= ecc::geometry::kClockTimingPredecessorValid;
                 }
               } else {
-                clock_note("timing predecessor for node " + std::to_string(local_id)
-                           + " references an unknown node");
+                clock_note("timing predecessor for node " + std::to_string(local_id) + " references an unknown node");
               }
             }
             if (state.contains("arrival_ns") && !state["arrival_ns"].is_none()) {
@@ -466,11 +456,8 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
                 timing.flags |= ecc::geometry::kClockTimingSlewValid;
               }
             }
-            if ((timing.flags
-                 & (ecc::geometry::kClockTimingArrivalValid | ecc::geometry::kClockTimingSlewValid))
-                == 0U) {
-              clock_note("timing state for node " + std::to_string(local_id)
-                         + " has no valid arrival or slew");
+            if ((timing.flags & (ecc::geometry::kClockTimingArrivalValid | ecc::geometry::kClockTimingSlewValid)) == 0U) {
+              clock_note("timing state for node " + std::to_string(local_id) + " has no valid arrival or slew");
               continue;
             }
             const auto scenario = string_or(state, "analysis", "late") + "/" + string_or(state, "source_edge", "rise") + "->"
@@ -481,8 +468,7 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
         }
       }
       clock.flags |= nodes_with_timing.empty() ? 0U : ecc::geometry::kClockTimingValid;
-      ecc::geometry::set_string_reference(snapshot, clock.diagnostics_offset, clock.diagnostics_size,
-                                         join_diagnostics(clock_diagnostics));
+      ecc::geometry::set_string_reference(snapshot, clock.diagnostics_offset, clock.diagnostics_size, join_diagnostics(clock_diagnostics));
       snapshot.clocks.push_back(clock);
     }
 
@@ -512,15 +498,14 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
                                         : "clock graph has no valid insertion timing");
       }
     } else {
-      snapshot.meta.status = static_cast<std::uint16_t>(timed_nodes.size() == snapshot.nodes.size()
-                                                            ? ClockTreeStatus::kCompleteTiming
-                                                            : ClockTreeStatus::kPartialTiming);
+      snapshot.meta.status = static_cast<std::uint16_t>(timed_nodes.size() == snapshot.nodes.size() ? ClockTreeStatus::kCompleteTiming
+                                                                                                    : ClockTreeStatus::kPartialTiming);
     }
     if (diagnostics.empty() && analysis_source == ClockTreeAnalysisSource::kCtsFastSta) {
       diagnostics.emplace_back("Committed CTS FastSTA clock graph; not signoff timing");
     }
-    ecc::geometry::set_string_reference(snapshot, snapshot.meta.diagnostics_offset,
-                                       snapshot.meta.diagnostics_size, join_diagnostics(diagnostics));
+    ecc::geometry::set_string_reference(snapshot, snapshot.meta.diagnostics_offset, snapshot.meta.diagnostics_size,
+                                        join_diagnostics(diagnostics));
     snapshot.meta.node_count = snapshot.nodes.size();
     snapshot.meta.edge_count = snapshot.edges.size();
     snapshot.meta.timing_count = snapshot.timing.size();

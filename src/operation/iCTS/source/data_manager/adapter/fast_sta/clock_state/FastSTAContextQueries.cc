@@ -451,8 +451,8 @@ auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optio
           }
           FastStaClockGraphTimingState state;
           state.analysis = analysis == FastStaAnalysisKind::kEarly ? FastStaClockGraphAnalysis::kEarly : FastStaClockGraphAnalysis::kLate;
-          state.source_transition = point.launch_clock_transition == FastStaTransition::kRise ? FastStaClockGraphTransition::kRise
-                                                                                             : FastStaClockGraphTransition::kFall;
+          state.source_transition
+              = point.launch_clock_transition == FastStaTransition::kRise ? FastStaClockGraphTransition::kRise : FastStaClockGraphTransition::kFall;
           state.local_transition = local_index == 0U ? FastStaClockGraphTransition::kRise : FastStaClockGraphTransition::kFall;
           state.predecessor_node_id = point.stage_input_node_id;
           if (state.predecessor_node_id == kInvalidFastStaNodeId) {
@@ -462,8 +462,7 @@ auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optio
           state.slew_ns = point.slew_ns;
           fact.timing_states.push_back(state);
 
-          const bool source_rise_late = state.analysis == FastStaClockGraphAnalysis::kLate
-                                        && state.source_transition == FastStaClockGraphTransition::kRise;
+          const bool source_rise_late = state.analysis == FastStaClockGraphAnalysis::kLate && state.source_transition == FastStaClockGraphTransition::kRise;
           if (source_rise_late && !fact.arrival_ns.has_value()) {
             fact.arrival_ns = state.arrival_ns;
             fact.slew_ns = state.slew_ns;
@@ -498,11 +497,11 @@ auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optio
         continue;
       }
       graph.edges.push_back(FastStaClockGraphEdge{.from_node_id = driver_graph_id,
-                                                 .to_node_id = graph_id_by_context_id.at(load_id),
-                                                 .cell_arc = false,
-                                                 .negative_unate = false,
-                                                 .net_name = net.name,
-                                                 .cell_master = {}});
+                                                  .to_node_id = graph_id_by_context_id.at(load_id),
+                                                  .cell_arc = false,
+                                                  .negative_unate = false,
+                                                  .net_name = net.name,
+                                                  .cell_master = {}});
     }
   }
 
@@ -515,11 +514,11 @@ auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optio
       return;
     }
     graph.edges.push_back(FastStaClockGraphEdge{.from_node_id = graph_id_by_context_id.at(from_id),
-                                               .to_node_id = graph_id_by_context_id.at(to_id),
-                                               .cell_arc = true,
-                                               .negative_unate = negative_unate,
-                                               .net_name = {},
-                                               .cell_master = cell_master});
+                                                .to_node_id = graph_id_by_context_id.at(to_id),
+                                                .cell_arc = true,
+                                                .negative_unate = negative_unate,
+                                                .net_name = {},
+                                                .cell_master = cell_master});
   };
   for (const auto& arc : context->timing_arcs) {
     append_cell_edge(arc.from_node_id, arc.to_node_id, arc.cell_master, arc.negative_unate);

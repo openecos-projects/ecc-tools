@@ -14,20 +14,21 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "utility/logger/Logger.hpp"
 #include "py_db.h"
+
+#include <idm.h>
+
+#include <optional>
+#include <utility>
 
 #include "GeometryEditSession.h"
 #include "GeometrySnapshotExporter.h"
 #include "IdbDesign.h"
 #include "IdbNet.h"
 #include "IdbSpecialNet.h"
-#include "py_clock_tree.h"
 #include "feature_manager.h"
-#include <idm.h>
-
-#include <optional>
-#include <utility>
+#include "py_clock_tree.h"
+#include "utility/logger/Logger.hpp"
 
 namespace python_interface {
 namespace {
@@ -215,8 +216,7 @@ bool saveJson(const std::filesystem::path& path)
 }
 
 bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_drc,
-                          const std::optional<std::filesystem::path>& thumbnail_path,
-                          const std::optional<std::string>& clock_tree_stage,
+                          const std::optional<std::filesystem::path>& thumbnail_path, const std::optional<std::string>& clock_tree_stage,
                           const pybind11::object& clock_tree_graph)
 {
   idb::IdbDesign* design = dmInst->get_idb_design();
@@ -260,13 +260,11 @@ bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_
     ecc::geometry::ClockTreeCollectOptions options;
     if (*clock_tree_stage == "postFloorplan") {
       options.stage = ecc::geometry::ClockTreeStage::kPostFloorplan;
-      options.timing_unavailable_reason =
-          "postFloorplan clock network has topology only; insertion delay was not requested";
+      options.timing_unavailable_reason = "postFloorplan clock network has topology only; insertion delay was not requested";
     } else if (*clock_tree_stage == "CTS") {
       options.stage = ecc::geometry::ClockTreeStage::kCts;
       options.analysis_source = ecc::geometry::ClockTreeAnalysisSource::kCtsFastSta;
-      options.timing_unavailable_reason =
-          "CTS clock topology is available; committed FastSTA edge-level timing was unavailable";
+      options.timing_unavailable_reason = "CTS clock topology is available; committed FastSTA edge-level timing was unavailable";
       if (!clock_tree_graph.is_none()) {
         std::uint32_t dbu_per_micron = 0;
         if (design->get_units() != nullptr) {
@@ -274,8 +272,7 @@ bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_
         } else if (layout->get_units() != nullptr) {
           dbu_per_micron = static_cast<std::uint32_t>(layout->get_units()->get_micron_dbu());
         }
-        clock_tree_snapshot =
-            python_interface::clockTreeSnapshotFromPython(clock_tree_graph, dbu_per_micron);
+        clock_tree_snapshot = python_interface::clockTreeSnapshotFromPython(clock_tree_graph, dbu_per_micron);
       }
     } else if (*clock_tree_stage == "filler") {
       options.stage = ecc::geometry::ClockTreeStage::kFiller;
@@ -283,8 +280,7 @@ bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_
       options.rc_corner = "TYPICAL";
       options.liberty_corner = "TYP";
       options.temperature_c = 25.0;
-      options.timing_unavailable_reason =
-          "filler clock topology is available; TYPICAL RC/iSTA timing capture was unavailable";
+      options.timing_unavailable_reason = "filler clock topology is available; TYPICAL RC/iSTA timing capture was unavailable";
       if (!clock_tree_graph.is_none()) {
         std::uint32_t dbu_per_micron = 0;
         if (design->get_units() != nullptr) {
@@ -292,8 +288,7 @@ bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_
         } else if (layout->get_units() != nullptr) {
           dbu_per_micron = static_cast<std::uint32_t>(layout->get_units()->get_micron_dbu());
         }
-        clock_tree_snapshot =
-            python_interface::clockTreeSnapshotFromPython(clock_tree_graph, dbu_per_micron);
+        clock_tree_snapshot = python_interface::clockTreeSnapshotFromPython(clock_tree_graph, dbu_per_micron);
       }
     } else {
       return false;
@@ -301,8 +296,8 @@ bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_
     clock_tree_options = std::move(options);
   }
   return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc),
-                                                thumbnail_path.value_or(std::filesystem::path{}),
-                                                std::move(clock_tree_options), std::move(clock_tree_snapshot))
+                                                 thumbnail_path.value_or(std::filesystem::path{}), std::move(clock_tree_options),
+                                                 std::move(clock_tree_snapshot))
       .ok;
 }
 

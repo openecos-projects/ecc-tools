@@ -16,13 +16,12 @@
 // ***************************************************************************************
 #pragma once
 
+#include <pybind11/pybind11.h>
+#include <tcl_util.h>
+
 #include <filesystem>
 #include <map>
 #include <optional>
-
-#include <pybind11/pybind11.h>
-
-#include <tcl_util.h>
 
 namespace python_interface {
 

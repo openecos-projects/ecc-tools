@@ -25,10 +25,8 @@ void populate_design_metadata(SnapshotWriteOptions& options, idb::IdbDesign& des
 
 }  // namespace
 
-SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout,
-                                             const std::filesystem::path& output_dir,
-                                             std::optional<GeometryDrcDistribution> drc,
-                                             const std::filesystem::path& thumbnail_path,
+SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout, const std::filesystem::path& output_dir,
+                                             std::optional<GeometryDrcDistribution> drc, const std::filesystem::path& thumbnail_path,
                                              std::optional<ClockTreeCollectOptions> clock_tree_options,
                                              std::optional<ClockTreeSnapshot> clock_tree_snapshot)
 {

@@ -192,7 +192,6 @@ static_assert(sizeof(ClockRecord) == 64);
 static_assert(sizeof(ClockNodeRecord) == 56);
 static_assert(sizeof(ClockEdgeRecord) == 40);
 static_assert(sizeof(ClockTimingRecord) == 48);
-static_assert(std::endian::native == std::endian::little,
-              "clock-tree snapshot records are defined as little-endian");
+static_assert(std::endian::native == std::endian::little, "clock-tree snapshot records are defined as little-endian");
 
 }  // namespace ecc::geometry

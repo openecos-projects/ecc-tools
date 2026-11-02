@@ -1,13 +1,5 @@
 #include "ClockTreeCollector.h"
 
-#include "GeometryStore.h"
-#include "IdbDesign.h"
-#include "IdbInstance.h"
-#include "IdbLayout.h"
-#include "IdbNet.h"
-#include "IdbPins.h"
-#include "IdbUnits.h"
-
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -17,6 +9,14 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "GeometryStore.h"
+#include "IdbDesign.h"
+#include "IdbInstance.h"
+#include "IdbLayout.h"
+#include "IdbNet.h"
+#include "IdbPins.h"
+#include "IdbUnits.h"
 
 namespace ecc::geometry {
 namespace {
@@ -68,8 +68,7 @@ class UnionFind
 
 std::string lower(std::string value)
 {
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+  std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
   return value;
 }
 
@@ -144,8 +143,7 @@ std::string pin_display_name(idb::IdbPin* pin)
   if (pin == nullptr) {
     return {};
   }
-  return pin->get_instance() == nullptr ? pin->get_pin_name()
-                                        : pin->get_instance()->get_name() + "/" + pin->get_pin_name();
+  return pin->get_instance() == nullptr ? pin->get_pin_name() : pin->get_instance()->get_name() + "/" + pin->get_pin_name();
 }
 
 using InstanceOwnerIndex = std::unordered_map<uint32_t, uint32_t>;
@@ -217,8 +215,7 @@ uint64_t fingerprint_clocks(const ClockTreeSnapshot& snapshot)
 
 }  // namespace
 
-std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout,
-                                                             const GeometryStore& store,
+std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout, const GeometryStore& store,
                                                              const ClockTreeCollectOptions& options)
 {
   if (design.get_net_list() == nullptr) {
@@ -246,8 +243,7 @@ std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& des
     }
     std::vector<idb::IdbPin*> net_pins;
     if (net->get_io_pins() != nullptr) {
-      net_pins.insert(net_pins.end(), net->get_io_pins()->get_pin_list().begin(),
-                      net->get_io_pins()->get_pin_list().end());
+      net_pins.insert(net_pins.end(), net->get_io_pins()->get_pin_list().begin(), net->get_io_pins()->get_pin_list().end());
     }
     if (net->get_instance_pin_list() != nullptr) {
       net_pins.insert(net_pins.end(), net->get_instance_pin_list()->get_pin_list().begin(),
@@ -356,12 +352,10 @@ std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& des
   auto edge_pin_key = [&pins](const ClockEdgeRecord& edge) {
     return std::pair<std::string, std::string>{pin_key(pins[edge.from_node].pin), pin_key(pins[edge.to_node].pin)};
   };
-  std::sort(net_edges.begin(), net_edges.end(), [&](const ClockEdgeRecord& lhs, const ClockEdgeRecord& rhs) {
-    return edge_pin_key(lhs) < edge_pin_key(rhs);
-  });
-  std::sort(cell_edges.begin(), cell_edges.end(), [&](const ClockEdgeRecord& lhs, const ClockEdgeRecord& rhs) {
-    return edge_pin_key(lhs) < edge_pin_key(rhs);
-  });
+  std::sort(net_edges.begin(), net_edges.end(),
+            [&](const ClockEdgeRecord& lhs, const ClockEdgeRecord& rhs) { return edge_pin_key(lhs) < edge_pin_key(rhs); });
+  std::sort(cell_edges.begin(), cell_edges.end(),
+            [&](const ClockEdgeRecord& lhs, const ClockEdgeRecord& rhs) { return edge_pin_key(lhs) < edge_pin_key(rhs); });
 
   std::map<uint32_t, std::vector<uint32_t>> component_nodes;
   for (uint32_t index = 0; index < pins.size(); ++index) {
@@ -371,15 +365,13 @@ std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& des
   std::vector<std::vector<uint32_t>> ordered_components;
   ordered_components.reserve(component_nodes.size());
   for (auto& [root, node_ids] : component_nodes) {
-    (void)root;
-    std::sort(node_ids.begin(), node_ids.end(), [&](uint32_t lhs, uint32_t rhs) {
-      return pin_key(pins[lhs].pin) < pin_key(pins[rhs].pin);
-    });
+    (void) root;
+    std::sort(node_ids.begin(), node_ids.end(),
+              [&](uint32_t lhs, uint32_t rhs) { return pin_key(pins[lhs].pin) < pin_key(pins[rhs].pin); });
     ordered_components.push_back(std::move(node_ids));
   }
-  std::sort(ordered_components.begin(), ordered_components.end(), [&](const auto& lhs, const auto& rhs) {
-    return pin_key(pins[lhs.front()].pin) < pin_key(pins[rhs.front()].pin);
-  });
+  std::sort(ordered_components.begin(), ordered_components.end(),
+            [&](const auto& lhs, const auto& rhs) { return pin_key(pins[lhs.front()].pin) < pin_key(pins[rhs.front()].pin); });
 
   std::vector<ClockNodeRecord> nodes;
   std::vector<ClockEdgeRecord> edges;
@@ -402,17 +394,15 @@ std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& des
       idb::IdbPin* pin = pins[pin_index].pin;
       const std::string instance_name = pin->get_instance() == nullptr ? "" : pin->get_instance()->get_name();
       const std::string pin_name = pin->get_pin_name();
-      const std::string master =
-          pin->get_instance() == nullptr || pin->get_instance()->get_cell_master() == nullptr
-              ? ""
-              : pin->get_instance()->get_cell_master()->get_name();
+      const std::string master = pin->get_instance() == nullptr || pin->get_instance()->get_cell_master() == nullptr
+                                     ? ""
+                                     : pin->get_instance()->get_cell_master()->get_name();
 
       ClockNodeRecord node;
       node.node_id = static_cast<uint32_t>(nodes.size());
       node.clock_id = clock_index;
       node.kind = static_cast<uint8_t>(pin->get_instance() == nullptr
-                                           ? (pin->is_primary_input() ? ClockNodeKind::kRootPort
-                                                                      : ClockNodeKind::kOtherBoundary)
+                                           ? (pin->is_primary_input() ? ClockNodeKind::kRootPort : ClockNodeKind::kOtherBoundary)
                                            : classify_instance_pin(pin, master));
       if (pin->get_instance() != nullptr) {
         node.owner_index = find_instance_owner_index(instance_owners, pin->get_instance());
@@ -506,10 +496,8 @@ std::optional<ClockTreeSnapshot> collect_clock_tree_snapshot(idb::IdbDesign& des
   snapshot.timing = std::move(timing);
   snapshot.meta.status = static_cast<uint16_t>(ClockTreeStatus::kTopologyOnly);
   set_string_reference(snapshot, snapshot.meta.rc_corner_offset, snapshot.meta.rc_corner_size, options.rc_corner);
-  set_string_reference(snapshot, snapshot.meta.liberty_corner_offset, snapshot.meta.liberty_corner_size,
-                       options.liberty_corner);
-  set_string_reference(snapshot, snapshot.meta.diagnostics_offset, snapshot.meta.diagnostics_size,
-                       options.timing_unavailable_reason);
+  set_string_reference(snapshot, snapshot.meta.liberty_corner_offset, snapshot.meta.liberty_corner_size, options.liberty_corner);
+  set_string_reference(snapshot, snapshot.meta.diagnostics_offset, snapshot.meta.diagnostics_size, options.timing_unavailable_reason);
   snapshot.meta.node_count = snapshot.nodes.size();
   snapshot.meta.edge_count = snapshot.edges.size();
   snapshot.meta.timing_count = snapshot.timing.size();

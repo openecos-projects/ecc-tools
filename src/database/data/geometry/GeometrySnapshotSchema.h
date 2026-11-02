@@ -1,10 +1,10 @@
 #pragma once
 
+#include <cstdint>
+
 #include "ClockTreeSchema.h"
 #include "OwnerRef.h"
 #include "ShapeRecord.h"
-
-#include <cstdint>
 
 namespace ecc::geometry {
 
