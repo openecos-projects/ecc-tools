@@ -35,8 +35,8 @@ class Config
   // **********        FP         ********** //
   std::string temp_directory_path;                         // required
   int32_t thread_number;                                   // optional
-  double macro_placement_halo;                             // optional
-  double macro_routing_halo;                               // optional
+  double macro_placement_halo;                             // optional; used for row cutting and PDN stripe keepout
+  double macro_routing_halo;                               // optional; used for outputting route halo
   std::string input_macro_path;                            // optional; non-empty loads macro placement file
   DieMode die_mode;                                        // optional
   std::string die_site_name;                               // optional
