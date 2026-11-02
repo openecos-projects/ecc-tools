@@ -164,6 +164,66 @@ struct FastStaClockPointFact
   double slew_ns = 0.0;
 };
 
+enum class FastStaClockGraphTransition
+{
+  kRise,
+  kFall
+};
+
+enum class FastStaClockGraphAnalysis
+{
+  kEarly,
+  kLate
+};
+
+struct FastStaClockGraphTimingState
+{
+  FastStaClockGraphAnalysis analysis = FastStaClockGraphAnalysis::kLate;
+  FastStaClockGraphTransition source_transition = FastStaClockGraphTransition::kRise;
+  FastStaClockGraphTransition local_transition = FastStaClockGraphTransition::kRise;
+  FastStaNodeId predecessor_node_id = kInvalidFastStaNodeId;
+  double arrival_ns = 0.0;
+  double slew_ns = 0.0;
+};
+
+struct FastStaClockGraphNode
+{
+  FastStaNodeId id = kInvalidFastStaNodeId;
+  std::string name = "";
+  std::string instance_name = "";
+  std::string pin_name = "";
+  std::string cell_master = "";
+  FastStaClockPointKind kind = FastStaClockPointKind::kSink;
+  FastStaPoint location{};
+  bool position_valid = false;
+  bool sink = false;
+  bool inactive = false;
+  std::optional<double> arrival_ns = std::nullopt;
+  std::optional<double> slew_ns = std::nullopt;
+  std::vector<FastStaClockGraphTimingState> timing_states;
+};
+
+struct FastStaClockGraphEdge
+{
+  FastStaNodeId from_node_id = kInvalidFastStaNodeId;
+  FastStaNodeId to_node_id = kInvalidFastStaNodeId;
+  bool cell_arc = false;
+  bool negative_unate = false;
+  std::string net_name = "";
+  std::string cell_master = "";
+};
+
+struct FastStaClockGraph
+{
+  std::string clock_name = "";
+  std::string clock_net_name = "";
+  std::vector<FastStaNodeId> root_node_ids;
+  std::vector<FastStaClockGraphNode> nodes;
+  std::vector<FastStaClockGraphEdge> edges;
+  bool timing_available = false;
+  std::string diagnostic = "";
+};
+
 struct FastStaClockTreeTopology
 {
   FastStaNodeId source_node_id = kInvalidFastStaNodeId;
@@ -624,6 +684,9 @@ class FastSTA
   // beyond the physical owner boundary. Sizing buffers, sink arrivals and skew
   // are separately restricted to the context's physical Clock owner.
   auto collectClockPointFacts(FastStaContextId context_id) const -> std::vector<FastStaClockPointFact>;
+  // Owned clock topology and committed early/late timing states. The graph is
+  // a value snapshot: callers may retain it after the context is erased.
+  auto collectClockGraph(FastStaContextId context_id) const -> std::optional<FastStaClockGraph>;
   auto queryClockNodeArrival(FastStaContextId context_id, FastStaNodeId node_id) const -> std::optional<double>;
   auto querySkew(FastStaContextId context_id) const -> FastStaSkewSummary;
   auto queryCapStatus(FastStaContextId context_id, FastStaNetId net_id) const -> std::optional<FastStaCapStatus>;

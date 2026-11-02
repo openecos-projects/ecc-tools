@@ -80,6 +80,7 @@ void ClockNetworkBuilder::markClock(ClockSource& clock)
 {
   Database& database = _database;
   std::queue<int32_t> pin_queue;
+  std::set<std::string> visited_pins;
   for (const auto& clock_source : clock.get_source_list()) {
     if (!database.graph().points().contains(clock_source)) {
       STALOG.warn(Loc::current(), "clock '", clock.get_clock_name(), "' has no source");
@@ -90,9 +91,15 @@ void ClockNetworkBuilder::markClock(ClockSource& clock)
 
   while (!pin_queue.empty()) {
     int32_t vertex_idx = pin_queue.front();
+    pin_queue.pop();
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     std::string& pin_name = vertex.get_pin_name();
-    pin_queue.pop();
+    // Rebuilding the graph after clock propagation must still collect every
+    // point.  The timing points already carry clock states at that stage, so
+    // traversal is deduplicated locally instead of via has_clock_state().
+    if (!visited_pins.insert(pin_name).second) {
+      continue;
+    }
 
     Pin& pin = database.network().pins().at(pin_name);
     // Multiple exported clock modes have no internal data fanout to analyze.
@@ -112,9 +119,6 @@ void ClockNetworkBuilder::markClock(ClockSource& clock)
       continue;
     }
     TimingPoint& timing_point = vertex.get_timing_point();
-    if (timing_point.has_clock_state(clock.get_clock_name())) {
-      continue;
-    }
 
     timing_point.set_is_clock_point(true);
     timing_point.get_clock_state(clock.get_clock_name());
