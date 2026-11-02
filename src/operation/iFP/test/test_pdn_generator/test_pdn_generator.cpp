@@ -246,6 +246,66 @@ bool testPGSegmentRect()
   return passed;
 }
 
+bool testBoundaryRailConnections(const std::string& directory)
+{
+  initFixture(directory);
+  addLine("VDD_A", "M99", PGSegmentType::kFollowPin, 1001, 2003, 21001, 2003, 160);
+  addLine("VSS_B", "M99", PGSegmentType::kFollowPin, 1001, 22003, 21001, 22003, 160);
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 5001, 2003, 5001, 22003, 1000);
+  addLine("VSS_B", "M10", PGSegmentType::kStripe, 15001, 22003, 15001, 2003, 1000);
+  addConnect("M99", "M10");
+  FPPG.generate();
+
+  bool passed = check(hasVia("VDD_A", "M99", "M10", 5001, 2003), "Bottom rail via must remain centered on the rail");
+  passed = check(hasVia("VSS_B", "M99", "M10", 15001, 22003), "Top rail via must remain centered on the rail") && passed;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kVia) {
+      passed = check(segment.get_via_width() == 1000 && segment.get_via_height() == 160, "Boundary rail via must use the full rail width") && passed;
+    } else if (segment.get_type() == PGSegmentType::kStripe) {
+      passed = check(segment.get_width() == 1000, "Stripe width must not change") && passed;
+      if (segment.get_net_name() == "VDD_A") {
+        passed = check(segment.get_start_y() == 1923 && segment.get_end_y() == 22003, "Bottom stripe must cover the lower rail edge") && passed;
+      } else {
+        passed = check(segment.get_start_y() == 22083 && segment.get_end_y() == 2003, "Reversed stripe must cover the upper rail edge") && passed;
+      }
+    }
+  }
+
+  initFixture(directory);
+  addLine("VDD_A", "M10", PGSegmentType::kFollowPin, 1001, 2003, 1001, 22003, 160);
+  addLine("VSS_B", "M10", PGSegmentType::kFollowPin, 21001, 2003, 21001, 22003, 160);
+  addLine("VDD_A", "M2", PGSegmentType::kStripe, 1001, 5003, 21001, 5003, 1000);
+  addLine("VSS_B", "M2", PGSegmentType::kStripe, 21001, 15003, 1001, 15003, 1000);
+  addConnect("M10", "M2");
+  FPPG.generate();
+  passed = check(hasVia("VDD_A", "M10", "M2", 1001, 5003), "Left rail via must remain centered on the rail") && passed;
+  passed = check(hasVia("VSS_B", "M10", "M2", 21001, 15003), "Right rail via must remain centered on the rail") && passed;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kVia) {
+      passed = check(segment.get_via_width() == 160 && segment.get_via_height() == 1000, "Horizontal stripe must cover the full vertical rail") && passed;
+    }
+  }
+  return passed;
+}
+
+bool testUnconnectedRail(const std::string& directory)
+{
+  initFixture(directory);
+  addLine("VSS_B", "M99", PGSegmentType::kFollowPin, 1001, 2003, 21001, 2003, 160);
+  addLine("VDD_A", "M2", PGSegmentType::kFollowPin, 1001, 22003, 21001, 22003, 160);
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 5001, 2003, 5001, 22003, 1000);
+  addConnect("M99", "M10");
+  FPPG.generate();
+  bool passed = true;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kStripe) {
+      passed = check(segment.get_start_y() == 2003 && segment.get_end_y() == 22003, "Unconnected rail must not extend a stripe") && passed;
+    }
+    passed = check(segment.get_type() != PGSegmentType::kVia, "Wrong-net or unconfigured-layer rail must not generate a via") && passed;
+  }
+  return passed;
+}
+
 bool testMissingConnections(const std::string& directory)
 {
   initFixture(directory);
@@ -325,8 +385,7 @@ bool testStripePlacementHalo(const std::string& directory)
   FPPG.generate();
 
   bool passed = true;
-  passed = check(!hasVerticalSegmentSpanning("MET4", 150000, 100000, 310000),
-                 "MET4 stripe must not survive inside the placement halo corridor") && passed;
+  passed = check(!hasVerticalSegmentSpanning("MET4", 150000, 100000, 310000), "MET4 stripe must not survive inside the placement halo corridor") && passed;
   passed = check(hasVerticalSegmentSpanning("MET4", 150000, 0, 100000), "MET4 stripe below macro A must remain") && passed;
   passed = check(hasVerticalSegmentSpanning("MET4", 150000, 310000, 400000), "MET4 stripe above macro B must remain") && passed;
 
@@ -335,8 +394,7 @@ bool testStripePlacementHalo(const std::string& directory)
   addPlacementHaloMacro(100000, 230000, 200000, 330000, 5000, 1000);
   FPDM.getConfig().pg_stripe_list.push_back(met4_stripe);
   FPPG.generate();
-  passed = check(hasVerticalSegmentSpanning("MET4", 150000, 205000, 225000),
-                 "MET4 stripe must remain in the gap outside both placement halos") && passed;
+  passed = check(hasVerticalSegmentSpanning("MET4", 150000, 205000, 225000), "MET4 stripe must remain in the gap outside both placement halos") && passed;
 
   initPlacementHaloFixture(directory);
   addPlacementHaloMacro(100000, 100000, 200000, 200000, 5000, 1000);
@@ -369,6 +427,17 @@ bool testActualViaOverlap(const std::string& directory)
   return passed;
 }
 
+bool testRailExtensionHalo(const std::string& directory)
+{
+  initPlacementHaloFixture(directory);
+  addPlacementHaloMacro(100000, 100000, 200000, 200000, 0, 0);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 100000, 100000, 200000, 100000, 160);
+  addLine("VDD", "MET4", PGSegmentType::kStripe, 150000, 0, 150000, 100000, 1000);
+  addConnect("MET1", "MET4");
+  FPPG.generate();
+  return check(!hasVerticalSegmentSpanning("MET4", 150000, 100000, 200000), "Rail extension must not enter a macro placement halo");
+}
+
 }  // namespace ifp
 
 int main(int argc, char* argv[])
@@ -381,11 +450,14 @@ int main(int argc, char* argv[])
   ifp::PDNGenerator::initInst();
   FPUTIL.createDir(directory);
   bool passed = ifp::testPGSegmentRect();
+  passed = ifp::testBoundaryRailConnections(directory) && passed;
+  passed = ifp::testUnconnectedRail(directory) && passed;
   passed = ifp::testGeneratedStripes(directory) && passed;
   passed = ifp::testConnectionTypes(directory) && passed;
   passed = ifp::testMissingConnections(directory) && passed;
   passed = ifp::testStripePlacementHalo(directory) && passed;
   passed = ifp::testActualViaOverlap(directory) && passed;
+  passed = ifp::testRailExtensionHalo(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
   ifp::Utility::destroyInst();
