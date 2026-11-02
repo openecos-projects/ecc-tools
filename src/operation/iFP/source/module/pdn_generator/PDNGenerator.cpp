@@ -431,6 +431,7 @@ void PDNGenerator::alignStripeSegmentList()
       continue;
     }
     alignStripeSegment(pg_segment);
+    extendStripeToRail(pg_segment);
   }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -645,6 +646,67 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
   return closest_full_overlap_coord;
 }
 
+void PDNGenerator::extendStripeToRail(PGSegment& stripe_segment)
+{
+  std::set<std::string> connected_layer_name_set;
+  for (PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+    if (layer_pair.get_first_layer_name() == stripe_segment.get_layer_name()) {
+      connected_layer_name_set.insert(layer_pair.get_second_layer_name());
+    } else if (layer_pair.get_second_layer_name() == stripe_segment.get_layer_name()) {
+      connected_layer_name_set.insert(layer_pair.get_first_layer_name());
+    }
+  }
+
+  for (PGSegment& rail_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (rail_segment.get_type() != PGSegmentType::kFollowPin || rail_segment.get_net_name() != stripe_segment.get_net_name()
+        || !connected_layer_name_set.contains(rail_segment.get_layer_name()) || rail_segment.is_vertical() == stripe_segment.is_vertical()) {
+      continue;
+    }
+    PlanarRect stripe_rect(stripe_segment.get_ll_x(), stripe_segment.get_ll_y(), stripe_segment.get_ur_x(), stripe_segment.get_ur_y());
+    PlanarRect rail_rect(rail_segment.get_ll_x(), rail_segment.get_ll_y(), rail_segment.get_ur_x(), rail_segment.get_ur_y());
+    PlanarRect overlap_rect = getOverlapRect(stripe_rect, rail_rect);
+    if (overlap_rect.get_width() <= 0 || overlap_rect.get_height() <= 0) {
+      continue;
+    }
+
+    // Boundary rails straddle stripe endpoints. Cover their full width before sizing the via.
+    PGSegment extended_segment = stripe_segment;
+    if (stripe_segment.is_vertical()) {
+      int32_t low_coord = std::min(stripe_segment.get_ll_y(), rail_segment.get_ll_y());
+      int32_t high_coord = std::max(stripe_segment.get_ur_y(), rail_segment.get_ur_y());
+      if (low_coord == stripe_segment.get_ll_y() && high_coord == stripe_segment.get_ur_y()) {
+        continue;
+      }
+      bool ascending = stripe_segment.get_start_y() < stripe_segment.get_end_y();
+      extended_segment.set_start_y(ascending ? low_coord : high_coord);
+      extended_segment.set_end_y(ascending ? high_coord : low_coord);
+    } else {
+      int32_t low_coord = std::min(stripe_segment.get_ll_x(), rail_segment.get_ll_x());
+      int32_t high_coord = std::max(stripe_segment.get_ur_x(), rail_segment.get_ur_x());
+      if (low_coord == stripe_segment.get_ll_x() && high_coord == stripe_segment.get_ur_x()) {
+        continue;
+      }
+      bool ascending = stripe_segment.get_start_x() < stripe_segment.get_end_x();
+      extended_segment.set_start_x(ascending ? low_coord : high_coord);
+      extended_segment.set_end_x(ascending ? high_coord : low_coord);
+    }
+    if (!getMacroBlockageIntervalList(extended_segment.get_layer_name(), extended_segment.get_width(), extended_segment.get_start_x(),
+                                      extended_segment.get_start_y(), extended_segment.get_end_x(), extended_segment.get_end_y())
+             .empty()) {
+      continue;
+    }
+    stripe_segment = extended_segment;
+  }
+}
+
+PlanarRect PDNGenerator::getOverlapRect(PlanarRect first_rect, PlanarRect second_rect)
+{
+  PlanarRect overlap_rect;
+  overlap_rect.set_rect(std::max(first_rect.get_ll_x(), second_rect.get_ll_x()), std::max(first_rect.get_ll_y(), second_rect.get_ll_y()),
+                        std::min(first_rect.get_ur_x(), second_rect.get_ur_x()), std::min(first_rect.get_ur_y(), second_rect.get_ur_y()));
+  return overlap_rect;
+}
+
 void PDNGenerator::initPowerLayerPair(PGModel& pg_model)
 {
   std::map<int32_t, std::string> stripe_layer_map;
@@ -711,8 +773,8 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
           addViaSegment(pg_model, pg_net.get_name(), bottom_layer->get_name(), top_layer->get_name(), "", x, y, overlap_rect.get_width(),
                         overlap_rect.get_height());
           if (bottom_layer->get_name() == pg_model.get_power_layer_pair().get_first_layer_name()
-              && top_layer->get_name() == pg_model.get_power_layer_pair().get_second_layer_name()
-              && bottom_segment.get_type() == PGSegmentType::kStripe && top_segment.get_type() == PGSegmentType::kStripe) {
+              && top_layer->get_name() == pg_model.get_power_layer_pair().get_second_layer_name() && bottom_segment.get_type() == PGSegmentType::kStripe
+              && top_segment.get_type() == PGSegmentType::kStripe) {
             pg_model.get_power_net_coord_map()[pg_net.get_name()].emplace(x, y);
           }
         }
@@ -721,14 +783,6 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
   }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-PlanarRect PDNGenerator::getOverlapRect(PlanarRect first_rect, PlanarRect second_rect)
-{
-  PlanarRect overlap_rect;
-  overlap_rect.set_rect(std::max(first_rect.get_ll_x(), second_rect.get_ll_x()), std::max(first_rect.get_ll_y(), second_rect.get_ll_y()),
-                        std::min(first_rect.get_ur_x(), second_rect.get_ur_x()), std::min(first_rect.get_ur_y(), second_rect.get_ur_y()));
-  return overlap_rect;
 }
 
 void PDNGenerator::addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name,
