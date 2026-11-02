@@ -22,15 +22,6 @@
 
 namespace ifp {
 
-namespace {
-
-const PlanarRect& getMacroPGBlockageRect(const Instance& instance)
-{
-  return instance.get_placement_halo_rect();
-}
-
-}  // namespace
-
 // public
 
 void PDNGenerator::initInst()
@@ -218,7 +209,7 @@ void PDNGenerator::mergeRailSegmentList()
       int32_t rail_end_x = std::max(rail_segment.get_start_x(), rail_segment.get_end_x());
       int32_t merged_start_x = std::min(merged_rail_segment.get_start_x(), merged_rail_segment.get_end_x());
       int32_t merged_end_x = std::max(merged_rail_segment.get_start_x(), merged_rail_segment.get_end_x());
-      if (rail_segment.get_ur_x() < merged_rail_segment.get_ll_x() || merged_rail_segment.get_ur_x() < rail_segment.get_ll_x()) {
+      if (rail_segment.get_ur_x() <= merged_rail_segment.get_ll_x() || merged_rail_segment.get_ur_x() <= rail_segment.get_ll_x()) {
         segment_idx++;
         continue;
       }
@@ -316,22 +307,22 @@ std::vector<std::pair<int32_t, int32_t>> PDNGenerator::getMacroBlockageIntervalL
     if (routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
       continue;
     }
-    const PlanarRect& pg_blockage_rect = getMacroPGBlockageRect(instance);
+    PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
     if (horizontal) {
-      if (line_coord + half_width <= pg_blockage_rect.get_ll_y() || pg_blockage_rect.get_ur_y() <= line_coord - half_width) {
+      if (line_coord + half_width <= routing_halo_rect.get_ll_y() || routing_halo_rect.get_ur_y() <= line_coord - half_width) {
         continue;
       }
-      int32_t start_coord = std::max(line_begin, pg_blockage_rect.get_ll_x());
-      int32_t end_coord = std::min(line_end, pg_blockage_rect.get_ur_x());
+      int32_t start_coord = std::max(line_begin, routing_halo_rect.get_ll_x() - half_width);
+      int32_t end_coord = std::min(line_end, routing_halo_rect.get_ur_x() + half_width);
       if (start_coord < end_coord) {
         blockage_interval_list.emplace_back(start_coord, end_coord);
       }
     } else {
-      if (line_coord + half_width <= pg_blockage_rect.get_ll_x() || pg_blockage_rect.get_ur_x() <= line_coord - half_width) {
+      if (line_coord + half_width <= routing_halo_rect.get_ll_x() || routing_halo_rect.get_ur_x() <= line_coord - half_width) {
         continue;
       }
-      int32_t start_coord = std::max(line_begin, pg_blockage_rect.get_ll_y());
-      int32_t end_coord = std::min(line_end, pg_blockage_rect.get_ur_y());
+      int32_t start_coord = std::max(line_begin, routing_halo_rect.get_ll_y() - half_width);
+      int32_t end_coord = std::min(line_end, routing_halo_rect.get_ur_y() + half_width);
       if (start_coord < end_coord) {
         blockage_interval_list.emplace_back(start_coord, end_coord);
       }
@@ -444,51 +435,60 @@ void PDNGenerator::alignStripeSegment(PGSegment& stripe_segment)
   }
 
   bool vertical = stripe_segment.is_vertical();
+  int32_t half_width = stripe_segment.get_width() / 2;
   for (Instance* instance_ptr : _placed_macro_list) {
     Instance& instance = *instance_ptr;
     if (routing_layer->get_order() > getMacroTopLayerOrder(instance)) {
       continue;
     }
 
-    const PlanarRect& pg_blockage_rect = getMacroPGBlockageRect(instance);
+    PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
     if (vertical) {
-      if (stripe_segment.get_ur_x() <= pg_blockage_rect.get_ll_x() || pg_blockage_rect.get_ur_x() <= stripe_segment.get_ll_x()) {
+      if (stripe_segment.get_ur_x() <= routing_halo_rect.get_ll_x() || routing_halo_rect.get_ur_x() <= stripe_segment.get_ll_x()) {
         continue;
       }
-      if (stripe_segment.get_start_y() == pg_blockage_rect.get_ur_y()) {
+      if (stripe_segment.get_start_y() == routing_halo_rect.get_ur_y() + half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, true);
-        int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, true);
-        int32_t target_coord = cross_stripe_coord != INT32_MAX ? cross_stripe_coord : rail_coord;
-        if (target_coord != INT32_MAX && target_coord <= stripe_segment.get_end_y()) {
-          stripe_segment.set_start_y(target_coord);
+        if (rail_coord != INT32_MAX && rail_coord <= stripe_segment.get_end_y()) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, true);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
+          stripe_segment.set_start_y(rail_coord);
         }
       }
-      if (stripe_segment.get_end_y() == pg_blockage_rect.get_ll_y()) {
+      if (stripe_segment.get_end_y() == routing_halo_rect.get_ll_y() - half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, false);
-        int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, false);
-        int32_t target_coord = cross_stripe_coord != INT32_MAX ? cross_stripe_coord : rail_coord;
-        if (target_coord != INT32_MAX && stripe_segment.get_start_y() <= target_coord) {
-          stripe_segment.set_end_y(target_coord);
+        if (rail_coord != INT32_MAX && stripe_segment.get_start_y() <= rail_coord) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, false);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
+          stripe_segment.set_end_y(rail_coord);
         }
       }
     } else {
-      if (stripe_segment.get_ur_y() <= pg_blockage_rect.get_ll_y() || pg_blockage_rect.get_ur_y() <= stripe_segment.get_ll_y()) {
+      if (stripe_segment.get_ur_y() <= routing_halo_rect.get_ll_y() || routing_halo_rect.get_ur_y() <= stripe_segment.get_ll_y()) {
         continue;
       }
-      if (stripe_segment.get_start_x() == pg_blockage_rect.get_ur_x()) {
+      if (stripe_segment.get_start_x() == routing_halo_rect.get_ur_x() + half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, true);
-        int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, true);
-        int32_t target_coord = cross_stripe_coord != INT32_MAX ? cross_stripe_coord : rail_coord;
-        if (target_coord != INT32_MAX && target_coord <= stripe_segment.get_end_x()) {
-          stripe_segment.set_start_x(target_coord);
+        if (rail_coord != INT32_MAX && rail_coord <= stripe_segment.get_end_x()) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, true);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
+          stripe_segment.set_start_x(rail_coord);
         }
       }
-      if (stripe_segment.get_end_x() == pg_blockage_rect.get_ll_x()) {
+      if (stripe_segment.get_end_x() == routing_halo_rect.get_ll_x() - half_width) {
         int32_t rail_coord = getClosestRailEdgeCoord(stripe_segment, instance, false);
-        int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, false);
-        int32_t target_coord = cross_stripe_coord != INT32_MAX ? cross_stripe_coord : rail_coord;
-        if (target_coord != INT32_MAX && stripe_segment.get_start_x() <= target_coord) {
-          stripe_segment.set_end_x(target_coord);
+        if (rail_coord != INT32_MAX && stripe_segment.get_start_x() <= rail_coord) {
+          int32_t cross_stripe_coord = getClosestCrossStripeEdgeCoord(stripe_segment, instance, rail_coord, false);
+          if (cross_stripe_coord != INT32_MAX) {
+            rail_coord = cross_stripe_coord;
+          }
+          stripe_segment.set_end_x(rail_coord);
         }
       }
     }
@@ -497,7 +497,7 @@ void PDNGenerator::alignStripeSegment(PGSegment& stripe_segment)
 
 int32_t PDNGenerator::getClosestRailEdgeCoord(PGSegment& stripe_segment, Instance& instance, bool high_side)
 {
-  const PlanarRect& pg_blockage_rect = getMacroPGBlockageRect(instance);
+  PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
   bool vertical = stripe_segment.is_vertical();
   int32_t closest_rail_edge_coord = INT32_MAX;
   int32_t closest_distance = INT32_MAX;
@@ -510,19 +510,19 @@ int32_t PDNGenerator::getClosestRailEdgeCoord(PGSegment& stripe_segment, Instanc
         continue;
       }
       if (high_side) {
-        if (rail_segment.get_ll_y() < pg_blockage_rect.get_ur_y()) {
+        if (rail_segment.get_ll_y() < routing_halo_rect.get_ur_y()) {
           continue;
         }
-        int32_t distance = rail_segment.get_ll_y() - pg_blockage_rect.get_ur_y();
+        int32_t distance = rail_segment.get_ll_y() - routing_halo_rect.get_ur_y();
         if (distance < closest_distance) {
           closest_distance = distance;
           closest_rail_edge_coord = rail_segment.get_ll_y();
         }
       } else {
-        if (pg_blockage_rect.get_ll_y() < rail_segment.get_ur_y()) {
+        if (routing_halo_rect.get_ll_y() < rail_segment.get_ur_y()) {
           continue;
         }
-        int32_t distance = pg_blockage_rect.get_ll_y() - rail_segment.get_ur_y();
+        int32_t distance = routing_halo_rect.get_ll_y() - rail_segment.get_ur_y();
         if (distance < closest_distance) {
           closest_distance = distance;
           closest_rail_edge_coord = rail_segment.get_ur_y();
@@ -533,19 +533,19 @@ int32_t PDNGenerator::getClosestRailEdgeCoord(PGSegment& stripe_segment, Instanc
         continue;
       }
       if (high_side) {
-        if (rail_segment.get_ll_x() < pg_blockage_rect.get_ur_x()) {
+        if (rail_segment.get_ll_x() < routing_halo_rect.get_ur_x()) {
           continue;
         }
-        int32_t distance = rail_segment.get_ll_x() - pg_blockage_rect.get_ur_x();
+        int32_t distance = rail_segment.get_ll_x() - routing_halo_rect.get_ur_x();
         if (distance < closest_distance) {
           closest_distance = distance;
           closest_rail_edge_coord = rail_segment.get_ll_x();
         }
       } else {
-        if (pg_blockage_rect.get_ll_x() < rail_segment.get_ur_x()) {
+        if (routing_halo_rect.get_ll_x() < rail_segment.get_ur_x()) {
           continue;
         }
-        int32_t distance = pg_blockage_rect.get_ll_x() - rail_segment.get_ur_x();
+        int32_t distance = routing_halo_rect.get_ll_x() - rail_segment.get_ur_x();
         if (distance < closest_distance) {
           closest_distance = distance;
           closest_rail_edge_coord = rail_segment.get_ur_x();
@@ -558,18 +558,15 @@ int32_t PDNGenerator::getClosestRailEdgeCoord(PGSegment& stripe_segment, Instanc
 
 int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, Instance& instance, int32_t rail_coord, bool high_side)
 {
-  const PlanarRect& pg_blockage_rect = getMacroPGBlockageRect(instance);
+  PlanarRect& routing_halo_rect = instance.get_routing_halo_rect();
   bool vertical = stripe_segment.is_vertical();
   int32_t half_width = stripe_segment.get_width() / 2;
-  int32_t stripe_coord_begin = vertical ? stripe_segment.get_start_y() : stripe_segment.get_start_x();
-  int32_t stripe_coord_end = vertical ? stripe_segment.get_end_y() : stripe_segment.get_end_x();
-  int32_t stripe_min_coord = std::min(stripe_coord_begin, stripe_coord_end);
-  int32_t stripe_max_coord = std::max(stripe_coord_begin, stripe_coord_end);
-  int32_t high_bound = rail_coord == INT32_MAX ? stripe_max_coord : std::min(rail_coord, stripe_max_coord);
-  int32_t low_bound = rail_coord == INT32_MAX ? stripe_min_coord : std::max(rail_coord, stripe_min_coord);
   int32_t closest_full_overlap_coord = INT32_MAX;
   int32_t closest_full_overlap_gap_distance = INT32_MAX;
   int32_t closest_full_overlap_extension_distance = INT32_MAX;
+  int32_t closest_contact_coord = INT32_MAX;
+  int32_t closest_contact_gap_distance = INT32_MAX;
+  int32_t closest_contact_extension_distance = INT32_MAX;
   for (PGSegment& cross_stripe : FPDM.getDatabase().get_pg_segment_list()) {
     if (cross_stripe.get_type() != PGSegmentType::kStripe || cross_stripe.get_net_name() != stripe_segment.get_net_name()
         || (vertical && !cross_stripe.is_horizontal()) || (!vertical && !cross_stripe.is_vertical())) {
@@ -590,8 +587,10 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
     }
 
     int32_t full_overlap_coord = INT32_MAX;
+    int32_t contact_coord = INT32_MAX;
     int32_t gap_distance = INT32_MAX;
     bool full_overlap_valid = false;
+    bool contact_valid = false;
     if (vertical) {
       int32_t stripe_ll_x = stripe_segment.get_start_x() - half_width;
       int32_t stripe_ur_x = stripe_segment.get_start_x() + half_width;
@@ -604,12 +603,16 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
       }
       if (high_side) {
         full_overlap_coord = cross_stripe.get_ll_y();
-        gap_distance = std::max(full_overlap_coord - pg_blockage_rect.get_ur_y(), 0);
-        full_overlap_valid = full_width_overlap && pg_blockage_rect.get_ur_y() <= full_overlap_coord && full_overlap_coord <= high_bound;
+        contact_coord = cross_stripe.get_ur_y();
+        gap_distance = std::max(rail_coord - cross_stripe.get_ur_y(), 0);
+        full_overlap_valid = full_width_overlap && routing_halo_rect.get_ur_y() <= full_overlap_coord && full_overlap_coord <= rail_coord;
+        contact_valid = routing_halo_rect.get_ur_y() <= contact_coord && contact_coord <= rail_coord;
       } else {
         full_overlap_coord = cross_stripe.get_ur_y();
-        gap_distance = std::max(pg_blockage_rect.get_ll_y() - full_overlap_coord, 0);
-        full_overlap_valid = full_width_overlap && low_bound <= full_overlap_coord && full_overlap_coord <= pg_blockage_rect.get_ll_y();
+        contact_coord = cross_stripe.get_ll_y();
+        gap_distance = std::max(cross_stripe.get_ll_y() - rail_coord, 0);
+        full_overlap_valid = full_width_overlap && rail_coord <= full_overlap_coord && full_overlap_coord <= routing_halo_rect.get_ll_y();
+        contact_valid = rail_coord <= contact_coord && contact_coord <= routing_halo_rect.get_ll_y();
       }
     } else {
       int32_t stripe_ll_y = stripe_segment.get_start_y() - half_width;
@@ -623,17 +626,23 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
       }
       if (high_side) {
         full_overlap_coord = cross_stripe.get_ll_x();
-        gap_distance = std::max(full_overlap_coord - pg_blockage_rect.get_ur_x(), 0);
-        full_overlap_valid = full_width_overlap && pg_blockage_rect.get_ur_x() <= full_overlap_coord && full_overlap_coord <= high_bound;
+        contact_coord = cross_stripe.get_ur_x();
+        gap_distance = std::max(rail_coord - cross_stripe.get_ur_x(), 0);
+        full_overlap_valid = full_width_overlap && routing_halo_rect.get_ur_x() <= full_overlap_coord && full_overlap_coord <= rail_coord;
+        contact_valid = routing_halo_rect.get_ur_x() <= contact_coord && contact_coord <= rail_coord;
       } else {
         full_overlap_coord = cross_stripe.get_ur_x();
-        gap_distance = std::max(pg_blockage_rect.get_ll_x() - full_overlap_coord, 0);
-        full_overlap_valid = full_width_overlap && low_bound <= full_overlap_coord && full_overlap_coord <= pg_blockage_rect.get_ll_x();
+        contact_coord = cross_stripe.get_ll_x();
+        gap_distance = std::max(cross_stripe.get_ll_x() - rail_coord, 0);
+        full_overlap_valid = full_width_overlap && rail_coord <= full_overlap_coord && full_overlap_coord <= routing_halo_rect.get_ll_x();
+        contact_valid = rail_coord <= contact_coord && contact_coord <= routing_halo_rect.get_ll_x();
       }
     }
 
+    // Repair only the small gaps that buildLayerConnect already treats as overlaps because it expands line endpoints by half the width.
+    contact_valid = contact_valid && 0 < gap_distance && gap_distance < half_width;
     if (full_overlap_valid) {
-      int32_t extension_distance = std::abs(full_overlap_coord - (high_side ? high_bound : low_bound));
+      int32_t extension_distance = std::abs(full_overlap_coord - rail_coord);
       if (gap_distance < closest_full_overlap_gap_distance
           || (gap_distance == closest_full_overlap_gap_distance && extension_distance < closest_full_overlap_extension_distance)) {
         closest_full_overlap_gap_distance = gap_distance;
@@ -641,8 +650,17 @@ int32_t PDNGenerator::getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, 
         closest_full_overlap_coord = full_overlap_coord;
       }
     }
+    if (contact_valid) {
+      int32_t extension_distance = std::abs(contact_coord - rail_coord);
+      if (gap_distance < closest_contact_gap_distance
+          || (gap_distance == closest_contact_gap_distance && extension_distance < closest_contact_extension_distance)) {
+        closest_contact_gap_distance = gap_distance;
+        closest_contact_extension_distance = extension_distance;
+        closest_contact_coord = contact_coord;
+      }
+    }
   }
-  return closest_full_overlap_coord;
+  return closest_full_overlap_coord != INT32_MAX ? closest_full_overlap_coord : closest_contact_coord;
 }
 
 void PDNGenerator::initPowerLayerPair(PGModel& pg_model)

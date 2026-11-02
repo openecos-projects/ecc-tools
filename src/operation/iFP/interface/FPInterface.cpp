@@ -437,9 +437,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.input_macro_path = macro_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, macro_file_path);
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
-  if (config.macro_placement_halo < 0.0) {
-    FPLOG.error(Loc::current(), "The macro placement halo must not be negative!");
-  }
 
   nlohmann::json& die_builder_json = config_json["die_builder"];
   config.die_mode = GetDieModeByName()(die_builder_json["mode"].get<std::string>());
@@ -1463,6 +1460,7 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
 {
   bool covered = false;
   for (PGSegment* line_segment : line_segment_list) {
+    int32_t half_width = line_segment->get_width() / 2;
     if (line_segment->is_vertical()) {
       if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x || line_segment->get_ur_y() < enclosure_ll_y
           || enclosure_ur_y < line_segment->get_ll_y()) {
@@ -1470,17 +1468,17 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
       }
       if (line_segment->get_start_y() <= line_segment->get_end_y()) {
         if (enclosure_ll_y < line_segment->get_ll_y()) {
-          line_segment->set_start_y(enclosure_ll_y);
+          line_segment->set_start_y(enclosure_ll_y + half_width);
         }
         if (line_segment->get_ur_y() < enclosure_ur_y) {
-          line_segment->set_end_y(enclosure_ur_y);
+          line_segment->set_end_y(enclosure_ur_y - half_width);
         }
       } else {
         if (enclosure_ll_y < line_segment->get_ll_y()) {
-          line_segment->set_end_y(enclosure_ll_y);
+          line_segment->set_end_y(enclosure_ll_y + half_width);
         }
         if (line_segment->get_ur_y() < enclosure_ur_y) {
-          line_segment->set_start_y(enclosure_ur_y);
+          line_segment->set_start_y(enclosure_ur_y - half_width);
         }
       }
       covered = (enclosure_ll_y >= line_segment->get_ll_y() && line_segment->get_ur_y() >= enclosure_ur_y) || covered;
@@ -1491,17 +1489,17 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
       }
       if (line_segment->get_start_x() <= line_segment->get_end_x()) {
         if (enclosure_ll_x < line_segment->get_ll_x()) {
-          line_segment->set_start_x(enclosure_ll_x);
+          line_segment->set_start_x(enclosure_ll_x + half_width);
         }
         if (line_segment->get_ur_x() < enclosure_ur_x) {
-          line_segment->set_end_x(enclosure_ur_x);
+          line_segment->set_end_x(enclosure_ur_x - half_width);
         }
       } else {
         if (enclosure_ll_x < line_segment->get_ll_x()) {
-          line_segment->set_end_x(enclosure_ll_x);
+          line_segment->set_end_x(enclosure_ll_x + half_width);
         }
         if (line_segment->get_ur_x() < enclosure_ur_x) {
-          line_segment->set_start_x(enclosure_ur_x);
+          line_segment->set_start_x(enclosure_ur_x - half_width);
         }
       }
       covered = (enclosure_ll_x >= line_segment->get_ll_x() && line_segment->get_ur_x() >= enclosure_ur_x) || covered;

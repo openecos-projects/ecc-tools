@@ -14,8 +14,6 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 
-#include <algorithm>
-
 #include "DataManager.hpp"
 #include "Logger.hpp"
 #include "PDNGenerator.hpp"
@@ -92,32 +90,6 @@ bool hasVia(std::string net, std::string bottom_layer, std::string top_layer, in
   for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
     if (segment.get_type() == PGSegmentType::kVia && segment.get_net_name() == net && segment.get_bottom_layer_name() == bottom_layer
         && segment.get_top_layer_name() == top_layer && segment.get_start_x() == x && segment.get_start_y() == y) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool hasVerticalSegmentSpanning(const std::string& layer, int32_t x, int32_t y1, int32_t y2)
-{
-  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
-    if (!segment.is_vertical() || segment.get_layer_name() != layer || segment.get_start_x() != x) {
-      continue;
-    }
-    if (std::max(segment.get_ll_y(), y1) < std::min(segment.get_ur_y(), y2)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-bool hasHorizontalSegmentSpanning(const std::string& layer, int32_t y, int32_t x1, int32_t x2)
-{
-  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
-    if (!segment.is_horizontal() || segment.get_layer_name() != layer || segment.get_start_y() != y) {
-      continue;
-    }
-    if (std::max(segment.get_ll_x(), x1) < std::min(segment.get_ur_x(), x2)) {
       return true;
     }
   }
@@ -225,27 +197,6 @@ bool testConnectionTypes(const std::string& directory)
          && check(hasVia("VDD_A", "M10", "M2", 500017, 600007), "Fixture must contain a macro-pin via");
 }
 
-bool testPGSegmentRect()
-{
-  PGSegment vertical;
-  vertical.set_type(PGSegmentType::kStripe);
-  vertical.set_start_coord(1000, 2000);
-  vertical.set_end_coord(1000, 5000);
-  vertical.set_width(200);
-  bool passed = check(vertical.get_ll_x() == 900 && vertical.get_ur_x() == 1100 && vertical.get_ll_y() == 2000 && vertical.get_ur_y() == 5000,
-                      "Vertical PGSegment rectangle is incorrect");
-
-  PGSegment horizontal;
-  horizontal.set_type(PGSegmentType::kStripe);
-  horizontal.set_start_coord(2000, 1000);
-  horizontal.set_end_coord(5000, 1000);
-  horizontal.set_width(200);
-  passed = check(horizontal.get_ll_x() == 2000 && horizontal.get_ur_x() == 5000 && horizontal.get_ll_y() == 900 && horizontal.get_ur_y() == 1100,
-                 "Horizontal PGSegment rectangle is incorrect")
-           && passed;
-  return passed;
-}
-
 bool testMissingConnections(const std::string& directory)
 {
   initFixture(directory);
@@ -270,105 +221,6 @@ bool testMissingConnections(const std::string& directory)
   return checkPowerFile(directory, {});
 }
 
-void initPlacementHaloFixture(const std::string& directory)
-{
-  FPDM.getConfig() = Config();
-  FPDM.getDatabase() = Database();
-  FPDM.getConfig().pg_temp_directory_path = directory + "/";
-  FPDM.getDatabase().set_micron_dbu(2000);
-  FPDM.getDatabase().get_core().set_rect(0, 0, 400000, 400000);
-
-  PGGlobalConnect power;
-  power.set_net_name("VDD");
-  power.set_pin_name("VDD");
-  power.set_net_type(PGNetType::kPower);
-  FPDM.getConfig().pg_connect_list.push_back(power);
-  PGGlobalConnect ground;
-  ground.set_net_name("VSS");
-  ground.set_pin_name("VSS");
-  ground.set_net_type(PGNetType::kGround);
-  FPDM.getConfig().pg_connect_list.push_back(ground);
-
-  addLayer("MET1", 1, Direction::kHorizontal);
-  addLayer("MET4", 4, Direction::kVertical);
-  addLayer("MET5", 5, Direction::kHorizontal);
-}
-
-void addPlacementHaloMacro(int32_t llx, int32_t lly, int32_t urx, int32_t ury, int32_t placement_halo, int32_t routing_halo)
-{
-  Instance macro;
-  macro.set_macro(true);
-  macro.set_placed(true);
-  macro.set_bounding_rect(llx, lly, urx, ury);
-  macro.get_placement_halo_rect().set_rect(llx - placement_halo, lly - placement_halo, urx + placement_halo, ury + placement_halo);
-  macro.get_routing_halo_rect().set_rect(llx - routing_halo, lly - routing_halo, urx + routing_halo, ury + routing_halo);
-  InstancePinShape pin;
-  pin.set_pin_name("DUMMY");
-  pin.set_layer_name("MET4");
-  pin.set_rect(llx, lly, urx, ury);
-  macro.get_pin_shape_list().push_back(pin);
-  FPDM.getDatabase().get_instance_list().push_back(macro);
-}
-
-bool testStripePlacementHalo(const std::string& directory)
-{
-  PGStripe met4_stripe;
-  met4_stripe.set_layer_name("MET4");
-  met4_stripe.set_width_micron(0.5);
-  met4_stripe.set_pitch_micron(500.0);
-  met4_stripe.set_offset_micron(74.75);
-
-  initPlacementHaloFixture(directory);
-  addPlacementHaloMacro(100000, 100000, 200000, 200000, 5000, 1000);
-  addPlacementHaloMacro(100000, 210000, 200000, 310000, 5000, 1000);
-  FPDM.getConfig().pg_stripe_list.push_back(met4_stripe);
-  FPPG.generate();
-
-  bool passed = true;
-  passed = check(!hasVerticalSegmentSpanning("MET4", 150000, 100000, 310000),
-                 "MET4 stripe must not survive inside the placement halo corridor") && passed;
-  passed = check(hasVerticalSegmentSpanning("MET4", 150000, 0, 100000), "MET4 stripe below macro A must remain") && passed;
-  passed = check(hasVerticalSegmentSpanning("MET4", 150000, 310000, 400000), "MET4 stripe above macro B must remain") && passed;
-
-  initPlacementHaloFixture(directory);
-  addPlacementHaloMacro(100000, 100000, 200000, 200000, 5000, 1000);
-  addPlacementHaloMacro(100000, 230000, 200000, 330000, 5000, 1000);
-  FPDM.getConfig().pg_stripe_list.push_back(met4_stripe);
-  FPPG.generate();
-  passed = check(hasVerticalSegmentSpanning("MET4", 150000, 205000, 225000),
-                 "MET4 stripe must remain in the gap outside both placement halos") && passed;
-
-  initPlacementHaloFixture(directory);
-  addPlacementHaloMacro(100000, 100000, 200000, 200000, 5000, 1000);
-  PGStripe met5_stripe;
-  met5_stripe.set_layer_name("MET5");
-  met5_stripe.set_width_micron(0.5);
-  met5_stripe.set_pitch_micron(500.0);
-  met5_stripe.set_offset_micron(74.75);
-  FPDM.getConfig().pg_stripe_list.push_back(met5_stripe);
-  FPPG.generate();
-  passed = check(hasHorizontalSegmentSpanning("MET5", 150000, 0, 400000), "MET5 stripe must pass over the macro") && passed;
-  return passed;
-}
-
-bool testActualViaOverlap(const std::string& directory)
-{
-  initPlacementHaloFixture(directory);
-  addLine("VDD", "MET4", PGSegmentType::kStripe, 150000, 819500, 150000, 900000, 1000);
-  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 819000, 400000, 819000, 1000);
-  addConnect("MET4", "MET5");
-  FPPG.generate();
-  bool passed = check(!hasVia("VDD", "MET4", "MET5", 150000, 819000), "Zero-overlap via must not be generated");
-
-  initPlacementHaloFixture(directory);
-  addLine("VDD", "MET4", PGSegmentType::kStripe, 150000, 818500, 150000, 900000, 1000);
-  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 819000, 400000, 819000, 1000);
-  addConnect("MET4", "MET5");
-  FPPG.generate();
-  passed = check(hasVia("VDD", "MET4", "MET5", 150000, 819000), "Positive-overlap via must be generated") && passed;
-  return passed;
-}
-
 }  // namespace ifp
 
 int main(int argc, char* argv[])
@@ -380,12 +232,9 @@ int main(int argc, char* argv[])
   ifp::DataManager::initInst();
   ifp::PDNGenerator::initInst();
   FPUTIL.createDir(directory);
-  bool passed = ifp::testPGSegmentRect();
-  passed = ifp::testGeneratedStripes(directory) && passed;
+  bool passed = ifp::testGeneratedStripes(directory);
   passed = ifp::testConnectionTypes(directory) && passed;
   passed = ifp::testMissingConnections(directory) && passed;
-  passed = ifp::testStripePlacementHalo(directory) && passed;
-  passed = ifp::testActualViaOverlap(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
   ifp::Utility::destroyInst();

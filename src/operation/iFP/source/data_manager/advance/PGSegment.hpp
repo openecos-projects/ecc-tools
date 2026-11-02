@@ -79,10 +79,10 @@ class PGSegment
   bool is_line() const { return _type == PGSegmentType::kFollowPin || _type == PGSegmentType::kStripe; }
   bool is_horizontal() const { return is_line() && _start_y == _end_y; }
   bool is_vertical() const { return is_line() && _start_x == _end_x; }
-  int32_t get_ll_x() const { return _start_x == _end_x ? _start_x - _width / 2 : std::min(_start_x, _end_x); }
-  int32_t get_ur_x() const { return _start_x == _end_x ? _start_x + _width / 2 : std::max(_start_x, _end_x); }
-  int32_t get_ll_y() const { return _start_y == _end_y ? _start_y - _width / 2 : std::min(_start_y, _end_y); }
-  int32_t get_ur_y() const { return _start_y == _end_y ? _start_y + _width / 2 : std::max(_start_y, _end_y); }
+  int32_t get_ll_x() const { return std::min(_start_x, _end_x) - _width / 2; }
+  int32_t get_ll_y() const { return std::min(_start_y, _end_y) - _width / 2; }
+  int32_t get_ur_x() const { return std::max(_start_x, _end_x) + _width / 2; }
+  int32_t get_ur_y() const { return std::max(_start_y, _end_y) + _width / 2; }
 
  private:
   std::string _net_name;
