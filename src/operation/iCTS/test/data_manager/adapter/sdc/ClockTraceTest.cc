@@ -21,7 +21,6 @@
  * @brief Native ownership tests for explicit SDC clock propagation evidence.
  */
 
-#include <gtest/gtest.h>
 #include <stdint.h>
 
 #include <cstddef>
@@ -40,6 +39,7 @@
 #include "LibParserCpp.hh"
 #include "SDCClockReader.hh"
 #include "TimingConstraints.hh"
+#include "gtest/gtest.h"
 #include "liberty/Lib.hh"
 
 namespace idb {

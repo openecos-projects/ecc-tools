@@ -21,8 +21,6 @@
  * @brief Unit tests for Design-owned CTS clock DAG path-depth semantics
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <map>
@@ -44,6 +42,7 @@
 #include "data_manager/design/Pin.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "data_manager/spatial/Point.hh"
+#include "gtest/gtest.h"
 #include "module/evaluation/qor/QOREvaluation.hh"
 #include "module/synthesis/realization/ClockTreeRealization.hh"
 #include "stage/StageSummary.hh"

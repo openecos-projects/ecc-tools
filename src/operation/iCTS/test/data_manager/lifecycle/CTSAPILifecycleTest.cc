@@ -21,7 +21,6 @@
  * @brief Public CTS destruction lifecycle and session-ownership tests.
  */
 
-#include <gtest/gtest.h>
 #include <stdint.h>
 
 #include <algorithm>
@@ -67,6 +66,7 @@
 #include "dm_config.h"
 #include "evaluation/Evaluation.hh"
 #include "evaluation/qor/ClockQORMetricCollector.hh"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "instantiation/Instantiation.hh"
 #include "module/synthesis/Synthesis.hh"

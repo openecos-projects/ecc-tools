@@ -21,8 +21,6 @@
  * @brief Frontier helper tests for characterization composition states.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <string>
 #include <vector>
@@ -30,6 +28,7 @@
 #include "characterization/Characterization.hh"
 #include "data_manager/characterization/PatternId.hh"
 #include "data_manager/characterization/SegmentChar.hh"
+#include "gtest/gtest.h"
 #include "module/characterization/fixture/CharacterizationUnitCaseData.hh"
 
 namespace icts_test {

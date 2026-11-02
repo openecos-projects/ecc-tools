@@ -27,8 +27,6 @@
  * variables it defines, referenced later by commands iCTS does not read.
  */
 
-#include <gtest/gtest.h>
-
 #include <cstdio>
 #include <fstream>
 #include <string>
@@ -36,6 +34,7 @@
 
 #include "SDCClockReader.hh"
 #include "TimingConstraints.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

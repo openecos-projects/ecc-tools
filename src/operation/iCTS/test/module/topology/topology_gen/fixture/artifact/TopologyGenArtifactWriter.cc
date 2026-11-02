@@ -20,8 +20,6 @@
  * @date 2026-04-11
  * @brief Artifact emission for topology generation tests.
  */
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -31,6 +29,7 @@
 
 #include "Logger.hh"
 #include "Point.hh"
+#include "gtest/gtest.h"
 #include "module/topology/fixture/analysis/TopologyAnalysis.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"

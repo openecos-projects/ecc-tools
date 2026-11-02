@@ -21,8 +21,6 @@
  * @brief The clock writeback must not edit placement attributes the input DEF already decided.
  */
 
-#include <gtest/gtest.h>
-
 #include <cstdint>
 #include <initializer_list>
 #include <string>
@@ -42,6 +40,7 @@
 #include "data_manager/design/Design.hh"
 #include "data_manager/design/Inst.hh"
 #include "data_manager/io/Wrapper.hh"
+#include "gtest/gtest.h"
 
 namespace idb {
 class IdbNet;

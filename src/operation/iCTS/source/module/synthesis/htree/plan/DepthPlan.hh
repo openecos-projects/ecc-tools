@@ -52,6 +52,9 @@ struct DepthSummary
   bool selected = false;
   bool used_explicit_target_depth = false;
   std::string failure_reason;
+  SinkLoadRegionViolation failure_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::size_t coverage_rejected_count = 0U;
   std::size_t htree_load_group_count = 0U;
   double htree_load_cap_min_pf = 0.0;
   double htree_load_cap_max_pf = 0.0;
