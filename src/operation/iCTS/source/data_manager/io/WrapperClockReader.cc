@@ -41,7 +41,7 @@
 #include "LibParserCpp.hh"
 #include "Logger.hh"
 #include "Wrapper.hh"
-#include "adapter/sdc/SDCClockReader.hh"
+#include "adapter/sdc/ClockTrace.hh"
 #include "builder.h"
 #include "def_service.h"
 #include "design/Clock.hh"

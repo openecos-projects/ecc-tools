@@ -15,33 +15,29 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @file ClockTraceResolver.hh
- * @author Dawn Li (dawnli619215645@gmail.com)
- * @date 2026-05-15
- * @brief Resolves SDC clock roots into CTS synthesis target nets.
+ * @file ConstraintBudgets.hh
+ * @brief Consume already-bound constraint values as CTS synthesis budgets.
  */
-
 #pragma once
 
-#include <cstddef>
-
-#include "SDCClockReader.hh"
-
-namespace icts {
-struct SdcClockData;
-}
-
-namespace idb {
-class IdbDesign;
-}  // namespace idb
+#include <string>
+#include <vector>
 
 namespace icts {
+class Config;
+struct SdcElectricalLimit;
 
-class ClockTraceResolver
+struct ConstraintBudget
 {
- public:
-  static auto resolve(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup, std::size_t max_fanout)
-      -> ClockTraceBuild;
+  std::string rule;
+  double value = 0.0;
+  bool from_sdc = false;
+  bool configured = false;
+  bool rejected = false;
 };
+
+// Only native design-scoped facts can replace a single global budget. Local
+// facts remain in the owned snapshot and are never widened to the whole design.
+auto ApplyConstraintBudgets(const std::vector<SdcElectricalLimit>& limits, Config& config) -> std::vector<ConstraintBudget>;
 
 }  // namespace icts

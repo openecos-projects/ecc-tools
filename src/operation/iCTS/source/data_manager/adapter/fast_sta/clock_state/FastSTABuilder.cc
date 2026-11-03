@@ -80,6 +80,9 @@ auto applyEnvironment(const FastStaEnvironment& environment, FastStaContext& con
   context.routing_layer = environment.routing_layer;
   context.wire_width_um = environment.wire_width_um;
   context.root_input_slew_ns = std::max(0.0, environment.root_input_slew_ns);
+  context.sdc_max_cap_pf = environment.sdc_max_cap_pf.has_value() && *environment.sdc_max_cap_pf > 0.0 ? environment.sdc_max_cap_pf : std::nullopt;
+  context.sdc_max_transition_ns
+      = environment.sdc_max_transition_ns.has_value() && *environment.sdc_max_transition_ns > 0.0 ? environment.sdc_max_transition_ns : std::nullopt;
   context.worker_count = std::max<std::size_t>(1U, environment.worker_count);
 }
 
@@ -154,29 +157,49 @@ auto collectPropagationBufferModelsAndNetLimits(const FastStaEnvironment& enviro
         node.logic_function = (liberty_cell.timing_arc.negative_unate ? "!" : "") + liberty_cell.input_port;
       }
     }
-  }
-  for (auto& net : context.nets) {
-    if (environment.max_cap_pf.has_value() && *environment.max_cap_pf > 0.0) {
-      net.max_cap_pf = *environment.max_cap_pf;
-      net.cap_limit_from_master = false;
-      continue;
+    if (context.sdc_max_transition_ns.has_value()) {
+      const auto master_limit = node.kind == FastStaNodeKind::kBufferInput ? liberty_cell.input_slew_limit_ns : liberty_cell.output_slew_limit_ns;
+      node.slew_limit_from_master = master_limit > 0.0 && master_limit < *context.sdc_max_transition_ns;
+      node.max_slew_ns = node.slew_limit_from_master ? master_limit : *context.sdc_max_transition_ns;
     }
+  }
+  // Each net's capacitance limit comes from its driver's Liberty rule. A design-wide
+  // limit then either replaces it (the configured value keeps its historical authority)
+  // or tightens it (an SDC rule may only restrict what the cell already allows).
+  const auto sdc_cap_limit = context.sdc_max_cap_pf.has_value() && *context.sdc_max_cap_pf > 0.0 ? *context.sdc_max_cap_pf : 0.0;
+  const auto configured_cap_limit = environment.max_cap_pf.has_value() && *environment.max_cap_pf > 0.0 ? *environment.max_cap_pf : 0.0;
+  for (auto& net : context.nets) {
+    // The driver's own rule, without any configured or SDC override.
+    std::optional<double> liberty_limit;
     const auto source_clock = std::ranges::find_if(clocks, [&](const Clock* clock) -> bool {
       const auto* source_net = clock->get_clock_source_net();
       return source_net != nullptr && net.name == source_net->get_name();
     });
     if (source_clock != clocks.end()) {
-      const auto source_cap_limit_pf
-          = wrapper.queryClockSourceDriveCapLimit({.clock_source = (*source_clock)->get_clock_source(), .configured_max_cap_pf = environment.max_cap_pf});
-      net.max_cap_pf = source_cap_limit_pf.value_or(0.0);
+      liberty_limit = wrapper.queryLibertyClockSourceDriveCapLimit((*source_clock)->get_clock_source());
+    } else if (net.driver_node_id != kInvalidFastStaNodeId) {
+      const auto& driver = context.nodes.at(net.driver_node_id);
+      if (const auto iter = context.liberty_cell_by_master.find(driver.cell_master); iter != context.liberty_cell_by_master.end()) {
+        liberty_limit = iter->second.output_cap_limit_pf;
+      }
+    }
+    if (liberty_limit.has_value() && !(*liberty_limit > 0.0)) {
+      liberty_limit.reset();
+    }
+
+    if (sdc_cap_limit > 0.0) {
+      const bool cell_is_tighter = liberty_limit.has_value() && *liberty_limit < sdc_cap_limit;
+      net.max_cap_pf = cell_is_tighter ? *liberty_limit : sdc_cap_limit;
+      net.cap_limit_from_master = cell_is_tighter;
       continue;
     }
-    if (net.driver_node_id == kInvalidFastStaNodeId) {
+    if (configured_cap_limit > 0.0) {
+      net.max_cap_pf = configured_cap_limit;
+      net.cap_limit_from_master = false;
       continue;
     }
-    const auto& driver = context.nodes.at(net.driver_node_id);
-    if (const auto iter = context.liberty_cell_by_master.find(driver.cell_master); iter != context.liberty_cell_by_master.end()) {
-      net.max_cap_pf = iter->second.output_cap_limit_pf;
+    if (liberty_limit.has_value()) {
+      net.max_cap_pf = *liberty_limit;
       net.cap_limit_from_master = true;
     }
   }
@@ -197,7 +220,8 @@ auto collectSinkPinCaps(const FastStaEnvironment& environment, const Clock& cloc
     }
     auto& node = context.nodes.at(node_iter->second);
     const auto input_cap_pf = wrapper.queryPinCapacitance(pin);
-    const auto max_slew_ns = wrapper.queryPinSlewLimit({.pin = pin, .configured_max_sink_tran_ns = environment.max_sink_tran_ns});
+    const auto max_slew_ns = wrapper.queryPinSlewLimit(
+        {.pin = pin, .configured_max_sink_tran_ns = environment.max_sink_tran_ns, .sdc_max_transition_ns = environment.sdc_max_transition_ns});
     if (!input_cap_pf.has_value()) {
       failure_reason = "sink_pin_capacitance_unavailable:";
       failure_reason += Design::getPinFullName(pin);
