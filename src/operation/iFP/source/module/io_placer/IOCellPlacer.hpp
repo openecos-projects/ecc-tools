@@ -35,7 +35,6 @@ struct IOSideCapacity
   int32_t package_span = 0;
   int32_t group_count = 0;
   int32_t power_length = 0;
-  int32_t clearance = 0;
   int32_t signal_length = 0;
   int32_t free_length = 0;
   int32_t deficit = 0;
@@ -96,12 +95,14 @@ class IOCellPlacer
     int32_t line_length = 0;
     int32_t package_span = 0;
     int32_t group_count = 0;
-    int32_t clearance = 0;
     int32_t dbu_spacing = 0;
     std::vector<const IOCellPowerMember*> package;
-    std::vector<int32_t> filler_widths;
     std::vector<int32_t> anchors;
-    std::vector<Segment> free_segments;
+    // Signals stay contiguous in netlist order; one entry per signal.  Power
+    // packages separate chunks whose accumulated length would exceed the
+    // target spacing, and the free tail is filled afterwards.
+    std::vector<int32_t> signal_offsets;
+    std::vector<Segment> filler_segments;
     std::string error;
   };
 
@@ -109,17 +110,19 @@ class IOCellPlacer
   static bool isSignalMaster(const IOCellDefinition& definition, const std::string& master);
   bool loadDefinition(IOCellDefinition& definition);
   bool validateDefinition(const IOCellDefinition& definition);
+  bool prepareDefinition();
+  std::string resolvePowerNetName(const IOCellPowerMember& member);
+  std::set<std::string> powerGroundIOPinNames() const;
+  void warnUnusedPowerPads(const IOCellDefinition& definition) const;
   bool placeAuto(const IOCellDefinition& definition);
   bool placeFromFile(const IOCellDefinition& definition);
   bool placeCorners(const IOCellDefinition& definition);
   bool placeSide(IOEdgeType edge, const IOCellDefinition& definition, const std::vector<int32_t>& signal_indices);
   std::array<std::vector<int32_t>, 4> buildSignalSideIndices(const IOCellDefinition& definition) const;
-  bool buildSideLayout(IOEdgeType edge, const IOCellDefinition& definition, SideLayout& layout) const;
-  bool packSignalsDryRun(IOEdgeType edge, const std::vector<int32_t>& signal_indices, const SideLayout& layout, int32_t& deficit) const;
-  bool canFillGap(int32_t gap, const std::vector<int32_t>& filler_widths) const;
-  int32_t requiredLineLength(int32_t signal_length, int32_t package_span, int32_t spacing, int32_t clearance, int32_t filler_gcd) const;
+  bool buildSideLayout(IOEdgeType edge, const IOCellDefinition& definition, const std::vector<int32_t>& signal_indices,
+                       SideLayout& layout) const;
+  std::vector<int32_t> signalSpans(const std::vector<int32_t>& signal_indices, IOEdgeType edge) const;
   int32_t fillerWidth(const IOCellFillerMaster& filler) const;
-  int32_t fillerGcd(const IOCellDefinition& definition) const;
   bool normalizePowerInstanceNames(const IOCellDefinition& definition);
   bool bindIOPins(const IOCellDefinition& definition);
   bool updateIOPinPorts();
@@ -143,6 +146,11 @@ class IOCellPlacer
   std::vector<int32_t> _power_instance_indices;
   std::set<std::string> _used_instance_names;
   int32_t _next_power_temp_id = 0;
+  // The definition file is parsed once per placer; checkCapacity() may run
+  // several resize attempts against the same technology data.
+  IOCellDefinition _definition;
+  bool _definition_ready = false;
+  std::map<std::string, std::string> _power_net_cache;
   // Keep the instance and its terminal together; a net may also connect internal macros.
   struct PortBinding
   {

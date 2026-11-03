@@ -198,7 +198,6 @@ void DataManager::printConfig()
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "io_cell_mode: ", GetPlacementModeName()(_config.io_cell_mode),
              ", placement_file: ", _config.io_cell_file, ", definition_file: ", _config.io_cell_definition_file,
              ", power_spacing: ", _config.io_cell_power_spacing_micron,
-             ", corner_clearance: ", _config.io_cell_corner_clearance_micron,
              ", auto_resize: ", _config.io_cell_auto_resize ? "true" : "false");
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "pg_connect_list");

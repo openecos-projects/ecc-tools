@@ -22,11 +22,12 @@
 #include "NetPin.hpp"
 #include "RoutingLayer.hpp"
 
+#include <memory>
 #include <unordered_map>
 
 namespace ifp {
 
-struct IOCapacityReport;
+class IOCellPlacer;
 
 #define FPIP (ifp::IOPlacer::getInst())
 
@@ -39,17 +40,16 @@ class IOPlacer
   // function
   void place();
   void placeAuto();
-  bool ensureIOCapacity();
+  bool planDieForIO();
 
  private:
-  bool growDieForIoCapacity(const IOCapacityReport& report, double initial_die_width_micron, double initial_die_height_micron);
   // self
   static IOPlacer* _ip_instance;
 
   IOPlacer() = default;
   IOPlacer(const IOPlacer& other) = delete;
   IOPlacer(IOPlacer&& other) = delete;
-  ~IOPlacer() = default;
+  ~IOPlacer();
   IOPlacer& operator=(const IOPlacer& other) = delete;
   IOPlacer& operator=(IOPlacer&& other) = delete;
   // function
@@ -64,16 +64,15 @@ class IOPlacer
   int32_t getTrackPitch(std::string layer_name);
   int32_t getTrackOffset(std::string layer_name);
   int32_t calculatePinDepth(IOEdgeType edge_type, int32_t width, const std::string& pin_layer_name, const std::string& access_layer_name);
-  void placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num, std::string layer_name,
-                         int32_t width, const std::string& access_layer_name, int32_t access_pitch, int32_t track_offset, int32_t track_pitch);
-  int32_t getAlongCoord(int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span, int32_t access_pitch, int32_t side_pin_num,
-                        int32_t pin_idx, int32_t track_offset, int32_t track_pitch);
   void addIOPinPort(IOPin& io_pin, IOEdgeType edge_type, int32_t x, int32_t y, int32_t width, int32_t depth, std::string layer_name);
   void syncPinLocation(IOPin& io_pin, IOPort& io_port, int32_t x, int32_t y);
   void buildNetIOPinIndex();
   void updateNetIOPin(IOPin& io_pin);
 
   std::unordered_map<std::string, std::vector<NetPin*>> _io_pin_to_net_pin_map;
+  // Shared across the capacity checks and the final placement so the IO cell
+  // definition is parsed once per run.
+  std::unique_ptr<IOCellPlacer> _io_cell_placer;
 };
 
 }  // namespace ifp

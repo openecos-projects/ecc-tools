@@ -95,7 +95,6 @@ class Config
   std::string io_cell_file;                                // io_cell.file_path
   std::string io_cell_definition_file;                     // io_cell.definition_file_path
   double io_cell_power_spacing_micron = 1000.0;            // io_cell.power.target_group_spacing
-  double io_cell_corner_clearance_micron = 260.0;          // io_cell.power.corner_clearance_micron
   bool io_cell_auto_resize = true;                         // io_cell.auto_resize.enable
   std::vector<PGGlobalConnect> pg_connect_list;            // optional
   std::string core_power_net;

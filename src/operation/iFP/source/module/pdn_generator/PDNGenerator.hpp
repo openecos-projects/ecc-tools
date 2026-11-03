@@ -62,6 +62,7 @@ class PDNGenerator
 
   void buildRail(PGModel& pg_model);
   void mergeRailSegmentList();
+  void mergeIoWireSegmentList();
   RoutingLayer* findRoutingLayer(std::string layer_name);
   void addLineSegment(std::string net_name, std::string layer_name, PGSegmentType segment_type, int32_t width, int32_t start_x, int32_t start_y, int32_t end_x,
                       int32_t end_y);
@@ -85,11 +86,13 @@ class PDNGenerator
 
   void buildIOCoreConnect(PGModel& pg_model);
   void buildMacroConnect(PGModel& pg_model);
+  void pruneDeadEndStripes();
   void trimStripeEnds();
 
   std::vector<Instance*> _placed_macro_list;
   std::unordered_map<const Instance*, int32_t> _macro_top_layer_order;
   int32_t _rejected_via_count = 0;
+  std::map<std::pair<std::string, std::string>, int32_t> _grown_via_counts;
 };
 
 }  // namespace ifp
