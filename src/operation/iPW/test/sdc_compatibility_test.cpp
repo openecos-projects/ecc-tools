@@ -95,9 +95,12 @@ void testGeneratedDefaultSdc()
     );
     require(constraint.get_port_constraint_map().size() == (virtual_clock ? 3 : 2), "unexpected port constraint");
     require(constraint.get_port_constraint_map().contains("clk") == virtual_clock, "data-input collection changed");
+    if (virtual_clock)
+      require(clock.get_transition_map().empty(), "virtual clock acquired a transition waveform");
     for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin}) {
       for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
-        require(clock.get_transition_map()[analysis_type][trans_type] == 0.15, "clock transition changed");
+        if (!virtual_clock)
+          require(clock.get_transition_map().at(analysis_type).at(trans_type) == 0.15, "clock transition changed");
         require(
             constraint.get_port_constraint_map()["in"].get_input_transition(analysis_type, trans_type) == 0.20,
             "input transition changed"
