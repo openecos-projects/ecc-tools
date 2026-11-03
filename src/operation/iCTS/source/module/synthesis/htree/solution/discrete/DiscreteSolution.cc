@@ -29,21 +29,17 @@
 #include <utility>
 #include <vector>
 
-#include "BufferingPattern.hh"
 #include "HTreeTopologyChar.hh"
-#include "HTreeTopologyPattern.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
-#include "PatternId.hh"
-#include "SegmentChar.hh"
 #include "characterization/Characterization.hh"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/compensation/RootDriverCompensation.hh"
+#include "synthesis/htree/constraint/Constraint.hh"
 #include "synthesis/htree/diagnostic/HTreeDiagnostic.hh"
 #include "synthesis/htree/plan/DepthPlan.hh"
 #include "synthesis/htree/region/SinkLoadRegion.hh"
 #include "synthesis/htree/segment_pruning/SegmentFrontierCatalog.hh"
-#include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
 #include "synthesis/htree/segment_pruning/SegmentPruning.hh"
 #include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 #include "synthesis/htree/synthesis_state/SynthesisState.hh"
@@ -71,11 +67,11 @@ auto EmitDepthCandidateSummary(const HTree::LogContext& context, const std::vect
                     ToLogTableCell(summary.split_local_depth), ToLogTableCell(summary.split_triggered_by_fanout),
                     ToLogTableCell(summary.split_triggered_by_capacitance), ToLogTableCell(summary.used_boundary_relaxation),
                     ToLogTableCell(summary.selected_delay_ns), ToLogTableCell(summary.selected_power_w),
-                    summary.failure_reason.empty() ? "n/a" : summary.failure_reason});
+                    summary.failure_reason.empty() ? "n/a" : summary.failure_reason, ToLogTableCell(summary.coverage_rejected_count)});
   }
   EmitLogTable(Loc::current(), "HTree Depth Candidate Summary",
                {"Depth", "Leaves", "Status", "Explicit", "Candidates", "Candidate Front", "Feasible", "Feasible Front", "Final Front", "Split Groups",
-                "Extra Buffers", "Local Depth", "Fanout Trigger", "Cap Trigger", "Relaxed", "Delay (ns)", "Power (W)", "Failure"},
+                "Extra Buffers", "Local Depth", "Fanout Trigger", "Cap Trigger", "Relaxed", "Delay (ns)", "Power (W)", "Failure", "Coverage Rejects"},
                rows);
   EmitLogTable(Loc::current(), "HTree Candidate Scope", {"Property", "Value"},
                {{"Clock", context.clock_name}, {"Net", context.clock_net_name}, {"Sink Domain", context.sink_domain}, {"Stage", context.stage}});
@@ -168,15 +164,44 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
   if (!selected_ref.has_value() || selected_ref->entry == nullptr) {
     HTreeSelectionBuild selection_build;
     selection_build.engine = htree::HTreeSelectionEngine::kDiscrete;
-    if (!selected_feasible_ref.has_value() && !config.allow_boundary_relaxation) {
-      selection_build.failure_reason = "no_strict_boundary_feasible_solution_any_depth";
-    } else if (!covered_global_candidate_pool.summary.first_failure_reason.empty()) {
+    // Keep a causal depth failure instead of replacing it with a generic boundary miss.
+    for (const auto& evaluation : exploration.output.candidate_evaluations) {
+      if (evaluation.failure_reason.empty()) {
+        continue;
+      }
+      const bool recoverable_capacitance = evaluation.recovery_failure != htree::SinkLoadRegionRecoveryFailure::kSingleLoadCapacitance
+                                           && (evaluation.failure_violation == htree::SinkLoadRegionViolation::kCapacitance
+                                               || evaluation.failure_violation == htree::SinkLoadRegionViolation::kBoundaryLoadCoverage);
+      if (selection_build.failure_reason.empty() || recoverable_capacitance) {
+        selection_build.failure_reason = evaluation.failure_reason;
+        selection_build.failure_violation = evaluation.failure_violation;
+        selection_build.recovery_failure = evaluation.recovery_failure;
+      }
+      if (selection_build.hasRecoverableCapacitanceFailure()) {
+        break;
+      }
+    }
+    if (selection_build.failure_reason.empty() && !covered_global_feasible_pool.summary.first_failure_reason.empty()) {
+      selection_build.failure_reason = covered_global_feasible_pool.summary.first_failure_reason;
+      selection_build.failure_violation = covered_global_feasible_pool.summary.first_violation;
+      selection_build.recovery_failure = covered_global_feasible_pool.summary.first_recovery_failure;
+    }
+    if (selection_build.failure_reason.empty() && !covered_global_candidate_pool.summary.first_failure_reason.empty()) {
       selection_build.failure_reason = covered_global_candidate_pool.summary.first_failure_reason;
-    } else {
-      selection_build.failure_reason = exploration.output.global_candidate_pool.empty() ? "no_legal_depth_candidates" : "missing_best_char";
+      selection_build.failure_violation = covered_global_candidate_pool.summary.first_violation;
+      selection_build.recovery_failure = covered_global_candidate_pool.summary.first_recovery_failure;
+    }
+    if (selection_build.failure_reason.empty()) {
+      if (!selected_feasible_ref.has_value() && !config.allow_boundary_relaxation) {
+        selection_build.failure_reason = "no_strict_boundary_feasible_solution_any_depth";
+      } else if (exploration.output.global_candidate_pool.empty()) {
+        selection_build.failure_reason = "no_legal_depth_candidates";
+      } else {
+        selection_build.failure_reason = "missing_best_char";
+      }
     }
     EmitDepthCandidateSummary(state.input->log_context, exploration.summary.depth_summaries);
-    CTSLOG.warn(Loc::current(), "HTree: failed to select a strict-feasible H-tree characterization entry across depth candidates.");
+    CTSLOG.warn(Loc::current(), "HTree: failed to select a feasible characterization entry across depth candidates: ", selection_build.failure_reason);
     return selection_build;
   }
 
@@ -200,6 +225,8 @@ auto SelectDiscreteHTreeSolution(HTreeSynthesisState& state) -> HTreeSelectionBu
     return HTreeSelectionBuild{
         .selected = false,
         .failure_reason = "sink_load_region_legality_missing",
+        .failure_violation = selected_sink_load_region_legality.violation,
+        .recovery_failure = selected_sink_load_region_legality.recovery_failure,
         .engine = htree::HTreeSelectionEngine::kDiscrete,
         .selected_solution = {},
     };

@@ -21,12 +21,13 @@
  * @brief Unit coverage for HTree degenerate cases.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "BufferingPattern.hh"
@@ -39,17 +40,23 @@
 #include "Point.hh"
 #include "SegmentChar.hh"
 #include "Tree.hh"
+#include "ValueLattice.hh"
+#include "characterization/Characterization.hh"
 #include "data_manager/DataManager.hh"
+#include "gtest/gtest.h"
 #include "module/synthesis/htree/HTree.hh"
 #include "module/synthesis/htree/HTreeBuildObservation.hh"
 #include "module/synthesis/htree/constraint/Constraint.hh"
 #include "module/synthesis/htree/diagnostic/HTreeDiagnostic.hh"
 #include "module/synthesis/htree/plan/DepthPlan.hh"
 #include "module/synthesis/htree/plan/Plan.hh"
+#include "module/synthesis/htree/region/SinkLoadRegion.hh"
 #include "module/synthesis/htree/segment_pruning/SegmentPruning.hh"
+#include "module/synthesis/htree/solution/finalization/SolutionFinalizer.hh"
 #include "module/synthesis/htree/topology_pruning/TopologyPruning.hh"
 #include "synthesis/htree/segment_pruning/SegmentFrontierCatalog.hh"
 #include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
+#include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 #include "synthesis/topology/trunk/SourceTrunkLabelSolver.hh"
 
 namespace icts_test {
@@ -160,6 +167,152 @@ auto MakeRuntimeHTreeInput(icts::Net& root_net) -> icts::HTree::Input
   input.characterization_input.wrapper = &CTSDM.getWrapper();
   input.characterization_input.fast_sta = &CTSDM.getFastSTA();
   return input;
+}
+
+struct CachedCoverageFixture
+{
+  CachedCoverageFixture() : segment_patterns(CTSDM.getWrapper())
+  {
+    segment_patterns.add(icts::BufferingPattern(1U, icts::PatternId::segment(0U), {}, {}, false));
+    AddSingleLevelTopologyPattern(topology_patterns, icts::PatternId::segment(0U));
+    topology.set_root(topology.create_node());
+    icts::htree::SinkLoadRegionLegalitySummary legality;
+    legality.legal = true;
+    legality.violation = icts::htree::SinkLoadRegionViolation::kNone;
+    legality.required_leaf_load_cap_pf = 0.145;
+    legality.required_leaf_load_cap_covering_idx = 15U;
+    legality_context.cap_lattice = icts::UniformValueLattice::buildFromMax(0.15, 15U);
+    legality_context.result_by_signature.emplace(icts::htree::SinkLoadRegionLegalitySignature{}, std::move(legality));
+  }
+
+  static auto makeEntry(unsigned cap_index) -> icts::HTreeTopologyChar
+  {
+    return icts::HTreeTopologyChar(icts::CharCore(1U, 1U, 1U, cap_index, 1.0, 1.0, icts::PatternId::topology(0U), 0.0), 1U);
+  }
+
+  icts::htree::BufferPatternLibrary segment_patterns;
+  icts::htree::TopologyPatternLibrary topology_patterns;
+  icts::htree::SinkLoadRegionLegalityContext legality_context;
+  icts::Tree topology;
+};
+
+TEST(HTreeTest, CoverageFiltersKeepTheUpperCapBinAndTypedRejection)
+{
+  CachedCoverageFixture fixture;
+  const std::vector<icts::HTreeTopologyChar> entries{CachedCoverageFixture::makeEntry(14U), CachedCoverageFixture::makeEntry(15U)};
+  const auto filtered
+      = icts::htree::FilterSinkLoadRegionLegalEntries(entries, fixture.topology, fixture.topology_patterns, fixture.segment_patterns, fixture.legality_context);
+  ASSERT_EQ(filtered.output.entries.size(), 1U);
+  EXPECT_EQ(filtered.output.entries.front().get_leaf_load_cap_idx(), 15U);
+  EXPECT_EQ(filtered.summary.coverage_rejected_count, 1U);
+  EXPECT_EQ(filtered.summary.first_violation, icts::htree::SinkLoadRegionViolation::kBoundaryLoadCoverage);
+  EXPECT_EQ(filtered.summary.first_recovery_failure, icts::htree::SinkLoadRegionRecoveryFailure::kNone);
+
+  std::vector<icts::htree::CandidateBuildEvaluation> evaluations(1U);
+  evaluations.front().topology_pattern_library = fixture.topology_patterns;
+  const std::vector<icts::htree::CandidateCharRef> refs{
+      {.candidate_index = 0U, .entry = &entries.front()},
+      {.candidate_index = 0U, .entry = &entries.back()},
+  };
+  const auto global
+      = icts::htree::FilterGlobalEntriesBySinkLoadRegionCoverage(refs, evaluations, fixture.topology, fixture.segment_patterns, fixture.legality_context);
+  ASSERT_EQ(global.output.entries.size(), 1U);
+  EXPECT_EQ(global.output.entries.front().entry->get_leaf_load_cap_idx(), 15U);
+  EXPECT_EQ(global.summary.first_violation, icts::htree::SinkLoadRegionViolation::kBoundaryLoadCoverage);
+}
+
+TEST(HTreeTest, CandidateReductionUpdatesFeasibilityAfterCoverage)
+{
+  CachedCoverageFixture fixture;
+  icts::htree::DepthCandidateBuild candidate;
+  candidate.leaf_count = 1U;
+  auto& evaluation = candidate.evaluation;
+  evaluation.success = true;
+  evaluation.best_char = CachedCoverageFixture::makeEntry(14U);
+  evaluation.feasible_frontier_entries.push_back(*evaluation.best_char);
+  evaluation.feasible_solution_count = 1U;
+  evaluation.topology_pattern_library = fixture.topology_patterns;
+  icts::htree::ReduceCandidateBuildEvaluationForGlobalSelection(evaluation, fixture.topology, fixture.segment_patterns, fixture.legality_context, false);
+  EXPECT_FALSE(evaluation.success);
+  EXPECT_FALSE(evaluation.best_char.has_value());
+  EXPECT_EQ(evaluation.feasible_solution_count, 0U);
+  EXPECT_EQ(evaluation.coverage_rejected_count, 1U);
+  EXPECT_EQ(evaluation.failure_violation, icts::htree::SinkLoadRegionViolation::kBoundaryLoadCoverage);
+  EXPECT_NE(evaluation.failure_reason.find("required_leaf_load_cap_idx=15"), std::string::npos);
+  std::vector<icts::htree::DepthSummary> summaries;
+  icts::htree::RecordTopologyDepthCandidateBuild(1U, false, candidate, summaries);
+  ASSERT_EQ(summaries.size(), 1U);
+  EXPECT_FALSE(summaries.front().success);
+  EXPECT_EQ(summaries.front().coverage_rejected_count, 1U);
+  EXPECT_EQ(summaries.front().feasible_frontier_entry_count, 0U);
+  EXPECT_EQ(summaries.front().failure_violation, icts::htree::SinkLoadRegionViolation::kBoundaryLoadCoverage);
+}
+
+TEST(HTreeTest, CandidateReductionRetainsCoveredUpperCapBin)
+{
+  CachedCoverageFixture fixture;
+  icts::htree::CandidateBuildEvaluation evaluation;
+  evaluation.success = true;
+  evaluation.best_char = CachedCoverageFixture::makeEntry(14U);
+  evaluation.feasible_frontier_entries = {*evaluation.best_char, CachedCoverageFixture::makeEntry(15U)};
+  evaluation.topology_pattern_library = fixture.topology_patterns;
+  icts::htree::ReduceCandidateBuildEvaluationForGlobalSelection(evaluation, fixture.topology, fixture.segment_patterns, fixture.legality_context, false);
+  ASSERT_TRUE(evaluation.success);
+  ASSERT_TRUE(evaluation.best_char.has_value());
+  EXPECT_EQ(evaluation.best_char->get_leaf_load_cap_idx(), 15U);
+  EXPECT_EQ(evaluation.feasible_solution_count, 1U);
+  EXPECT_EQ(evaluation.coverage_rejected_count, 1U);
+  EXPECT_EQ(evaluation.failure_violation, icts::htree::SinkLoadRegionViolation::kNone);
+}
+
+TEST(HTreeTest, IntrinsicPinFailureSurvivesCoverageReduction)
+{
+  CachedCoverageFixture fixture;
+  auto& legality = fixture.legality_context.result_by_signature.begin()->second;
+  legality.legal = false;
+  legality.violation = icts::htree::SinkLoadRegionViolation::kCapacitance;
+  legality.recovery_failure = icts::htree::SinkLoadRegionRecoveryFailure::kSingleLoadCapacitance;
+  legality.failure_reason = "single_load_cap_violation";
+  icts::htree::CandidateBuildEvaluation evaluation;
+  evaluation.best_char = CachedCoverageFixture::makeEntry(15U);
+  evaluation.feasible_frontier_entries.push_back(*evaluation.best_char);
+  evaluation.topology_pattern_library = fixture.topology_patterns;
+  icts::htree::ReduceCandidateBuildEvaluationForGlobalSelection(evaluation, fixture.topology, fixture.segment_patterns, fixture.legality_context, false);
+  EXPECT_FALSE(evaluation.success);
+  EXPECT_EQ(evaluation.failure_reason, legality.failure_reason);
+  EXPECT_EQ(evaluation.failure_violation, icts::htree::SinkLoadRegionViolation::kCapacitance);
+  EXPECT_EQ(evaluation.recovery_failure, icts::htree::SinkLoadRegionRecoveryFailure::kSingleLoadCapacitance);
+}
+
+TEST(HTreeTest, CapacitanceDeepeningUsesTypedCause)
+{
+  icts::htree::HTreeSelectionBuild failure;
+  failure.failure_reason = "no_strict_boundary_feasible_solution_any_depth";
+  failure.failure_violation = icts::htree::SinkLoadRegionViolation::kCapacitance;
+  EXPECT_TRUE(failure.hasRecoverableCapacitanceFailure());
+  failure.recovery_failure = icts::htree::SinkLoadRegionRecoveryFailure::kSingleLoadCapacitance;
+  EXPECT_FALSE(failure.hasRecoverableCapacitanceFailure());
+  failure.recovery_failure = icts::htree::SinkLoadRegionRecoveryFailure::kNone;
+  failure.failure_violation = icts::htree::SinkLoadRegionViolation::kBoundaryLoadCoverage;
+  EXPECT_TRUE(failure.hasRecoverableCapacitanceFailure());
+  failure.failure_reason = "cap_violation";
+  failure.failure_violation = icts::htree::SinkLoadRegionViolation::kRoutingFailed;
+  EXPECT_FALSE(failure.hasRecoverableCapacitanceFailure());
+  failure.failure_violation = icts::htree::SinkLoadRegionViolation::kPinCapUnavailable;
+  EXPECT_FALSE(failure.hasRecoverableCapacitanceFailure());
+  failure.failure_violation = icts::htree::SinkLoadRegionViolation::kCapacitance;
+  failure.selected = true;
+  EXPECT_FALSE(failure.hasRecoverableCapacitanceFailure());
+}
+
+TEST(HTreeTest, MaximumCapBinRemainsSampled)
+{
+  const auto lattice = icts::UniformValueLattice::buildFromMax(0.15, 15U);
+  const auto samples = lattice.sampleValues();
+  ASSERT_EQ(samples.size(), 15U);
+  EXPECT_DOUBLE_EQ(samples.back(), 0.15);
+  EXPECT_EQ(lattice.coveringIndex(samples.back()), 15U);
+  EXPECT_TRUE(lattice.tryObservedIndex(samples.back()).has_value());
 }
 
 TEST(HTreeTest, SegmentPatternCombinerInternsRepeatedStructuralPair)

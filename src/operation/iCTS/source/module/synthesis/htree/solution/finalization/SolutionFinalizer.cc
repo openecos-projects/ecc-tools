@@ -23,9 +23,9 @@
 
 #include "synthesis/htree/solution/finalization/SolutionFinalizer.hh"
 
+#include <cstddef>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "HTreeTopologyChar.hh"

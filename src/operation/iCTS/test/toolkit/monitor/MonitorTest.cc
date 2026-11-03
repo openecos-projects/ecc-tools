@@ -21,14 +21,13 @@
  * @brief Tests for the iCTS runtime Monitor contract.
  */
 
-#include <gtest/gtest.h>
-
 #include <chrono>
 #include <regex>
 #include <string>
 #include <thread>
 
 #include "Monitor.hh"
+#include "gtest/gtest.h"
 
 namespace icts {
 namespace {

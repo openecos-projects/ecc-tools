@@ -1,6 +1,7 @@
 find_package(ZLIB REQUIRED)
 
 add_library(geometry_data
+    ClockTreeSnapshot.cpp
     GeometrySpatialIndex.cpp
     GeometryStore.cpp
     GeometryTilePyramid.cpp

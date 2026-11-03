@@ -21,8 +21,6 @@
  * @brief Incremental timing equivalence, batch rollback and scaling regressions.
  */
 
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -38,6 +36,7 @@
 #include "FastSTATiming.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "fixture/FastSTATestModel.hh"
+#include "gtest/gtest.h"
 #include "liberty/FastSTALibertyModel.hh"
 
 namespace icts_test {

@@ -29,14 +29,6 @@
 
 namespace icts {
 
-struct SdcUnits
-{
-  double time_unit_ns = 1.0;
-  double capacitance_unit_pf = 1.0;
-
-  auto operator==(const SdcUnits&) const -> bool = default;
-};
-
 enum class SdcObjectKind
 {
   kPort,

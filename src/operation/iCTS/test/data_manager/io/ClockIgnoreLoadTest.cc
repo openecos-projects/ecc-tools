@@ -21,8 +21,6 @@
  * @brief Top-level IO pins on a clock net are ignore loads: read, clone, and writeback coverage.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +43,7 @@
 #include "data_manager/design/Net.hh"
 #include "data_manager/design/Pin.hh"
 #include "data_manager/io/Wrapper.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

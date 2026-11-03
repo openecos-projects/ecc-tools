@@ -44,7 +44,9 @@ bool saveNetList(const std::filesystem::path& netlist_path, std::set<std::string
 bool saveGDSII(const std::filesystem::path& gds_name, const std::filesystem::path& layer_map_path);
 bool saveJson(const std::filesystem::path& path);
 bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_drc = false,
-                          const std::optional<std::filesystem::path>& thumbnail_path = std::nullopt);
+                          const std::optional<std::filesystem::path>& thumbnail_path = std::nullopt,
+                          const std::optional<std::string>& clock_tree_stage = std::nullopt,
+                          const pybind11::object& clock_tree_graph = pybind11::none());
 std::size_t canonicalizeNetNames();
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
                    const std::string& source = "", const std::string& placement_status = "fixed", bool create_if_missing = true);

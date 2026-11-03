@@ -76,4 +76,74 @@ pybind11::dict CtsTimingFeature()
   return result;
 }
 
+pybind11::dict CtsClockGraph()
+{
+  namespace py = pybind11;
+
+  const auto graph = icts::CTSAPI::outputClockGraph();
+  py::dict result;
+  result["timing_source"] = graph.timing_source;
+  result["arrival_reference"] = graph.arrival_reference;
+  py::list clocks;
+  for (const auto& network : graph.clocks) {
+    py::dict clock;
+    clock["name"] = network.name;
+    clock["net_name"] = network.net_name;
+    clock["timing_available"] = network.timing_available;
+    clock["diagnostic"] = network.diagnostic;
+    py::list roots;
+    for (const auto root : network.roots) {
+      roots.append(root);
+    }
+    clock["roots"] = std::move(roots);
+    py::list nodes;
+    for (const auto& node : network.nodes) {
+      py::dict item;
+      item["id"] = node.id;
+      item["name"] = node.name;
+      item["instance_name"] = node.instance_name;
+      item["pin_name"] = node.pin_name;
+      item["master"] = node.master;
+      item["kind"] = node.kind;
+      item["cell_role"] = node.cell_role;
+      item["x_dbu"] = node.x_dbu;
+      item["y_dbu"] = node.y_dbu;
+      item["position_valid"] = node.position_valid;
+      item["sink"] = node.sink;
+      item["inactive"] = node.inactive;
+      item["arrival_ns"] = node.arrival_valid ? py::cast(node.arrival_ns) : py::none();
+      item["slew_ns"] = node.slew_valid ? py::cast(node.slew_ns) : py::none();
+      py::list states;
+      for (const auto& state : node.timing_states) {
+        py::dict timing;
+        timing["analysis"] = state.analysis;
+        timing["source_edge"] = state.source_edge;
+        timing["local_edge"] = state.local_edge;
+        timing["predecessor"] = state.predecessor;
+        timing["arrival_ns"] = state.arrival_valid ? py::cast(state.arrival_ns) : py::none();
+        timing["slew_ns"] = state.slew_valid ? py::cast(state.slew_ns) : py::none();
+        states.append(std::move(timing));
+      }
+      item["timing_states"] = std::move(states);
+      nodes.append(std::move(item));
+    }
+    clock["nodes"] = std::move(nodes);
+    py::list edges;
+    for (const auto& edge : network.edges) {
+      py::dict item;
+      item["from"] = edge.from;
+      item["to"] = edge.to;
+      item["cell_arc"] = edge.cell_arc;
+      item["negative_unate"] = edge.negative_unate;
+      item["net_name"] = edge.net_name;
+      item["cell_master"] = edge.cell_master;
+      edges.append(std::move(item));
+    }
+    clock["edges"] = std::move(edges);
+    clocks.append(std::move(clock));
+  }
+  result["clocks"] = std::move(clocks);
+  return result;
+}
+
 }  // namespace python_interface

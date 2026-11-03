@@ -21,8 +21,6 @@
  * @brief Real Liberty context transactions, topology splice and reset regressions.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
@@ -50,6 +48,7 @@
 #include "design/Net.hh"
 #include "design/Pin.hh"
 #include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"

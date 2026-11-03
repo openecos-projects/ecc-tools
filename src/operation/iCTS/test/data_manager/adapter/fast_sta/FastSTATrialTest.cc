@@ -21,8 +21,6 @@
  * @brief Clock trial electrical/power equivalence and exact snapshot restoration.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -53,6 +51,7 @@
 #include "design/Net.hh"
 #include "design/Pin.hh"
 #include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"
