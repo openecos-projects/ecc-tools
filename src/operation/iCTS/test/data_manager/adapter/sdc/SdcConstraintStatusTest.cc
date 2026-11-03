@@ -33,6 +33,8 @@
 #include <vector>
 
 #include "SDCClockReader.hh"
+#include "iSTA/source/data_manager/DataManager.hpp"
+#include "iSTA/source/toolkit/logger/Logger.hpp"
 #include "TimingConstraints.hh"
 #include "gtest/gtest.h"
 
@@ -59,6 +61,25 @@ class SdcConstraintStatusFixtureInterface : public ::testing::Test
     return data;
   }
 };
+
+TEST_F(SdcConstraintStatusFixtureInterface, ExistingStaSessionIsPreserved)
+{
+  ista::Logger::initInst();
+  ista::DataManager::initInst();
+  struct Cleanup
+  {
+    ~Cleanup() { ista::DataManager::destroyInst(); ista::Logger::destroyInst(); }
+  } cleanup;
+  auto& database = ista::DataManager::getInst().getDatabase();
+  database.network().setName("active_sta_design");
+  database.sdc().get_clock_map()["active_clock"].set_period(7.0);
+  const auto data = readSdc("busy_sta", "create_clock -name unrelated -period 10\n");
+  ASSERT_FALSE(data.ok()) << "CTS declaration read must reject an already-owned STA database";
+  EXPECT_EQ(ista::DataManager::getInst().getDatabase().network().name(), "active_sta_design");
+  const auto& clocks = ista::DataManager::getInst().getDatabase().sdc().get_clock_map();
+  ASSERT_EQ(clocks.size(), 1U);
+  EXPECT_DOUBLE_EQ(clocks.at("active_clock").get_period(), 7.0);
+}
 
 TEST_F(SdcConstraintStatusFixtureInterface, UnrecognizedCommandWithUnresolvedArgumentKeepsStatusOk)
 {

@@ -86,6 +86,8 @@ void checkMode(
     bool pin_propagation = false
 )
 {
+  // Synthetic libraries must start a new BDD generation, as wrapTimingLibrary does.
+  LogicExpression::invalidateThreadBddCache();
   DataManager::initInst();
   DelayCalculator::initInst();
   Database& database = PWDM.getDatabase();
@@ -164,7 +166,23 @@ void checkMode(
   }
   PWI.wrapPowerIndex();
   GraphBuilder::initInst();
-  PWGB.build();
+  // Match runPW's cache-init/build order twice, after SDC was already applied.
+  for (int rebuild = 0; rebuild < 2; ++rebuild) {
+    PWDC.init();
+    PWGB.build();
+    require(database.get_timing_constraint().get_port_constraint_map().at("external").get_load(AnalysisType::kMax, TransType::kRise) == .07,
+            "graph rebuild discarded set_load");
+    if (clock_mode) {
+      auto& constraints = database.get_timing_constraint();
+      require(constraints.get_clock_map().at("package_clock").get_is_propagated() == !pin_propagation,
+              "graph rebuild changed clock-scoped propagation");
+      if (pin_propagation)
+        require(constraints.clockPinConstraints().at("external").at("").propagated.value_or(false),
+                "graph rebuild discarded port-scoped propagation");
+      require(constraints.get_clock_map().at("forwarded").get_is_propagated(),
+              "graph rebuild discarded generated-clock propagation");
+    }
+  }
   GraphBuilder::destroyInst();
   require(database.get_pin_map().size() == 10, "graph duplicated physical pins");
   require(database.get_graph_vertex_list().size() == 12, "INOUT must have two independent vertices");
@@ -232,7 +250,8 @@ void checkMode(
     uint32_t pad_idx = static_cast<uint32_t>(pad.get_index());
     require(
         database.get_workspace().driver_activity_map.contains(pad_idx) == (output_enable != 0),
-        "disabled output acquired external activity"
+        "driver activity disagrees with output enable=" + std::to_string(output_enable)
+            + ", constant_data=" + std::to_string(constant_data) + ", with_vcd=" + std::to_string(with_vcd)
     );
     uint32_t external_idx = static_cast<uint32_t>(database.get_pin_map().at("external").get_index());
     PowerActivity& external_activity = database.get_workspace().driver_activity_map.at(external_idx);
@@ -286,14 +305,17 @@ void checkDriverLoad()
   resistor.set_resistance(100.0);
   parasitic.get_resistor_list().push_back(resistor);
   GraphBuilder::initInst();
-  PWGB.build();
-  GraphBuilder::destroyInst();
-  for (bool reverse : {false, true, false}) {
-    std::string driver = reverse ? "buffer:contact" : "external";
-    double load = PWDC.getPowerOutputLoad(driver, AnalysisType::kMax, TransType::kRise);
-    double expected = reverse ? 0.10 : 0.06;
-    require(std::abs(load - expected) < 1E-9, "RC load includes driver capacitance or reused another driver's root");
+  for (int rebuild = 0; rebuild < 2; ++rebuild) {
+    PWDC.init();
+    PWGB.build();
+    for (bool reverse : {false, true, false}) {
+      std::string driver = reverse ? "buffer:contact" : "external";
+      double load = PWDC.getPowerOutputLoad(driver, AnalysisType::kMax, TransType::kRise);
+      double expected = reverse ? 0.10 : 0.06;
+      require(std::abs(load - expected) < 1E-9, "RC load includes driver capacitance, lost set_load, or reused another driver's root");
+    }
   }
+  GraphBuilder::destroyInst();
   PWDC.destroy();
   DelayCalculator::destroyInst();
   DataManager::destroyInst();
@@ -301,6 +323,8 @@ void checkDriverLoad()
 
 void checkClockToQ()
 {
+  // Synthetic libraries must start a new BDD generation, as wrapTimingLibrary does.
+  LogicExpression::invalidateThreadBddCache();
   DataManager::initInst();
   DelayCalculator::initInst();
   Database& database = PWDM.getDatabase();

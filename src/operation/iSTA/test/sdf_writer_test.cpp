@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <sstream>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
 #include "SdfValueExtractor.hpp"
+#include "DelayCalculator.hpp"
 #include "SdfWriter.hpp"
 #include "graph/TimingStateQuery.hpp"
 
@@ -151,6 +153,61 @@ static void cellArcAndCheckValues()
     require(out.str().find(expected) != std::string::npos, expected);
 }
 
+// A condition that was not traversed must retain its own delay identity.
+static void conditionalArcValues()
+{
+  using namespace ista;
+  Database db;
+  Config config;
+  auto& family = db.liberty().get_cell_map()["gate"].get_cell_arc_list().emplace_back();
+  family.set_source_port("A");
+  family.set_sink_port("Y");
+  for (int index : {0, 1}) {
+    auto& variant = family.get_timing_arc_list().emplace_back();
+    variant.set_arc_idx(index);
+    variant.set_sense(TimingArcSense::kPositive);
+    variant.set_sdf_cond(index ? "S == 1'b1" : "S == 1'b0");
+    for (auto edge : {TransType::kRise, TransType::kFall}) {
+      auto& table = variant.get_delay_table_map()[edge];
+      table.set_variable_type1(TimingTableVariableType::kInputTransition);
+      table.set_axis_list({{0., 1.}});
+      table.set_value_list({10. * index, 10. * index + 1.});
+    }
+  }
+  auto& arc = db.graph().arcs().emplace_back();
+  arc.set_type(ArcType::kCell);
+  arc.set_source_pin("u:A");
+  arc.set_sink_pin("u:Y");
+  arc.setLibertyArcId(LibertyArcId{"gate", 0});
+  auto& point = db.graph().points()["u:A"];
+  for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
+    for (auto edge : {TransType::kRise, TransType::kFall}) {
+      arc.get_timing_arc_delay_map()[0][mode][edge][edge] = .25;
+      arc.get_graph_delay_map()[mode][edge][edge] = .25;
+      auto& wave = point.get_clock_state("M").waveforms[edge];
+      wave.physical_slew_map[mode][edge] = mode == AnalysisType::kMin ? .2 : .6;
+      wave.slew_map[mode][edge] = .01; // Published ideal slew is not the physical waveform.
+    }
+  }
+  const auto aggregate = arc.get_graph_delay_map();
+  DelayCalculator calculator(db, config);
+  calculator.completeCellArcDelays(db.graph());
+  auto records = SdfValueExtractor(db).graphCellArcDelays(arc);
+  auto& inactive = records.at({"S == 1'b1", TransType::kNone});
+  require(std::abs(inactive.get_rise_min_delay().value_or(-1.) - 10.2) < 1e-12,
+          "inactive conditional arc borrowed an active delay");
+  require(std::abs(inactive.get_fall_max_delay().value_or(-1.) - 10.6) < 1e-12,
+          "inactive conditional arc lost physical input slew");
+  require(arc.get_graph_delay_map() == aggregate, "export completion changed propagated delay");
+  const auto cached = arc.get_timing_arc_delay_map();
+  calculator.completeCellArcDelays(db.graph());
+  require(arc.get_timing_arc_delay_map() == cached, "repeated export changed completed delays");
+  arc.get_timing_arc_delay_map().erase(1);
+  records = SdfValueExtractor(db).graphCellArcDelays(arc);
+  require(records.size() == 1 && records.begin()->first.condition == "S == 1'b0",
+          "writer relabelled an aggregate as an unevaluated condition");
+}
+
 class FailingBuffer : public std::streambuf
 {
   std::size_t remaining = 32;
@@ -184,6 +241,7 @@ static void writeFailures()
 
 int main()
 {
+  conditionalArcValues();
   writeFailures();
   storedWireDelay();
   cellArcAndCheckValues();

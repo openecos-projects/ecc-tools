@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "ReadLiberty.hpp"
+#include "interconnect/PinCapacitanceCalculator.hpp"
+#include "interconnect/RcTreeAnalyzer.hpp"
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "ClockPropagator.hpp"
 #include "DataManager.hpp"
@@ -276,6 +278,16 @@ void checkDriverLoad()
   net.get_driver_pin_list() = {"external", "buffer:contact"};
   net.get_load_pin_list() = {"external", "buffer:contact"};
   command("set_load 0.07 [get_ports external]");
+  // The bidirectional cell still presents its input capacitance while driving.
+  // The external source also sees the port's explicit set_load capacitance.
+  require(std::abs(STADC.pinLoad("buffer:contact", AnalysisType::kMax, TransType::kRise) - 0.10) < 1e-12,
+          "unannotated inout driver lost its own input capacitance");
+  require(std::abs(STADC.pinLoad("external", AnalysisType::kMax, TransType::kRise) - 0.10) < 1e-12,
+          "input source omitted its port load");
+  command("set_load 0.02 [get_nets pad_net]");
+  require(std::abs(STADC.pinLoad("buffer:contact", AnalysisType::kMax, TransType::kRise) - 0.12) < 1e-12,
+          "net load override lost inout input capacitance");
+  database.sdc().get_net_load_map().clear();
   ParasiticNet& parasitic = database.parasitics().nets()["pad_net"];
   parasitic.set_net_name("pad_net");
   parasitic.get_node_map()["external"].set_capacitance(0.01);
@@ -285,6 +297,10 @@ void checkDriverLoad()
   resistor.set_sink_node("buffer:contact");
   resistor.set_resistance(100.0);
   parasitic.get_resistor_list().push_back(resistor);
+  require(std::abs(STADC.pinLoad("buffer:contact", AnalysisType::kMax, TransType::kRise) - 0.13) < 1e-12,
+          "SPEF inout driver lost its own input capacitance");
+  require(std::abs(STADC.pinLoad("external", AnalysisType::kMax, TransType::kRise) - 0.13) < 1e-12,
+          "SPEF input source must count port load exactly once");
   for (bool reverse : {false, true, false}) {
     Arc arc;
     arc.set_type(ArcType::kNet);
@@ -297,9 +313,73 @@ void checkDriverLoad()
     double expected = reverse ? 0.008 : 0.005 * std::log(2.0);
     require(std::abs(result->get_delay() - expected) < 1E-9, "RC response reused another driver's root");
   }
+  PinCapacitanceCalculator pin_caps(database);
+  RcTreeAnalyzer rc(database, pin_caps);
+  for (auto analysis : {AnalysisType::kMin, AnalysisType::kMax}) {
+    for (auto edge : {TransType::kRise, TransType::kFall}) {
+      const double cap = (analysis == AnalysisType::kMin ? 0.02 : 0.04) + (edge == TransType::kRise ? 0.0 : 0.01);
+      contact.get_trans_capacitance_map()[analysis][edge] = cap;
+      STADC.clear();
+      require(std::abs(STADC.pinLoad("buffer:contact", analysis, edge) - (0.10 + cap)) < 1e-12,
+              "inout load ignored min/max rise/fall pin capacitance");
+      std::vector<std::string> nodes;
+      std::vector<int32_t> parents;
+      std::vector<double> resistances, caps;
+      std::string root = "buffer:contact";
+      rc.buildTree(parasitic, root, analysis, edge, nodes, parents, resistances, caps);
+      require(nodes.size() == 2 && std::abs(caps[0] - (0.02 + cap)) < 1e-12 && std::abs(caps[1] - 0.08) < 1e-12,
+              "DMP/Arnoldi tree misplaced inout capacitance on the far end");
+      root = "external";
+      nodes.clear();
+      parents.clear();
+      resistances.clear();
+      caps.clear();
+      rc.buildTree(parasitic, root, analysis, edge, nodes, parents, resistances, caps);
+      require(nodes.size() == 2 && std::abs(caps[0] - 0.08) < 1e-12 && std::abs(caps[1] - (0.02 + cap)) < 1e-12,
+              "DMP/Arnoldi tree misplaced input port capacitance on the far end");
+    }
+  }
+  parasitic.get_node_map().erase("buffer:contact");
+  parasitic.get_resistor_list().clear();
+  STADC.clear();
+  require(std::abs(STADC.pinLoad("buffer:contact", AnalysisType::kMax, TransType::kFall) - 0.13) < 1e-12,
+          "partial SPEF fallback lost inout root capacitance");
   STADC.clear();
   DelayCalculator::destroyInst();
   DataManager::destroyInst();
+}
+
+void checkInputNetLoad()
+{
+  for (auto direction : {PinDirection::kInput, PinDirection::kInout}) {
+    DataManager::initInst();
+    DelayCalculator::initInst();
+    auto& database = STADM.getDatabase();
+    database.network().instances()["buffer"].set_cell_name("boundary");
+    database.liberty().get_cell_map()["boundary"].get_port_map()["contact"].set_capacitance(0.03);
+    addPin("external", direction, true);
+    addPin("buffer:contact", PinDirection::kInput, false);
+    addNet("pad_net", {"external", "buffer:contact"});
+    auto& net = database.network().nets().at("pad_net");
+    net.get_driver_pin_list() = {"external"};
+    net.get_load_pin_list() = {"buffer:contact"};
+    if (direction == PinDirection::kInout)
+      net.get_load_pin_list().push_back("external");
+    require(std::abs(STADC.pinLoad("external", AnalysisType::kMax, TransType::kRise) - 0.03) < 1e-12, "unconstrained port added capacitance");
+    command("set_load 0.07 [get_ports external]");
+    command("set_load -subtract_pin_load 0.2 [get_nets pad_net]");
+    for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
+      for (auto edge : {TransType::kRise, TransType::kFall})
+        require(std::abs(STADC.pinLoad("external", mode, edge) - 0.2) < 1e-12, "subtract_pin_load omitted or duplicated the driving port capacitance");
+    database.sdc().get_net_load_map().clear();
+    auto& parasitic = database.parasitics().nets()["pad_net"];
+    parasitic.set_net_name("pad_net");
+    parasitic.get_node_map()["buffer:contact"].set_capacitance(0.02);
+    STADC.clear();
+    require(std::abs(STADC.pinLoad("external", AnalysisType::kMax, TransType::kRise) - 0.12) < 1e-12, "partial SPEF omitted the input port's capacitance");
+    DelayCalculator::destroyInst();
+    DataManager::destroyInst();
+  }
 }
 
 void checkLiberty(const char* path)
@@ -368,6 +448,7 @@ int main(int argc, char** argv)
   }
   checkMode(0, true);
   checkDriverLoad();
+  checkInputNetLoad();
   checkClockToQ();
   checkMode(1, false, true);
   checkMode(0, false, false, true);
