@@ -278,21 +278,34 @@ auto applyBufferMasterChange(FastStaContext& context, FastStaNodeId node_id, std
   input_node.input_cap_pf = context.liberty_cell_by_master.at(target_master).input_cap_pf;
   input_node.input_cap_pf_by_timing = context.liberty_cell_by_master.at(target_master).input_cap_pf_by_timing;
   input_node.input_cap_profile_available = context.liberty_cell_by_master.at(target_master).input_cap_profile_available;
-  if (input_node.slew_limit_from_master) {
-    input_node.max_slew_ns = context.liberty_cell_by_master.at(target_master).input_slew_limit_ns;
-  }
+  const auto& target_cell = context.liberty_cell_by_master.at(target_master);
+  const auto update_slew = [&](FastStaNode& pin, double master_limit) -> void {
+    if (context.sdc_max_transition_ns.has_value()) {
+      pin.slew_limit_from_master = master_limit > 0.0 && master_limit < *context.sdc_max_transition_ns;
+      pin.max_slew_ns = pin.slew_limit_from_master ? master_limit : *context.sdc_max_transition_ns;
+    } else if (pin.slew_limit_from_master) {
+      pin.max_slew_ns = master_limit;
+    }
+  };
+  update_slew(input_node, target_cell.input_slew_limit_ns);
   output_node.cell_master = target_master;
   for (auto& arc : context.timing_arcs) {
     if (arc.from_node_id == input_node_id && arc.to_node_id == output_node_id) {
       arc.cell_master = target_master;
     }
   }
-  if (output_node.slew_limit_from_master) {
-    output_node.max_slew_ns = context.liberty_cell_by_master.at(target_master).output_slew_limit_ns;
-  }
+  update_slew(output_node, target_cell.output_slew_limit_ns);
   for (const auto net_id : output_node.output_net_ids) {
-    if (net_id < context.nets.size() && context.nets.at(net_id).cap_limit_from_master) {
-      context.nets.at(net_id).max_cap_pf = context.liberty_cell_by_master.at(target_master).output_cap_limit_pf;
+    if (net_id >= context.nets.size()) {
+      continue;
+    }
+    auto& net = context.nets.at(net_id);
+    const double master_limit_pf = target_cell.output_cap_limit_pf;
+    if (context.sdc_max_cap_pf.has_value()) {
+      net.cap_limit_from_master = master_limit_pf > 0.0 && master_limit_pf < *context.sdc_max_cap_pf;
+      net.max_cap_pf = net.cap_limit_from_master ? master_limit_pf : *context.sdc_max_cap_pf;
+    } else if (net.cap_limit_from_master) {
+      net.max_cap_pf = master_limit_pf;
     }
   }
   if (invalidate_context) {

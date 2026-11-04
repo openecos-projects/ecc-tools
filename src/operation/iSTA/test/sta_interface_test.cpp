@@ -173,13 +173,8 @@ int main()
   }
   // A partially read SDC must invalidate both the old model and its timing.
   std::ofstream(fixture.sdc_file) << "set_input_transition 0.2 [get_ports in]\nunknown_sdc_command\n";
-  bool init_failed = false;
-  try {
-    sta.initSTA({{"-temp_directory_path", fixture.directory.string()}, {"-thread_number", int32_t{1}}});
-  } catch (const std::runtime_error&) {
-    init_failed = true;
-  }
-  require(init_failed, "invalid SDC did not fail initialization");
+  const bool init_ok = sta.initSTA({{"-temp_directory_path", fixture.directory.string()}, {"-thread_number", int32_t{1}}});
+  require(!init_ok, "invalid SDC did not fail initialization");
   require(!sta.isInitialized() && !sta.isTimingReady(), "failed initialization retained an initialized or ready session");
   for (int operation : {0, 1, 2}) {
     bool rejected = false;

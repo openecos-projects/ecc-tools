@@ -15,10 +15,10 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @file SDCClockReader.hh
+ * @file ClockTrace.hh
  * @author Dawn Li (dawnli619215645@gmail.com)
  * @date 2026-05-15
- * @brief Shared SDC frontend adapter for iCTS.
+ * @brief CTS clock-ownership tracing over owned native STA constraints.
  */
 
 #pragma once
@@ -128,18 +128,11 @@ struct SdcClockTraceInput
   std::size_t max_fanout = 0U;
 };
 
-class SdcClockReader
+class ClockTraceResolver
 {
  public:
-  SdcClockReader();
-  explicit SdcClockReader(std::string sdc_path);
-
-  auto readClockData() const -> SdcClockData;
-  static auto traceClockTargets(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup,
-                                std::size_t max_fanout) -> ClockTraceBuild;
-
- private:
-  std::string _sdc_path;
+  static auto resolve(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup, std::size_t max_fanout)
+      -> ClockTraceBuild;
 };
 
 }  // namespace icts

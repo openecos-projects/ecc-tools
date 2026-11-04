@@ -139,7 +139,12 @@ void STAInterface::destroyInst()
   }
 }
 
-void STAInterface::initSTA(std::map<std::string, std::any> config_map)
+bool STAInterface::initSTA(std::map<std::string, std::any> config_map)
+{
+  return initialize(std::move(config_map), InputScope::kTiming);
+}
+
+bool STAInterface::initialize(std::map<std::string, std::any> config_map, InputScope scope)
 {
   for (const std::string key : {"-min_slew_degradation", "-adjust_driver_resistance"}) {
     if (config_map.contains(key)) {
@@ -170,7 +175,7 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   STALOG.info(Loc::current(), "Starting...");
 
   DataManager::initInst();
-  readDesign(config_map);
+  readDesign(config_map, scope);
   DelayCalculator::initInst();
   SdcCommand::initInst();
   sdc::registerSdcCommands(SdcCommand::getInst());
@@ -181,13 +186,33 @@ void STAInterface::initSTA(std::map<std::string, std::any> config_map)
   }
   // Simulation values are derived from constraints and are rebuilt by analysis.
   STADM.getDatabase().graph().simValues().clear();
-  readSdc(STADM.getDatabase().sdc());
+  if (!readSdc(STADM.getDatabase().sdc())) {
+    return false;
+  }
 
   _initialized = true;
   _model_ready = false;
   _timing_ready = false;
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  return true;
+}
+
+bool STAInterface::tryInitConstraints(std::map<std::string, std::any> config_map, std::string& diagnostic)
+{
+  diagnostic.clear();
+  try {
+    if (initialize(std::move(config_map), InputScope::kConstraints))
+      return true;
+    const auto& errors = SdcCommand::getInst().getErrors();
+    diagnostic = errors.empty() ? "native_sdc_load_failed" : "line " + std::to_string(errors.front().line_number) + ": " + errors.front().message;
+  } catch (const std::exception& error) {
+    _initialized = false;
+    _model_ready = false;
+    _timing_ready = false;
+    diagnostic = error.what();
+  }
+  return false;
 }
 
 void STAInterface::prepareTimingModel()
@@ -283,7 +308,8 @@ void STAInterface::destroySTA()
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
 
-  STADC.clear();
+  // Destruction also releases caches and is safe when init failed before the
+  // calculator was constructed; getInst().clear() would throw in that case.
   DelayCalculator::destroyInst();
   {
     Monitor monitor;
@@ -366,7 +392,7 @@ ClockTreeGraphData STAInterface::exportClockTreeGraph()
   return ista::exportClockTreeGraph(STADM.getDatabase());
 }
 
-void STAInterface::readDesign(std::map<std::string, std::any>& config_map)
+void STAInterface::readDesign(std::map<std::string, std::any>& config_map, InputScope scope)
 {
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
@@ -374,7 +400,8 @@ void STAInterface::readDesign(std::map<std::string, std::any>& config_map)
   STADM.getDatabase().sdc().set_sdc_file_path(dmInst->get_config().get_sdc_path());
   readNetwork(STADM.getDatabase().network());
   ReadLiberty(STADM.getDatabase().liberty(), STADM.getDatabase().network()).read();
-  ReadParasitics(STADM.getDatabase().parasitics()).read();
+  if (scope == InputScope::kTiming)
+    ReadParasitics(STADM.getDatabase().parasitics()).read();
   STADM.buildDesign();
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

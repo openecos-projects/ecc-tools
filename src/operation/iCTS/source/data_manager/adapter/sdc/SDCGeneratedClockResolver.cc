@@ -23,8 +23,6 @@
 
 #include "SDCGeneratedClockResolver.hh"
 
-#include <fnmatch.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -38,11 +36,6 @@
 namespace icts {
 namespace {
 
-auto objectPatternMatches(const std::string& pattern, const std::string& name) -> bool
-{
-  return pattern == name || fnmatch(pattern.c_str(), name.c_str(), 0) == 0;
-}
-
 auto sourceMatchesClock(const SdcClockDecl& generated, const SdcClockDecl& master) -> bool
 {
   if (!generated.master_clock_name.empty()) {
@@ -50,11 +43,10 @@ auto sourceMatchesClock(const SdcClockDecl& generated, const SdcClockDecl& maste
   }
   return std::ranges::any_of(generated.generated_sources, [&](const auto& source) -> bool {
     if (source.kind == SdcObjectKind::kClock) {
-      return objectPatternMatches(source.pattern, master.clock_name);
+      return source.name == master.clock_name;
     }
     return std::ranges::any_of(master.targets, [&](const auto& target) -> bool {
-      return (source.kind == target.kind || source.kind == SdcObjectKind::kUnknown || target.kind == SdcObjectKind::kUnknown)
-             && (source.pattern == target.pattern || objectPatternMatches(source.pattern, target.pattern));
+      return (source.kind == target.kind || source.kind == SdcObjectKind::kUnknown || target.kind == SdcObjectKind::kUnknown) && source.name == target.name;
     });
   });
 }
@@ -84,9 +76,10 @@ auto deriveWaveform(SdcClockDecl& generated, const SdcClockDecl& master) -> bool
     generated.period_ns = times[2] - times[0];
     generated.waveform_ns = {times[0], times[1]};
   } else {
-    const double scale = static_cast<double>(generated.divide_by) / static_cast<double>(generated.multiply_by);
+    const double scale = generated.divide_by / generated.multiply_by;
     generated.period_ns = master.period_ns * scale;
-    const bool divider = generated.divide_by_explicit && generated.divide_by > 1 && (generated.divide_by & (generated.divide_by - 1)) == 0;
+    const bool divider
+        = generated.divide_by_explicit && generated.divide_by > 1 && std::floor(std::log2(generated.divide_by)) == std::log2(generated.divide_by);
     if (divider) {
       generated.waveform_ns = {master.waveform_ns.front(), master.waveform_ns.front() + generated.period_ns / 2.0};
     } else if (generated.duty_cycle_percent) {

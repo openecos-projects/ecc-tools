@@ -211,7 +211,11 @@ void FastSTA::ContextStore::ClockTrialNodeSnapshot::swap(FastStaContext& context
 }
 
 FastSTA::ContextStore::ClockTrialNetSnapshot::ClockTrialNetSnapshot(FastStaNetId net_id, FastStaNet& net)
-    : id(net_id), drivers(std::move(net.driver_timing_by_state)), switching_power_w(net.switching_power_w), max_cap_pf(net.max_cap_pf)
+    : id(net_id),
+      drivers(std::move(net.driver_timing_by_state)),
+      switching_power_w(net.switching_power_w),
+      max_cap_pf(net.max_cap_pf),
+      cap_limit_from_master(net.cap_limit_from_master)
 {
 }
 
@@ -221,6 +225,7 @@ void FastSTA::ContextStore::ClockTrialNetSnapshot::swap(FastStaContext& context)
   std::swap(net.driver_timing_by_state, drivers);
   std::swap(net.switching_power_w, switching_power_w);
   std::swap(net.max_cap_pf, max_cap_pf);
+  std::swap(net.cap_limit_from_master, cap_limit_from_master);
 }
 
 FastSTA::ContextStore::TimingEditSnapshot::TimingEditSnapshot(FastStaContext& context, const std::vector<FastStaBufferMasterChange>& changes,

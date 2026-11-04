@@ -23,8 +23,6 @@
 
 #include "FastSTAConstraints.hh"
 
-#include <fnmatch.h>
-
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -64,15 +62,14 @@ auto validateConstraintObjects(const FastStaContext& context) -> std::optional<s
           found = FastStaConstraints::matches(context, object, kInvalidFastStaNodeId, context.clock_name);
         }
       } else if (object.kind == SdcObjectKind::kNet) {
-        found = std::ranges::any_of(
-            context.nets, [&](const auto& net) -> bool { return object.pattern == net.name || fnmatch(object.pattern.c_str(), net.name.c_str(), 0) == 0; });
+        found = std::ranges::any_of(context.nets, [&](const auto& net) -> bool { return object.name == net.name; });
       } else {
         for (FastStaNodeId node_id = 0U; node_id < context.nodes.size() && !found; ++node_id) {
           found = FastStaConstraints::matches(context, object, node_id);
         }
       }
       if (!found) {
-        failure = "sdc_object_unresolved:" + std::string(command) + ":" + std::string(field) + ":" + object.pattern;
+        failure = "sdc_object_unresolved:" + std::string(command) + ":" + std::string(field) + ":" + object.name;
         return;
       }
     }
@@ -122,7 +119,7 @@ auto resolveCaseValues(FastStaContext& context) -> std::optional<std::string>
     node.clock_inactive = false;
   }
   for (const auto& assignment : context.constraints.case_analyses) {
-    if (assignment.value != 0 && assignment.value != 1) {
+    if (assignment.value != SdcCaseValue::kZero && assignment.value != SdcCaseValue::kOne) {
       return "case_analysis_value_not_boolean";
     }
     for (const auto& object : assignment.objects) {
@@ -130,7 +127,7 @@ auto resolveCaseValues(FastStaContext& context) -> std::optional<std::string>
       for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
         if (FastStaConstraints::matches(context, object, node_id)) {
           auto& node = context.nodes.at(node_id);
-          const auto value = assignment.value != 0;
+          const auto value = assignment.value == SdcCaseValue::kOne;
           if (node.case_value.has_value() && *node.case_value != value) {
             return "conflicting_case_analysis:" + node.name;
           }
@@ -140,7 +137,7 @@ auto resolveCaseValues(FastStaContext& context) -> std::optional<std::string>
         }
       }
       if (!found) {
-        return "case_analysis_object_unresolved:" + object.pattern;
+        return "case_analysis_object_unresolved:" + object.name;
       }
     }
   }
@@ -227,10 +224,9 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     for (const auto& target : declaration.targets) {
       bool found = false;
       for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-        const auto net_driver_target
-            = target.kind != SdcObjectKind::kNet || std::ranges::any_of(context.nodes.at(node_id).output_net_ids, [&](const auto net_id) -> bool {
-                return target.pattern == context.nets.at(net_id).name || fnmatch(target.pattern.c_str(), context.nets.at(net_id).name.c_str(), 0) == 0;
-              });
+        const auto net_driver_target = target.kind != SdcObjectKind::kNet
+                                       || std::ranges::any_of(context.nodes.at(node_id).output_net_ids,
+                                                              [&](const auto net_id) -> bool { return target.name == context.nets.at(net_id).name; });
         if (!net_driver_target || !FastStaConstraints::matches(context, target, node_id)) {
           continue;
         }
@@ -243,7 +239,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
         }
         found = true;
       }
-      if (!found && !declaration.is_virtual && declaration.clock_name == context.clock_name && target.pattern == context.clock_net_name
+      if (!found && !declaration.is_virtual && declaration.clock_name == context.clock_name && target.name == context.clock_net_name
           && context.source_node_id < context.nodes.size()) {
         // A clock sizing context intentionally omits the data-path timing
         // graph. Preserve the already identified physical source when the
@@ -254,7 +250,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
         found = true;
       }
       if (!found && !declaration.is_virtual) {
-        return "clock_target_unresolved:" + declaration.clock_name + ":" + target.pattern;
+        return "clock_target_unresolved:" + declaration.clock_name + ":" + target.name;
       }
     }
   }
@@ -636,7 +632,7 @@ auto FastStaConstraints::transitionMatches(SdcTransition selection, FastStaTrans
 auto FastStaConstraints::matches(const FastStaContext& context, const SdcObjectRef& object, FastStaNodeId node_id, const std::string& clock_name) -> bool
 {
   if (object.kind == SdcObjectKind::kClock) {
-    return !clock_name.empty() && (object.pattern == clock_name || fnmatch(object.pattern.c_str(), clock_name.c_str(), 0) == 0);
+    return !clock_name.empty() && (object.name == clock_name);
   }
   if (node_id >= context.nodes.size()) {
     return false;
@@ -649,17 +645,13 @@ auto FastStaConstraints::matches(const FastStaContext& context, const SdcObjectR
     return false;
   }
   if (object.kind == SdcObjectKind::kNet) {
-    if (node.incoming_net_id < context.nets.size()
-        && (object.pattern == context.nets.at(node.incoming_net_id).name
-            || fnmatch(object.pattern.c_str(), context.nets.at(node.incoming_net_id).name.c_str(), 0) == 0)) {
+    if (node.incoming_net_id < context.nets.size() && (object.name == context.nets.at(node.incoming_net_id).name)) {
       return true;
     }
-    return std::ranges::any_of(node.output_net_ids, [&](auto net_id) -> bool {
-      return net_id < context.nets.size()
-             && (object.pattern == context.nets.at(net_id).name || fnmatch(object.pattern.c_str(), context.nets.at(net_id).name.c_str(), 0) == 0);
-    });
+    return std::ranges::any_of(node.output_net_ids,
+                               [&](auto net_id) -> bool { return net_id < context.nets.size() && (object.name == context.nets.at(net_id).name); });
   }
-  return node.name == object.pattern || fnmatch(object.pattern.c_str(), node.name.c_str(), 0) == 0;
+  return node.name == object.name;
 }
 
 auto FastStaConstraints::clock(const FastStaContext& context, const std::string& name) -> const SdcClockDecl*

@@ -22,6 +22,7 @@
  */
 
 #include <cstddef>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -35,8 +36,10 @@
 #include "FastSTAPower.hh"
 #include "FastSTATiming.hh"
 #include "clock_state/FastSTAClockState.hh"
+#include "clock_state/FastSTAGraphImport.hh"
 #include "fixture/FastSTATestModel.hh"
 #include "gtest/gtest.h"
+#include "io/Wrapper.hh"
 #include "liberty/FastSTALibertyModel.hh"
 
 namespace icts_test {
@@ -254,6 +257,62 @@ TEST(FastSTATest, BatchIncrementalAtScaleMatchesFullRecompute)
   ASSERT_TRUE(icts::FastStaTiming::update(baseline_context));
 
   EXPECT_TRUE(ScaleRoutesMatchFullReplay(baseline_context, MakeScaleChanges(node_count)));
+}
+
+TEST(FastSTATest, DesignElectricalLimitsSurviveMasterSwitchesInBothDirections)
+{
+  auto context = MakeTwoLevelContext();
+  context.sdc_max_transition_ns = 0.2;
+  context.sdc_max_cap_pf = 0.4;
+  auto& loose = context.liberty_cell_by_master.at("BUF_X1");
+  loose.input_slew_limit_ns = 0.3;
+  loose.output_slew_limit_ns = 0.5;
+  loose.output_cap_limit_pf = 0.8;
+  auto& tight = context.liberty_cell_by_master.at("BUF_X2");
+  tight.input_slew_limit_ns = 0.05;
+  tight.output_slew_limit_ns = 0.07;
+  tight.output_cap_limit_pf = 0.1;
+  for (const auto* master : {"BUF_X2", "BUF_X1", "BUF_X2"}) {
+    const bool tighter = std::string(master) == "BUF_X2";
+    ASSERT_TRUE(icts::FastStaIncremental::changeBufferMaster(context, 3U, master));
+    EXPECT_DOUBLE_EQ(context.nodes.at(3U).max_slew_ns, tighter ? 0.05 : 0.2);
+    EXPECT_DOUBLE_EQ(context.nodes.at(4U).max_slew_ns, tighter ? 0.07 : 0.2);
+    EXPECT_DOUBLE_EQ(context.nets.at(2U).max_cap_pf, tighter ? 0.1 : 0.4);
+    EXPECT_EQ(context.nodes.at(3U).slew_limit_from_master, tighter);
+    EXPECT_EQ(context.nets.at(2U).cap_limit_from_master, tighter);
+  }
+  auto clone = context;
+  ASSERT_TRUE(icts::FastStaIncremental::changeBufferMaster(clone, 3U, "BUF_X1"));
+  EXPECT_DOUBLE_EQ(clone.nodes.at(3U).max_slew_ns, 0.2);
+  EXPECT_DOUBLE_EQ(context.nodes.at(3U).max_slew_ns, 0.05);
+  EXPECT_DOUBLE_EQ(clone.nets.at(2U).max_cap_pf, 0.4);
+  EXPECT_DOUBLE_EQ(context.nets.at(2U).max_cap_pf, 0.1);
+}
+
+TEST(FastSTATest, NativeDesignLimitsAlsoBoundImportedLogicPinsAndNets)
+{
+  auto context = MakeTwoLevelContext();
+  context.sdc_max_transition_ns = 0.2;
+  context.sdc_max_cap_pf = 0.4;
+  context.liberty_cell_by_master.at("BUF_X1").output_cap_limit_pf = 0.1;
+  icts::Wrapper wrapper;
+  icts::FastStaEnvironment environment{.wrapper = &wrapper, .max_fanout = 8};
+  icts::WrapperTimingGraph graph;
+  graph.status = icts::WrapperTimingGraphStatus::kComplete;
+  for (const auto& node : context.nodes) {
+    graph.nodes.push_back(
+        {.pin_name = node.name, .inst_name = node.inst_name, .cell_master = node.cell_master, .max_slew_ns = node.name == "buf2/A" ? 0.05 : 0.3});
+  }
+  for (auto& net : context.nets) {
+    net.domain = icts::FastStaNetDomain::kLogic;
+  }
+  std::string failure;
+  ASSERT_TRUE(icts::fast_sta::AppendTimingGraph(environment, graph, context, failure)) << failure;
+  EXPECT_DOUBLE_EQ(context.nodes.at(1U).max_slew_ns, 0.2);
+  EXPECT_DOUBLE_EQ(context.nodes.at(3U).max_slew_ns, 0.05);
+  EXPECT_DOUBLE_EQ(context.nets.at(0U).max_cap_pf, 0.4);
+  EXPECT_DOUBLE_EQ(context.nets.at(1U).max_cap_pf, 0.1);
+  EXPECT_DOUBLE_EQ(context.nets.at(1U).max_fanout, 8.0);
 }
 
 }  // namespace

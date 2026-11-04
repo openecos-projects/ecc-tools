@@ -12,6 +12,8 @@ icts_add_test_executable(
   LIBS
     icts_source_data_manager_adapter_fast_sta
     icts_source_data_manager_adapter_sdc
+    ista_sdc_frontend
+    ista_data_manager
     icts_source_data_manager_adapter_fast_sta_clock_net_parasitic
     icts_source_data_manager_adapter_fast_sta_clock_sizing
     icts_source_data_manager_adapter_fast_sta_power

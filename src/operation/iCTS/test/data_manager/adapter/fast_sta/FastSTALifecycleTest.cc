@@ -116,7 +116,7 @@ TEST(FastSTATest, ContextFailureRollbackAndReset)
                  .positive_unate = true}};
   icts::SdcClockData constraints;
   constraints.clocks.push_back({.clock_name = "ROOT",
-                                .targets = {{.kind = icts::SdcObjectKind::kPort, .pattern = "clk"}},
+                                .targets = {{.kind = icts::SdcObjectKind::kPort, .name = "clk"}},
                                 .generated_sources = {},
                                 .period_ns = 1,
                                 .period_resolved = true,
@@ -139,7 +139,7 @@ TEST(FastSTATest, ContextFailureRollbackAndReset)
     return;
   }
   EXPECT_DOUBLE_EQ(*ideal_arrival, 0.0);
-  constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .pattern = "ROOT"});
+  constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .name = "ROOT"});
   const auto physical = authority.replaceContext(*ideal.context_id, input);
   if (!physical.context_id.has_value()) {
     ADD_FAILURE() << "Expected a physical context identity.";
@@ -419,7 +419,7 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
                    .kind = icts::WrapperTimingCheckKind::kHold}};
   icts::SdcClockData constraints;
   constraints.clocks.push_back({.clock_name = "ROOT",
-                                .targets = {{.kind = icts::SdcObjectKind::kPort, .pattern = "clk"}},
+                                .targets = {{.kind = icts::SdcObjectKind::kPort, .name = "clk"}},
                                 .generated_sources = {},
                                 .period_ns = 1,
                                 .period_resolved = true,
@@ -427,7 +427,7 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
                                 .generated_edges = {},
                                 .generated_edge_shifts_ns = {},
                                 .waveform_resolved = true});
-  constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .pattern = "ROOT"});
+  constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .name = "ROOT"});
   constraints.clocks.push_back({.clock_name = "VIRTUAL",
                                 .targets = {},
                                 .generated_sources = {},
@@ -460,10 +460,12 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   }
   ASSERT_TRUE(authority.synchronizeClockContext(*unchanged.context_id, original_input).ok());
   const auto unchanged_summary = authority.queryTimingSummary(*unchanged.context_id);
-  ASSERT_TRUE(unchanged_summary.has_value());
+  if (!unchanged_summary.has_value()) {
+    FAIL() << "Expected unchanged_summary to have a value.";
+  }
   EXPECT_DOUBLE_EQ(unchanged_summary->runtime_s, original_summary->runtime_s);
   auto changed_constraints = constraints;
-  changed_constraints.clock_transitions.push_back({.clocks = {{.kind = icts::SdcObjectKind::kClock, .pattern = "ROOT"}}, .value_ns = .2});
+  changed_constraints.clock_transitions.push_back({.clocks = {{.kind = icts::SdcObjectKind::kClock, .name = "ROOT"}}, .value_ns = .2});
   auto changed_input = original_input;
   changed_input.constraints = &changed_constraints;
   const auto stale_constraints = authority.synchronizeClockContext(*unchanged.context_id, changed_input);
@@ -473,7 +475,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   changed_input.propagate_all_clocks = true;
   EXPECT_FALSE(authority.synchronizeClockContext(*unchanged.context_id, changed_input).ok());
   const auto restored_summary = authority.queryTimingSummary(*unchanged.context_id);
-  ASSERT_TRUE(restored_summary.has_value());
+  if (!restored_summary.has_value()) {
+    FAIL() << "Expected restored_summary to have a value.";
+  }
   EXPECT_DOUBLE_EQ(restored_summary->runtime_s, original_summary->runtime_s);
   ASSERT_TRUE(authority.discardContextTransaction(*unchanged.context_id));
   auto timing_only_input = original_input;
@@ -490,7 +494,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   EXPECT_FALSE(missing_power.ok());
   EXPECT_EQ(missing_power.failure_reason, "clock_topology_complete_power_unavailable");
   const auto incomplete_power_status = authority.queryAnalysisStatus(*incomplete_power.context_id);
-  ASSERT_TRUE(incomplete_power_status.has_value());
+  if (!incomplete_power_status.has_value()) {
+    FAIL() << "Expected incomplete_power_status to have a value.";
+  }
   EXPECT_TRUE(incomplete_power_status->timing_valid);
   EXPECT_FALSE(incomplete_power_status->power_valid);
   ASSERT_TRUE(authority.discardContextTransaction(*incomplete_power.context_id));
@@ -583,7 +589,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   ASSERT_TRUE(authority.discardContextTransaction(*pending.context_id));
   compare_points(original_points, authority.collectTimingPointFacts(*original.context_id));
   const auto final_summary = authority.queryTimingSummary(*original.context_id);
-  ASSERT_TRUE(final_summary.has_value());
+  if (!final_summary.has_value()) {
+    FAIL() << "Expected final_summary to have a value.";
+  }
   EXPECT_DOUBLE_EQ(final_summary->runtime_s, original_summary->runtime_s);
   const auto accepted = authority.beginContextTransaction(*original.context_id);
   if (!accepted.context_id.has_value()) {
@@ -673,7 +681,9 @@ TEST(FastSTATest, ClockTopologySpliceRetainsLogicIdentityAndRollsBackWithoutRebu
   ASSERT_TRUE(authority.discardContextTransaction(*sized.context_id));
   compare_points(cold_points, authority.collectTimingPointFacts(*accepted.context_id));
   const auto accepted_runtime = authority.queryTimingSummary(*accepted.context_id);
-  ASSERT_TRUE(accepted_runtime.has_value());
+  if (!accepted_runtime.has_value()) {
+    FAIL() << "Expected accepted_runtime to have a value.";
+  }
   EXPECT_DOUBLE_EQ(accepted_runtime->runtime_s, accepted_summary->runtime_s);
 
   // Resynthesis replaces the old CTS suffix while preserving every input ID.

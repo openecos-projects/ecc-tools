@@ -72,9 +72,16 @@ unsigned TclInitSTA::exec()
     config_map[key] = int32_t(value == "1");
   }
   try {
-    STAI.initSTA(config_map);
+    if (!STAI.initSTA(config_map)) {
+      Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(),
+                       Tcl_NewStringObj("native STA initialization rejected SDC constraints", -1));
+      STAI.destroySTA();
+      return 0;
+    }
   } catch (const std::exception& error) {
-    Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(), Tcl_NewStringObj(error.what(), -1));
+    const std::string diagnostic = error.what();
+    STAI.destroySTA();
+    Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(), Tcl_NewStringObj(diagnostic.c_str(), -1));
     return 0;
   }
   return 1;

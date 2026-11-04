@@ -330,12 +330,18 @@ class Wrapper
   {
     const Pin* clock_source = nullptr;
     std::optional<double> configured_max_cap_pf = std::nullopt;
+    // A design-wide SDC capacitance limit. It may only tighten the source's own Liberty
+    // rule, never relax it, and it outranks the configured fallback.
+    std::optional<double> sdc_max_cap_pf = std::nullopt;
   };
 
   struct PinSlewLimitInput
   {
     const Pin* pin = nullptr;
     double configured_max_sink_tran_ns = 0.0;
+    // A design-wide SDC transition limit. It may only tighten the receiving cell's own
+    // rule, never relax it, and it outranks the configured fallback.
+    std::optional<double> sdc_max_transition_ns = std::nullopt;
   };
 
   struct WireCapacitanceProfile
@@ -379,6 +385,12 @@ class Wrapper
   auto queryPinCapacitance(const Pin* pin) const -> std::optional<double>;
   auto queryPinCapacitance(const Pin* pin, bool early, WrapperTimingTransition transition) const -> std::optional<double>;
   auto queryPinSlewLimit(const PinSlewLimitInput& input) const -> std::optional<double>;
+  // The receiving pin's own Liberty transition rule, or nothing when the cell, the pin
+  // or its rule is unavailable.
+  auto queryLibertyPinSlewLimit(const Pin* pin) const -> std::optional<double>;
+  // The clock source's own Liberty output capacitance limit, or nothing when the cell,
+  // the pin or its rule is unavailable.
+  auto queryLibertyClockSourceDriveCapLimit(const Pin* clock_source) const -> std::optional<double>;
   auto queryPinSlewLimit(const Config& config, const Pin* pin) const -> std::optional<double>;
   auto queryRootDriverCostDirect(const std::string& cell_master, double input_slew_ns, double output_load_pf, double clock_period_ns) const -> RootDriverCost;
   auto queryBufferPorts(const std::string& cell_master) const -> std::optional<BufferPorts>;

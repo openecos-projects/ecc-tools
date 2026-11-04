@@ -29,6 +29,8 @@
 #include <utility>
 #include <vector>
 
+#include "Design.hh"
+#include "FastSTA.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"

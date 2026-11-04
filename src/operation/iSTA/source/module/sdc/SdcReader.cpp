@@ -9,12 +9,12 @@
 #include "sdc/Sdc.hpp"
 
 namespace ista {
-void readSdc(Sdc& constraints)
+auto readSdc(Sdc& constraints) -> bool
 {
   const std::string sdc_file_path = constraints.get_sdc_file_path();
   constraints.clearConstraints();
   if (sdc_file_path.empty()) {
-    return;
+    return true;
   }
 
   auto& sdc_command{Singleton<SdcCommand>::getInst()};
@@ -22,7 +22,10 @@ void readSdc(Sdc& constraints)
     for (const SdcError& error : sdc_command.getErrors()) {
       STALOG.warn(Loc::current(), "SDC command failed in '", sdc_file_path, "' at line ", error.line_number, ": ", error.message);
     }
-    STALOG.error(Loc::current(), "SDC contains invalid or unsupported constraints; timing analysis stopped");
+    STALOG.warn(Loc::current(), "SDC contains invalid or unsupported constraints.");
+    constraints.clearConstraints();
+    return false;
   }
+  return true;
 }
 }  // namespace ista
