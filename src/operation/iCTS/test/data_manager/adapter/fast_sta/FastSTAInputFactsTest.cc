@@ -320,6 +320,61 @@ TEST(FastSTAParsedInputTest, GeneratedClockRequiresItsActualMasterAndSourcePath)
   EXPECT_EQ(nested.nodes.at(4U).clock_name, "H");
 }
 
+TEST(FastSTAParsedInputTest, GeneratedClockSeedsBlackBoxTargetAndDownstreamClockTree)
+{
+  const ScopedTimingInput sdc(
+      "create_clock -name REF -period 10 [get_ports ref]\n"
+      "create_generated_clock -name PLL -source [get_ports ref] -master_clock REF -divide_by 2 [get_pins PLL/CKOUT]\n");
+  ASSERT_TRUE(sdc.ready());
+  icts::FastStaContext context;
+  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
+  ASSERT_TRUE(context.constraints.ok());
+  context.nodes = {
+      {.kind = icts::FastStaNodeKind::kSource, .name = "ref", .top_level = true, .domain = icts::FastStaNodeDomain::kLogic, .input = true},
+      {.kind = icts::FastStaNodeKind::kSink, .name = "PLL/CKOUT", .domain = icts::FastStaNodeDomain::kLogic, .output = true},
+      {.kind = icts::FastStaNodeKind::kBufferInput,
+       .name = "buf/A",
+       .inst_name = "buf",
+       .pin_name = "A",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+      {.kind = icts::FastStaNodeKind::kBufferOutput,
+       .name = "buf/Y",
+       .inst_name = "buf",
+       .pin_name = "Y",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .output = true},
+      {.kind = icts::FastStaNodeKind::kSink,
+       .name = "sink/CLK",
+       .inst_name = "sink",
+       .pin_name = "CLK",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+  };
+  context.nodes.at(0U).output_net_ids = {};
+  context.nodes.at(1U).output_net_ids = {0U};
+  context.nodes.at(2U).incoming_net_id = 0U;
+  context.nodes.at(3U).output_net_ids = {1U};
+  context.nodes.at(4U).incoming_net_id = 1U;
+  context.nets = {
+      {.name = "pll_clock", .driver_node_id = 1U, .load_node_ids = {2U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+      {.name = "leaf_clock", .driver_node_id = 3U, .load_node_ids = {4U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+  };
+  context.buffer_input_node_id_by_inst = {{"buf", 2U}};
+  context.buffer_output_node_id_by_inst = {{"buf", 3U}};
+
+  const auto error = icts::FastStaConstraints::prepare(context);
+  ASSERT_FALSE(error.has_value()) << error.value_or("");
+  EXPECT_EQ(context.nodes.at(1U).kind, icts::FastStaNodeKind::kSource);
+  EXPECT_EQ(context.nodes.at(1U).domain, icts::FastStaNodeDomain::kClock);
+  EXPECT_EQ(context.nodes.at(1U).clock_name, "PLL");
+  for (const auto node_id : {2U, 3U, 4U}) {
+    EXPECT_EQ(context.nodes.at(node_id).domain, icts::FastStaNodeDomain::kClock);
+    EXPECT_EQ(context.nodes.at(node_id).clock_name, "PLL");
+  }
+  EXPECT_NE(std::ranges::find(context.clock_source_node_ids, 1U), context.clock_source_node_ids.end());
+}
+
 TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUpstreamMasterEdits)
 {
   const auto good = loadModel(_library);
