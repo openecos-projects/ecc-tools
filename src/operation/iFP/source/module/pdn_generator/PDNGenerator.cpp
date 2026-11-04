@@ -2204,6 +2204,15 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     }
     return false;
   };
+  // The exported IOWIRE terminates on the target stripe boundary or its
+  // centerline.  Contact coverage therefore treats the wire as extending half
+  // its width past that endpoint, matching the PGSegment bounding-box semantics
+  // the IO connector was validated against before endpoints stopped inflating.
+  auto contact_box = [](const PGSegment& segment) {
+    const int32_t half_width = segment.get_width() / 2;
+    return PlanarRect(std::min(segment.get_start_x(), segment.get_end_x()) - half_width, std::min(segment.get_start_y(), segment.get_end_y()) - half_width,
+                      std::max(segment.get_start_x(), segment.get_end_x()) + half_width, std::max(segment.get_start_y(), segment.get_end_y()) + half_width);
+  };
 
   for (auto& instance : database.get_instance_list()) {
     const std::string& net_name = instance.get_io_cell_net_name();
@@ -2772,7 +2781,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           ++pin_cross_section_failures;
           return reject("PIN_CROSS_SECTION_NOT_COVERED");
         }
-        const auto stripe_contact_box = segmentRect(path.back());
+        const auto stripe_contact_box = contact_box(path.back());
         const auto target_box = segmentRect(target.segment);
         if (detour) {
           if (!positive_overlap(stripe_contact_box, target_box)) {
