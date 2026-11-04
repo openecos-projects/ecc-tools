@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "ClockTrace.hh"
 #include "IdbCellMaster.h"
 #include "IdbDesign.h"
 #include "IdbEnum.h"
@@ -37,7 +38,6 @@
 #include "IdbLayout.h"
 #include "IdbTerm.h"
 #include "LibParserCpp.hh"
-#include "SDCClockReader.hh"
 #include "TimingConstraints.hh"
 #include "gtest/gtest.h"
 #include "liberty/Lib.hh"
@@ -146,7 +146,7 @@ class ClockTraceFixtureInterface : public testing::Test
     return icts::SdcClockDecl{
         .kind = icts::SdcClockDecl::Kind::kPrimary,
         .clock_name = clock_name,
-        .targets = {{.kind = icts::SdcObjectKind::kNet, .pattern = net_name}},
+        .targets = {{.kind = icts::SdcObjectKind::kNet, .name = net_name}},
         .generated_sources = {},
         .master_clock_name = {},
         .period_ns = 10.0,
@@ -166,7 +166,7 @@ class ClockTraceFixtureInterface : public testing::Test
     return icts::SdcClockDecl{
         .kind = icts::SdcClockDecl::Kind::kGenerated,
         .clock_name = clock_name,
-        .targets = {{.kind = icts::SdcObjectKind::kNet, .pattern = net_name}},
+        .targets = {{.kind = icts::SdcObjectKind::kNet, .name = net_name}},
         .generated_sources = {},
         .master_clock_name = master_name,
         .period_ns = 10.0,
@@ -194,7 +194,7 @@ class ClockTraceFixtureInterface : public testing::Test
       const auto iter = _lib_cells.find(master_name);
       return iter == _lib_cells.end() ? nullptr : iter->second;
     };
-    return icts::SdcClockReader::traceClockTargets(data, &_design, lookup, max_fanout);
+    return icts::ClockTraceResolver::resolve(data, &_design, lookup, max_fanout);
   }
 
   static auto findRecord(const icts::ClockTraceBuild& build, const std::string& clock_name, const std::string& net_name, const std::string& status)
@@ -537,7 +537,7 @@ TEST_F(ClockTraceFixtureInterface, MultipleResolvedSeedsDoNotCreateCompatibility
   connect("left", {pin(left_source, "Y"), pin(left_sink, "CLK")});
   connect("right", {pin(right_source, "Y"), pin(right_sink, "CLK")});
   auto clock = primaryClock("clk", "left");
-  clock.targets.push_back({.kind = icts::SdcObjectKind::kNet, .pattern = "right"});
+  clock.targets.push_back({.kind = icts::SdcObjectKind::kNet, .name = "right"});
 
   const auto build = trace(clockData({clock}));
 

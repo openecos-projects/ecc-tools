@@ -489,7 +489,17 @@ struct FastStaEnvironment
   std::optional<double> wire_width_um = std::nullopt;
   double root_input_slew_ns = 0.0;
   std::optional<double> max_cap_pf = std::nullopt;
+  // A design-wide SDC capacitance limit, kept apart from `max_cap_pf` because it must be
+  // honoured against the driver's Liberty rule instead of replacing it outright.
+  std::optional<double> sdc_max_cap_pf = std::nullopt;
   double max_sink_tran_ns = 0.0;
+  // A design-wide SDC transition limit, kept apart from `max_sink_tran_ns` because it
+  // must be honoured against the cell's Liberty rule instead of only when that rule is
+  // missing.
+  std::optional<double> sdc_max_transition_ns = std::nullopt;
+  // Design-wide fanout budget the logic summary is checked against. Zero means no
+  // budget was established, so no violation can be reported.
+  double max_fanout = 0.0;
   std::size_t worker_count = 4U;
 };
 

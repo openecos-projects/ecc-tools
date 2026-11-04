@@ -15,24 +15,29 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @file SDCCaseAnalysis.hh
- * @author Dawn Li (dawnli619215645@gmail.com)
- * @date 2026-10-28
- * @brief Registers CTS-local symbolic case constraints in the shared SDC frontend.
+ * @file IstaConstraintReader.hh
+ * @brief Native STA initialization and owned constraint snapshot boundary.
  */
-
 #pragma once
 
+#include <string>
+
+#include "timing/TimingConstraints.hh"
+
 namespace ista {
-class SdcCommand;
+class Database;
 }
 
 namespace icts {
-struct SdcClockData;
-}
 
-namespace icts::sdc_reader {
+class IstaConstraintReader
+{
+ public:
+  // The current iDB design and shared raw Liberty generation must already be loaded.
+  // The temporary native session is destroyed before this call returns.
+  static auto read(const std::string& work_dir) -> SdcClockData;
+  // Value-only extraction; no Tcl interpretation or object-query resolution.
+  static auto snapshot(ista::Database& database) -> SdcClockData;
+};
 
-auto RegisterCaseAnalysisRecorder(ista::SdcCommand& interpreter, SdcClockData& data) -> void;
-
-}  // namespace icts::sdc_reader
+}  // namespace icts

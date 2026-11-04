@@ -4,6 +4,7 @@ icts_add_test_executable(
     ${ICTS_TEST}/data_manager/io/ClockIgnoreLoadTest.cc
     ${ICTS_TEST}/data_manager/io/ClockTreeWritebackInstAttributesTest.cc
     ${ICTS_TEST}/data_manager/io/IdbBulkDisconnectTest.cc
+    ${ICTS_TEST}/data_manager/io/WrapperPinSlewLimitTest.cc
     ${ICTS_TEST}/data_manager/io/WrapperRCTest.cc
     ${ICTS_TEST}/data_manager/io/WrapperTimingGraphTest.cc
 )

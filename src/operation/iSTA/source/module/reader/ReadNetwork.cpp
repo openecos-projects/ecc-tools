@@ -2,6 +2,7 @@
 #include "ReadNetwork.hpp"
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -143,8 +144,7 @@ PinDirection pinDirection(idb::IdbConnectDirection idb_direction)
     case idb::IdbConnectDirection::kInOut:
       return PinDirection::kInout;
     default:
-      STALOG.error(Loc::current(), "Unrecognized type!");
-      break;
+      throw std::invalid_argument("native Network: unsupported iDB pin direction");
   }
   return PinDirection::kNone;
 }

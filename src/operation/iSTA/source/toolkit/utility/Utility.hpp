@@ -161,12 +161,8 @@ class Utility
 
   static void createDir(std::string dir_path)
   {
-    if (!std::filesystem::exists(dir_path)) {
-      std::error_code system_error;
-      if (!std::filesystem::create_directories(dir_path, system_error)) {
-        STALOG.error(Loc::current(), "Failed to create directory '", dir_path, "', system_error:", system_error.message());
-      }
-    }
+    // Filesystem errors must unwind a native import session, not terminate its host.
+    std::filesystem::create_directories(dir_path);
   }
   static void removeDir(const std::string& dir_path)
   {

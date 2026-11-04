@@ -361,8 +361,28 @@ auto AppendTimingGraph(const FastStaEnvironment& environment, const WrapperTimin
         .clock_gating = source_check.clock_gating,
     });
   }
+  if (context.sdc_max_transition_ns.has_value()) {
+    for (auto& node : context.nodes) {
+      if (node.domain != FastStaNodeDomain::kLogic) {
+        continue;
+      }
+      const auto master_limit = node.max_slew_ns;
+      node.slew_limit_from_master = master_limit > 0.0 && master_limit < *context.sdc_max_transition_ns;
+      node.max_slew_ns = node.slew_limit_from_master ? master_limit : *context.sdc_max_transition_ns;
+    }
+  }
   for (auto& net : context.nets) {
-    if (net.domain != FastStaNetDomain::kLogic || net.driver_node_id >= context.nodes.size()) {
+    if (net.domain != FastStaNetDomain::kLogic) {
+      continue;
+    }
+    // The design-wide budget governs every net, including one whose driver the graph
+    // does not know, so it is recorded before the driver lookup can skip the net.
+    net.max_fanout = std::max(0.0, environment.max_fanout);
+    if (context.sdc_max_cap_pf.has_value()) {
+      net.max_cap_pf = *context.sdc_max_cap_pf;
+      net.cap_limit_from_master = false;
+    }
+    if (net.driver_node_id >= context.nodes.size()) {
       continue;
     }
     const auto& driver = context.nodes.at(net.driver_node_id);
@@ -370,6 +390,10 @@ auto AppendTimingGraph(const FastStaEnvironment& environment, const WrapperTimin
     if (liberty_iter != context.liberty_cell_by_master.end()) {
       net.max_cap_pf = std::max(0.0, liberty_iter->second.output_cap_limit_pf);
       net.cap_limit_from_master = true;
+      if (context.sdc_max_cap_pf.has_value()) {
+        net.cap_limit_from_master = net.max_cap_pf > 0.0 && net.max_cap_pf < *context.sdc_max_cap_pf;
+        net.max_cap_pf = net.cap_limit_from_master ? net.max_cap_pf : *context.sdc_max_cap_pf;
+      }
     }
   }
   return true;

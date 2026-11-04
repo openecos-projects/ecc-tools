@@ -120,6 +120,25 @@ int main()
             "model-only and complete preparation produced different min required rules");
   }
 
+  require(SdcCommand::getInst().evalString("get_ports out") == TCL_OK && sta.isTimingReady(),
+          "read-only SDC query invalidated timing");
+  require(SdcCommand::getInst().evalString("set_load 0.25 [get_ports out]") == TCL_OK, "load edit failed");
+  require(!sta.isTimingReady(), "SDC edit left stale timing export ready");
+  bool stale_rejected = false;
+  try {
+    sta.exportTimingData();
+  } catch (const std::runtime_error&) {
+    stale_rejected = true;
+  }
+  require(stale_rejected, "SDC edit allowed export of old timing");
+  sta.runSTA();
+  require(sta.isTimingReady(), "SDC edit did not recover after reanalysis");
+  require(SdcCommand::getInst().evalString("set_load 0.4 [get_ports out]; unknown_sdc_command") == TCL_ERROR,
+          "intended partial SDC failure did not occur");
+  require(!sta.isTimingReady(), "partially failed SDC script retained old timing validity");
+  sta.runSTA();
+  require(sta.isTimingReady(), "partial script changes could not be reanalyzed");
+
   tcl::registerCmdSTA();
   auto* engine = ecc::ScriptEngine::getOrCreateInstance();
   const auto path = fixture.directory / "effective.sdc";
@@ -154,13 +173,8 @@ int main()
   }
   // A partially read SDC must invalidate both the old model and its timing.
   std::ofstream(fixture.sdc_file) << "set_input_transition 0.2 [get_ports in]\nunknown_sdc_command\n";
-  bool init_failed = false;
-  try {
-    sta.initSTA({{"-temp_directory_path", fixture.directory.string()}, {"-thread_number", int32_t{1}}});
-  } catch (const std::runtime_error&) {
-    init_failed = true;
-  }
-  require(init_failed, "invalid SDC did not fail initialization");
+  const bool init_ok = sta.initSTA({{"-temp_directory_path", fixture.directory.string()}, {"-thread_number", int32_t{1}}});
+  require(!init_ok, "invalid SDC did not fail initialization");
   require(!sta.isInitialized() && !sta.isTimingReady(), "failed initialization retained an initialized or ready session");
   for (int operation : {0, 1, 2}) {
     bool rejected = false;

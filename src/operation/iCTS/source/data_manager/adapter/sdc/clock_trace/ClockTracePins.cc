@@ -27,13 +27,13 @@
 #include <utility>
 #include <vector>
 
+#include "ClockTrace.hh"
 #include "IdbCellMaster.h"
 #include "IdbEnum.h"
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
 #include "IdbTerm.h"
-#include "SDCClockReader.hh"
 #include "SDCClockTraceAlgorithm.hh"
 #include "TimingConstraints.hh"
 #include "liberty/Lib.hh"

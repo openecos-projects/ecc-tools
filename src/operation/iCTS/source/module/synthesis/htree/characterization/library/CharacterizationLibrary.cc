@@ -142,8 +142,14 @@ auto CharacterizationLibrary::buildRuntimeConfig(const Config& config) -> CharBu
   if (config.has_max_buf_tran() && config.get_max_buf_tran() > 0.0) {
     char_config.max_slew_ns = config.get_max_buf_tran();
   }
+  if (config.has_sdc_max_transition() && config.get_sdc_max_transition_ns() > 0.0) {
+    char_config.sdc_max_slew_ns = config.get_sdc_max_transition_ns();
+  }
   if (config.has_max_cap() && config.get_max_cap() > 0.0) {
     char_config.max_cap_pf = config.get_max_cap();
+  }
+  if (config.has_sdc_max_cap() && config.get_sdc_max_cap_pf() > 0.0) {
+    char_config.sdc_max_cap_pf = config.get_sdc_max_cap_pf();
   }
   if (config.get_wirelength_unit_um() > 0.0) {
     char_config.wirelength_unit_um = config.get_wirelength_unit_um();
