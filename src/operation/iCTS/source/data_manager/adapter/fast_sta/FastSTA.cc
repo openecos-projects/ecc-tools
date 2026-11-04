@@ -310,10 +310,14 @@ auto FastSTA::synchronizeClockContext(FastStaContextId pending_id, const FastSta
       original.logic.emplace_back(id, context->nodes.at(id));
     }
   }
-  if (!FastStaTiming::updateClockTopology(*context, region) || (input.require_power && !FastStaPower::update(*context))) {
+  if (!FastStaTiming::updateClockTopology(*context, region)) {
     const auto reason = context->timing_summary.fallback_reason;
     original.swap(*context);
     return {.failure_reason = "clock_topology_analysis_failed:" + reason};
+  }
+  if (input.require_power && !FastStaPower::update(*context)) {
+    original.swap(*context);
+    return {.failure_reason = "clock_topology_power_analysis_failed"};
   }
   transaction->second.edits.push_back(std::move(original));
   return {.context_id = pending_id, .failure_reason = {}};
