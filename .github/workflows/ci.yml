@@ -26,6 +26,13 @@ jobs:
       - name: Build wheel
         uses: ./.github/actions/build-wheel
 
+      - name: Run iMJ design tools regression
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          cmake --build build --target test_imj_design_tools --parallel 2
+          ctest --test-dir build -R '^test_imj_design_tools$' --output-on-failure --no-tests=error
+
       - name: Upload repaired wheel
         uses: actions/upload-artifact@v4
         with:
@@ -44,7 +51,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install test prerequisites
-        run: dnf install -y git make curl tar bzip2 unzip
+        run: |
+          dnf install -y 'dnf-command(config-manager)'
+          dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          dnf install -y gh git make curl tar bzip2 unzip
 
       - name: Setup Python 3.11
         run: echo "/opt/python/cp311-cp311/bin" >> "$GITHUB_PATH"
@@ -69,9 +79,13 @@ jobs:
           ../.venv-test/bin/python -c 'from ecc_tools_bin import ecc_py; print(ecc_py.__file__)'
 
       - name: Setup PDK
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           git clone --depth 1 https://github.com/openecos-projects/icsprout55-pdk.git icsprout55-pdk
-          cd icsprout55-pdk && make unzip
+          gh release download --repo openecos-projects/icsprout55-pdk \
+            --pattern '*.tar.bz2' --dir icsprout55-pdk
+          make -C icsprout55-pdk unzip
 
       - name: Run Python API integration tests
         working-directory: test
@@ -89,3 +103,27 @@ jobs:
           name: ecc-tools-python-api-artifacts
           if-no-files-found: ignore
           path: test-artifacts/
+
+  nix-build:
+    name: Nix Build (flake checks)
+    runs-on: ubuntu-latest
+    # Cold cache builds boost 1.91 and ecc-tools from source;
+    # magic-nix-cache makes subsequent runs incremental.
+    timeout-minutes: 240
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v19
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          extra-conf: |
+            extra-substituters = https://cache.ani.llc
+            extra-trusted-public-keys = cache.ani.llc:8nINs8lCCU0Yoed1KMjLj6fCHpMmrY+sFuhGTdxLB88=
+
+      - name: Cache Nix store
+        uses: DeterminateSystems/magic-nix-cache-action@v15
+
+      - name: Build all flake checks
+        run: nix flake check -L

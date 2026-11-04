@@ -15,6 +15,8 @@
 // ***************************************************************************************
 #include "PowerReporter.hpp"
 
+#include <algorithm>
+
 #include "DataManager.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
@@ -60,19 +62,144 @@ void PowerReporter::report()
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+void PowerReporter::reportCellPower(const std::string& directory_path, const int32_t top_num, const bool is_all)
+{
+  Monitor monitor;
+  PWLOG.info(Loc::current(), "Starting...");
+
+  Database& database = PWDM.getDatabase();
+  if (database.get_instance_power_list().empty()) {
+    PWLOG.error(Loc::current(), "No instance power data found, run_pw first!");
+  }
+  if (!is_all && top_num < 1) {
+    PWLOG.error(Loc::current(), "The -top option requires a positive integer!");
+  }
+
+  std::vector<InstancePower>& instance_power_list = database.get_instance_power_list();
+  std::vector<std::pair<std::string, InstancePower*>> cell_power_list;
+  std::size_t skipped_num = 0;
+  // 按 instance_map（字典序）遍历 + 按 id 取功耗：与原 map 遍历顺序一致。
+  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
+    const std::string& instance_name = instance_pair.first;
+    if (database.get_timing_library().get_cell_map().count(instance_pair.second.get_cell_name()) == 0) {
+      skipped_num++;
+      continue;
+    }
+    cell_power_list.emplace_back(instance_name, &instance_power_list[instance_pair.second.get_instance_id()]);
+  }
+  std::sort(
+      cell_power_list.begin(),
+      cell_power_list.end(),
+      [](const std::pair<std::string, InstancePower*>& left_pair,
+         const std::pair<std::string, InstancePower*>& right_pair) {
+        double left_power = left_pair.second->get_power_value().get_internal_power();
+        double right_power = right_pair.second->get_power_value().get_internal_power();
+        if (left_power != right_power) {
+          return left_power > right_power;
+        }
+        return left_pair.first < right_pair.first;
+      }
+  );
+  if (skipped_num > 0) {
+    PWLOG.info(Loc::current(), "Skipped ", skipped_num, " instance(s) without power table from cell power report.");
+  }
+  outputCellPowerReport(directory_path, cell_power_list, top_num, is_all);
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PowerReporter::reportNetPower(const std::string& directory_path, const int32_t top_num, const bool is_all)
+{
+  Monitor monitor;
+  PWLOG.info(Loc::current(), "Starting...");
+
+  Database& database = PWDM.getDatabase();
+  if (database.get_instance_power_list().empty()) {
+    PWLOG.error(Loc::current(), "No instance power data found, run_pw first!");
+  }
+  if (!is_all && top_num < 1) {
+    PWLOG.error(Loc::current(), "The -top option requires a positive integer!");
+  }
+
+  std::vector<NetPower>& net_power_list_data = database.get_net_power_list();
+  std::vector<uint8_t>& net_power_written = database.get_net_power_written();
+  std::vector<std::pair<std::string, NetPower*>> net_power_list;
+  // 只列"本窗口写过"的 net，顺序同原 map（net_map 为字典序）。
+  for (std::pair<const std::string, Net>& net_pair : database.get_net_map()) {
+    const uint64_t net_index = net_pair.second.get_index();
+    if (net_power_written[net_index] == 0) {
+      continue;
+    }
+    net_power_list.emplace_back(net_pair.first, &net_power_list_data[net_index]);
+  }
+  std::sort(
+      net_power_list.begin(),
+      net_power_list.end(),
+      [](const std::pair<std::string, NetPower*>& left_pair, const std::pair<std::string, NetPower*>& right_pair) {
+        double left_power = left_pair.second->get_switching_power();
+        double right_power = right_pair.second->get_switching_power();
+        if (left_power != right_power) {
+          return left_power > right_power;
+        }
+        return left_pair.first < right_pair.first;
+      }
+  );
+  outputNetPowerReport(directory_path, net_power_list, top_num, is_all);
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PowerReporter::reportPeakPowerWaveform(const std::string& file_path)
+{
+  Monitor monitor;
+
+  const PeakPowerSummary& peak_power_summary = PWDM.getDatabase().get_peak_power_summary();
+  if (!peak_power_summary.get_is_enabled() || peak_power_summary.get_window_list().empty()) {
+    PWLOG.error(Loc::current(), "No peak power waveform data found, run_pw -peak first!");
+    return;
+  }
+
+  const std::string waveform_file_path
+      = file_path.empty() ? PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "peak_windows.tsv") : file_path;
+  std::ofstream* waveform_file = PWUTIL.getOutputFileStream(waveform_file_path);
+  (*waveform_file) << "# iPW_PEAK_WINDOW_V1\n";
+  (*waveform_file) << "window_index\tbegin_time_ns\tend_time_ns\tpower_w\n";
+  (*waveform_file) << std::setprecision(17);
+  for (const PeakPowerWindow& window : peak_power_summary.get_window_list()) {
+    (*waveform_file) << window.window_index << '\t' << window.begin_time << '\t' << window.end_time << '\t'
+                     << window.power << '\n';
+  }
+  PWUTIL.closeFileStream(waveform_file);
+
+  PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 // private
 
 PowerReporter* PowerReporter::_pr_instance = nullptr;
 
 void PowerReporter::outputPowerReport()
 {
-  std::ofstream* power_report_file = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "power.rpt"));
+  std::ofstream* power_report_file
+      = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "power.rpt"));
   outputPowerDesignInfo(power_report_file);
   outputPowerUnitInfo(power_report_file);
-  outputPowerSummary(power_report_file);
-  outputPowerGroupList(power_report_file);
-  outputPowerAttribute(power_report_file);
+  if (PWDM.getDatabase().get_peak_power_summary().get_is_enabled()) {
+    outputPeakPower(power_report_file);
+  } else {
+    outputPowerSummary(power_report_file);
+    outputPowerGroupList(power_report_file);
+    outputPowerAttribute(power_report_file);
+  }
   PWUTIL.closeFileStream(power_report_file);
+}
+
+void PowerReporter::outputPeakPower(std::ofstream* power_report_file)
+{
+  PeakPowerValue& total_peak_value = PWDM.getDatabase().get_peak_power_summary().get_total_peak_value();
+  (*power_report_file) << "Peak Power             = " << std::scientific << std::setprecision(5)
+                       << total_peak_value.get_power() << std::defaultfloat << " W\n";
+  (*power_report_file) << "Peak Time              = " << total_peak_value.get_begin_time() << " ns\n";
 }
 
 void PowerReporter::outputPowerDesignInfo(std::ofstream* power_report_file)
@@ -80,13 +207,15 @@ void PowerReporter::outputPowerDesignInfo(std::ofstream* power_report_file)
   Database& database = PWDM.getDatabase();
   TimingLibrary& timing_library = database.get_timing_library();
   (*power_report_file) << "Design : " << database.get_design_name() << "\n";
-  (*power_report_file) << "Global Operating Voltage = " << std::setprecision(4) << timing_library.get_nom_voltage() << "\n\n";
+  (*power_report_file) << "Global Operating Voltage = " << std::setprecision(4) << timing_library.get_nom_voltage()
+                       << "\n\n";
 }
 
 void PowerReporter::outputPowerUnitInfo(std::ofstream* power_report_file)
 {
   TimingLibrary& timing_library = PWDM.getDatabase().get_timing_library();
-  std::string leakage_power_unit = timing_library.get_leakage_power_unit() ? *timing_library.get_leakage_power_unit() : "1mW";
+  std::string leakage_power_unit
+      = timing_library.get_leakage_power_unit() ? *timing_library.get_leakage_power_unit() : "1mW";
   (*power_report_file) << "Dynamic Power Units = 1mW\n";
   (*power_report_file) << "Leakage Power Units = " << leakage_power_unit << "\n\n";
 }
@@ -95,21 +224,27 @@ void PowerReporter::outputPowerSummary(std::ofstream* power_report_file)
 {
   PowerValue& total_power_value = PWDM.getDatabase().get_power_summary().get_total_power_value();
   double dynamic_power = getDynamicPower();
-  (*power_report_file) << "Cell Internal Power  = " << std::setw(12) << getPowerString(total_power_value.get_internal_power()) << "\n";
-  (*power_report_file) << "Net Switching Power  = " << std::setw(12) << getPowerString(total_power_value.get_switching_power()) << "\n";
+  (*power_report_file) << "Cell Internal Power  = " << std::setw(12)
+                       << getPowerString(total_power_value.get_internal_power()) << "\n";
+  (*power_report_file) << "Net Switching Power  = " << std::setw(12)
+                       << getPowerString(total_power_value.get_switching_power()) << "\n";
   (*power_report_file) << "Total Dynamic Power  = " << std::setw(12) << getPowerString(dynamic_power) << "\n";
-  (*power_report_file) << "Cell Leakage Power   = " << std::setw(12) << getPowerString(total_power_value.get_leakage_power()) << "\n\n";
+  (*power_report_file) << "Cell Leakage Power   = " << std::setw(12)
+                       << getPowerString(total_power_value.get_leakage_power()) << "\n\n";
 }
 
 void PowerReporter::outputPowerGroupList(std::ofstream* power_report_file)
 {
   (*power_report_file) << "                 Internal         Switching           Leakage            Total\n";
-  (*power_report_file) << "Power Group      Power            Power               Power              Power   (   %    )  Attrs\n";
-  (*power_report_file) << "--------------------------------------------------------------------------------------------------\n";
+  *power_report_file
+      << "Power Group      Power            Power               Power              Power   (   %    )  Attrs\n";
+  *power_report_file
+      << "--------------------------------------------------------------------------------------------------\n";
   for (PowerGroupType power_group_type : GetPowerGroupTypeList()()) {
     outputPowerGroup(power_report_file, power_group_type);
   }
-  (*power_report_file) << "--------------------------------------------------------------------------------------------------\n";
+  *power_report_file
+      << "--------------------------------------------------------------------------------------------------\n";
   PowerValue& total_power_value = PWDM.getDatabase().get_power_summary().get_total_power_value();
   (*power_report_file) << std::left << std::setw(15) << "Total" << std::right << std::setw(13)
                        << getPowerTotalString(total_power_value.get_internal_power(), false) << std::setw(18)
@@ -122,12 +257,14 @@ void PowerReporter::outputPowerGroup(std::ofstream* power_report_file, PowerGrou
 {
   PowerValue power_value = getPowerGroupPowerValue(power_group_type);
   double total_power = PWDM.getDatabase().get_power_summary().get_total_power_value().get_total_power();
-  (*power_report_file) << std::left << std::setw(15) << GetPowerGroupTypeName()(power_group_type) << std::right << std::setw(10)
-                       << getPowerTableString(power_value.get_internal_power(), false) << std::setw(18)
+  (*power_report_file) << std::left << std::setw(15) << GetPowerGroupTypeName()(power_group_type) << std::right
+                       << std::setw(10) << getPowerTableString(power_value.get_internal_power(), false) << std::setw(18)
                        << getPowerTableString(power_value.get_switching_power(), false) << std::setw(18)
                        << getPowerTableString(power_value.get_leakage_power(), true) << std::setw(18)
-                       << getPowerTableString(power_value.get_total_power(), false) << "  (" << std::setw(7) << std::fixed << std::setprecision(2)
-                       << getPercentage(power_value.get_total_power(), total_power) << "%)" << getPowerGroupAttribute(power_group_type) << "\n";
+                       << getPowerTableString(power_value.get_total_power(), false) << "  (" << std::setw(7)
+                       << std::fixed << std::setprecision(2)
+                       << getPercentage(power_value.get_total_power(), total_power) << "%)"
+                       << getPowerGroupAttribute(power_group_type) << "\n";
 }
 
 void PowerReporter::outputPowerAttribute(std::ofstream* power_report_file)
@@ -137,42 +274,233 @@ void PowerReporter::outputPowerAttribute(std::ofstream* power_report_file)
 
 void PowerReporter::outputInstancePower()
 {
+  std::ofstream* instance_power_file
+      = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.tsv"));
+  (*instance_power_file) << "# iEMIR_INSTANCE_POWER_V1\n";
+  (*instance_power_file) << "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\t"
+                            "total_power_w\taverage_current_a\n";
+  (*instance_power_file) << std::setprecision(17);
+  if (PWDM.getDatabase().get_peak_power_summary().get_is_enabled()) {
+    outputPeakInstancePower(instance_power_file);
+    PWUTIL.closeFileStream(instance_power_file);
+    return;
+  }
   Database& database = PWDM.getDatabase();
-  std::ofstream* instance_power_file = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.bin"));
-  outputInstancePowerHeader(instance_power_file);
-  for (std::pair<const std::string, InstancePower>& instance_power_pair : database.get_instance_power_map()) {
-    outputInstancePowerRecord(instance_power_file, instance_power_pair.first, instance_power_pair.second);
+  std::vector<InstancePower>& instance_power_list = database.get_instance_power_list();
+  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
+    InstancePower& instance_power = instance_power_list[instance_pair.second.get_instance_id()];
+    PowerValue& power_value = instance_power.get_power_value();
+    outputInstancePowerRow(instance_power_file, instance_pair.first, instance_power.get_voltage(), power_value);
   }
   PWUTIL.closeFileStream(instance_power_file);
 }
 
-void PowerReporter::outputInstancePowerHeader(std::ofstream* instance_power_file)
+// 峰值流程导出每个单元的峰值功耗（各单元取自己的峰窗口），而不是最后一个窗口的值。
+void PowerReporter::outputPeakInstancePower(std::ofstream* instance_power_file)
 {
-  char magic[8] = {'I', 'S', 'T', 'A', 'P', 'W', 'R', '\0'};
-  uint32_t version = 1;
-  uint32_t record_size = sizeof(uint64_t) + sizeof(uint32_t) + 4 * sizeof(double);
-  uint64_t instance_power_num = PWDM.getDatabase().get_instance_power_map().size();
-  instance_power_file->write(magic, static_cast<std::streamsize>(sizeof(magic)));
-  instance_power_file->write(reinterpret_cast<const char*>(&version), static_cast<std::streamsize>(sizeof(version)));
-  instance_power_file->write(reinterpret_cast<const char*>(&record_size), static_cast<std::streamsize>(sizeof(record_size)));
-  instance_power_file->write(reinterpret_cast<const char*>(&instance_power_num), static_cast<std::streamsize>(sizeof(instance_power_num)));
+  Database& database = PWDM.getDatabase();
+  PeakPowerSummary& peak_power_summary = database.get_peak_power_summary();
+  std::vector<InstancePower>& instance_power_list = database.get_instance_power_list();
+  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
+    const uint32_t instance_id = static_cast<uint32_t>(instance_pair.second.get_instance_id());
+    PeakPowerValue* peak_value = peak_power_summary.findInstancePeakValue(instance_id);
+    if (peak_value == nullptr) {
+      continue;
+    }
+    double voltage = instance_id < instance_power_list.size() ? instance_power_list[instance_id].get_voltage() : 0.0;
+    outputInstancePowerRow(instance_power_file, instance_pair.first, voltage, peak_value->get_power_value());
+  }
 }
 
-void PowerReporter::outputInstancePowerRecord(std::ofstream* instance_power_file, const std::string& instance_name, InstancePower& instance_power)
+void PowerReporter::outputInstancePowerRow(
+    std::ofstream* instance_power_file,
+    const std::string& instance_name,
+    const double voltage,
+    PowerValue& power_value
+)
 {
-  // iEMIR resolves the stable ID against the same IDB design database.
-  uint64_t instance_id = PWDM.getDatabase().get_instance_map()[instance_name].get_instance_id();
-  uint32_t power_group_type = static_cast<uint32_t>(instance_power.get_power_group_type());
-  double voltage = instance_power.get_voltage();
-  double internal_power = instance_power.get_power_value().get_internal_power();
-  double switching_power = instance_power.get_power_value().get_switching_power();
-  double leakage_power = instance_power.get_power_value().get_leakage_power();
-  instance_power_file->write(reinterpret_cast<const char*>(&instance_id), static_cast<std::streamsize>(sizeof(instance_id)));
-  instance_power_file->write(reinterpret_cast<const char*>(&power_group_type), static_cast<std::streamsize>(sizeof(power_group_type)));
-  instance_power_file->write(reinterpret_cast<const char*>(&voltage), static_cast<std::streamsize>(sizeof(voltage)));
-  instance_power_file->write(reinterpret_cast<const char*>(&internal_power), static_cast<std::streamsize>(sizeof(internal_power)));
-  instance_power_file->write(reinterpret_cast<const char*>(&switching_power), static_cast<std::streamsize>(sizeof(switching_power)));
-  instance_power_file->write(reinterpret_cast<const char*>(&leakage_power), static_cast<std::streamsize>(sizeof(leakage_power)));
+  // Some ICS55 internal power tables hold negative entries, so an instance whose arc
+  // energies nearly cancel can accumulate a tiny negative internal component. The instance
+  // power contract requires every component to be >= 0, so the residue is reported as
+  // zero, and total_power_w / average_current_a follow from the reported components.
+  const double internal_power = std::max(0.0, power_value.get_internal_power());
+  const double switching_power = power_value.get_switching_power();
+  const double leakage_power = power_value.get_leakage_power();
+  const double total_power = internal_power + switching_power + leakage_power;
+  const double average_current = voltage > 0.0 ? total_power / voltage : 0.0;
+  (*instance_power_file) << instance_name << '\t' << voltage << '\t' << internal_power << '\t';
+  (*instance_power_file) << switching_power << '\t' << leakage_power << '\t';
+  (*instance_power_file) << total_power << '\t' << average_current << '\n';
+}
+
+void PowerReporter::outputCellPowerReport(
+    const std::string& directory_path,
+    std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,
+    const int32_t top_num,
+    const bool is_all
+)
+{
+  Database& database = PWDM.getDatabase();
+  std::string report_directory_path = directory_path.empty() ? PWDM.getConfig().pr_temp_directory_path : directory_path;
+  if (!report_directory_path.empty() && report_directory_path.back() != '/') {
+    report_directory_path += "/";
+  }
+  PWUTIL.createDir(report_directory_path);
+
+  std::size_t total_num = cell_power_list.size();
+  std::size_t display_num = is_all ? total_num : std::min(static_cast<std::size_t>(top_num), total_num);
+  double design_total_power = database.get_power_summary().get_total_power_value().get_total_power();
+
+  std::ofstream* cell_power_report_file
+      = PWUTIL.getOutputFileStream(PWUTIL.getString(report_directory_path, "cell_power.rpt"));
+  (*cell_power_report_file) << "****************************************\n";
+  (*cell_power_report_file) << "Report : Averaged Power\n";
+  (*cell_power_report_file) << "        -cell_power\n";
+  (*cell_power_report_file) << "        -sort_by cell_internal_power\n";
+  (*cell_power_report_file) << "        " << (is_all ? "-all" : PWUTIL.getString("-top ", top_num)) << "\n";
+  (*cell_power_report_file) << "Design : " << database.get_design_name() << "\n";
+  (*cell_power_report_file) << "Global Operating Voltage = " << std::setprecision(4)
+                            << database.get_timing_library().get_nom_voltage() << "\n";
+  (*cell_power_report_file) << "Power Units = 1W\n";
+  (*cell_power_report_file) << "Cells : " << total_num << " total, " << display_num << " displayed\n";
+  (*cell_power_report_file) << "****************************************\n\n\n\n";
+  (*cell_power_report_file) << "  Attributes\n";
+  (*cell_power_report_file) << "  ----------\n";
+  (*cell_power_report_file) << "      a  -  Annotated internal | leakage | switching power \n";
+  (*cell_power_report_file) << "      b  -  Black-box (unresolved) cell\n";
+  (*cell_power_report_file) << "      c  -  Clock pin internal power only\n";
+  (*cell_power_report_file) << "      d  -  Does not include clock pin internal power\n";
+  (*cell_power_report_file) << "      h  -  Hierarchical cell\n\n";
+  (*cell_power_report_file) << "                        Internal  Switching Leakage   Total\n";
+  (*cell_power_report_file) << "Cell                    Power     Power     Power     Power    (     %)   Attrs\n";
+  (*cell_power_report_file) << std::string(80, '-') << "\n";
+
+  PowerValue display_power_value;
+  for (std::size_t cell_idx = 0; cell_idx < display_num; cell_idx++) {
+    const std::string& cell_name = cell_power_list[cell_idx].first;
+    PowerValue& cell_power_value = cell_power_list[cell_idx].second->get_power_value();
+    display_power_value.add_power_value(cell_power_value);
+    double cell_total_power = cell_power_value.get_total_power();
+    if (cell_name.size() < 24) {
+      (*cell_power_report_file) << std::left << std::setw(24) << cell_name << std::right;
+    } else {
+      (*cell_power_report_file) << cell_name << "\n" << std::string(24, ' ');
+    }
+    (*cell_power_report_file) << std::setw(9) << getPowerCellString(cell_power_value.get_internal_power()) << " "
+                              << std::setw(9) << getPowerCellString(cell_power_value.get_switching_power()) << " "
+                              << std::setw(9) << getPowerCellString(cell_power_value.get_leakage_power()) << " "
+                              << std::setw(9) << getPowerCellString(cell_total_power) << " (" << std::setw(5)
+                              << getPowerCellPercentageString(getPercentage(cell_total_power, design_total_power))
+                              << "%)  \n";
+  }
+  (*cell_power_report_file) << std::string(80, '-') << "\n";
+
+  std::string total_label = is_all ? PWUTIL.getString("Totals (", total_num, " cells)")
+                                   : PWUTIL.getString("Total (", display_num, " of ", total_num, " cells)");
+  if (total_label.size() < 24) {
+    (*cell_power_report_file) << std::left << std::setw(24) << total_label << std::right;
+  } else {
+    (*cell_power_report_file) << total_label << "\n" << std::string(24, ' ');
+  }
+  (*cell_power_report_file) << std::setw(9) << getPowerCellString(display_power_value.get_internal_power()) << " "
+                            << std::setw(9) << getPowerCellString(display_power_value.get_switching_power()) << " "
+                            << std::setw(9) << getPowerCellString(display_power_value.get_leakage_power()) << " "
+                            << std::setw(9) << getPowerCellString(display_power_value.get_total_power());
+  if (is_all) {
+    (*cell_power_report_file) << " (" << std::setw(5) << getPowerCellPercentageString(100.0) << "%)";
+  }
+  (*cell_power_report_file) << "\n";
+  PWUTIL.closeFileStream(cell_power_report_file);
+
+  PWLOG.info(
+      Loc::current(),
+      "Reported ",
+      display_num,
+      " of ",
+      total_num,
+      " cell(s) to '",
+      PWUTIL.getString(report_directory_path, "cell_power.rpt"),
+      "'."
+  );
+}
+
+void PowerReporter::outputNetPowerReport(
+    const std::string& directory_path,
+    std::vector<std::pair<std::string, NetPower*>>& net_power_list,
+    const int32_t top_num,
+    const bool is_all
+)
+{
+  Database& database = PWDM.getDatabase();
+  std::string report_directory_path = directory_path.empty() ? PWDM.getConfig().pr_temp_directory_path : directory_path;
+  if (!report_directory_path.empty() && report_directory_path.back() != '/') {
+    report_directory_path += "/";
+  }
+  PWUTIL.createDir(report_directory_path);
+
+  std::size_t total_num = net_power_list.size();
+  std::size_t display_num = is_all ? total_num : std::min(static_cast<std::size_t>(top_num), total_num);
+
+  std::ofstream* net_power_report_file
+      = PWUTIL.getOutputFileStream(PWUTIL.getString(report_directory_path, "net_power.rpt"));
+  (*net_power_report_file) << "****************************************\n";
+  (*net_power_report_file) << "Report : Averaged Power\n";
+  (*net_power_report_file) << "        -net_power\n";
+  (*net_power_report_file) << "        -sort_by net_switching_power\n";
+  (*net_power_report_file) << "        " << (is_all ? "-all" : PWUTIL.getString("-top ", top_num)) << "\n";
+  (*net_power_report_file) << "Design : " << database.get_design_name() << "\n";
+  (*net_power_report_file) << "Global Operating Voltage = " << std::setprecision(4)
+                           << database.get_timing_library().get_nom_voltage() << "\n";
+  (*net_power_report_file) << "Power Units = 1W\n";
+  (*net_power_report_file) << "Nets : " << total_num << " total, " << display_num << " displayed\n";
+  (*net_power_report_file) << "****************************************\n\n\n\n";
+  (*net_power_report_file) << "  Attributes\n";
+  (*net_power_report_file) << "  ----------\n";
+  *net_power_report_file
+      << "      a  -  Switching activity information / Switching power information annotated on net\n";
+  (*net_power_report_file) << "      p  -  Propagated switching activity information on net\n";
+  (*net_power_report_file) << "      d  -  Default switching activity used on net\n";
+  (*net_power_report_file) << "      u  -  Net switching activity uninitialized\n";
+  (*net_power_report_file) << "      m  -  Net is driven by multiple pins\n";
+  (*net_power_report_file) << "      b  -  Net is a primary input (boundary net)\n\n";
+  (*net_power_report_file) << "\t\tToggle rates reported with respect to time unit 1ns\n";
+  (*net_power_report_file) << std::string(80, '-') << "\n";
+  (*net_power_report_file) << "                                  Total      Static   Toggle   Switching\n";
+  (*net_power_report_file) << "Net                         Vdd   Net Load   Prob.    Rate     Power      Attrs\n";
+  (*net_power_report_file) << std::string(80, '-') << "\n";
+
+  double display_switching_power = 0.0;
+  for (std::size_t net_idx = 0; net_idx < display_num; net_idx++) {
+    const std::string& net_name = net_power_list[net_idx].first;
+    NetPower& net_power = *net_power_list[net_idx].second;
+    display_switching_power += net_power.get_switching_power();
+
+    if (net_name.size() < 28) {
+      (*net_power_report_file) << std::left << std::setw(28) << net_name << std::right;
+    } else {
+      (*net_power_report_file) << net_name << "\n" << std::string(28, ' ');
+    }
+    (*net_power_report_file) << getNetPowerValueString(net_power) << "  "
+                             << getNetPowerAttributeString(net_name, net_power) << "\n";
+  }
+  (*net_power_report_file) << std::string(80, '-') << "\n";
+
+  std::string total_label = is_all ? PWUTIL.getString("Total (", total_num, " nets)")
+                                   : PWUTIL.getString("Total (", display_num, " of ", total_num, " nets)");
+  (*net_power_report_file) << std::left << std::setw(63) << total_label << std::right << std::setw(9)
+                           << getPowerCellString(display_switching_power) << " Watt\n";
+  PWUTIL.closeFileStream(net_power_report_file);
+
+  PWLOG.info(
+      Loc::current(),
+      "Reported ",
+      display_num,
+      " of ",
+      total_num,
+      " net(s) to '",
+      PWUTIL.getString(report_directory_path, "net_power.rpt"),
+      "'."
+  );
 }
 
 PowerValue PowerReporter::getPowerGroupPowerValue(PowerGroupType power_group_type)
@@ -196,6 +524,26 @@ double PowerReporter::getPercentage(double numerator, double denominator)
     return 0.0;
   }
   return numerator * 100.0 / denominator;
+}
+
+std::string PowerReporter::getPowerCellString(double power)
+{
+  if (std::fabs(power) < 1E-15) {
+    return "0.0000";
+  }
+  std::stringstream oss;
+  oss << std::scientific << std::setprecision(3) << power;
+  return oss.str();
+}
+
+std::string PowerReporter::getPowerCellPercentageString(double percentage)
+{
+  if (percentage >= 99.995) {
+    return "100.0";
+  }
+  std::stringstream oss;
+  oss << std::fixed << std::setprecision(2) << percentage;
+  return oss.str();
 }
 
 std::string PowerReporter::getPowerString(double power)
@@ -244,6 +592,55 @@ std::string PowerReporter::getPowerTotalString(double power, bool is_leakage_pow
 std::string PowerReporter::getPowerGroupAttribute(PowerGroupType power_group_type)
 {
   return power_group_type == PowerGroupType::kClockNetwork ? "  i" : "";
+}
+
+std::string PowerReporter::getNetPowerValueString(NetPower& net_power)
+{
+  double static_probability = net_power.get_is_activity_valid() ? net_power.get_static_probability() : 0.0;
+  double transition_density = net_power.get_is_activity_valid() ? net_power.get_transition_density() : 0.0;
+  std::stringstream oss;
+  oss << std::fixed << std::setprecision(2) << std::setw(4) << net_power.get_voltage() << "   " << std::setprecision(3)
+      << std::setw(6) << net_power.get_total_net_load() << "   " << std::setw(6) << static_probability << "   "
+      << std::setprecision(4) << std::setw(7) << transition_density << "   " << std::setw(9)
+      << getPowerCellString(net_power.get_switching_power());
+  return oss.str();
+}
+
+std::string PowerReporter::getNetPowerAttributeString(const std::string& net_name, NetPower& net_power)
+{
+  std::string attribute_string;
+  if (!net_power.get_is_activity_valid()) {
+    attribute_string += "u";
+  } else {
+    switch (net_power.get_activity_origin()) {
+      case PowerActivityOrigin::kVcd:
+        attribute_string += "a";
+        break;
+      case PowerActivityOrigin::kInput:
+        attribute_string += "d";
+        break;
+      case PowerActivityOrigin::kClock:
+      case PowerActivityOrigin::kPropagated:
+      case PowerActivityOrigin::kSequential:
+      case PowerActivityOrigin::kConstant:
+        attribute_string += "p";
+        break;
+      case PowerActivityOrigin::kNone:
+      default:
+        attribute_string += "u";
+        break;
+    }
+  }
+  Database& database = PWDM.getDatabase();
+  auto net_iter = database.get_net_map().find(net_name);
+  if (net_iter != database.get_net_map().end()) {
+    if (net_iter->second.get_driver_pin_list().empty()) {
+      attribute_string += "b";
+    } else if (net_iter->second.get_driver_pin_list().size() > 1) {
+      attribute_string += "m";
+    }
+  }
+  return attribute_string;
 }
 
 }  // namespace ipw

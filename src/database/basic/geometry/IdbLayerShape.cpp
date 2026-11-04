@@ -70,7 +70,7 @@ void IdbLayerShape::clear()
 
 IdbRect* IdbLayerShape::get_rect(uint index)
 {
-  if (index < 0 || index >= get_rect_list_num()) {
+  if (index >= get_rect_list_num()) {
     return nullptr;
   } else {
     return _rect_list[index];
@@ -81,19 +81,30 @@ IdbCoordinate<int32_t> IdbLayerShape::get_average_xy()
 {
   int x = 0;
   int y = 0;
+  size_t count = 0;
   for (IdbRect* rect : _rect_list) {
+    if (rect == nullptr) {
+      continue;
+    }
     x += rect->get_middle_point().get_x();
     y += rect->get_middle_point().get_y();
+    ++count;
   }
 
-  x = x / _rect_list.size();
-  y = y / _rect_list.size();
+  if (count == 0) {
+    return IdbCoordinate<int32_t>(0, 0);
+  }
 
+  x = x / count;
+  y = y / count;
   return IdbCoordinate<int32_t>(x, y);
 }
 
 void IdbLayerShape::add_rect(IdbRect* rect)
 {
+  if (rect == nullptr) {
+    return;
+  }
   _rect_list.emplace_back(rect);
 }
 
@@ -118,6 +129,9 @@ IdbRect IdbLayerShape::get_bounding_box()
   for (IdbRect* rect : _rect_list)
 
   {
+    if (rect == nullptr) {
+      continue;
+    }
     bounding_box_ll_x = std::min(bounding_box_ll_x, rect->get_low_x());
     bounding_box_ll_y = std::min(bounding_box_ll_y, rect->get_low_y());
     bounding_box_ur_x = std::max(bounding_box_ur_x, rect->get_high_x());
@@ -129,7 +143,13 @@ IdbRect IdbLayerShape::get_bounding_box()
 
 void IdbLayerShape::moveToLocation(IdbCoordinate<int32_t>* coordinate)
 {
+  if (coordinate == nullptr) {
+    return;
+  }
   for (IdbRect* rect : _rect_list) {
+    if (rect == nullptr) {
+      continue;
+    }
     rect->moveByStep(coordinate->get_x(), coordinate->get_y());
   }
 }
@@ -148,6 +168,9 @@ IdbLayerShape& IdbLayerShape::operator=(const IdbLayerShape& other)
   _type = other._type;
   _layer = other._layer;
   for (IdbRect* rect : other._rect_list) {
+    if (rect == nullptr) {
+      continue;
+    }
     IdbRect* rect_new = new IdbRect(rect);
     _rect_list.emplace_back(rect_new);
   }

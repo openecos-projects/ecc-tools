@@ -4,7 +4,7 @@ add_library(ista_utility
 
 target_link_libraries(ista_utility
     PUBLIC
-    ista_data_manager
+    ista_logger
 )
 
 target_include_directories(ista_utility

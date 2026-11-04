@@ -31,6 +31,7 @@ class ACModel
       : _violation_num(other._violation_num),
         _micron_dbu(other._micron_dbu),
         _report_dir(std::move(other._report_dir)),
+        _step_json_path(std::move(other._step_json_path)),
         _rule_list(std::move(other._rule_list)),
         _rule_map(std::move(other._rule_map)),
         _thickness_by_order(std::move(other._thickness_by_order)),
@@ -53,6 +54,8 @@ class ACModel
   int get_micron_dbu() const { return _micron_dbu; }
   std::string& get_report_dir() { return _report_dir; }
   const std::string& get_report_dir() const { return _report_dir; }
+  std::string& get_step_json_path() { return _step_json_path; }
+  const std::string& get_step_json_path() const { return _step_json_path; }
   std::vector<ACAntennaRule>& get_rule_list() { return _rule_list; }
   const std::vector<ACAntennaRule>& get_rule_list() const { return _rule_list; }
   std::vector<std::vector<const ACAntennaRule*>>& get_rule_map() { return _rule_map; }
@@ -68,11 +71,17 @@ class ACModel
   int64_t& get_signal_net_cnt() { return _signal_net_cnt; }
   int64_t get_signal_net_cnt() const { return _signal_net_cnt; }
   std::atomic<int64_t>& get_pins_missing_antenna_info() { return _pins_missing_antenna_info; }
+  const std::atomic<int64_t>& get_pins_missing_antenna_info() const { return _pins_missing_antenna_info; }
   std::atomic<int64_t>& get_pins_with_gate_area() { return _pins_with_gate_area; }
+  const std::atomic<int64_t>& get_pins_with_gate_area() const { return _pins_with_gate_area; }
   std::atomic<int64_t>& get_comps_without_gate() { return _comps_without_gate; }
+  const std::atomic<int64_t>& get_comps_without_gate() const { return _comps_without_gate; }
   std::atomic<int64_t>& get_skipped_segments() { return _skipped_segments; }
+  const std::atomic<int64_t>& get_skipped_segments() const { return _skipped_segments; }
   std::atomic<int64_t>& get_conductors_out_of_range() { return _conductors_out_of_range; }
+  const std::atomic<int64_t>& get_conductors_out_of_range() const { return _conductors_out_of_range; }
   std::atomic<int64_t>& get_partial_areas_dropped() { return _partial_areas_dropped; }
+  const std::atomic<int64_t>& get_partial_areas_dropped() const { return _partial_areas_dropped; }
   // setter
   void set_violation_num(const int32_t violation_num) { _violation_num = violation_num; }
   // function
@@ -82,6 +91,7 @@ class ACModel
   int32_t _violation_num = 0;
   int _micron_dbu = 1000;
   std::string _report_dir;
+  std::string _step_json_path;
   std::vector<ACAntennaRule> _rule_list;
   std::vector<std::vector<const ACAntennaRule*>> _rule_map;
   std::vector<double> _thickness_by_order;

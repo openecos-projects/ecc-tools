@@ -25,7 +25,6 @@
 
 #include <algorithm>
 #include <limits>
-#include <ostream>
 #include <utility>
 
 #include "Logger.hh"

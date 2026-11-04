@@ -34,7 +34,6 @@
 #include <vector>
 
 #include "spatial/Point.hh"
-#include "timing/TimingConstraints.hh"
 
 namespace idb {
 class IdbBuilder;
@@ -47,7 +46,6 @@ class IdbPin;
 template <typename T>
 class IdbCoordinate;
 class LibCell;
-class LibLibrary;
 }  // namespace idb
 
 namespace idm {
@@ -352,8 +350,7 @@ class Wrapper
   };
 
   auto queryDbUnit() const -> std::optional<int32_t>;
-  auto querySdcUnits() const -> std::optional<SdcUnits>;
-  auto querySupplyVoltage() const -> std::optional<double>;
+  auto queryCellSupplyVoltage(const std::string& cell_master) const -> std::optional<double>;
   auto queryLibertyRevision() const -> std::uint64_t;
   static auto queryParallelWorkerCount() -> std::size_t;
   auto is_design_ready() const -> bool { return _idb_design != nullptr; }

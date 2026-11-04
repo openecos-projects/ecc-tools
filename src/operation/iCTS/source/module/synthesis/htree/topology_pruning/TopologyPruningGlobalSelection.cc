@@ -30,20 +30,20 @@
 #include <utility>
 #include <vector>
 
+#include "BufferingPattern.hh"
 #include "HTreeTopologyChar.hh"
+#include "HTreeTopologyPattern.hh"
 #include "Logger.hh"
 #include "PatternId.hh"
 #include "synthesis/htree/constraint/Constraint.hh"
 #include "synthesis/htree/region/SinkLoadRegion.hh"
 #include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"
+#include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 #include "synthesis/htree/topology_pruning/TopologyPruning.hh"
 
 namespace icts {
 class Tree;
 
-namespace htree {
-struct BufferPatternLibrary;
-}  // namespace htree
 }  // namespace icts
 
 namespace icts::htree {
@@ -504,11 +504,13 @@ auto FilterGlobalEntriesBySinkLoadRegionCoverage(const std::vector<CandidateChar
     }
 
     const auto& evaluation = evaluations[entry_ref.candidate_index];
-    const auto legality = ResolveSinkLoadRegionLegality(topology, entry_ref.entry->get_pattern_id(), evaluation.topology_pattern_library,
-                                                        segment_pattern_library, legality_context);
+    const auto& legality = ResolveSinkLoadRegionLegality(topology, entry_ref.entry->get_pattern_id(), evaluation.topology_pattern_library,
+                                                         segment_pattern_library, legality_context);
     if (!legality.legal) {
       if (result.summary.first_failure_reason.empty()) {
         result.summary.first_failure_reason = legality.failure_reason;
+        result.summary.first_violation = legality.violation;
+        result.summary.first_recovery_failure = legality.recovery_failure;
       }
       continue;
     }
@@ -519,6 +521,7 @@ auto FilterGlobalEntriesBySinkLoadRegionCoverage(const std::vector<CandidateChar
         detail << "sink_load_region_boundary_load_coverage_violation required_leaf_load_cap_idx=" << *legality.required_leaf_load_cap_covering_idx
                << ", entry_leaf_load_cap_idx=" << entry_ref.entry->get_leaf_load_cap_idx() << ", max_real_load_cap_pf=" << legality.required_leaf_load_cap_pf;
         result.summary.first_failure_reason = detail.str();
+        result.summary.first_violation = SinkLoadRegionViolation::kBoundaryLoadCoverage;
       }
       continue;
     }
@@ -529,6 +532,8 @@ auto FilterGlobalEntriesBySinkLoadRegionCoverage(const std::vector<CandidateChar
     covered_ref.split_local_depth = legality.split_local_depth;
     covered_ref.split_triggered_by_fanout = legality.split_triggered_by_fanout;
     covered_ref.split_triggered_by_capacitance = legality.split_triggered_by_capacitance;
+    covered_ref.used_cap_fallback = legality.used_cap_fallback;
+    covered_ref.cap_overrun_pf = legality.total_cap_overrun_pf;
     result.output.entries.push_back(covered_ref);
   }
   return result;

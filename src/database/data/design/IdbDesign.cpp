@@ -29,7 +29,6 @@
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-#include "utility/logger/Logger.hpp"
 #include "IdbDesign.h"
 
 #include <algorithm>
@@ -38,6 +37,9 @@
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+
+#include "utility/logger/Logger.hpp"
 
 namespace idb {
 
@@ -141,6 +143,8 @@ IdbDesign::~IdbDesign()
     _instance_list = nullptr;
   }
   if (_io_pin_list != nullptr) {
+    // The design owns IO pins; regular nets, special nets and buses only reference them.
+    _io_pin_list->reset();
     delete _io_pin_list;
     _io_pin_list = nullptr;
   }
@@ -184,6 +188,27 @@ IdbDesign::~IdbDesign()
     delete _bus_list;
     _bus_list = nullptr;
   }
+}
+
+void IdbDesign::swap(IdbDesign& other) noexcept
+{
+  _version.swap(other._version);
+  _design_name.swap(other._design_name);
+  std::swap(_units, other._units);
+  std::swap(_instance_list, other._instance_list);
+  std::swap(_io_pin_list, other._io_pin_list);
+  std::swap(_net_list, other._net_list);
+  std::swap(_via_list, other._via_list);
+  std::swap(_blockage_list, other._blockage_list);
+  std::swap(_region_list, other._region_list);
+  std::swap(_slot_list, other._slot_list);
+  std::swap(_group_list, other._group_list);
+  std::swap(_special_net_list, other._special_net_list);
+  std::swap(_fill_list, other._fill_list);
+  std::swap(_layout, other._layout);
+  std::swap(_bus_bit_chars, other._bus_bit_chars);
+  std::swap(_bus_list, other._bus_list);
+  m_instID2Name.swap(other.m_instID2Name);
 }
 
 // void IdbDesign::createDefaultVias(IdbLayers* layers)
@@ -474,13 +499,17 @@ std::string IdbDesign::makeUniqueNetName(const std::string& prefix) const
   }
 
   std::string base_name = prefix.empty() ? "net" : prefix;
-  if (_net_list->find_net(base_name) == nullptr) {
+  const auto available = [this](const std::string& name) {
+    return _net_list->find_net(name) == nullptr && _io_pin_list->find_pin(name) == nullptr
+           && _instance_list->find_instance(name) == nullptr;
+  };
+  if (available(base_name)) {
     return base_name;
   }
 
   for (uint64_t index = 0;; ++index) {
     std::string candidate = base_name + std::to_string(index);
-    if (_net_list->find_net(candidate) == nullptr) {
+    if (available(candidate)) {
       return candidate;
     }
   }
@@ -1047,7 +1076,7 @@ void IdbDesign::clearBlockage(std::string type)
 }
 
 void IdbDesign::addRoutingBlockage(int32_t llx, int32_t lly, int32_t urx, int32_t ury, const std::vector<std::string>& layers,
-                                  const bool& is_except_pgnet)
+                                   const bool& is_except_pgnet)
 {
   if (_layout == nullptr || _blockage_list == nullptr || _layout->get_layers() == nullptr) {
     return;
@@ -1178,7 +1207,7 @@ IdbConnectivityCheckResult IdbDesign::validateConnectivity(bool check_floating) 
         if (!pin->get_net_name().empty() && pin->get_net_name() != net->get_net_name()) {
           result.pin_reverse_mismatch_count++;
           pushLimitedMessage(result.messages, "regular pin net name mismatch: " + pinDisplayName(pin) + " has " + pin->get_net_name()
-                                                + " but is listed in " + net->get_net_name());
+                                                  + " but is listed in " + net->get_net_name());
         }
         if (!pin->is_io_pin()) {
           auto* instance = pin->get_instance();
@@ -1263,9 +1292,8 @@ IdbConnectivityCheckResult IdbDesign::validateConnectivity(bool check_floating) 
   }
 
   result.ok = result.duplicate_net_count == 0 && result.duplicate_instance_count == 0 && result.duplicate_io_pin_count == 0
-              && result.stale_regular_pin_ref_count == 0 && result.stale_pin_net_ref_count == 0
-              && result.stale_special_pin_ref_count == 0 && result.pin_reverse_mismatch_count == 0
-              && result.net_instance_mismatch_count == 0 && result.duplicate_pin_ref_count == 0
+              && result.stale_regular_pin_ref_count == 0 && result.stale_pin_net_ref_count == 0 && result.stale_special_pin_ref_count == 0
+              && result.pin_reverse_mismatch_count == 0 && result.net_instance_mismatch_count == 0 && result.duplicate_pin_ref_count == 0
               && (!check_floating || result.floating_pin_count == 0);
   return result;
 }
@@ -1305,7 +1333,8 @@ bool IdbDesign::writeConnectivitySnapshot(const std::string& path, bool check_fl
 
 bool IdbDesign::connectIOPinToPowerStripe(vector<IdbCoordinate<int32_t>*>& point_list, IdbLayer* layer)
 {
-  if (point_list.size() < _POINT_MAX_ || layer == nullptr || _layout == nullptr || _io_pin_list == nullptr || _special_net_list == nullptr) {
+  if (point_list.size() < _POINT_MAX_ || layer == nullptr || _layout == nullptr || _io_pin_list == nullptr
+      || _special_net_list == nullptr) {
     return false;
   }
 

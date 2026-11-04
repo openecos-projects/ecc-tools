@@ -23,13 +23,11 @@
 
 #include "Logger.hh"
 
-#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
 #include <filesystem>
-#include <functional>
 #include <iostream>
 #include <string_view>
 #include <system_error>

@@ -23,11 +23,9 @@
 
 #include "synthesis/htree/solution/selection/SolutionSelection.hh"
 
-#include <algorithm>
 #include <cstddef>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <vector>
 
@@ -35,6 +33,7 @@
 #include "HTreeTopologyPattern.hh"
 #include "Logger.hh"
 #include "PatternId.hh"
+#include "Tree.hh"
 #include "io/Wrapper.hh"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/segment_pruning/SegmentPatternLibrary.hh"

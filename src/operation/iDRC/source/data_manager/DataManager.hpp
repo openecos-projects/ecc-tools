@@ -74,6 +74,7 @@ class DataManager
   void wrapDie();
   void wrapDesignRule();
   void wrapLayerList();
+  void wrapMacroObsList();
   void wrapTrackAxis(RoutingLayer& routing_layer, idb::IdbLayerRouting* idb_layer);
   void wrapRoutingDesignRule(RoutingLayer& routing_layer, idb::IdbLayerRouting* idb_layer);
   void wrapCutDesignRule(CutLayer& cut_layer, idb::IdbLayerCut* idb_layer);

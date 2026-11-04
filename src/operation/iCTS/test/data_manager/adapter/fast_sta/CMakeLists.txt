@@ -2,6 +2,7 @@ icts_add_test_executable(
   icts_test_data_manager_adapter_fast_sta
   SOURCES
     ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTATest.cc
+    ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTAPowerTest.cc
     ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTAIncrementalTest.cc
     ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTALifecycleTest.cc
     ${ICTS_TEST}/data_manager/adapter/fast_sta/fixture/FastSTATestModel.cc

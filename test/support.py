@@ -19,6 +19,10 @@ INPUTS = {
     "lvs": ("harden_in.def.gz", "harden_in.v.gz"),
     "placement_map": ("cts_in.def.gz",),
     "pyplacedb_rows": (),
+    "pyplacedb_timing": ("route_in.def.gz", "route_in.v.gz"),
+    "sizing_mutation": ("route_in.def.gz", "route_in.v.gz"),
+    "buffer_mutation": ("route_in.def.gz", "route_in.v.gz"),
+    "full_refresh_mutation": ("route_in.def.gz", "route_in.v.gz"),
     "rcx": ("route_in.def.gz", "route_in.v.gz"),
     "routing": ("route_in.def.gz",),
     "sta": ("route_in.def.gz", "route_in.v.gz"),
@@ -74,7 +78,7 @@ def run_scenario(
     environment.setdefault("ECC_LOGGER_THROW_ON_ERROR", "1")
     environment.setdefault("OMP_NUM_THREADS", "2")
     command = [
-        sys.executable,
+        os.environ.get("ECC_TOOLS_TEST_PYTHON_LAUNCHER", sys.executable),
         str(roots.repo_root / "test" / "native_scenarios.py"),
         str(manifest_path),
     ]

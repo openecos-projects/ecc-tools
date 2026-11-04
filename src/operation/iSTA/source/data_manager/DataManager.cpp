@@ -16,11 +16,21 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 
+#include <omp.h>
+
+#include <algorithm>
+#include <any>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <map>
+#include <string>
+#include <utility>
+
 #include "Logger.hpp"
 #include "Monitor.hpp"
-#include "STAInterface.hpp"
-#include "SdcCommand.hpp"
 #include "Utility.hpp"
+#include "network/LinkNetwork.hpp"
 
 namespace ista {
 
@@ -51,24 +61,41 @@ void DataManager::destroyInst()
 
 // function
 
-void DataManager::input(std::map<std::string, std::any>& config_map)
+void DataManager::readConfig(std::map<std::string, std::any>& config_map)
 {
-  Monitor monitor;
-  STALOG.info(Loc::current(), "Starting...");
-  STAI.input(config_map);
-  buildConfig();
-  buildDatabase();
-  printConfig();
-  printDatabase();
-  STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
-}
-
-void DataManager::output()
-{
-  Monitor monitor;
-  STALOG.info(Loc::current(), "Starting...");
-  STAI.output();
-  STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  Config& config = _config;
+  /////////////////////////////////////////////
+  config.temp_directory_path = STAUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./sta_temp_directory");
+  config.thread_number = STAUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
+  config.output_timing_reports = STAUTIL.getConfigValue<int32_t>(config_map, "-output_timing_reports", 1);
+  config.output_timing_features = STAUTIL.getConfigValue<int32_t>(config_map, "-output_timing_features", 1);
+  config.timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
+  config.min_slew_degradation = STAUTIL.getConfigValue<int32_t>(config_map, "-min_slew_degradation", 0);
+  config.adjust_driver_resistance = STAUTIL.getConfigValue<int32_t>(config_map, "-adjust_driver_resistance", 1);
+  config.timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
+  config.is_path_report_number_specified = STAUTIL.exist(config_map, std::string("-max_paths")) || STAUTIL.exist(config_map, std::string("-max_path"))
+                                           || STAUTIL.exist(config_map, std::string("-path_report_number"));
+  config.path_report_number = STAUTIL.getConfigValue<int32_t>(config_map, "-max_paths", 1);
+  if (STAUTIL.exist(config_map, std::string("-max_path"))) {
+    config.path_report_number = std::any_cast<int32_t>(config_map["-max_path"]);
+  }
+  if (STAUTIL.exist(config_map, std::string("-path_report_number"))) {
+    config.path_report_number = std::any_cast<int32_t>(config_map["-path_report_number"]);
+  }
+  config.endpoint_path_report_number = STAUTIL.getConfigValue<int32_t>(config_map, "-nworst", 1);
+  if (!config.is_path_report_number_specified && config.endpoint_path_report_number > 1) {
+    config.path_report_number = config.endpoint_path_report_number;
+  }
+  config.has_timing_report_slack_lesser_than = STAUTIL.exist(config_map, std::string("-slack_lesser_than"));
+  if (config.has_timing_report_slack_lesser_than) {
+    config.timing_report_slack_lesser_than = std::any_cast<double>(config_map["-slack_lesser_than"]);
+  }
+  config.has_timing_report_slack_greater_than = STAUTIL.exist(config_map, std::string("-slack_greater_than"));
+  if (config.has_timing_report_slack_greater_than) {
+    config.timing_report_slack_greater_than = std::any_cast<double>(config_map["-slack_greater_than"]);
+  }
+  omp_set_num_threads(std::max(config.thread_number, 1));
+  /////////////////////////////////////////////
 }
 
 // private
@@ -76,6 +103,14 @@ void DataManager::output()
 DataManager* DataManager::_dm_instance = nullptr;
 
 #if 1  // build
+
+void DataManager::buildDesign()
+{
+  buildConfig();
+  LinkNetwork(_database.network(), _database.liberty()).link();
+  printConfig();
+  printDatabase();
+}
 
 void DataManager::buildConfig()
 {
@@ -95,7 +130,7 @@ void DataManager::buildConfig()
   _config.dc_temp_directory_path = _config.temp_directory_path + "delay_calculator/";
   // ******** ClockPropagator    ********* //
   _config.cp_temp_directory_path = _config.temp_directory_path + "clock_propagator/";
-  // ********* TimingPropagator   ********* //
+  // ********* DataPropagator   ********* //
   _config.tp_temp_directory_path = _config.temp_directory_path + "timing_propagator/";
   // ********** TimingAnalyzer   ********* //
   _config.ta_temp_directory_path = _config.temp_directory_path + "timing_analyzer/";
@@ -103,11 +138,18 @@ void DataManager::buildConfig()
   _config.tc_temp_directory_path = _config.temp_directory_path + "timing_characterizer/";
   // **********  TimingReporter   ********** //
   _config.tr_temp_directory_path = _config.temp_directory_path + "timing_reporter/";
-  // ************  SDFWriter  ************* //
+  // ************  SdfWriter  ************* //
   _config.sw_temp_directory_path = _config.temp_directory_path + "sdf_writer/";
   /////////////////////////////////////////////
   // **********        STA        ********** //
-  STAUTIL.removeDir(_config.temp_directory_path);
+  // The caller owns the parent directory. Refresh only the fixed STA output
+  // subdirectories; inputs and other files in the parent must survive init.
+  // Do not append '/' here: remove_all must unlink a child symlink rather than
+  // traversing its target.
+  for (const char* name : {"data_manager", "graph_builder", "delay_calculator", "clock_propagator", "timing_propagator", "timing_analyzer",
+                           "timing_characterizer", "timing_reporter", "sdf_writer"}) {
+    STAUTIL.removeDir((std::filesystem::path(_config.temp_directory_path) / name).string());
+  }
   STAUTIL.createDir(_config.temp_directory_path);
   STAUTIL.createDirByFile(_config.log_file_path);
   // **********    DataManager    ********** //
@@ -118,7 +160,7 @@ void DataManager::buildConfig()
   STAUTIL.createDir(_config.dc_temp_directory_path);
   // ******** ClockPropagator    ********* //
   STAUTIL.createDir(_config.cp_temp_directory_path);
-  // ********* TimingPropagator   ********* //
+  // ********* DataPropagator   ********* //
   STAUTIL.createDir(_config.tp_temp_directory_path);
   // ********** TimingAnalyzer   ********* //
   STAUTIL.createDir(_config.ta_temp_directory_path);
@@ -126,197 +168,10 @@ void DataManager::buildConfig()
   STAUTIL.createDir(_config.tc_temp_directory_path);
   // **********  TimingReporter   ********** //
   STAUTIL.createDir(_config.tr_temp_directory_path);
-  // ************  SDFWriter  ************* //
+  // ************  SdfWriter  ************* //
   STAUTIL.createDir(_config.sw_temp_directory_path);
   /////////////////////////////////////////////
   STALOG.openLogFileStream(_config.log_file_path);
-}
-
-void DataManager::buildDatabase()
-{
-  buildInstanceList();
-  buildNetList();
-  buildInstanceTimingInfo();
-}
-
-void DataManager::buildInstanceList()
-{
-  makeInstanceList();
-}
-
-void DataManager::makeInstanceList()
-{
-  Database& database = _database;
-  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    instance_pair.second.get_pin_name_list().clear();
-  }
-
-  for (std::pair<const std::string, Pin>& pin_pair : database.get_pin_map()) {
-    Pin& pin = pin_pair.second;
-    if (!isInstancePin(pin)) {
-      continue;
-    }
-
-    makeUniqueName(database.get_instance_map()[pin.get_instance_name()].get_pin_name_list(), pin_pair.first);
-  }
-}
-
-void DataManager::buildInstanceTimingInfo()
-{
-  Database& database = _database;
-  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    makeInstanceTimingInfo(instance_pair.second);
-  }
-}
-
-void DataManager::makeInstanceTimingInfo(Instance& instance)
-{
-  Database& database = _database;
-  std::map<std::string, TimingCell>& timing_cell_map = database.get_timing_library().get_cell_map();
-  if (timing_cell_map.count(instance.get_cell_name()) == 0) {
-    return;
-  }
-
-  TimingCell& timing_cell = timing_cell_map[instance.get_cell_name()];
-  instance.set_is_sequential(timing_cell.get_is_sequential());
-  instance.set_is_clock_gating(timing_cell.get_is_clock_gating());
-  instance.set_has_clear_arc(timing_cell.get_has_clear_arc());
-  instance.set_has_preset_arc(timing_cell.get_has_preset_arc());
-  TimingCellArc* clock_to_q_arc = findClockToQArc(timing_cell);
-  if (clock_to_q_arc != nullptr) {
-    instance.set_output_pin_name(getInstancePinName(instance, clock_to_q_arc->get_sink_port()));
-    instance.set_clock_to_q_delay(clock_to_q_arc->get_delay());
-    instance.set_clock_to_q_arc(*clock_to_q_arc);
-  } else {
-    instance.set_output_pin_name(findOutputPinName(instance, timing_cell));
-  }
-  instance.get_check_arc_list().clear();
-  for (TimingCheckArc& timing_check_arc : timing_cell.get_check_arc_list()) {
-    instance.get_check_arc_list().push_back(makeInstanceTimingCheckArc(instance, timing_check_arc));
-  }
-
-  TimingCheckArc* representative_check_arc = nullptr;
-  for (TimingCheckArc& timing_check_arc : timing_cell.get_check_arc_list()) {
-    if (representative_check_arc == nullptr || timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
-      representative_check_arc = &timing_check_arc;
-    }
-    if (timing_check_arc.get_check_type() == TimingCheckType::kSetup) {
-      break;
-    }
-  }
-  if (representative_check_arc != nullptr) {
-    instance.set_clock_pin_name(getInstancePinName(instance, representative_check_arc->get_clock_port()));
-    instance.set_data_pin_name(getInstancePinName(instance, representative_check_arc->get_data_port()));
-  }
-}
-
-TimingCheckArc DataManager::makeInstanceTimingCheckArc(Instance& instance, TimingCheckArc& timing_check_arc)
-{
-  TimingCheckArc instance_timing_check_arc;
-  instance_timing_check_arc.set_clock_port(getInstancePinName(instance, timing_check_arc.get_clock_port()));
-  instance_timing_check_arc.set_data_port(getInstancePinName(instance, timing_check_arc.get_data_port()));
-  instance_timing_check_arc.set_check_type(timing_check_arc.get_check_type());
-  instance_timing_check_arc.set_check_time(timing_check_arc.get_check_time());
-  instance_timing_check_arc.set_timing_arc_list(timing_check_arc.get_timing_arc_list());
-  instance_timing_check_arc.set_clock_trans_type(timing_check_arc.get_clock_trans_type());
-  return instance_timing_check_arc;
-}
-
-TimingCellArc* DataManager::findClockToQArc(TimingCell& timing_cell)
-{
-  for (TimingCellArc& timing_cell_arc : timing_cell.get_cell_arc_list()) {
-    if (timing_cell_arc.get_is_clock_arc()) {
-      return &timing_cell_arc;
-    }
-  }
-  return nullptr;
-}
-
-std::string DataManager::getInstancePinName(Instance& instance, std::string& port_name)
-{
-  return instance.get_instance_name() + ":" + port_name;
-}
-
-std::string DataManager::findOutputPinName(Instance& instance, TimingCell& timing_cell)
-{
-  for (auto& [port_name, timing_cell_port] : timing_cell.get_port_map()) {
-    if (timing_cell_port.get_is_output() && !timing_cell_port.get_is_clock()) {
-      return getInstancePinName(instance, timing_cell_port.get_port_name());
-    }
-  }
-  return "";
-}
-
-bool DataManager::isInstancePin(Pin& pin)
-{
-  return !pin.get_is_port();
-}
-
-void DataManager::makeUniqueName(std::vector<std::string>& list, const std::string& value)
-{
-  if (!STAUTIL.exist(list, value)) {
-    list.push_back(value);
-  }
-}
-
-void DataManager::buildNetList()
-{
-  makeNetList();
-}
-
-void DataManager::makeNetList()
-{
-  Database& database = _database;
-  for (std::pair<const std::string, Pin>& pin_pair : database.get_pin_map()) {
-    pin_pair.second.get_net_name().clear();
-  }
-
-  for (std::pair<const std::string, Net>& net_pair : database.get_net_map()) {
-    makeNet(net_pair.first, net_pair.second);
-  }
-}
-
-void DataManager::makeNet(const std::string& net_name, Net& net)
-{
-  Database& database = _database;
-  net.get_driver_pin().clear();
-  net.get_driver_pin_list().clear();
-  net.get_load_pin_list().clear();
-
-  for (std::string& pin_name : net.get_pin_name_list()) {
-    Pin& pin = database.get_pin_map()[pin_name];
-    pin.set_net_name(net_name);
-    makeUniqueName(net.get_load_pin_list(), pin_name);
-  }
-}
-
-void DataManager::readConstraint()
-{
-  Database& database = _database;
-  std::string sdc_file_path = database.get_timing_constraint().get_sdc_file_path();
-  database.get_timing_constraint().get_clock_map().clear();
-  database.get_timing_constraint().get_port_constraint_map().clear();
-  database.get_timing_constraint().get_case_analysis_map().clear();
-  database.get_timing_constraint().get_effective_case_analysis_map().clear();
-  database.get_timing_constraint().get_path_exception_list().clear();
-  database.get_timing_constraint().get_clock_group_list().clear();
-  database.get_timing_constraint().get_max_fanout().reset();
-  database.get_timing_constraint().get_port_max_fanout_map().clear();
-  database.get_timing_constraint().get_net_load_map().clear();
-  database.get_timing_constraint().get_clock_uncertainty_list().clear();
-  database.get_timing_constraint().get_path_break_start_points().clear();
-  database.get_timing_constraint().get_path_break_end_points().clear();
-  if (sdc_file_path.empty()) {
-    return;
-  }
-
-  auto& sdc_command{Singleton<SdcCommand>::getInst()};
-  if (sdc_command.evalScriptFile(sdc_file_path) != TCL_OK) {
-    for (const SdcError& error : sdc_command.getErrors()) {
-      STALOG.warn(Loc::current(), "SDC command failed in '", sdc_file_path, "' at line ", error.line_number, ": ", error.message);
-    }
-    STALOG.error(Loc::current(), "SDC contains invalid or unsupported constraints; timing analysis stopped");
-  }
 }
 
 void DataManager::printConfig()
@@ -346,6 +201,8 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.output_timing_features);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "min_slew_degradation");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.min_slew_degradation);
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "adjust_driver_resistance");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.adjust_driver_resistance);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_path_limit");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_path_limit);
   // **********        STA        ********** //
@@ -361,15 +218,15 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "gb_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.gb_temp_directory_path);
   // ********* DelayCalculator   ********* //
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "DelayCalculator");
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "ArcDelayCalculator");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "dc_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.dc_temp_directory_path);
   // ******** ClockPropagator    ********* //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "ClockPropagator");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "cp_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.cp_temp_directory_path);
-  // ********* TimingPropagator   ********* //
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingPropagator");
+  // ********* DataPropagator   ********* //
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "DataPropagator");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tp_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.tp_temp_directory_path);
   // ********** TimingAnalyzer   ********* //
@@ -384,8 +241,8 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "TimingReporter");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "tr_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.tr_temp_directory_path);
-  // ************  SDFWriter  ************* //
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "SDFWriter");
+  // ************  SdfWriter  ************* //
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "SdfWriter");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), "sw_temp_directory_path");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(3), _config.sw_temp_directory_path);
   /////////////////////////////////////////////
@@ -394,7 +251,7 @@ void DataManager::printConfig()
 void DataManager::printDatabase()
 {
   std::size_t port_num = 0;
-  for (std::pair<const std::string, Pin>& pin_pair : _database.get_pin_map()) {
+  for (std::pair<const std::string, Pin>& pin_pair : _database.network().pins()) {
     if (pin_pair.second.get_is_port()) {
       port_num++;
     }
@@ -403,15 +260,15 @@ void DataManager::printDatabase()
   // **********        STA        ********** //
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(0), "STA_DATABASE");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "design_name");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.get_design_name());
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.network().name());
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "instance_num");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.get_instance_map().size());
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.network().instances().size());
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "port_num");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), port_num);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "pin_num");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.get_pin_map().size());
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.network().pins().size());
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "net_num");
-  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.get_net_map().size());
+  STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _database.network().nets().size());
   /////////////////////////////////////////////
 }
 

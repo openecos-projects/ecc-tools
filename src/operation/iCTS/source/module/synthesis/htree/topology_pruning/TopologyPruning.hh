@@ -31,6 +31,7 @@
 #include "HTreeTopologyChar.hh"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/constraint/Constraint.hh"
+#include "synthesis/htree/region/SinkLoadRegion.hh"
 #include "synthesis/htree/segment_pruning/TopologyPatternLibrary.hh"
 
 namespace icts {
@@ -43,7 +44,6 @@ namespace icts::htree {
 class RootDriverCompensationPass;
 class SegmentFrontierCatalog;
 struct BufferPatternLibrary;
-struct SinkLoadRegionLegalityContext;
 
 struct CandidateBuildEvaluation
 {
@@ -54,6 +54,9 @@ struct CandidateBuildEvaluation
   std::vector<HTree::LevelPlan> levels;
   bool success = false;
   std::string failure_reason;
+  SinkLoadRegionViolation failure_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::size_t coverage_rejected_count = 0U;
   std::optional<unsigned> failure_level = std::nullopt;
   std::optional<unsigned> failure_length_idx = std::nullopt;
   std::size_t final_frontier_count = 0U;
@@ -70,6 +73,9 @@ struct CandidateBuildEvaluation
   bool used_boundary_relaxation = false;
   std::optional<double> boundary_relaxation_score = std::nullopt;
   std::string boundary_relaxation_reason;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
+  std::string cap_fallback_detail;
   TopologyPatternLibrary topology_pattern_library;
 };
 
@@ -89,6 +95,8 @@ struct CandidateCharRef
   unsigned split_local_depth = 0U;
   bool split_triggered_by_fanout = false;
   bool split_triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
 };
 
 struct CandidateCharRefFilterOutput
@@ -99,6 +107,8 @@ struct CandidateCharRefFilterOutput
 struct CandidateCharRefFilterSummary
 {
   std::string first_failure_reason;
+  SinkLoadRegionViolation first_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure first_recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
 };
 
 struct CandidateCharRefFilterBuild

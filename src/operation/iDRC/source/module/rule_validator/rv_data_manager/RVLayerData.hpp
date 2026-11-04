@@ -129,6 +129,8 @@ struct RVLayerData
   bgi::rtree<CutData, bgi::quadratic<16>, CutDataIndexable> cut_rtrees;
   bgi::rtree<std::pair<GTLRectInt, int32_t>, bgi::quadratic<16>> metal_short_metal_rtree;
   bgi::rtree<GTLRectInt, bgi::quadratic<16>> metal_short_obs_rtree;
+  // Fixed shapes (pin shapes with net_idx != -1) only absorb routing violations around pins.
+  std::map<int32_t, std::vector<GTLRectInt>> metal_short_fixed_rects;
 
   const CutData& getCut(int32_t cut_id) const { return cut_pool[cut_id]; }
   int32_t getCutId(const CutData& cut_data) const { return static_cast<int32_t>(&cut_data - cut_pool.data()); }

@@ -26,12 +26,13 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <initializer_list>
 #include <memory>
 #include <optional>
-#include <ranges>
 #include <utility>
 #include <vector>
 
+#include "FastSTA.hh"
 #include "Type.hh"
 #include "io/Wrapper.hh"
 #include "liberty/Lib.hh"

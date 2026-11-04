@@ -30,8 +30,12 @@
 #include <utility>
 #include <vector>
 
+#include "FastSTAClockNetParasitic.hh"
+#include "FastSTAClockSizingEdit.hh"
+#include "FastSTAClockState.hh"
 #include "clock_sizing/FastSTAIncremental.hh"
 #include "power/FastSTAPower.hh"
+#include "timing/FastSTAClockTiming.hh"
 #include "timing/FastSTATiming.hh"
 
 namespace icts {

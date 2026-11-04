@@ -52,6 +52,9 @@ struct DepthSummary
   bool selected = false;
   bool used_explicit_target_depth = false;
   std::string failure_reason;
+  SinkLoadRegionViolation failure_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::size_t coverage_rejected_count = 0U;
   std::size_t htree_load_group_count = 0U;
   double htree_load_cap_min_pf = 0.0;
   double htree_load_cap_max_pf = 0.0;
@@ -68,6 +71,8 @@ struct DepthSummary
   bool split_triggered_by_fanout = false;
   bool split_triggered_by_capacitance = false;
   bool used_boundary_relaxation = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
   double selected_power_w = 0.0;
   double selected_delay_ns = 0.0;
 };

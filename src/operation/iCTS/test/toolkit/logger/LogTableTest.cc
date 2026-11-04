@@ -21,16 +21,17 @@
  * @brief Tests for canonical ASCII table rendering and Logger emission.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 #include "LogTable.hh"
 #include "Logger.hh"
+#include "gtest/gtest.h"
 
 namespace icts {
 namespace {

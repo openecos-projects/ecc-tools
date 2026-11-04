@@ -16,11 +16,13 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <string>
 
 namespace python_interface {
 
-bool init_lvs(const std::string& temp_directory_path, const int& thread_number);
+bool init_lvs(const std::optional<std::filesystem::path>& temp_directory_path, const int& thread_number);
 bool run_lvs();
 bool destroy_lvs();
 

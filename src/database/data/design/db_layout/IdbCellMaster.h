@@ -33,11 +33,13 @@
 
 #include <iostream>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "../../../basic/geometry/IdbGeometry.h"
 #include "../IdbEnum.h"
+#include "../db_property/IdbMacroProperty.h"
 #include "IdbLayer.h"
 
 namespace idb {
@@ -84,6 +86,9 @@ class IdbCellMaster
 
   IdbLayer* get_top_layer();
 
+  bool has_macro_property() { return _macro_property != nullptr ? true : false; }
+  macro::MacroProperty* get_macro_property() { return _macro_property.get(); }
+
   // setter
   void set_type(CellMasterType type) { _type = type; }
   void set_type(string type_name);
@@ -98,6 +103,7 @@ class IdbCellMaster
   void set_origin_y(int64_t value) { _origin_y = value; }
   void set_width(uint32_t value) { _width = value; }
   void set_height(uint32_t value) { _height = value; }
+  void set_macro_property(std::shared_ptr<macro::MacroProperty> macro_property) { _macro_property = std::move(macro_property); }
 
   IdbTerm* add_term(IdbTerm* term = nullptr);
   IdbTerm* add_term(string name);
@@ -130,6 +136,7 @@ class IdbCellMaster
 
   vector<IdbTerm*> _term_list;
   vector<IdbObs*> _obs_list;
+  std::shared_ptr<macro::MacroProperty> _macro_property;
 };
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

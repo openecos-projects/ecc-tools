@@ -1,0 +1,30 @@
+VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN antenna_test ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 30000 30000 ) ;
+ROW ROW_0 CORE 0 0 N DO 30 BY 1 STEP 1000 0 ;
+TRACKS X 0 DO 15 STEP 2000 LAYER M2 ;
+TRACKS Y 0 DO 15 STEP 2000 LAYER M1 ;
+COMPONENTS 7 ;
+- driver DRIVER + FIXED ( 1500 1500 ) N ;
+- early GATE_M1 + FIXED ( 2000 1500 ) N ;
+- late GATE_M2 + FIXED ( 9500 7500 ) N ;
+- isolated GATE_M1 + FIXED ( 15000 15000 ) N ;
+- clean GATE_M1 + FIXED ( 1000 10000 ) N ;
+- missing UNKNOWN_GATE + FIXED ( 1000 20000 ) N ;
+- power GATE_M1 + FIXED ( 1000 25000 ) N ;
+END COMPONENTS
+NETS 4 ;
+- violating ( driver Y ) ( early A ) ( late A ) ( isolated A )
+  + USE SIGNAL
+  + ROUTED M1 ( 2000 2000 ) ( 10000 2000 ) V12
+    NEW M2 ( 10000 2000 ) ( 10000 8000 ) ;
+- clean ( clean A ) + USE SIGNAL ;
+- missing ( missing A ) + USE SIGNAL
+  + ROUTED M1 ( 1500 20500 ) ( 20000 20500 ) ;
+- power ( power A ) + USE POWER
+  + ROUTED M1 ( 1500 25500 ) ( 20000 25500 ) ;
+END NETS
+END DESIGN

@@ -35,6 +35,7 @@ enum class ViolationType
   kEnclosureParallel,
   kFloatingPatch,
   kJogToJogSpacing,
+  kMacroObsSpacing,
   kMaximumWidth,
   kMaxViaStack,
   kMetalShort,
@@ -95,6 +96,9 @@ struct GetViolationTypeName
         break;
       case ViolationType::kJogToJogSpacing:
         violation_type_name = "jog_to_jog_spacing";
+        break;
+      case ViolationType::kMacroObsSpacing:
+        violation_type_name = "macro_obs_spacing";
         break;
       case ViolationType::kMaximumWidth:
         violation_type_name = "maximum_width";
@@ -175,6 +179,8 @@ struct GetViolationTypeByName
       violation_type = ViolationType::kFloatingPatch;
     } else if (violation_type_name == "jog_to_jog_spacing") {
       violation_type = ViolationType::kJogToJogSpacing;
+    } else if (violation_type_name == "macro_obs_spacing") {
+      violation_type = ViolationType::kMacroObsSpacing;
     } else if (violation_type_name == "maximum_width") {
       violation_type = ViolationType::kMaximumWidth;
     } else if (violation_type_name == "max_via_stack") {

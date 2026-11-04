@@ -28,7 +28,7 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <ostream>
+#include <ranges>
 #include <utility>
 #include <vector>
 

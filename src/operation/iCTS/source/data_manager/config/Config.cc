@@ -29,6 +29,7 @@
 #include <cstddef>
 #include <exception>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <string>

@@ -24,11 +24,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <optional>
 #include <string>
-#include <string_view>
+#include <utility>
+#include <vector>
 
+#include "FastSTAClockState.hh"
+#include "FastSTAClockTiming.hh"
 #include "FastSTAConstraints.hh"
 
 namespace icts {

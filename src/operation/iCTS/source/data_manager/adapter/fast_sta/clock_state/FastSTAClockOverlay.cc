@@ -24,7 +24,9 @@
 #include "FastSTAClockOverlay.hh"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -34,13 +36,15 @@
 
 #include "FastSTA.hh"
 #include "FastSTABuilder.hh"
+#include "FastSTAClockNetParasitic.hh"
 #include "FastSTAClockState.hh"
+#include "FastSTAClockTiming.hh"
 #include "FastSTAClockTree.hh"
 #include "FastSTAGraphImport.hh"
 #include "FastSTALibertyModel.hh"
+#include "TimingConstraints.hh"
 #include "design/Clock.hh"
 #include "design/Design.hh"
-#include "design/Net.hh"
 
 namespace icts {
 namespace fast_sta {
@@ -571,6 +575,49 @@ auto FastStaBuilder::extractClockContext(const FastStaContext& source, const Fas
       context.initial_buffer_outputs.emplace(name, mapped);
     }
   }
+  // The overlay carries the physical clock pins, but the stage input/output pair
+  // model comes from the resolved source context, where constraint resolution
+  // paired every buffer stage. Copy that model and close it over this context's
+  // node set: a pin whose pair mate stays outside the clock graph (a PLL input, a
+  // black-box boundary) is a load of this context, not half of a buffer. A half
+  // pair would otherwise fail hasCompleteBufferPairIndexes and silently disable
+  // clock sizing.
+  context.buffer_input_node_id_by_inst.clear();
+  context.buffer_output_node_id_by_inst.clear();
+  for (const auto& [name, id] : source.buffer_input_node_id_by_inst) {
+    if (const auto mapped = remap_node(id); mapped != kInvalidFastStaNodeId) {
+      context.buffer_input_node_id_by_inst.emplace(name, mapped);
+    }
+  }
+  for (const auto& [name, id] : source.buffer_output_node_id_by_inst) {
+    if (const auto mapped = remap_node(id); mapped != kInvalidFastStaNodeId) {
+      context.buffer_output_node_id_by_inst.emplace(name, mapped);
+    }
+  }
+  for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+    auto& node = context.nodes.at(node_id);
+    if (node.kind != FastStaNodeKind::kBufferInput && node.kind != FastStaNodeKind::kBufferOutput) {
+      continue;
+    }
+    const auto& index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_input_node_id_by_inst : context.buffer_output_node_id_by_inst;
+    const auto& peer_index = node.kind == FastStaNodeKind::kBufferInput ? context.buffer_output_node_id_by_inst : context.buffer_input_node_id_by_inst;
+    const auto indexed = index.find(node.inst_name);
+    const auto peer = peer_index.find(node.inst_name);
+    const bool paired = !node.inst_name.empty() && indexed != index.end() && indexed->second == node_id && peer != peer_index.end()
+                        && peer->second < context.nodes.size()
+                        && context.nodes.at(peer->second).kind
+                               == (node.kind == FastStaNodeKind::kBufferInput ? FastStaNodeKind::kBufferOutput : FastStaNodeKind::kBufferInput)
+                        && context.nodes.at(peer->second).inst_name == node.inst_name;
+    if (!paired) {
+      node.kind = FastStaNodeKind::kSink;
+    }
+  }
+  std::erase_if(context.buffer_input_node_id_by_inst, [&](const auto& entry) -> bool {
+    return entry.second >= context.nodes.size() || context.nodes.at(entry.second).kind != FastStaNodeKind::kBufferInput;
+  });
+  std::erase_if(context.buffer_output_node_id_by_inst, [&](const auto& entry) -> bool {
+    return entry.second >= context.nodes.size() || context.nodes.at(entry.second).kind != FastStaNodeKind::kBufferOutput;
+  });
   context.case_values = source.case_values;
   context.source_node_id = remap_node(source.source_node_id);
   context.input_node_count = context.nodes.size();

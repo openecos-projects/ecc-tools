@@ -26,10 +26,8 @@
 #include "characterization/sampling/CharSTASampler.hh"
 
 #include <algorithm>
-#include <cstddef>
 #include <functional>
 #include <optional>
-#include <ostream>
 #include <ranges>
 #include <string>
 #include <vector>

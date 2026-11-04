@@ -45,7 +45,8 @@ class GraphBuilder
   // function
   void applyCaseAnalysis();
   void propagateCaseValue();
-  std::optional<TimingCaseValue> getNetDriverCaseValue(TimingConstraint& constraint, Net& net);
+  bool updateDriverCaseValue(const std::string& pin_name, TimingCaseValue value);
+  std::optional<TimingCaseValue> getNetDriverCaseValue(TimingConstraint& constraint, Net& net, const std::string& load);
   std::map<std::string, bool> getInstanceConstantInputMap(Instance& instance);
   bool hasStaticExpressionInput(Instance& instance, LogicExpression& expression);
   bool isStaticCaseValue(TimingCaseValue value);
@@ -53,13 +54,24 @@ class GraphBuilder
   bool updateEffectiveCaseValue(TimingConstraint& constraint, const std::string& pin_name, TimingCaseValue value);
   void disableCaseInsensitiveArc();
   void buildSignalPointList();
+  void buildPinOutputFlagMap();
+  void buildPowerIndex();
   void normalizePinDirectionByTimingCell();
   void buildCellArcs();
   bool buildLibraryCellArcs(Instance& instance);
   std::string getInstancePinName(Instance& instance, std::string& port_name);
   void addCellArc(Instance& instance, TimingCellArc& timing_cell_arc);
-  void addArc(const std::string& source_pin, const std::string& sink_pin, ArcType type, const std::string& owner_name, const std::string& library_source_port,
-              const std::string& library_sink_port, bool is_clock_arc, bool is_disable_arc, TimingCellArc* timing_cell_arc);
+  void addArc(
+      const std::string& source_pin,
+      const std::string& sink_pin,
+      ArcType type,
+      const std::string& owner_name,
+      const std::string& library_source_port,
+      const std::string& library_sink_port,
+      bool is_clock_arc,
+      bool is_disable_arc,
+      TimingCellArc* timing_cell_arc
+  );
   std::vector<std::string> collectInputPins(Instance& instance);
   bool isInputLike(PinDirection direction);
   std::vector<std::string> collectOutputPins(Instance& instance);
@@ -67,7 +79,11 @@ class GraphBuilder
   void buildInoutPinDirectionByGraph();
   std::map<std::string, PinDirection> makeInoutPinDirectionMap();
   bool isFloatingInoutPin(Pin& pin);
-  PinDirection inferInoutPinDirection(const std::string& pin_name, Pin& pin, std::map<std::string, PinDirection>& inout_pin_direction_map);
+  PinDirection inferInoutPinDirection(
+      const std::string& pin_name,
+      Pin& pin,
+      std::map<std::string, PinDirection>& inout_pin_direction_map
+  );
   PinDirection inferInoutPinDirectionByTimingCell(Pin& pin);
   TimingCellPort* getTimingCellPort(Pin& pin);
   PinDirection inferInoutPinDirectionByTimingGraph(const std::string& pin_name);
@@ -88,6 +104,8 @@ class GraphBuilder
   bool isDriverPin(Pin& pin);
   std::string getPinNameListString(std::vector<std::string>& pin_name_list);
   void buildNetArcs();
+  void buildGraphVertexList();
+  int32_t addGraphVertex(const std::string& pin_name, bool is_driver, TimingPoint& point);
   void addArc(const std::string& source_pin, const std::string& sink_pin, ArcType type, const std::string& owner_name);
   bool shouldDisableNetArc(const std::string& source_pin, const std::string& sink_pin);
   bool isDisableArc(Arc& arc);
@@ -98,16 +116,9 @@ class GraphBuilder
   bool isClockSource(const std::string& pin_name);
   bool hasIncomingArc(const std::string& pin_name);
   bool isInputPort(Pin& pin);
-  void appendUnique(std::vector<std::string>& list, const std::string& value);
   void breakLoopArcList();
-  bool traverseDataPath(std::string& pin_name, std::map<std::string, GBColorType>& color_map, std::size_t& disabled_loop_num);
-  bool isBlack(std::map<std::string, GBColorType>& color_map, std::string& pin_name);
-  bool isGray(std::map<std::string, GBColorType>& color_map, std::string& pin_name);
-  bool disableLoopArc(Arc& arc);
   void buildSignalOrder();
-  std::map<std::string, std::size_t> makeIndegreeMap();
-  void pushRootPinList(std::map<std::string, std::size_t>& indegree_map, std::queue<std::string>& pin_queue);
-  void updateSinkIndegree(Arc& arc, std::map<std::string, std::size_t>& indegree_map, std::queue<std::string>& pin_queue);
+  void buildSignalLevel();
   void printLoopInfo();
 };
 

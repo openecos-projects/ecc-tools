@@ -23,6 +23,9 @@
 
 #include "instantiation/Instantiation.hh"
 
+#include <string>
+#include <vector>
+
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"

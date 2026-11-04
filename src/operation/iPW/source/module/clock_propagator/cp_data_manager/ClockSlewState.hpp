@@ -29,7 +29,10 @@ class ClockSlewState
   // getter
   std::map<AnalysisType, std::map<TransType, double>>& get_slew_map() { return _slew_map; }
   std::map<AnalysisType, std::map<TransType, double>>& get_physical_slew_map() { return _physical_slew_map; }
-  const std::map<AnalysisType, std::map<TransType, double>>& get_physical_slew_map() const { return _physical_slew_map; }
+  const std::map<AnalysisType, std::map<TransType, double>>& get_physical_slew_map() const
+  {
+    return _physical_slew_map;
+  }
   // setter
   void set_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& slew_map) { _slew_map = slew_map; }
   void set_physical_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& physical_slew_map)

@@ -4,6 +4,7 @@ add_subdirectory(${IPW_MODULE}/clock_propagator)
 add_subdirectory(${IPW_MODULE}/signal_propagator)
 add_subdirectory(${IPW_MODULE}/power_propagator)
 add_subdirectory(${IPW_MODULE}/power_analyzer)
+add_subdirectory(${IPW_MODULE}/peak_power_engine)
 add_subdirectory(${IPW_MODULE}/power_reporter)
 add_subdirectory(${IPW_MODULE}/sdc_command)
 
@@ -17,6 +18,7 @@ target_link_libraries(ipw_module
     ipw_signal_propagator
     ipw_power_propagator
     ipw_power_analyzer
+    ipw_peak_power_engine
     ipw_power_reporter
     ipw_sdc_command
 )

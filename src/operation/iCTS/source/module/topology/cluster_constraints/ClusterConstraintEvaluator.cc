@@ -27,7 +27,6 @@
 #include <cmath>
 #include <cstddef>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <unordered_map>
 #include <utility>

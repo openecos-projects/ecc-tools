@@ -117,6 +117,7 @@ target_link_libraries(
   icts_source_data_manager_adapter_fast_sta_clock_net_parasitic
   icts_source_data_manager_adapter_fast_sta_liberty_model
   icts_source_data_manager_adapter_sdc
+  icts_source_toolkit_logger
 )
 
 target_include_directories(
@@ -136,6 +137,7 @@ target_link_libraries(
   icts_source_data_manager_adapter_fast_sta_liberty_model
   icts_source_data_manager_adapter_fast_sta_timing
   icts_source_data_manager_io
+  icts_source_toolkit_logger
 )
 
 target_include_directories(

@@ -30,7 +30,10 @@ class Config
   std::string temp_directory_path;  // required
   int32_t thread_number;            // optional
   int32_t min_slew_degradation = 1;
-  std::string sdc_file_path;        // input
+  std::string sdc_file_path;  // input
+  // 峰值（time_based）流程的活动口径，与 PrimeTime PX 同名变量一一对应。
+  double x_transition_derate_factor = 0.5;     // power_x_transition_derate_factor
+  bool include_initial_x_transitions = false;  // power_include_initial_x_transitions
   /////////////////////////////////////////////
   // **********        PW        ********** //
   std::string log_file_path;  // building

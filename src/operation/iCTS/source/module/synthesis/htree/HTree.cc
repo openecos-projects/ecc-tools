@@ -116,7 +116,39 @@ auto HTreeBuilder::build() -> htree::DiagnosticBuild
     return result;
   }
 
-  auto state_build = htree::AssembleHTreeSynthesisState(input, config);
+  std::optional<unsigned> requested_topology_depth;
+  htree::HTreeSynthesisStateBuild state_build;
+  htree::HTreeSelectionBuild selection;
+  bool selected = false;
+  for (unsigned deepen = 0U; deepen < 64U && !selected; ++deepen) {
+    state_build = htree::AssembleHTreeSynthesisState(input, config, requested_topology_depth);
+    if (state_build.status != htree::HTreeSynthesisStateStatus::kReady) {
+      break;
+    }
+    selection = htree::SelectHTreeSolution(state_build.state);
+    if (selection.selected) {
+      selected = true;
+      break;
+    }
+    const auto& topology = state_build.state.result.output.topology;
+    const auto levels = topology.levels();
+    bool can_deepen = false;
+    if (!levels.empty()) {
+      for (const auto node_id : levels.back()) {
+        const auto* node = topology.get_node(node_id);
+        if (node != nullptr && node->get_loads().size() > 1U) {
+          can_deepen = true;
+          break;
+        }
+      }
+    }
+    if (!can_deepen || !selection.hasRecoverableCapacitanceFailure() || config.target_depth.has_value()) {
+      break;
+    }
+    const unsigned current_depth = levels.size() <= 1U ? 0U : static_cast<unsigned>(levels.size() - 1U);
+    requested_topology_depth = current_depth + 1U;
+    CTSLOG.info(Loc::current(), "HTree: deepening topology to ", *requested_topology_depth, " after capacitance legality failed at depth ", current_depth, ".");
+  }
   if (state_build.status != htree::HTreeSynthesisStateStatus::kReady) {
     // kCompleted means the build already finished - a degenerate topology the loads
     // drive directly - and must stay a success. Only a failed assembly carries a
@@ -129,8 +161,7 @@ auto HTreeBuilder::build() -> htree::DiagnosticBuild
     return std::move(state_build.state.result);
   }
 
-  auto selection = htree::SelectHTreeSolution(state_build.state);
-  if (selection.selected) {
+  if (selected) {
     htree::FinalizeSelectedHTreeSolution(state_build.state, selection.selected_solution);
     return std::move(state_build.state.result);
   }

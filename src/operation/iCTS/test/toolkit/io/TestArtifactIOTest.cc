@@ -21,12 +21,13 @@
  * @brief Tests for deterministic test artifact output handling.
  */
 
-#include <gtest/gtest.h>
-
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <string>
 
+#include "gtest/gtest.h"
 #include "toolkit/io/TestArtifactIO.hh"
 
 namespace icts_test {

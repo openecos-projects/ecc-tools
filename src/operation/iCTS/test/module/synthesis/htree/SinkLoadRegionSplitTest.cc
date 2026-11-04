@@ -21,16 +21,24 @@
  * @brief Unit tests for sink-load-region local split remediation.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
+#include <cstddef>
+#include <initializer_list>
 #include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
+#include "ClockRouteSegmentRC.hh"
 #include "Inst.hh"
 #include "Pin.hh"
 #include "Point.hh"
+#include "gtest/gtest.h"
 #include "synthesis/htree/region/SinkLoadRegion.hh"
+#include "topology/clustering/Clustering.hh"
+#include "topology/config/TopologyConfig.hh"
+#include "topology/fast_clustering/FastClustering.hh"
 
 namespace icts_test {
 namespace {
@@ -143,6 +151,51 @@ auto makeRecoveryInput(const std::vector<icts::Pin*>& loads, double pin_cap_pf, 
     input.sink_pin_cap_pf_by_pin.emplace(load, pin_cap_pf);
   }
   return input;
+}
+
+auto expectRecoveryElectricalLegal(const icts::htree::SinkLoadRegionSplitPlan& plan, const icts::Point<int>& anchor,
+                                   const icts::htree::SinkLoadRegionLegalityInput& input) -> void
+{
+  auto config = icts::FastClustering::buildElectricalBaseConfig(input.max_fanout, input.max_cap_pf);
+  config.clock_route_segment_rc = input.clock_route_segment_rc;
+  config.sink_pin_cap_pf_by_pin = input.sink_pin_cap_pf_by_pin;
+  config.enable_exact_cap = true;
+  config.always_build_exact_cap = true;
+  SplitPinFactory buffer_pins;
+  const auto check_children = [&](const std::vector<icts::htree::SinkLoadRegionSplitNode>& children, const icts::Point<int>& driver) -> void {
+    std::vector<icts::Pin*> loads;
+    loads.reserve(children.size());
+    for (const auto& child : children) {
+      auto* pin = buffer_pins.make(child.center.get_x(), child.center.get_y());
+      config.sink_pin_cap_pf_by_pin.emplace(pin, input.split_buffer_input_cap_pf);
+      loads.push_back(pin);
+    }
+    const auto check = icts::Clustering::evaluateClusterElectrical(loads, driver, config, true);
+    EXPECT_TRUE(check.legal);
+    EXPECT_LE(check.summary.total_cap_pf, input.max_cap_pf);
+  };
+  ASSERT_FALSE(plan.children.empty());
+  check_children(plan.children, anchor);
+  std::vector<const icts::htree::SinkLoadRegionSplitNode*> pending;
+  pending.reserve(plan.buffer_count);
+  for (const auto& child : plan.children) {
+    pending.push_back(&child);
+  }
+  while (!pending.empty()) {
+    const auto* node = pending.back();
+    pending.pop_back();
+    if (node->children.empty()) {
+      const auto check = icts::Clustering::evaluateClusterElectrical(node->loads, node->center, config, true);
+      EXPECT_TRUE(check.legal);
+      EXPECT_LE(check.summary.total_cap_pf, input.max_cap_pf);
+    } else {
+      check_children(node->children, node->center);
+      for (const auto& child : node->children) {
+        pending.push_back(&child);
+      }
+    }
+  }
+  EXPECT_EQ(plan.buffer_count, countTreeNodes(plan.children));
 }
 
 TEST(SinkLoadRegionSplitTest, FiveLoadsSplitIntoTwoSubgroups)
@@ -336,6 +389,106 @@ TEST(SinkLoadRegionSplitTest, CoincidentCommonPinNamesUseFullIdentityForDetermin
   EXPECT_EQ(reordered.local_depth, reference.local_depth);
 }
 
+TEST(SinkLoadRegionSplitTest, SingleLoadLegalNetRemainsUnbuffered)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(1000, 0)};
+  const auto input = makeRecoveryInput(loads, 0.02, 32U, 0.05);
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_TRUE(plan.feasible);
+  EXPECT_FALSE(plan.required);
+  EXPECT_TRUE(plan.children.empty());
+  EXPECT_EQ(plan.buffer_count, 0U);
+}
+
+TEST(SinkLoadRegionSplitTest, SingleLoadLongWireUsesTerminalBuffer)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(500000, 0)};
+  auto input = makeRecoveryInput(loads, 0.02, 32U, 0.05);
+  input.clock_route_segment_rc.capacitance_per_um_pf = 0.0001;
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  ASSERT_TRUE(plan.feasible) << plan.failure_reason;
+  EXPECT_TRUE(plan.required);
+  EXPECT_TRUE(plan.triggered_by_capacitance);
+  EXPECT_FALSE(plan.used_cap_fallback);
+  EXPECT_EQ(plan.buffer_count, 1U);
+  EXPECT_EQ(plan.leaf_group_count, 1U);
+  EXPECT_EQ(collectAllPins(plan), loads);
+  expectRecoveryElectricalLegal(plan, icts::Point<int>(0, 0), input);
+}
+
+TEST(SinkLoadRegionSplitTest, SingleLoadLongWireUsesRelayChain)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(2000000, 0)};
+  auto input = makeRecoveryInput(loads, 0.02, 32U, 0.05);
+  input.clock_route_segment_rc.capacitance_per_um_pf = 0.0001;
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  ASSERT_TRUE(plan.feasible) << plan.failure_reason;
+  EXPECT_GT(plan.buffer_count, 1U);
+  EXPECT_GT(plan.local_depth, 1U);
+  EXPECT_EQ(plan.leaf_group_count, 1U);
+  EXPECT_EQ(collectLeafGroups(plan.children), (std::vector<std::vector<icts::Pin*>>{loads}));
+  EXPECT_FALSE(plan.used_cap_fallback);
+  expectRecoveryElectricalLegal(plan, icts::Point<int>(0, 0), input);
+}
+
+TEST(SinkLoadRegionSplitTest, SingleLoadWireBudgetAdjacentDbu)
+{
+  // (0.05 - 0.02) / 0.0001 * 1000 = 300000 DBU of unbuffered wire.
+  for (const int distance : {299999, 300001}) {
+    SplitPinFactory factory;
+    std::vector<icts::Pin*> loads = {factory.make(distance, 0)};
+    auto input = makeRecoveryInput(loads, 0.02, 32U, 0.05);
+    input.clock_route_segment_rc.capacitance_per_um_pf = 0.0001;
+    const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+    ASSERT_TRUE(plan.feasible) << distance << ": " << plan.failure_reason;
+    EXPECT_EQ(plan.required, distance > 300000);
+    if (plan.required) {
+      expectRecoveryElectricalLegal(plan, icts::Point<int>(0, 0), input);
+    } else {
+      EXPECT_EQ(plan.buffer_count, 0U);
+    }
+  }
+}
+
+TEST(SinkLoadRegionSplitTest, SingleLoadLongWireReportsRecoveryLimits)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(2000000, 0)};
+  auto input = makeRecoveryInput(loads, 0.02, 32U, 0.05);
+  input.clock_route_segment_rc.capacitance_per_um_pf = 0.0001;
+  input.max_split_buffer_count = 1U;
+  const auto count_limited = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_FALSE(count_limited.feasible);
+  EXPECT_EQ(count_limited.failure, icts::htree::SinkLoadRegionRecoveryFailure::kBufferLimit);
+  input.max_split_buffer_count = icts::htree::SinkLoadRegionLegalityInput{}.max_split_buffer_count;
+  input.max_split_depth = 1U;
+  const auto depth_limited = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_FALSE(depth_limited.feasible);
+  EXPECT_EQ(depth_limited.failure, icts::htree::SinkLoadRegionRecoveryFailure::kDepthLimit);
+}
+
+TEST(SinkLoadRegionSplitTest, SingleLoadLongWireDoesNotRelaxUnrecoverableBuffer)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(2000000, 0)};
+  auto input = makeRecoveryInput(loads, 0.02, 32U, 0.05);
+  input.clock_route_segment_rc.capacitance_per_um_pf = 0.0001;
+  input.allow_cap_fallback = true;
+  input.split_buffer_available = false;
+  const auto missing_buffer = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_FALSE(missing_buffer.feasible);
+  EXPECT_EQ(missing_buffer.failure, icts::htree::SinkLoadRegionRecoveryFailure::kNoBufferCandidate);
+  input.split_buffer_available = true;
+  input.split_buffer_input_cap_pf = input.max_cap_pf;
+  const auto no_progress = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_FALSE(no_progress.feasible);
+  EXPECT_FALSE(no_progress.used_cap_fallback);
+  EXPECT_EQ(no_progress.failure, icts::htree::SinkLoadRegionRecoveryFailure::kNoProgress);
+}
+
 TEST(SinkLoadRegionSplitTest, SingleLoadCapFailureIsTyped)
 {
   SplitPinFactory factory;
@@ -371,6 +524,37 @@ TEST(SinkLoadRegionSplitTest, MissingBufferCandidateAndRecoveryLimitsAreTyped)
   EXPECT_EQ(count_limited.failure, icts::htree::SinkLoadRegionRecoveryFailure::kBufferLimit);
 }
 
+TEST(SinkLoadRegionSplitTest, FarAnchorPullsSplitBufferOffTheLoad)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(1000, 0)};
+  // Pin plus the full anchor-to-centroid wire is over budget, but each child
+  // can move part of that wire onto its own legal downstream hop.
+  auto input = makeRecoveryInput(loads, 0.001, 32U, 0.0015);
+  input.split_buffer_input_cap_pf = 0.0002;
+  input.clock_route_segment_rc.capacitance_per_um_pf = 0.000002;
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  ASSERT_TRUE(plan.feasible) << plan.failure_reason;
+  ASSERT_EQ(plan.children.size(), 2U);
+  EXPECT_LE(plan.root_cap_pf, input.max_cap_pf);
+  // The unbuffered star from the anchor is 0.0024 pF. Recovery must move wire
+  // off that parent net.
+  EXPECT_LT(plan.root_cap_pf, 0.002);
+}
+
+TEST(SinkLoadRegionSplitTest, CapFallbackKeepsLeastOverrunPlan)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(10, 0)};
+  auto input = makeRecoveryInput(loads, 0.04, 32U, 0.05);
+  input.split_buffer_input_cap_pf = 0.04;
+  input.allow_cap_fallback = true;
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(5, 0), input);
+  EXPECT_TRUE(plan.feasible);
+  EXPECT_TRUE(plan.used_cap_fallback);
+  EXPECT_GT(plan.cap_overrun_pf, 0.0);
+}
+
 TEST(SinkLoadRegionSplitTest, BufferInputCapNoProgressIsTyped)
 {
   SplitPinFactory factory;
@@ -381,6 +565,81 @@ TEST(SinkLoadRegionSplitTest, BufferInputCapNoProgressIsTyped)
   EXPECT_FALSE(plan.feasible);
   EXPECT_EQ(plan.failure, icts::htree::SinkLoadRegionRecoveryFailure::kNoProgress);
   EXPECT_NE(plan.failure_reason.find("split_root_cap_violation"), std::string::npos);
+}
+
+auto expectEquivalentRecovery(const icts::htree::SinkLoadRegionSplitPlan& actual, const icts::htree::SinkLoadRegionSplitPlan& reference) -> void
+{
+  EXPECT_EQ(actual.feasible, reference.feasible);
+  EXPECT_EQ(actual.required, reference.required);
+  EXPECT_EQ(actual.failure, reference.failure);
+  EXPECT_EQ(actual.failure_reason, reference.failure_reason);
+  EXPECT_EQ(actual.original_loads, reference.original_loads);
+  EXPECT_EQ(actual.subgroups, reference.subgroups);
+  EXPECT_EQ(actual.centers, reference.centers);
+  EXPECT_EQ(actual.buffer_count, reference.buffer_count);
+  EXPECT_EQ(actual.local_depth, reference.local_depth);
+  EXPECT_EQ(actual.leaf_group_count, reference.leaf_group_count);
+  EXPECT_EQ(actual.triggered_by_fanout, reference.triggered_by_fanout);
+  EXPECT_EQ(actual.triggered_by_capacitance, reference.triggered_by_capacitance);
+  EXPECT_EQ(actual.used_cap_fallback, reference.used_cap_fallback);
+  EXPECT_DOUBLE_EQ(actual.root_cap_pf, reference.root_cap_pf);
+  EXPECT_DOUBLE_EQ(actual.cap_overrun_pf, reference.cap_overrun_pf);
+  EXPECT_EQ(collectLeafGroups(actual.children), collectLeafGroups(reference.children));
+  EXPECT_EQ(countTreeNodes(actual.children), countTreeNodes(reference.children));
+}
+
+TEST(SinkLoadRegionSplitTest, UnrelatedPinCapsPreserveLegalAndSplitRecovery)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads;
+  loads.reserve(16U);
+  for (int index = 0; index < 16; ++index) {
+    loads.push_back(factory.make(index * 10, 0));
+  }
+  for (const bool split : {false, true}) {
+    const auto local = makeRecoveryInput(loads, 0.02, split ? 4U : 64U, split ? 0.15 : 1.0);
+    const auto reference = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), local);
+    ASSERT_TRUE(reference.feasible) << reference.failure_reason;
+    auto global = local;
+    for (int index = 0; index < 4096; ++index) {
+      global.sink_pin_cap_pf_by_pin.emplace(factory.make(100000 + index, 100000), 100.0);
+    }
+    const auto actual = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), global);
+    expectEquivalentRecovery(actual, reference);
+  }
+}
+
+TEST(SinkLoadRegionSplitTest, UnrelatedPinCapsDoNotMaskMissingLocalCap)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(10, 0), factory.make(20, 0)};
+  auto input = makeRecoveryInput(loads, 0.01, 32U, 0.1);
+  input.sink_pin_cap_pf_by_pin.erase(loads.back());
+  for (int index = 0; index < 4096; ++index) {
+    input.sink_pin_cap_pf_by_pin.emplace(factory.make(100000 + index, 100000), 100.0);
+  }
+  const auto plan = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(0, 0), input);
+  EXPECT_FALSE(plan.feasible);
+  EXPECT_EQ(plan.failure, icts::htree::SinkLoadRegionRecoveryFailure::kPinCapUnavailable);
+  EXPECT_NE(plan.failure_reason.find("pin_cap_unavailable"), std::string::npos);
+}
+
+TEST(SinkLoadRegionSplitTest, UnrelatedPinCapsPreserveCapFailureAndFallback)
+{
+  SplitPinFactory factory;
+  std::vector<icts::Pin*> loads = {factory.make(0, 0), factory.make(10, 0)};
+  for (const bool fallback : {false, true}) {
+    auto local = makeRecoveryInput(loads, 0.04, 32U, 0.05);
+    local.split_buffer_input_cap_pf = 0.04;
+    local.allow_cap_fallback = fallback;
+    const auto reference = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(5, 0), local);
+    auto global = local;
+    for (int index = 0; index < 128; ++index) {
+      global.sink_pin_cap_pf_by_pin.emplace(factory.make(100000 + index, 100000), 100.0);
+    }
+    const auto actual = icts::htree::RecoverSinkLoadRegionGroup(loads, icts::Point<int>(5, 0), global);
+    expectEquivalentRecovery(actual, reference);
+  }
 }
 
 }  // namespace

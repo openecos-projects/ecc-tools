@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "Clock.hh"
 #include "SegmentChar.hh"
 #include "characterization/Characterization.hh"
 #include "design/Inst.hh"

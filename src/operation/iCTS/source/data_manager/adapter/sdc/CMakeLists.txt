@@ -1,13 +1,8 @@
 add_library(
   icts_source_data_manager_adapter_sdc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCClockReader.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockParser.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockCommands.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockEvaluator.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockValue.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCConstraintOptions.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockConstraints.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCGeneratedClocks.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCCaseAnalysis.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCGeneratedClockResolver.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceResolver.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTracePins.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceOwnership.cc
@@ -21,13 +16,14 @@ target_include_directories(
   ${ICTS_DATA_MANAGER_ADAPTER}
   ${ICTS_DATA_MANAGER}
   PRIVATE
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace
   ${ICTS_TOOLKIT}
   ${HOME_DATABASE}/data/design
   ${HOME_DATABASE}/data/design/db_design
   ${HOME_DATABASE}/data/design/db_layout
   ${HOME_DATABASE}/manager/builder
+  ${HOME_OPERATION}/iSTA/source
+  ${HOME_OPERATION}/iSTA/source/data_manager
 )
 
 target_link_libraries(
@@ -39,6 +35,8 @@ target_link_libraries(
   icts_source_data_manager_config
   icts_source_toolkit_logger
   liberty
+  ista_sdc_frontend
+  ista_data_manager
 )
 
 if(DEBUG_ICTS_SOURCE_DATA_MANAGER_ADAPTER_SDC)

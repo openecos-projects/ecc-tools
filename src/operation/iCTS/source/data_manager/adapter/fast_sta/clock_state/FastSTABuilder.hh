@@ -27,13 +27,16 @@
 #include <string>
 #include <vector>
 
+#include "FastSTA.hh"
 #include "clock_state/FastSTAClockState.hh"
+
+namespace icts {
+struct SdcClockData;
+}
 
 namespace icts {
 
 class Net;
-struct FastStaBuildInput;
-struct FastStaEnvironment;
 struct WrapperTimingGraph;
 template <typename T>
 class ClockSteinerTree;

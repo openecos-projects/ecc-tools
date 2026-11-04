@@ -23,11 +23,12 @@
 
 #pragma once
 
-#include <cstddef>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "FastSTA.hh"
+#include "clock_net_parasitic/FastSTAClockNetParasitic.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALibertyModel.hh"
 

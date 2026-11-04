@@ -24,11 +24,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -37,7 +39,6 @@
 #include "IdbCellMaster.h"
 #include "IdbLayout.h"
 #include "IdbUnits.h"
-#include "LibParserCpp.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
 #include "Type.hh"
@@ -459,50 +460,20 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
               ", cells=", cell_count, ", index_seconds=", index_seconds, index_monitor.getStatsInfo());
 }
 
-auto Wrapper::querySdcUnits() const -> std::optional<SdcUnits>
-{
-  loadLibertyIfNeeded();
-  if (_liberty_generation == nullptr) {
-    return std::nullopt;
-  }
-  std::optional<SdcUnits> units;
-  for (const auto& library : _liberty_generation->get_libraries()) {
-    if (library == nullptr || !library->has_cap_unit() || !library->has_time_unit()) {
-      return std::nullopt;
-    }
-    const SdcUnits candidate{.time_unit_ns = library->convert_time_unit_to_ns(1.0),
-                             .capacitance_unit_pf = idb::ConvertCapUnit(library->get_cap_unit(), idb::CapacitiveUnit::kPF, 1.0)};
-    if (!std::isfinite(candidate.time_unit_ns) || candidate.time_unit_ns <= 0.0 || !std::isfinite(candidate.capacitance_unit_pf)
-        || candidate.capacitance_unit_pf <= 0.0
-        || (units.has_value() && (units->time_unit_ns != candidate.time_unit_ns || units->capacitance_unit_pf != candidate.capacitance_unit_pf))) {
-      return std::nullopt;
-    }
-    units = candidate;
-  }
-  return units;
-}
-
 auto Wrapper::queryLibertyRevision() const -> std::uint64_t
 {
   loadLibertyIfNeeded();
   return _liberty_revision;
 }
 
-auto Wrapper::querySupplyVoltage() const -> std::optional<double>
+auto Wrapper::queryCellSupplyVoltage(const std::string& cell_master) const -> std::optional<double>
 {
-  loadLibertyIfNeeded();
-  if (_liberty_generation == nullptr) {
+  auto* cell = findLibertyCell(cell_master);
+  auto* library = cell != nullptr ? cell->get_owner_lib() : nullptr;
+  if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0) {
     return std::nullopt;
   }
-  std::optional<double> voltage;
-  for (const auto& library : _liberty_generation->get_libraries()) {
-    if (library == nullptr || !std::isfinite(library->get_nom_voltage()) || library->get_nom_voltage() <= 0.0
-        || (voltage.has_value() && *voltage != library->get_nom_voltage())) {
-      return std::nullopt;
-    }
-    voltage = library->get_nom_voltage();
-  }
-  return voltage;
+  return library->get_nom_voltage();
 }
 
 auto Wrapper::findLibertyCell(const std::string& cell_master) const -> idb::LibCell*

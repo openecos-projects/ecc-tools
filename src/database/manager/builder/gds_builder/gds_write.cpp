@@ -389,7 +389,7 @@ void Def2GdsWrite::packLayerShape(gdstk::Cell* gds_cell, IdbLayerShape* layer_sh
     return;
   }
 
-  // The Innovus stream-out map assigns cut layers to VIA objects only.  LEF
+  // The stream-out map assigns cut layers to VIA objects only.  LEF
   // pin/obstruction geometry is emitted for routing layers, while cut-layer
   // rectangles embedded in LEFPIN/LEFOBS are intentionally filtered out.
   // Otherwise standard-cell LEF cuts are mistaken for routed VIA shapes.
@@ -579,7 +579,7 @@ void Def2GdsWrite::packTerm(gdstk::Cell* gds_cell, IdbTerm* term)
       packLayerShape(gds_cell, layer_shape, "LEFPIN");
     }
 
-    // Innovus streamOut maps VIA objects explicitly, but does not map LEFPIN
+    // The stream-out mapping assigns VIA objects explicitly, but does not map LEFPIN
     // via geometry onto the cut layers.  Keep the via list attached to the
     // LEF pin in the database without flattening it into the component
     // master GDS cell.  DEF/top-level IO vias are still emitted by packPin().

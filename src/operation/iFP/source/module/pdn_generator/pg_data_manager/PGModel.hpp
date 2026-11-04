@@ -17,6 +17,7 @@
 #pragma once
 
 #include "FPHeader.hpp"
+#include "PGLayerPair.hpp"
 
 namespace ifp {
 
@@ -29,11 +30,15 @@ class PGModel
   std::string& get_default_power_net_name() { return _default_power_net_name; }
   std::string& get_default_ground_net_name() { return _default_ground_net_name; }
   std::set<std::string>& get_via_key_set() { return _via_key_set; }
+  PGLayerPair& get_power_layer_pair() { return _power_layer_pair; }
+  std::map<std::string, std::set<std::pair<int32_t, int32_t>>>& get_power_net_coord_map() { return _power_net_coord_map; }
 
   // const getter
   const std::string& get_default_power_net_name() const { return _default_power_net_name; }
   const std::string& get_default_ground_net_name() const { return _default_ground_net_name; }
   const std::set<std::string>& get_via_key_set() const { return _via_key_set; }
+  const PGLayerPair& get_power_layer_pair() const { return _power_layer_pair; }
+  const std::map<std::string, std::set<std::pair<int32_t, int32_t>>>& get_power_net_coord_map() const { return _power_net_coord_map; }
 
   // setter
   void set_default_power_net_name(std::string default_power_net_name) { _default_power_net_name = default_power_net_name; }
@@ -45,6 +50,8 @@ class PGModel
   std::string _default_power_net_name;
   std::string _default_ground_net_name;
   std::set<std::string> _via_key_set;
+  PGLayerPair _power_layer_pair;
+  std::map<std::string, std::set<std::pair<int32_t, int32_t>>> _power_net_coord_map;
 };
 
 }  // namespace ifp

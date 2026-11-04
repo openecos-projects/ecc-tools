@@ -24,20 +24,22 @@
 #include "ClockTraceResolver.hh"
 
 #include <algorithm>
+#include <functional>
 #include <map>
 #include <optional>
-#include <ostream>
-#include <ranges>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "IdbDesign.h"
 #include "IdbNet.h"
 #include "Logger.hh"
 #include "SDCClockReader.hh"
+#include "TimingConstraints.hh"
 #include "clock_trace/SDCClockTraceAlgorithm.hh"
 
 namespace icts {

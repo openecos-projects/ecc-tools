@@ -28,6 +28,9 @@ int registerCmdPW()
   registerTclCmd(TclInitPW, "init_pw");
   registerTclCmd(TclRunPW, "run_pw");
   registerTclCmd(TclDestroyPW, "destroy_pw");
+  registerTclCmd(TclReportCellPower, "report_cell_power");
+  registerTclCmd(TclReportNetPower, "report_net_power");
+  registerTclCmd(TclReportPeakPowerWaveform, "report_peak_power_waveform");
   return EXIT_SUCCESS;
 }
 

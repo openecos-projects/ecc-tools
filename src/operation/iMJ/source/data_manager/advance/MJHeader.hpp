@@ -47,9 +47,10 @@
 #include <iomanip>
 #include <iostream>
 #include <iterator>
-#include <list>
 #include <limits>
+#include <list>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <ostream>

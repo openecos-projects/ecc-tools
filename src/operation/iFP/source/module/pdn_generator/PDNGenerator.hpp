@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <unordered_map>
+
 #include "FPHeader.hpp"
 #include "IOPin.hpp"
 #include "Instance.hpp"
@@ -26,8 +28,6 @@
 #include "PlanarCoord.hpp"
 #include "PlanarRect.hpp"
 #include "RoutingLayer.hpp"
-
-#include <unordered_map>
 
 namespace ifp {
 
@@ -78,9 +78,10 @@ class PDNGenerator
   void alignStripeSegment(PGSegment& stripe_segment);
   int32_t getClosestRailEdgeCoord(PGSegment& stripe_segment, Instance& instance, bool high_side);
   int32_t getClosestCrossStripeEdgeCoord(PGSegment& stripe_segment, Instance& instance, int32_t rail_coord, bool high_side);
-
-  void buildLayerConnect(PGModel& pg_model);
+  void extendStripeToRail(PGSegment& stripe_segment);
   PlanarRect getOverlapRect(PlanarRect first_rect, PlanarRect second_rect);
+  void initPowerLayerPair(PGModel& pg_model);
+  void buildLayerConnect(PGModel& pg_model);
   bool addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name, int32_t x,
                      int32_t y, int32_t width, int32_t height);
 
@@ -88,6 +89,10 @@ class PDNGenerator
   void buildMacroConnect(PGModel& pg_model);
   void pruneDeadEndStripes();
   void trimStripeEnds();
+
+#if 1  // output
+  void outputPowerLocation(PGModel& pg_model);
+#endif
 
   std::vector<Instance*> _placed_macro_list;
   std::unordered_map<const Instance*, int32_t> _macro_top_layer_order;

@@ -24,10 +24,12 @@
  *        resistance underestimation regression (task 06-12-fix-wire-res-unit).
  */
 
-#include <gtest/gtest.h>
+#include <stdint.h>
 
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "IdbDesign.h"
 #include "IdbLayer.h"
@@ -36,6 +38,7 @@
 #include "data_manager/config/Config.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "data_manager/routing/ClockRouteSegmentRC.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

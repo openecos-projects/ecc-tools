@@ -23,14 +23,24 @@
 #include "FastSTABranch.hh"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstddef>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
+#include "FastSTAClockNetParasitic.hh"
+#include "FastSTAClockTiming.hh"
+#include "FastSTALibertyModel.hh"
 #include "clock_net_parasitic/FastSTAParasitics.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALiberty.hh"
 #include "timing/FastSTATiming.hh"
+#include "timing/TimingConstraints.hh"
 
 namespace icts {
 
@@ -103,7 +113,12 @@ auto FastStaBranch::evaluate(const FastStaContext& resident, const FastStaBranch
   branch.buffer_input_node_id_by_inst.emplace(driver_identity, 0U);
   branch.buffer_output_node_id_by_inst.emplace(driver_identity, 1U);
   branch.liberty_cell_by_master.emplace(request.driver_cell_master, *driver);
-  FastStaNet net{.name = request.component_id + "/branch", .driver_node_id = 1U, .load_node_ids = {}, .load_rc_node_ids = {}, .driver_timing_by_state = {}};
+  FastStaNet net{.name = request.component_id + "/branch",
+                 .driver_node_id = 1U,
+                 .load_node_ids = {},
+                 .load_rc_node_ids = {},
+                 .ignore_terminals = {},
+                 .driver_timing_by_state = {}};
   std::unordered_set<std::string> identities;
   bool representative_found = false;
   for (const auto& load : request.loads) {

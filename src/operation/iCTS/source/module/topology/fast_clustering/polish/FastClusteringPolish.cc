@@ -23,7 +23,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <numeric>
-#include <ranges>
 #include <vector>
 
 #include "cluster_draft/FastClusteringDraft.hh"

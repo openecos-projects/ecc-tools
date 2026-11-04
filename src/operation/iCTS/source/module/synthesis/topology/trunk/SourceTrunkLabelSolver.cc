@@ -24,8 +24,8 @@
 #include "synthesis/topology/trunk/SourceTrunkLabelSolver.hh"
 
 #include <algorithm>
+#include <functional>
 #include <limits>
-#include <ranges>
 #include <unordered_map>
 #include <utility>
 #include <vector>

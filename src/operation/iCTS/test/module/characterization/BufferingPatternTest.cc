@@ -21,13 +21,12 @@
  * @brief Unit coverage for BufferingPattern terminal branch-buffer metadata.
  */
 
-#include <gtest/gtest.h>
-
 #include <string>
 #include <vector>
 
 #include "data_manager/characterization/BufferingPattern.hh"
 #include "data_manager/characterization/PatternId.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

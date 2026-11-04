@@ -15,11 +15,18 @@
 // ***************************************************************************************
 #pragma once
 
+#include <filesystem>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace python_interface {
 
-bool init_emir(const std::string& temp_directory_path, const std::string& instance_power_file_path, const int& thread_number);
+bool init_emir(const std::optional<std::filesystem::path>& temp_directory_path,
+               const std::optional<std::filesystem::path>& instance_power_file_path, const int& thread_number,
+               const std::optional<std::filesystem::path>& technology_file_path,
+               const std::optional<std::filesystem::path>& ploc_file_path, const std::vector<std::filesystem::path>& pad_files,
+               bool add_ploc_from_top_def = false);
 bool run_emir();
 bool destroy_emir();
 

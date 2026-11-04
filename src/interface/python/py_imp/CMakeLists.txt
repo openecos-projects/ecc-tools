@@ -1,7 +1,11 @@
 set(PY_IMP_SRC
     py_register_imp.cpp
     idb_to_imp_db/PyPlaceDB.cpp
+    idb_to_imp_db/PyPlaceDBTiming.cpp
+    idb_to_imp_db/PyPlaceDBMinTiming.cpp
+    idb_to_imp_db/PyPlaceDBSparseTiming.cpp
     idb_to_imp_db/PyPlaceDBRoutbility.cpp
+    idb_to_imp_db/MutationBridge.cpp
 )
 
 add_library(py_imp ${PY_IMP_SRC})
@@ -9,6 +13,7 @@ add_library(py_imp ${PY_IMP_SRC})
 target_link_libraries(py_imp
     PUBLIC
     idm
+    ista_interface
     eval_congestion_api
     pybind11::pybind11
     ecc_logger

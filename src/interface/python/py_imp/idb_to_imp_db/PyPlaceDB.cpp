@@ -1,9 +1,11 @@
 #include "PyPlaceDB.h"
+
 #include "utility/logger/Logger.hpp"
 // #include "ContestDriver.h"
 #include <algorithm>
 #include <boost/polygon/polygon.hpp>
 #include <cassert>
+#include <chrono>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -20,9 +22,8 @@
 #include "IdbInstance.h"
 #include "IdbLayout.h"
 #include "IdbPins.h"
+#include "STAInterface.hpp"
 #include "idm.h"
-#include <boost/polygon/polygon.hpp>
-#include <vector>
 
 namespace python_interface {
 
@@ -46,17 +47,52 @@ double intersectArea(Box const& b1, Box const& b2)
   return dist[0] * dist[1];
 }
 
-bool isInvailidNet(IdbNet* net)
+bool isInvailidNet(IdbNet* net, bool with_sta)
 {
-  return net->is_ground() || net->is_power() || net->is_pdn() || net->is_clock()
+  return net->is_ground() || net->is_power() || net->is_pdn() || (!with_sta && net->is_clock())
          || net->get_instance_pin_list()->get_pin_list().size() == 0;
 }
 
+bool getConnectedPadCoordinate(IdbPin* io_pin, int32_t& x, int32_t& y)
+{
+  if (io_pin == nullptr || io_pin->get_net() == nullptr) {
+    return false;
+  }
+
+  for (IdbPin* instance_pin : io_pin->get_net()->get_instance_pin_list()->get_pin_list()) {
+    if (instance_pin == nullptr || instance_pin->get_instance() == nullptr || instance_pin->get_pin_name() != "PAD") {
+      continue;
+    }
+    IdbInstance* io_cell = instance_pin->get_instance();
+    if (io_cell->get_cell_master() == nullptr || !io_cell->get_cell_master()->is_io_cell()) {
+      continue;
+    }
+    IdbCoordinate<int32_t>* coordinate = instance_pin->get_average_coordinate();
+    if (coordinate == nullptr || coordinate->is_negative()) {
+      continue;
+    }
+
+    x = coordinate->get_x();
+    y = coordinate->get_y();
+    return true;
+  }
+
+  return false;
+}
+
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density)
+                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only)
 {
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
+  auto phase_started = std::chrono::steady_clock::now();
+  auto mark_phase = [&](const char* phase) {
+    const auto now = std::chrono::steady_clock::now();
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB phase ", phase, ", seconds ",
+                std::chrono::duration<double>(now - phase_started).count());
+    std::cout.flush();
+    phase_started = now;
+  };
   num_routing_grids_x = numRoutingGridsX;
   num_routing_grids_y = numRoutingGridsY;
   _db = db;
@@ -72,10 +108,6 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   m2_pg_rail_boxes = pybind11::list();
   m2_pg_rail_density_boxes = pybind11::list();
   dbu = db_deisgn->get_layout()->get_units()->get_micron_dbu();
-
-  if (with_sta) {
-    throw std::runtime_error("PyPlaceDB timing initialization is disabled in this ecc_py build");
-  }
 
   double total_fixed_terminal_area = 0;  // sum of fixed body and synthetic obstacle rectangles
   clock_net_names = pybind11::list();
@@ -104,7 +136,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   int net_id = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
     // is special net
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
 
@@ -113,7 +145,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   std::unordered_map<std::string, int> mPin2ID;
   int pin_id = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
 
@@ -207,14 +239,11 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
         box_tmp.xh += node->get_halo()->get_extend_right();
         box_tmp.yh += node->get_halo()->get_extend_top();
         ECCLOG.info(ecc::Loc::current(), "Instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
-                     node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
-                     node->get_halo()->get_extend_top(), ").");
+                    node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
+                    node->get_halo()->get_extend_top(), ").");
       }
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro,
-              is_macro_writeback_candidate, node);
-    }
-    else
-    {
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), box_tmp, false, is_hard_macro, is_macro_writeback_candidate, node);
+    } else {
       Box body_box = buildInstanceBox(node);
       Box halo_box = body_box;
       if (node->get_halo()) {
@@ -222,19 +251,18 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
         halo_box.yl -= node->get_halo()->get_extend_bottom();
         halo_box.xh += node->get_halo()->get_extend_right();
         halo_box.yh += node->get_halo()->get_extend_top();
-        ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(),
-                     ", ", node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
-                     node->get_halo()->get_extend_top(), ").");
+        ECCLOG.info(ecc::Loc::current(), "Macro instance ", node->get_name(), ", halo (", node->get_halo()->get_extend_lef(), ", ",
+                    node->get_halo()->get_extend_bottom(), ", ", node->get_halo()->get_extend_right(), ", ",
+                    node->get_halo()->get_extend_top(), ").");
       }
       // Keep the real instance as a body-only terminal.  Its halo is added to
       // the unioned obstacle set below so overlapping halos cannot be counted
       // multiple times as independent fixed nodes.
-      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro,
-              is_macro_writeback_candidate, node);
+      addNode(IdbOrientToString(node->get_orient()), node->get_name(), body_box, true, is_hard_macro, is_macro_writeback_candidate, node);
       if (node->get_cell_master()->is_io_cell()) {
-        ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (",
-                     node->get_coordinate()->get_x(), ", ", node->get_coordinate()->get_y(), ", ",
-                     node->get_bounding_box()->get_high_x(), ", ", node->get_bounding_box()->get_high_y(), ").");
+        ECCLOG.info(ecc::Loc::current(), "Fixed IO instance ", node->get_name(), ", coordinate (", node->get_coordinate()->get_x(), ", ",
+                    node->get_coordinate()->get_y(), ", ", node->get_bounding_box()->get_high_x(), ", ",
+                    node->get_bounding_box()->get_high_y(), ").");
       }
       num_terminals += 1;
       total_fixed_terminal_area += body_box.area();
@@ -353,8 +381,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
     string block_name = "blockage" + std::to_string(id);
-    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ",
-                 box.xh, ", ", box.yh, ").");
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB detects fixed blockage ", block_name, ", (", box.xl, ", ", box.yl, ", ", box.xh, ", ",
+                box.yh, ").");
     addNode("R0", block_name, box, true, false, false, nullptr);
     total_fixed_terminal_area += 1LL * box.area();
   }
@@ -365,16 +393,26 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   for (auto io_pin : db_deisgn->get_io_pin_list()->get_pin_list()) {
     int lx = 0;
     int ly = 0;
+    bool has_coordinate = false;
     IdbTerm* term = io_pin->get_term();
-    if (term->is_port_exist()) {
-      for (auto port : term->get_port_list()) {
-        lx = port->get_io_average_coordinate()->get_x();
-        ly = port->get_io_average_coordinate()->get_y();
+    if (term != nullptr && term->is_port_exist()) {
+      for (IdbPort* port : term->get_port_list()) {
+        IdbCoordinate<int32_t>* coordinate = port == nullptr ? nullptr : port->get_io_average_coordinate();
+        if (coordinate != nullptr && !coordinate->is_negative()) {
+          lx = coordinate->get_x();
+          ly = coordinate->get_y();
+          has_coordinate = true;
+        }
         break;
       }
-    } else {
+    }
+    if (!has_coordinate) {
       lx = io_pin->get_location()->get_x();
       ly = io_pin->get_location()->get_y();
+      has_coordinate = !io_pin->get_location()->is_negative();
+    }
+    if (!has_coordinate) {
+      getConnectedPadCoordinate(io_pin, lx, ly);
     }
     Box box_tmp(lx, ly, lx + 1, ly + 1);
     addNode("R0", io_pin->get_pin_name(), box_tmp, false, false, false, nullptr);
@@ -382,8 +420,8 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     num_terminal_NIs += 1;
   }
   // we only know num_nodes when all fixed cells with shapes are expanded
-  ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num,
-               ", num_terminal_NIs ", num_terminal_NIs, ".");
+  ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num, ", num_terminal_NIs ",
+              num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
   // Compute the exact fixed/obstacle area inside the core from the same union
   // represented by the terminal rectangles above.
@@ -404,6 +442,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
               gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
               gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
               total_fixed_terminal_area, ", synthetic_rectangles ", ext_blockage_num, ".");
+  mark_phase("geometry_and_obstacles");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
     auto node_name = node_names[i].cast<std::string>();
@@ -444,10 +483,11 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     count += pin_num;
   }
   flat_node2pin_start_map.append(count);
+  mark_phase("node_pin_map");
 
   num_movable_pins = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
     for (IdbPin* pin : net->get_instance_pin_list()->get_pin_list()) {
@@ -493,13 +533,15 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   }
 
+  mark_phase("pin_geometry");
   count = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net)) {
+    if (isInvailidNet(net, with_sta)) {
       continue;
     }
     // Net const& net = db.net(i);
-    net_weights.append(1);
+    // Timing needs clock-pin identities, but placement must not optimize clock HPWL.
+    net_weights.append(net->is_clock() ? 0 : 1);
     net_name2id_map[pybind11::str(net->get_net_name())] = mNet2ID[net->get_net_name()];
     net_names.append(pybind11::str(net->get_net_name()));
     pybind11::list pins;
@@ -551,6 +593,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     count += pin_num;
   }
   flat_net2pin_start_map.append(count);
+  mark_phase("net_pin_map");
 
   for (IdbRow* idb_row : db->get_idb_layout()->get_rows()->get_row_list()) {
     IdbRect* row_rect = idb_row->get_bounding_box();
@@ -607,8 +650,21 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   site_width = db->get_idb_layout()->get_rows()->get_row_list().at(0)->get_site()->get_width();
 #if 1
 
+  mark_phase("regions_and_rows");
   if (with_routability) {
     init_routability(db, inst_resort_list);
+  }
+  if (with_sta) {
+    timing_preparation_mode = timing_model_only ? "model_only" : "complete";
+    mark_phase("before_timing_snapshot");
+    const auto snapshot = timing_model_only ? ista::STAInterface::getInst().exportTimingModel() : ista::STAInterface::getInst().exportTimingData();
+    mark_phase("timing_snapshot");
+    init_timing(snapshot, db);
+    mark_phase("timing_remap");
+    init_min_timing(snapshot);
+    mark_phase("min_timing_remap");
+    init_sparse_timing(snapshot);
+    mark_phase("sparse_timing_remap");
   }
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set end.");
 
@@ -647,8 +703,8 @@ std::size_t PyPlaceDB::writeMacroPlacementBack(
         || checked_y > static_cast<double>(std::numeric_limits<int32_t>::max())) {
       throw std::invalid_argument("Macro placement writeback coordinates must be finite int32-compatible values");
     }
-    updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x),
-                       static_cast<int32_t>(candidate_y), candidate.orient});
+    updates.push_back({candidate.instance_name, candidate.instance_id, static_cast<int32_t>(candidate_x), static_cast<int32_t>(candidate_y),
+                       candidate.orient});
   }
   return _db->write_selected_placement_back(updates);
 }

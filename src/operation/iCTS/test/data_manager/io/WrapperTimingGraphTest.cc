@@ -21,12 +21,15 @@
  * @brief Regression test for disconnected DEF nets in the timing graph snapshot.
  */
 
-#include <gtest/gtest.h>
+#include <string>
+#include <vector>
 
 #include "IdbDesign.h"
+#include "IdbEnum.h"
 #include "IdbLayout.h"
 #include "IdbNet.h"
 #include "data_manager/io/Wrapper.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

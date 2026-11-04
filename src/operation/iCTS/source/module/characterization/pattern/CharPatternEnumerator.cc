@@ -27,12 +27,10 @@
 #include <cstddef>
 #include <limits>
 #include <optional>
-#include <ostream>
 #include <ranges>
 #include <string>
 #include <vector>
 
-#include "Logger.hh"
 #include "ValueLattice.hh"
 #include "characterization/buffer_cell/CharacterizationBufferCell.hh"
 #include "characterization/builder/CharBuilderImpl.hh"

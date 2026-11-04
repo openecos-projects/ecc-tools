@@ -21,7 +21,6 @@
  * @brief Tests for the iCTS runtime Logger contract.
  */
 
-#include <gtest/gtest.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -29,12 +28,14 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "Logger.hh"
+#include "gtest/gtest.h"
 
 namespace icts {
 namespace {

@@ -17,7 +17,9 @@ set(IEMIR_TEST ${HOME_IEMIR}/test)
 
 add_subdirectory(${IEMIR_INTERFACE})
 add_subdirectory(${IEMIR_SOURCE})
-add_subdirectory(${IEMIR_TEST})
+if(BUILD_TESTING)
+    add_subdirectory(${IEMIR_TEST})
+endif()
 
 ########################################################
 

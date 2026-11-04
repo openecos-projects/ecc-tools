@@ -65,6 +65,9 @@ IdbRect::IdbRect(const int32_t lx, const int32_t ly, const int32_t hx, const int
 
 void IdbRect::adjustCoordinate(IdbCoordinate<int32_t>* main_point, IdbCoordinate<int32_t>* follow_point, bool adjust_follow)
 {
+  if (main_point == nullptr || follow_point == nullptr) {
+    return;
+  }
   IdbCoordinate<int32_t> average_coordinate = get_middle_point();
   if (main_point->get_y() == follow_point->get_y()) {
     // horizontal
@@ -98,6 +101,9 @@ bool IdbRect::isIntersection(IdbRect rect)
 
 bool IdbRect::isIntersection(IdbRect* rect)
 {
+  if (rect == nullptr) {
+    return false;
+  }
   if (rect->get_low_x() > get_high_x() || rect->get_high_x() < get_low_x() || rect->get_low_y() > get_high_y()
       || rect->get_high_y() < get_low_y()) {
     return false;

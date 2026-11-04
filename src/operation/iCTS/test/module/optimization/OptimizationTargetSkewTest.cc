@@ -21,9 +21,10 @@
  * @brief Per-clock skew target resolution contract tests for CTS optimization.
  */
 
-#include <gtest/gtest.h>
+#include <string>
 
 #include "data_manager/config/Config.hh"
+#include "gtest/gtest.h"
 #include "optimization/preparation/OptimizationPreparation.hh"
 
 namespace icts_test {

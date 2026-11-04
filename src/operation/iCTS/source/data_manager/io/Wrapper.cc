@@ -24,7 +24,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,7 +42,6 @@
 #include "design/Clock.hh"
 #include "design/Design.hh"
 #include "lef_service.h"
-#include "liberty/Lib.hh"
 #include "spatial/Point.hh"
 
 namespace icts {

@@ -2,6 +2,10 @@
 
 SET(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${PROJECT_SOURCE_DIR}/bin)
 
+# Headers shared by the py_* binding modules (for example py_path_utils.h) live
+# in this directory, so every module can include them without a relative path.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 # DEFINE PYTHON MODULE & CMAKE TARGET
 pybind11_add_module(ecc_py python_moodule.cc)
 

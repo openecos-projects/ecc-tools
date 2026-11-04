@@ -64,6 +64,39 @@ class TclDestroyPW : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
+class TclReportCellPower : public TclCmd
+{
+ public:
+  explicit TclReportCellPower(const char* cmd_name);
+  ~TclReportCellPower() override = default;
+
+  unsigned check() override { return 1; }
+
+  unsigned exec() override;
+};
+
+class TclReportNetPower : public TclCmd
+{
+ public:
+  explicit TclReportNetPower(const char* cmd_name);
+  ~TclReportNetPower() override = default;
+
+  unsigned check() override { return 1; }
+
+  unsigned exec() override;
+};
+
+class TclReportPeakPowerWaveform : public TclCmd
+{
+ public:
+  explicit TclReportPeakPowerWaveform(const char* cmd_name);
+  ~TclReportPeakPowerWaveform() override = default;
+
+  unsigned check() override { return 1; }
+
+  unsigned exec() override;
+};
+
 #endif
 
 }  // namespace tcl

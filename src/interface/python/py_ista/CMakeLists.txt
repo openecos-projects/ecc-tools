@@ -14,4 +14,6 @@ target_include_directories(py_ista
     PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${HOME_UTILITY}/json
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )

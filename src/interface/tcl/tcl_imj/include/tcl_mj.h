@@ -92,6 +92,27 @@ class TclFlattenDef : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
+class TclAnalyzeDriver : public TclCmd
+{
+ public:
+  explicit TclAnalyzeDriver(const char* cmd_name);
+  ~TclAnalyzeDriver() override = default;
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclCutDEF : public TclCmd
+{
+ public:
+  explicit TclCutDEF(const char* cmd_name);
+  ~TclCutDEF() override = default;
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+
+ private:
+  std::vector<std::pair<std::string, ValueType>> _config_list;
+};
+
 class TclDestroyMJ : public TclCmd
 {
  public:

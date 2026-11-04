@@ -1,4 +1,0 @@
-initSAModel:初始化model
-initRoutingEdgeMap:初始化RoutingEdge map
-buildSupplySchedule:构建将要计算的Schedule
-analyzeSupply:分析GCell之间区域的障碍物，确定Edge supply和ignore net

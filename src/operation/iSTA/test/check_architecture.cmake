@@ -1,0 +1,23 @@
+foreach(case valid direct transitive cycle solver_database solver_coordinator solver_value_session analysis_component analysis_extraction query_calculator solver_graph arrival_slew sdc_core_frontend sdc_core_writer sdc_query_frontend catalog_query sdf_analysis output_database utility_network sdc_writer_frontend sdc_writer_session parasitic_session toolkit_reader toolkit_writer reader_writer reader_analysis writer_reader writer_extraction writer_transitive analysis_reader checker_reader)
+  execute_process(
+    COMMAND "${CMAKE_COMMAND}" -S "${CMAKE_CURRENT_LIST_DIR}/architecture"
+      -B "${TEST_BINARY_DIR}/${case}" "-DCASE=${case}" "-DARCHITECTURE_FILE=${ARCHITECTURE_FILE}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  if(case STREQUAL "valid")
+    if(NOT result EQUAL 0)
+      message(FATAL_ERROR "Valid architecture rejected: ${output}${error}")
+    endif()
+  else()
+    if(result EQUAL 0)
+      message(FATAL_ERROR "Invalid ${case} architecture accepted")
+    endif()
+    if(case STREQUAL "cycle")
+      set(expected "iSTA dependency cycle")
+    else()
+      set(expected "iSTA domain violation")
+    endif()
+    if(NOT "${output}${error}" MATCHES "${expected}")
+      message(FATAL_ERROR "Wrong failure for ${case}: ${output}${error}")
+    endif()
+  endif()
+endforeach()

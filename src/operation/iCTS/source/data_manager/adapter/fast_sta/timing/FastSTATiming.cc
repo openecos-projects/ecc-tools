@@ -24,20 +24,27 @@
 #include "FastSTATiming.hh"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <queue>
+#include <ranges>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "FastSTAClockPropagation.hh"
 #include "FastSTAClockState.hh"
+#include "FastSTAClockTiming.hh"
 #include "FastSTAConstraints.hh"
+#include "FastSTALibertyModel.hh"
 #include "FastSTALogicAnalysis.hh"
 #include "FastSTAParasitics.hh"
+#include "TimingConstraints.hh"
 #include "clock_sizing/FastSTAClockSizingEdit.hh"
 
 namespace icts {

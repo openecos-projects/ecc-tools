@@ -43,6 +43,14 @@ class TclAllClocks : public SdcTclCmd
   unsigned exec() override;
 };
 
+class TclAllDelayCorners : public SdcTclCmd
+{
+ public:
+  TclAllDelayCorners(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
 class TclGetObjectName : public SdcTclCmd
 {
  public:
@@ -102,6 +110,28 @@ class TclAllOutputs : public SdcTclCmd
 {
  public:
   TclAllOutputs(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+
+class TclGetLibs : public SdcTclCmd
+{
+ public:
+  TclGetLibs(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclGetLibCells : public SdcTclCmd
+{
+ public:
+  TclGetLibCells(const char* cmd_name);
+  unsigned check() override { return 1; }
+  unsigned exec() override;
+};
+class TclGetLibPins : public SdcTclCmd
+{
+ public:
+  TclGetLibPins(const char* cmd_name);
   unsigned check() override { return 1; }
   unsigned exec() override;
 };

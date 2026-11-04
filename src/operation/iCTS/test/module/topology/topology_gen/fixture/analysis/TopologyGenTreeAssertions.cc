@@ -20,8 +20,6 @@
  * @date 2026-04-11
  * @brief Topology validation and summary helpers for topology generation tests.
  */
-#include <gtest/gtest.h>
-
 #include <cstddef>
 #include <limits>
 #include <sstream>
@@ -32,7 +30,9 @@
 #include "Logger.hh"
 #include "Point.hh"
 #include "Tree.hh"
+#include "gtest/gtest.h"
 #include "module/topology/fixture/analysis/TopologyAnalysis.hh"
+#include "module/topology/fixture/analysis/TopologyStats.hh"
 #include "module/topology/topology_gen/fixture/TopologyGenCaseFixture.hh"
 #include "toolkit/geometry/Geometry.hh"
 

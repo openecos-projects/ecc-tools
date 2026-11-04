@@ -33,11 +33,15 @@ set(HOME_IFP ${HOME_OPERATION}/iFP)
 
 set(IFP_INTERFACE ${HOME_IFP}/interface)
 set(IFP_SOURCE ${HOME_IFP}/source)
+set(IFP_TEST ${HOME_IFP}/test)
 
 ############################ cmake subdirectory ############################
 
 add_subdirectory(${IFP_INTERFACE})
 add_subdirectory(${IFP_SOURCE})
+if(BUILD_TESTING)
+    add_subdirectory(${IFP_TEST})
+endif()
 
 ########################################################
 

@@ -20,11 +20,9 @@
  *        parser/model code reviewable.
  */
 
-#include "Lib.hh"
-
 #include <algorithm>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <map>
 #include <optional>
@@ -34,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "Lib.hh"
 #include "json/json.hpp"
 
 namespace idb {
@@ -43,8 +42,7 @@ namespace {
 bool isClockTreePathArc(LibArc* lib_arc)
 {
   auto timing_type = lib_arc->get_timing_type();
-  return timing_type == LibArc::TimingType::kMinClockTree
-         || timing_type == LibArc::TimingType::kMaxClockTree;
+  return timing_type == LibArc::TimingType::kMinClockTree || timing_type == LibArc::TimingType::kMaxClockTree;
 }
 
 auto classifyCellArcBySnkPort(LibCell* lib_cell) -> std::map<std::string, std::vector<LibArc*>>
@@ -65,11 +63,7 @@ struct BusRange
   int min_index = 0;
   int max_index = 0;
 
-  bool operator<(const BusRange& rhs) const
-  {
-    return std::tie(max_index, min_index) <
-           std::tie(rhs.max_index, rhs.min_index);
-  }
+  bool operator<(const BusRange& rhs) const { return std::tie(max_index, min_index) < std::tie(rhs.max_index, rhs.min_index); }
 };
 
 struct BusTypeDefinition
@@ -98,10 +92,27 @@ std::pair<std::string, std::optional<int>> splitPortName(const char* port_name)
   return {name.substr(0, left_bracket_idx), index};
 }
 
-std::string makeBusRangeKey(const std::string& bus_name, int min_index,
-                            int max_index)
+std::string makeBusRangeKey(const std::string& bus_name, int min_index, int max_index)
 {
   return bus_name + "[" + std::to_string(max_index) + ":" + std::to_string(min_index) + "]";
+}
+
+// Imported Liberty buses store their bits separately from scalar cell ports.
+// Both representations must participate in type discovery and pin emission.
+std::vector<LibPort*> exportPorts(LibCell* cell)
+{
+  std::vector<LibPort*> ports;
+  std::set<std::string> names;
+  auto append = [&](LibPort* port) {
+    if (names.insert(port->get_port_name()).second)
+      ports.push_back(port);
+  };
+  for (const auto& port : cell->get_cell_ports())
+    append(port.get());
+  for (const auto& bus : cell->get_cell_buses())
+    for (const auto& port : bus->get_ports())
+      append(port.get());
+  return ports;
 }
 
 BusTypeDefinitions collectBusTypeDefinitions(LibLibrary* lib)
@@ -110,14 +121,13 @@ BusTypeDefinitions collectBusTypeDefinitions(LibLibrary* lib)
 
   for (const auto& cell : lib->get_cells()) {
     std::map<std::string, BusRange> cell_bus_ranges;
-    for (const auto& cell_port : cell->get_cell_ports()) {
+    for (auto* cell_port : exportPorts(cell.get())) {
       auto [bus_name, index] = splitPortName(cell_port->get_port_name());
       if (!index) {
         continue;
       }
 
-      auto [iter, inserted] =
-          cell_bus_ranges.emplace(bus_name, BusRange{*index, *index});
+      auto [iter, inserted] = cell_bus_ranges.emplace(bus_name, BusRange{*index, *index});
       if (!inserted) {
         iter->second.min_index = std::min(iter->second.min_index, *index);
         iter->second.max_index = std::max(iter->second.max_index, *index);
@@ -133,37 +143,27 @@ BusTypeDefinitions collectBusTypeDefinitions(LibLibrary* lib)
   for (const auto& [bus_name, ranges] : bus_ranges_by_name) {
     const bool has_multiple_ranges = ranges.size() > 1;
     for (const auto& range : ranges) {
-      auto type_name =
-          has_multiple_ranges
-              ? bus_name + "__" + std::to_string(range.max_index) + "_" + std::to_string(range.min_index)
-              : bus_name;
-      bus_type_definitions.emplace(
-          makeBusRangeKey(bus_name, range.min_index, range.max_index),
-          BusTypeDefinition{std::move(type_name), range.min_index,
-                            range.max_index});
+      auto type_name
+          = has_multiple_ranges ? bus_name + "__" + std::to_string(range.max_index) + "_" + std::to_string(range.min_index) : bus_name;
+      bus_type_definitions.emplace(makeBusRangeKey(bus_name, range.min_index, range.max_index),
+                                   BusTypeDefinition{std::move(type_name), range.min_index, range.max_index});
     }
   }
 
   return bus_type_definitions;
 }
 
-std::string findBusTypeName(const BusTypeDefinitions& bus_type_definitions,
-                            const std::string& bus_name,
+std::string findBusTypeName(const BusTypeDefinitions& bus_type_definitions, const std::string& bus_name,
                             const std::vector<std::pair<int, LibPort*>>& bit_ports)
 {
   if (bit_ports.empty()) {
     return bus_name;
   }
 
-  auto [min_iter, max_iter] =
-      std::minmax_element(bit_ports.begin(), bit_ports.end(),
-                          [](const auto& lhs, const auto& rhs) {
-                            return lhs.first < rhs.first;
-                          });
-  const auto bus_range_key =
-      makeBusRangeKey(bus_name, min_iter->first, max_iter->first);
-  if (auto bus_type_iter = bus_type_definitions.find(bus_range_key);
-      bus_type_iter != bus_type_definitions.end()) {
+  auto [min_iter, max_iter]
+      = std::minmax_element(bit_ports.begin(), bit_ports.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  const auto bus_range_key = makeBusRangeKey(bus_name, min_iter->first, max_iter->first);
+  if (auto bus_type_iter = bus_type_definitions.find(bus_range_key); bus_type_iter != bus_type_definitions.end()) {
     return bus_type_iter->second.type_name;
   }
 
@@ -240,6 +240,10 @@ bool isTimeTableType(LibTable::TableType table_type)
     case LibTable::TableType::kCellFall:
     case LibTable::TableType::kRiseTransition:
     case LibTable::TableType::kFallTransition:
+    case LibTable::TableType::kRetainingRise:
+    case LibTable::TableType::kRetainingFall:
+    case LibTable::TableType::kRetainRiseSlew:
+    case LibTable::TableType::kRetainFallSlew:
     case LibTable::TableType::kRiseConstrain:
     case LibTable::TableType::kFallConstrain:
     case LibTable::TableType::kCellRiseSigma:
@@ -276,8 +280,7 @@ bool isTimeTemplateVariable(LibLutTableTemplate::Variable variable)
   }
 }
 
-std::optional<LibLutTableTemplate::Variable> getTemplateVariable(
-    LibLutTableTemplate* lut_table_template, int index_order)
+std::optional<LibLutTableTemplate::Variable> getTemplateVariable(LibLutTableTemplate* lut_table_template, int index_order)
 {
   if (!lut_table_template) {
     return std::nullopt;
@@ -297,9 +300,8 @@ std::optional<LibLutTableTemplate::Variable> getTemplateVariable(
   }
 }
 
-double convertAxisValueForExport(LibLibrary* lib, LibAxis* lib_axis,
-                                 LibLutTableTemplate* lut_table_template,
-                                 int index_order, double raw_value)
+double convertAxisValueForExport(LibLibrary* lib, LibAxis* lib_axis, LibLutTableTemplate* lut_table_template, int index_order,
+                                 double raw_value)
 {
   if (lib_axis && lib_axis->get_value_scale() == LibValueScale::kLibrary) {
     return raw_value;
@@ -313,8 +315,7 @@ double convertAxisValueForExport(LibLibrary* lib, LibAxis* lib_axis,
   return raw_value;
 }
 
-double convertTableValueForExport(LibLibrary* lib, LibTable* table,
-                                  double raw_value)
+double convertTableValueForExport(LibLibrary* lib, LibTable* table, double raw_value)
 {
   if (table && table->get_value_scale() == LibValueScale::kLibrary) {
     return raw_value;
@@ -371,18 +372,13 @@ const char* getTemplateVariableName(LibLutTableTemplate::Variable variable)
   return "";
 }
 
-void writeAxis(FILE* stream, LibLibrary* lib, LibAxis* lib_axis,
-               LibLutTableTemplate* lut_table_template, int index_order)
+void writeAxis(FILE* stream, LibLibrary* lib, LibAxis* lib_axis, LibLutTableTemplate* lut_table_template, int index_order)
 {
   auto& axis_values = lib_axis->get_axis_values();
   fprintf(stream, "                              index_%d (\"", index_order + 1);
   for (int i = 0; i < axis_values.size(); ++i) {
-    auto axis_float_value
-        = dynamic_cast<LibFloatValue*>(axis_values[i].get())->getFloatValue();
-    fprintf(stream, "%.8f",
-            convertAxisValueForExport(lib, lib_axis, lut_table_template,
-                                      index_order,
-                                      axis_float_value));
+    auto axis_float_value = dynamic_cast<LibFloatValue*>(axis_values[i].get())->getFloatValue();
+    fprintf(stream, "%.8f", convertAxisValueForExport(lib, lib_axis, lut_table_template, index_order, axis_float_value));
     if (i < axis_values.size() - 1) {
       fprintf(stream, ",");
     }
@@ -390,16 +386,13 @@ void writeAxis(FILE* stream, LibLibrary* lib, LibAxis* lib_axis,
   fprintf(stream, "\");\n");
 }
 
-void writeTableValues(FILE* stream, LibLibrary* lib, LibTable* lib_table,
-                      int columns)
+void writeTableValues(FILE* stream, LibLibrary* lib, LibTable* lib_table, int columns)
 {
   auto& lib_table_values = lib_table->get_table_values();
   fprintf(stream, "                                values (\"");
   for (int i = 0; i < lib_table_values.size(); ++i) {
-    auto lib_table_float_value
-        = dynamic_cast<LibFloatValue*>(lib_table_values[i].get())->getFloatValue();
-    fprintf(stream, "%.8f",
-            convertTableValueForExport(lib, lib_table, lib_table_float_value));
+    auto lib_table_float_value = dynamic_cast<LibFloatValue*>(lib_table_values[i].get())->getFloatValue();
+    fprintf(stream, "%.8f", convertTableValueForExport(lib, lib_table, lib_table_float_value));
     if ((i + 1) % columns == 0 && i < lib_table_values.size() - 1) {
       fprintf(stream, "\", \\\n                                        \"");
     } else if (i < lib_table_values.size() - 1) {
@@ -409,19 +402,14 @@ void writeTableValues(FILE* stream, LibLibrary* lib, LibTable* lib_table,
   fprintf(stream, "\");\n");
 }
 
-void writeDelayTable(FILE* stream, LibLibrary* lib, const char* table_name,
-                     LibTable* table)
+void writeDelayTable(FILE* stream, LibLibrary* lib, const char* table_name, LibTable* table)
 {
   auto* lut_table_template = table->get_table_template();
   if (lut_table_template) {
     std::string template_name = lut_table_template->get_template_name();
-    fprintf(stream, "                        %s(%s) {\n", table_name,
-            template_name.c_str());
+    fprintf(stream, "                        %s(%s) {\n", table_name, template_name.c_str());
     auto& axes = table->get_axes();
-    int columns = axes.empty()
-                      ? 1
-                      : (axes.size() > 1 ? axes[1].get()->get_axis_values().size()
-                                         : axes[0].get()->get_axis_values().size());
+    int columns = axes.empty() ? 1 : (axes.size() > 1 ? axes[1].get()->get_axis_values().size() : axes[0].get()->get_axis_values().size());
     for (int i = 0; i < axes.size(); i++) {
       writeAxis(stream, lib, axes[i].get(), lut_table_template, i);
     }
@@ -434,27 +422,20 @@ void writeDelayTable(FILE* stream, LibLibrary* lib, const char* table_name,
   if (table_values.size() > 1) {
     ECCLOG.error(ecc::Loc::current(), "Liberty scalar table has more than one value.");
   }
-  auto float_value
-      = dynamic_cast<LibFloatValue*>(table_values.front().get())->getFloatValue();
+  auto float_value = dynamic_cast<LibFloatValue*>(table_values.front().get())->getFloatValue();
   fprintf(stream, "                        %s(scalar) {\n", table_name);
-  fprintf(stream, "                                values (\"%.8f\");\n",
-          convertTableValueForExport(lib, table, float_value));
+  fprintf(stream, "                                values (\"%.8f\");\n", convertTableValueForExport(lib, table, float_value));
   fprintf(stream, "                       }\n");
 }
 
-void writeCheckTable(FILE* stream, LibLibrary* lib, const char* table_name,
-                     LibTable* table)
+void writeCheckTable(FILE* stream, LibLibrary* lib, const char* table_name, LibTable* table)
 {
   auto* lut_table_template = table->get_table_template();
   if (lut_table_template) {
     std::string template_name = lut_table_template->get_template_name();
-    fprintf(stream, "                       %s(%s) {\n", table_name,
-            template_name.c_str());
+    fprintf(stream, "                       %s(%s) {\n", table_name, template_name.c_str());
     auto& axes = table->get_axes();
-    int columns = axes.empty()
-                      ? 1
-                      : (axes.size() > 1 ? axes[1].get()->get_axis_values().size()
-                                         : axes[0].get()->get_axis_values().size());
+    int columns = axes.empty() ? 1 : (axes.size() > 1 ? axes[1].get()->get_axis_values().size() : axes[0].get()->get_axis_values().size());
     for (int i = 0; i < axes.size(); i++) {
       writeAxis(stream, lib, axes[i].get(), lut_table_template, i);
     }
@@ -467,68 +448,59 @@ void writeCheckTable(FILE* stream, LibLibrary* lib, const char* table_name,
   if (table_values.size() > 1) {
     ECCLOG.error(ecc::Loc::current(), "Liberty scalar table has more than one value.");
   }
-  auto float_value
-      = dynamic_cast<LibFloatValue*>(table_values.front().get())->getFloatValue();
+  auto float_value = dynamic_cast<LibFloatValue*>(table_values.front().get())->getFloatValue();
   fprintf(stream, "                       %s(scalar) {\n", table_name);
-  fprintf(stream, "                                values (\"%.8f\");\n",
-          convertTableValueForExport(lib, table, float_value));
+  fprintf(stream, "                                values (\"%.8f\");\n", convertTableValueForExport(lib, table, float_value));
   fprintf(stream, "                       }\n");
 }
 
 void writeDelayTableModel(FILE* stream, LibArc* lib_arc)
 {
   auto* lib = lib_arc->get_owner_cell()->get_owner_lib();
-  static const std::map<LibArc::TimingSense, const char*> timing_sense_map = {
-      {LibArc::TimingSense::kPositiveUnate, "positive_unate"},
-      {LibArc::TimingSense::kNegativeUnate, "negative_unate"},
-      {LibArc::TimingSense::kNonUnate, "non_unate"}};
-  static const std::map<LibArc::TimingType, const char*> timing_type_map = {
-      {LibArc::TimingType::kComb, "combinational"},
-      {LibArc::TimingType::kCombRise, "combinational_rise"},
-      {LibArc::TimingType::kCombFall, "combinational_fall"},
-      {LibArc::TimingType::kRisingEdge, "rising_edge"},
-      {LibArc::TimingType::kFallingEdge, "falling_edge"},
-      {LibArc::TimingType::kMaxClockTree, "max_clock_tree_path"},
-      {LibArc::TimingType::kMinClockTree, "min_clock_tree_path"}};
+  static const std::map<LibArc::TimingSense, const char*> timing_sense_map = {{LibArc::TimingSense::kPositiveUnate, "positive_unate"},
+                                                                              {LibArc::TimingSense::kNegativeUnate, "negative_unate"},
+                                                                              {LibArc::TimingSense::kNonUnate, "non_unate"}};
+  static const std::map<LibArc::TimingType, const char*> timing_type_map = {{LibArc::TimingType::kComb, "combinational"},
+                                                                            {LibArc::TimingType::kCombRise, "combinational_rise"},
+                                                                            {LibArc::TimingType::kCombFall, "combinational_fall"},
+                                                                            {LibArc::TimingType::kRisingEdge, "rising_edge"},
+                                                                            {LibArc::TimingType::kFallingEdge, "falling_edge"},
+                                                                            {LibArc::TimingType::kMaxClockTree, "max_clock_tree_path"},
+                                                                            {LibArc::TimingType::kMinClockTree, "min_clock_tree_path"}};
 
   fprintf(stream, "                timing () {\n");
-  if (const char* related_pin = lib_arc->get_src_port();
-      related_pin && *related_pin) {
-    fprintf(stream, "                       related_pin        : \"%s\";\n",
-            related_pin);
+  if (const char* related_pin = lib_arc->get_src_port(); related_pin && *related_pin) {
+    fprintf(stream, "                       related_pin        : \"%s\";\n", related_pin);
   }
   if (const auto& sdf_cond = lib_arc->get_sdf_cond(); !sdf_cond.empty()) {
-    fprintf(stream, "                       sdf_cond           : \"%s\";\n",
-            sdf_cond.c_str());
+    fprintf(stream, "                       sdf_cond           : \"%s\";\n", sdf_cond.c_str());
   }
   if (const auto& when = lib_arc->get_when(); !when.empty()) {
-    fprintf(stream, "                       when               : \"%s\";\n",
-            when.c_str());
+    fprintf(stream, "                       when               : \"%s\";\n", when.c_str());
   }
-  fprintf(stream, "                       timing_sense        : %s;\n",
-          timing_sense_map.at(lib_arc->get_timing_sense()));
-  if (auto timing_type = timing_type_map.find(lib_arc->get_timing_type());
-      timing_type != timing_type_map.end()) {
-    fprintf(stream, "                       timing_type        : %s;\n",
-            timing_type->second);
+  fprintf(stream, "                       timing_sense        : %s;\n", timing_sense_map.at(lib_arc->get_timing_sense()));
+  if (auto timing_type = timing_type_map.find(lib_arc->get_timing_type()); timing_type != timing_type_map.end()) {
+    fprintf(stream, "                       timing_type        : %s;\n", timing_type->second);
   }
 
   auto* delay_model = dynamic_cast<LibDelayTableModel*>(lib_arc->get_table_model());
-  if (auto* cell_fall_table
-      = delay_model->getTable(int(LibTable::TableType::kCellFall))) {
+  if (auto* cell_fall_table = delay_model->getTable(int(LibTable::TableType::kCellFall))) {
     writeDelayTable(stream, lib, "cell_fall", cell_fall_table);
   }
-  if (auto* cell_rise_table
-      = delay_model->getTable(int(LibTable::TableType::kCellRise))) {
+  if (auto* cell_rise_table = delay_model->getTable(int(LibTable::TableType::kCellRise))) {
     writeDelayTable(stream, lib, "cell_rise", cell_rise_table);
   }
-  if (auto* fall_transition_table
-      = delay_model->getTable(int(LibTable::TableType::kFallTransition))) {
+  if (auto* fall_transition_table = delay_model->getTable(int(LibTable::TableType::kFallTransition))) {
     writeDelayTable(stream, lib, "fall_transition", fall_transition_table);
   }
-  if (auto* rise_transition_table
-      = delay_model->getTable(int(LibTable::TableType::kRiseTransition))) {
+  if (auto* rise_transition_table = delay_model->getTable(int(LibTable::TableType::kRiseTransition))) {
     writeDelayTable(stream, lib, "rise_transition", rise_transition_table);
+  }
+  for (const auto& [name, type] : LibTable::_str2TableType) {
+    if (type >= LibTable::TableType::kRetainingRise && type <= LibTable::TableType::kRetainFallSlew) {
+      if (auto* table = delay_model->retainingTable(type))
+        writeDelayTable(stream, lib, name.c_str(), table);
+    }
   }
 
   fprintf(stream, "                }\n");
@@ -537,42 +509,30 @@ void writeDelayTableModel(FILE* stream, LibArc* lib_arc)
 void writeCheckTableModel(FILE* stream, LibArc* lib_arc)
 {
   auto* lib = lib_arc->get_owner_cell()->get_owner_lib();
-  static const std::map<LibArc::TimingType, const char*> timing_type_map = {
-      {LibArc::TimingType::kSetupRising, "setup_rising"},
-      {LibArc::TimingType::kHoldRising, "hold_rising"},
-      {LibArc::TimingType::kSetupFalling, "setup_falling"},
-      {LibArc::TimingType::kHoldFalling, "hold_falling"},
-      {LibArc::TimingType::kRecoveryRising, "recovery_rising"},
-      {LibArc::TimingType::kRecoveryFalling, "recovery_falling"},
-      {LibArc::TimingType::kRemovalRising, "removal_rising"},
-      {LibArc::TimingType::kRemovalFalling, "removal_falling"},
-      {LibArc::TimingType::kMinPulseWidth, "min_pulse_width"},
-      {LibArc::TimingType::kMinimunPeriod, "minimum_period"}};
+  static const std::map<LibArc::TimingType, const char*> timing_type_map
+      = {{LibArc::TimingType::kSetupRising, "setup_rising"},       {LibArc::TimingType::kHoldRising, "hold_rising"},
+         {LibArc::TimingType::kSetupFalling, "setup_falling"},     {LibArc::TimingType::kHoldFalling, "hold_falling"},
+         {LibArc::TimingType::kRecoveryRising, "recovery_rising"}, {LibArc::TimingType::kRecoveryFalling, "recovery_falling"},
+         {LibArc::TimingType::kRemovalRising, "removal_rising"},   {LibArc::TimingType::kRemovalFalling, "removal_falling"},
+         {LibArc::TimingType::kMinPulseWidth, "min_pulse_width"},  {LibArc::TimingType::kMinimunPeriod, "minimum_period"}};
 
   fprintf(stream, "                timing () {\n");
-  if (const char* related_pin = lib_arc->get_src_port();
-      related_pin && *related_pin) {
-    fprintf(stream, "                       related_pin        : \"%s\";\n",
-            related_pin);
+  if (const char* related_pin = lib_arc->get_src_port(); related_pin && *related_pin) {
+    fprintf(stream, "                       related_pin        : \"%s\";\n", related_pin);
   }
   if (const auto& sdf_cond = lib_arc->get_sdf_cond(); !sdf_cond.empty()) {
-    fprintf(stream, "                       sdf_cond           : \"%s\";\n",
-            sdf_cond.c_str());
+    fprintf(stream, "                       sdf_cond           : \"%s\";\n", sdf_cond.c_str());
   }
   if (const auto& when = lib_arc->get_when(); !when.empty()) {
-    fprintf(stream, "                       when               : \"%s\";\n",
-            when.c_str());
+    fprintf(stream, "                       when               : \"%s\";\n", when.c_str());
   }
-  fprintf(stream, "                       timing_type        : %s;\n",
-          timing_type_map.at(lib_arc->get_timing_type()));
+  fprintf(stream, "                       timing_type        : %s;\n", timing_type_map.at(lib_arc->get_timing_type()));
 
   auto* check_model = dynamic_cast<LibCheckTableModel*>(lib_arc->get_table_model());
-  if (auto* fall_constraint_table
-      = check_model->getTable(int(LibTable::TableType::kFallConstrain) - 4)) {
+  if (auto* fall_constraint_table = check_model->getTable(int(LibTable::TableType::kFallConstrain) - 4)) {
     writeCheckTable(stream, lib, "fall_constraint", fall_constraint_table);
   }
-  if (auto* rise_constraint_table
-      = check_model->getTable(int(LibTable::TableType::kRiseConstrain) - 4)) {
+  if (auto* rise_constraint_table = check_model->getTable(int(LibTable::TableType::kRiseConstrain) - 4)) {
     writeCheckTable(stream, lib, "rise_constraint", rise_constraint_table);
   }
 
@@ -598,16 +558,14 @@ bool isExportedCheckTimingType(LibArc::TimingType timing_type)
   }
 }
 
-void writeBusTypeDefinitions(FILE* stream,
-                             const BusTypeDefinitions& bus_type_definitions)
+void writeBusTypeDefinitions(FILE* stream, const BusTypeDefinitions& bus_type_definitions)
 {
   for (const auto& [range_key, bus_type] : bus_type_definitions) {
     (void) range_key;
     fprintf(stream, "  type (\"%s\") {\n", bus_type.type_name.c_str());
     fprintf(stream, "    base_type : array;\n");
     fprintf(stream, "    data_type : bit;\n");
-    fprintf(stream, "    bit_width : %d;\n",
-            bus_type.max_index - bus_type.min_index + 1);
+    fprintf(stream, "    bit_width : %d;\n", bus_type.max_index - bus_type.min_index + 1);
     fprintf(stream, "    bit_from : %d;\n", bus_type.max_index);
     fprintf(stream, "    bit_to : %d;\n", bus_type.min_index);
     fprintf(stream, "  }\n");
@@ -621,15 +579,12 @@ void writeBusTypeDefinitions(FILE* stream,
 void writeLutTemplateDefinitions(FILE* stream, LibLibrary* lib)
 {
   for (const auto& lut_template : lib->get_lut_templates()) {
-    fprintf(stream, "  lu_table_template(%s) {\n",
-            lut_template->get_template_name());
+    fprintf(stream, "  lu_table_template(%s) {\n", lut_template->get_template_name());
     if (auto variable1 = lut_template->get_template_variable1()) {
-      fprintf(stream, "    variable_1 : %s;\n",
-              getTemplateVariableName(*variable1));
+      fprintf(stream, "    variable_1 : %s;\n", getTemplateVariableName(*variable1));
     }
     if (auto variable2 = lut_template->get_template_variable2()) {
-      fprintf(stream, "    variable_2 : %s;\n",
-              getTemplateVariableName(*variable2));
+      fprintf(stream, "    variable_2 : %s;\n", getTemplateVariableName(*variable2));
     }
 
     auto& axes = lut_template->get_axes();
@@ -637,12 +592,8 @@ void writeLutTemplateDefinitions(FILE* stream, LibLibrary* lib)
       fprintf(stream, "    index_%d(\"", i + 1);
       auto& axis_values = axes[i]->get_axis_values();
       for (int j = 0; j < axis_values.size(); ++j) {
-        auto axis_float_value
-            = dynamic_cast<LibFloatValue*>(axis_values[j].get())->getFloatValue();
-        fprintf(stream, "%.8f",
-                convertAxisValueForExport(lib, axes[i].get(),
-                                          lut_template.get(), i,
-                                          axis_float_value));
+        auto axis_float_value = dynamic_cast<LibFloatValue*>(axis_values[j].get())->getFloatValue();
+        fprintf(stream, "%.8f", convertAxisValueForExport(lib, axes[i].get(), lut_template.get(), i, axis_float_value));
         if (j < axis_values.size() - 1) {
           fprintf(stream, ", ");
         }
@@ -657,8 +608,7 @@ void writeLutTemplateDefinitions(FILE* stream, LibLibrary* lib)
   }
 }
 
-void writeLibertyCell(FILE* stream, LibCell* lib_cell,
-                      const BusTypeDefinitions& bus_type_definitions)
+void writeLibertyCell(FILE* stream, LibCell* lib_cell, const BusTypeDefinitions& bus_type_definitions)
 {
   fprintf(stream, "  cell (%s) {\n", lib_cell->get_cell_name());
   if (lib_cell->get_cell_area() > 0.0) {
@@ -672,17 +622,20 @@ void writeLibertyCell(FILE* stream, LibCell* lib_cell,
   auto write_pin_block = [&](LibPort* cell_port, const char* indent) {
     const std::string port_name = cell_port->get_port_name();
     fprintf(stream, "%spin(\"%s\") {\n", indent, port_name.c_str());
-    fprintf(stream, "%s  direction               : %s;\n", indent,
-            getPortDirection(cell_port));
+    fprintf(stream, "%s  direction               : %s;\n", indent, getPortDirection(cell_port));
     if (cell_port->get_is_clock() || cell_port->get_is_clock_pin()) {
       fprintf(stream, "%s  clock                   : true;\n", indent);
     }
     fprintf(stream, "%s  capacitance             : %.8f;\n", indent,
-            convertInternalCapValueToExportUnit(lib_cell->get_owner_lib(),
-                                                cell_port->get_port_cap()));
+            convertInternalCapValueToExportUnit(lib_cell->get_owner_lib(), cell_port->get_port_cap()));
 
-    if (auto arc_iter = snkport2arcset.find(port_name);
-        arc_iter != snkport2arcset.end()) {
+    for (const auto& [name, value] : {std::pair{"min_period", cell_port->get_min_period()},
+                                      std::pair{"min_pulse_width_high", cell_port->get_min_pulse_width(TransType::kRise)},
+                                      std::pair{"min_pulse_width_low", cell_port->get_min_pulse_width(TransType::kFall)}}) {
+      if (value)
+        fprintf(stream, "%s  %s : %.8f;\n", indent, name, convertInternalTimeValueToExportUnit(lib_cell->get_owner_lib(), *value));
+    }
+    if (auto arc_iter = snkport2arcset.find(port_name); arc_iter != snkport2arcset.end()) {
       for (const auto& arc : arc_iter->second) {
         if (arc->isCheckTableArc()) {
           if (isExportedCheckTimingType(arc->get_timing_type())) {
@@ -698,16 +651,16 @@ void writeLibertyCell(FILE* stream, LibCell* lib_cell,
   };
 
   std::map<std::string, std::vector<std::pair<int, LibPort*>>> bus_ports;
-  for (const auto& cell_port : lib_cell->get_cell_ports()) {
+  for (auto* cell_port : exportPorts(lib_cell)) {
     auto [bus_name, index] = splitPortName(cell_port->get_port_name());
     if (index) {
-      bus_ports[bus_name].emplace_back(*index, cell_port.get());
+      bus_ports[bus_name].emplace_back(*index, cell_port);
     }
   }
 
   std::set<std::string> written_bus_names;
   std::set<std::string> written_port_names;
-  for (const auto& cell_port : lib_cell->get_cell_ports()) {
+  for (auto* cell_port : exportPorts(lib_cell)) {
     auto [bus_name, index] = splitPortName(cell_port->get_port_name());
     if (index) {
       if (!written_bus_names.insert(bus_name).second) {
@@ -715,17 +668,12 @@ void writeLibertyCell(FILE* stream, LibCell* lib_cell,
       }
 
       auto& bit_ports = bus_ports[bus_name];
-      std::sort(bit_ports.begin(), bit_ports.end(),
-                [](const auto& lhs, const auto& rhs) {
-                  return lhs.first > rhs.first;
-                });
+      std::sort(bit_ports.begin(), bit_ports.end(), [](const auto& lhs, const auto& rhs) { return lhs.first > rhs.first; });
 
       fprintf(stream, "    bus(\"%s\") {\n", bus_name.c_str());
-      const auto bus_type_name =
-          findBusTypeName(bus_type_definitions, bus_name, bit_ports);
+      const auto bus_type_name = findBusTypeName(bus_type_definitions, bus_name, bit_ports);
       fprintf(stream, "      bus_type : %s;\n", bus_type_name.c_str());
-      fprintf(stream, "      direction : %s;\n",
-              getPortDirection(bit_ports.front().second));
+      fprintf(stream, "      direction : %s;\n", getPortDirection(bit_ports.front().second));
       for (const auto& [bit_index, bit_port] : bit_ports) {
         (void) bit_index;
         written_port_names.insert(bit_port->get_port_name());
@@ -736,7 +684,7 @@ void writeLibertyCell(FILE* stream, LibCell* lib_cell,
     }
 
     written_port_names.insert(cell_port->get_port_name());
-    write_pin_block(cell_port.get(), "   ");
+    write_pin_block(cell_port, "   ");
   }
 
   for (const auto& [port_name, arcs] : snkport2arcset) {
@@ -745,8 +693,7 @@ void writeLibertyCell(FILE* stream, LibCell* lib_cell,
       continue;
     }
 
-    if (auto* cell_port = lib_cell->get_cell_port_or_port_bus(port_name.c_str());
-        cell_port && !cell_port->isLibertyPortBus()) {
+    if (auto* cell_port = lib_cell->get_cell_port_or_port_bus(port_name.c_str()); cell_port && !cell_port->isLibertyPortBus()) {
       write_pin_block(cell_port, "   ");
     }
   }
@@ -763,17 +710,14 @@ nlohmann::json createTimingArcJson(LibArc* lib_arc)
   auto append_table_json = [&timing_arc](const char* table_name, LibTable* table) {
     auto& axes = table->get_axes();
     auto& lib_table_values = table->get_table_values();
-    int columns = axes.empty()
-                      ? 1
-                      : (axes.size() > 1 ? axes[1].get()->get_axis_values().size()
-                                         : static_cast<int>(lib_table_values.size()));
+    int columns
+        = axes.empty() ? 1 : (axes.size() > 1 ? axes[1].get()->get_axis_values().size() : static_cast<int>(lib_table_values.size()));
     nlohmann::json table_data;
     for (int i = 0; i < axes.size(); i++) {
       auto& axis_values = axes[i].get()->get_axis_values();
       nlohmann::json index = nlohmann::json::array();
       for (int j = 0; j < axis_values.size(); ++j) {
-        auto axis_float_value
-            = dynamic_cast<LibFloatValue*>(axis_values[j].get())->getFloatValue();
+        auto axis_float_value = dynamic_cast<LibFloatValue*>(axis_values[j].get())->getFloatValue();
         index.push_back(axis_float_value);
       }
       table_data["index_" + std::to_string(i + 1)] = index;
@@ -783,8 +727,7 @@ nlohmann::json createTimingArcJson(LibArc* lib_arc)
     for (size_t i = 0; i < lib_table_values.size(); i += columns) {
       nlohmann::json row = nlohmann::json::array();
       for (size_t j = 0; j < columns && (i + j) < lib_table_values.size(); ++j) {
-        auto lib_table_float_value
-            = dynamic_cast<LibFloatValue*>(lib_table_values[i + j].get())->getFloatValue();
+        auto lib_table_float_value = dynamic_cast<LibFloatValue*>(lib_table_values[i + j].get())->getFloatValue();
         row.push_back(lib_table_float_value);
       }
       values_array.push_back(row);
@@ -796,16 +739,20 @@ nlohmann::json createTimingArcJson(LibArc* lib_arc)
   if (auto* cell_rise_table = delay_model->getTable(int(LibTable::TableType::kCellRise))) {
     append_table_json("cell_rise", cell_rise_table);
   }
-  if (auto* rise_transition_table
-      = delay_model->getTable(int(LibTable::TableType::kRiseTransition))) {
+  if (auto* rise_transition_table = delay_model->getTable(int(LibTable::TableType::kRiseTransition))) {
     append_table_json("rise_transition", rise_transition_table);
   }
   if (auto* cell_fall_table = delay_model->getTable(int(LibTable::TableType::kCellFall))) {
     append_table_json("cell_fall", cell_fall_table);
   }
-  if (auto* fall_transition_table
-      = delay_model->getTable(int(LibTable::TableType::kFallTransition))) {
+  if (auto* fall_transition_table = delay_model->getTable(int(LibTable::TableType::kFallTransition))) {
     append_table_json("fall_transition", fall_transition_table);
+  }
+  for (const auto& [name, type] : LibTable::_str2TableType) {
+    if (type >= LibTable::TableType::kRetainingRise && type <= LibTable::TableType::kRetainFallSlew) {
+      if (auto* table = delay_model->retainingTable(type))
+        append_table_json(name.c_str(), table);
+    }
   }
 
   return timing_arc;
@@ -825,38 +772,26 @@ void LibLibrary::printLibertyLibrary(const char* lib_file_name)
 
   fprintf(stream, "library (%s) {\n", get_lib_name().c_str());
 
-  auto write_percent_attr = [&stream](const char* attr_name,
-                                      double percent_value) {
-    fprintf(stream, "  %-30s : %g;\n", attr_name, percent_value);
-  };
+  auto write_percent_attr
+      = [&stream](const char* attr_name, double percent_value) { fprintf(stream, "  %-30s : %g;\n", attr_name, percent_value); };
 
   if (const auto& comment = get_comment(); comment) {
     fprintf(stream, "  %-30s : \"%s\";\n", "comment", comment->c_str());
   }
   fprintf(stream, "  delay_model                    : table_lookup;\n");
   const bool simulation = get_simulation().value_or(false);
-  fprintf(stream, "  %-30s : %s;\n", "simulation",
-          simulation ? "true" : "false");
-  fprintf(stream, "  capacitive_load_unit (1,%s);\n",
-          getDelayModelCapUnitName(this));
-  if (const auto& leakage_power_unit = get_leakage_power_unit();
-      leakage_power_unit) {
-    fprintf(stream, "  %-30s : %s;\n", "leakage_power_unit",
-            leakage_power_unit->c_str());
+  fprintf(stream, "  %-30s : %s;\n", "simulation", simulation ? "true" : "false");
+  fprintf(stream, "  capacitive_load_unit (1,%s);\n", getDelayModelCapUnitName(this));
+  if (const auto& leakage_power_unit = get_leakage_power_unit(); leakage_power_unit) {
+    fprintf(stream, "  %-30s : %s;\n", "leakage_power_unit", leakage_power_unit->c_str());
   }
-  if (const auto& current_unit_name = get_current_unit_name();
-      current_unit_name) {
-    fprintf(stream, "  %-30s : \"%s\";\n", "current_unit",
-            current_unit_name->c_str());
+  if (const auto& current_unit_name = get_current_unit_name(); current_unit_name) {
+    fprintf(stream, "  %-30s : \"%s\";\n", "current_unit", current_unit_name->c_str());
   }
-  fprintf(stream, "  pulling_resistance_unit        : \"1%s\";\n",
-          getDelayModelResistanceUnitName(this));
-  fprintf(stream, "  time_unit                      : \"1%s\";\n",
-          getDelayModelTimeUnitName(this));
-  if (const auto& voltage_unit_name = get_voltage_unit_name();
-      voltage_unit_name) {
-    fprintf(stream, "  %-30s : \"%s\";\n", "voltage_unit",
-            voltage_unit_name->c_str());
+  fprintf(stream, "  pulling_resistance_unit        : \"1%s\";\n", getDelayModelResistanceUnitName(this));
+  fprintf(stream, "  time_unit                      : \"1%s\";\n", getDelayModelTimeUnitName(this));
+  if (const auto& voltage_unit_name = get_voltage_unit_name(); voltage_unit_name) {
+    fprintf(stream, "  %-30s : \"%s\";\n", "voltage_unit", voltage_unit_name->c_str());
   }
   if (get_library_features().empty()) {
     fprintf(stream, "  library_features(report_delay_calculation);\n");
@@ -866,29 +801,19 @@ void LibLibrary::printLibertyLibrary(const char* lib_file_name)
     }
   }
 
-  write_percent_attr("input_threshold_pct_rise",
-                     get_input_threshold_pct_rise() * 100.0);
-  write_percent_attr("input_threshold_pct_fall",
-                     get_input_threshold_pct_fall() * 100.0);
-  write_percent_attr("output_threshold_pct_rise",
-                     get_output_threshold_pct_rise() * 100.0);
-  write_percent_attr("output_threshold_pct_fall",
-                     get_output_threshold_pct_fall() * 100.0);
-  write_percent_attr("slew_lower_threshold_pct_rise",
-                     get_slew_lower_threshold_pct_rise() * 100.0);
-  write_percent_attr("slew_lower_threshold_pct_fall",
-                     get_slew_lower_threshold_pct_fall() * 100.0);
-  write_percent_attr("slew_upper_threshold_pct_rise",
-                     get_slew_upper_threshold_pct_rise() * 100.0);
-  write_percent_attr("slew_upper_threshold_pct_fall",
-                     get_slew_upper_threshold_pct_fall() * 100.0);
-  fprintf(stream, "  %-30s : %g;\n", "slew_derate_from_library",
-          get_slew_derate_from_library());
+  write_percent_attr("input_threshold_pct_rise", get_input_threshold_pct_rise() * 100.0);
+  write_percent_attr("input_threshold_pct_fall", get_input_threshold_pct_fall() * 100.0);
+  write_percent_attr("output_threshold_pct_rise", get_output_threshold_pct_rise() * 100.0);
+  write_percent_attr("output_threshold_pct_fall", get_output_threshold_pct_fall() * 100.0);
+  write_percent_attr("slew_lower_threshold_pct_rise", get_slew_lower_threshold_pct_rise() * 100.0);
+  write_percent_attr("slew_lower_threshold_pct_fall", get_slew_lower_threshold_pct_fall() * 100.0);
+  write_percent_attr("slew_upper_threshold_pct_rise", get_slew_upper_threshold_pct_rise() * 100.0);
+  write_percent_attr("slew_upper_threshold_pct_fall", get_slew_upper_threshold_pct_fall() * 100.0);
+  fprintf(stream, "  %-30s : %g;\n", "slew_derate_from_library", get_slew_derate_from_library());
   if (const auto& nom_process = get_nom_process(); nom_process) {
     fprintf(stream, "  %-30s : %g;\n", "nom_process", *nom_process);
   }
-  if (const auto& nom_temperature = get_nom_temperature();
-      nom_temperature) {
+  if (const auto& nom_temperature = get_nom_temperature(); nom_temperature) {
     fprintf(stream, "  %-30s : %g;\n", "nom_temperature", *nom_temperature);
   }
   if (get_nom_voltage() > 0.0) {
