@@ -124,6 +124,19 @@ bool hasHorizontalSegmentSpanning(const std::string& layer, int32_t y, int32_t x
   return false;
 }
 
+bool hasVerticalSegmentSpanning(const std::string& net, const std::string& layer, int32_t x, int32_t y1, int32_t y2)
+{
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_net_name() != net || !segment.is_vertical() || segment.get_layer_name() != layer || segment.get_start_x() != x) {
+      continue;
+    }
+    if (std::max(segment.get_ll_y(), y1) < std::min(segment.get_ur_y(), y2)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool checkPowerFile(const std::string& directory, const std::map<std::string, std::vector<PlanarCoord>>& expected)
 {
   std::ifstream file(directory + "/power.ploc");
@@ -438,6 +451,30 @@ bool testRailExtensionHalo(const std::string& directory)
   return check(!hasVerticalSegmentSpanning("MET4", 150000, 100000, 200000), "Rail extension must not enter a macro placement halo");
 }
 
+bool testUncoveredEdgeStripe(const std::string& directory)
+{
+  initPlacementHaloFixture(directory);
+  PGStripe met4_stripe;
+  met4_stripe.set_layer_name("MET4");
+  met4_stripe.set_width_micron(0.5);
+  met4_stripe.set_pitch_micron(8.0);
+  met4_stripe.set_offset_micron(0.5);
+  FPDM.getConfig().pg_stripe_list.push_back(met4_stripe);
+  addConnect("MET1", "MET4");
+  addConnect("MET4", "MET5");
+
+  addLine("VSS", "MET1", PGSegmentType::kFollowPin, 100, 10000, 800, 10000, 160);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 0, 11000, 400000, 11000, 160);
+  addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 11000, 400000, 11000, 1000);
+  FPPG.generate();
+
+  bool passed = check(hasVerticalSegmentSpanning("VSS", "MET4", 500, 0, 400000), "Uncovered VSS rail must receive a core-edge stripe");
+  passed = check(hasVerticalSegmentSpanning("VSS", "MET4", 9500, 0, 400000), "Existing VSS mesh stripe must remain") && passed;
+  passed = check(!hasVerticalSegmentSpanning("VDD", "MET4", 500, 0, 400000), "Covered VDD edge must not receive another stripe") && passed;
+  passed = check(hasVia("VSS", "MET4", "MET5", 500, 11000), "VSS edge stripe must connect to the VSS mesh") && passed;
+  return passed;
+}
+
 }  // namespace ifp
 
 int main(int argc, char* argv[])
@@ -458,6 +495,7 @@ int main(int argc, char* argv[])
   passed = ifp::testStripePlacementHalo(directory) && passed;
   passed = ifp::testActualViaOverlap(directory) && passed;
   passed = ifp::testRailExtensionHalo(directory) && passed;
+  passed = ifp::testUncoveredEdgeStripe(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
   ifp::Utility::destroyInst();

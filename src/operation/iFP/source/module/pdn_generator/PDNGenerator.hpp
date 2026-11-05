@@ -73,6 +73,7 @@ class PDNGenerator
   int32_t getMacroTopLayerOrder(Instance& instance);
 
   void buildStripe(PGModel& pg_model);
+  void addUncoveredEdgeStripes(PGModel& pg_model);
   void buildRing(PGModel& pg_model);
   void alignStripeSegmentList();
   void alignStripeSegment(PGSegment& stripe_segment);

@@ -257,6 +257,7 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   buildPGNet(pg_model);
   buildRail(pg_model);
   buildStripe(pg_model);
+  addUncoveredEdgeStripes(pg_model);
   alignStripeSegmentList();
   buildRing(pg_model);
   initPowerLayerPair(pg_model);
@@ -1324,6 +1325,154 @@ void PDNGenerator::buildStripe(PGModel& pg_model)
     }
   }
 
+  FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void PDNGenerator::addUncoveredEdgeStripes(PGModel& pg_model)
+{
+  Monitor monitor;
+  FPLOG.info(Loc::current(), "Starting...");
+
+  Database& database = FPDM.getDatabase();
+  const Config& config = FPDM.getConfig();
+  std::vector<PGSegment>& segments = database.get_pg_segment_list();
+  const Core& core = database.get_core();
+  const int32_t grid = std::max(1, database.get_manufacture_grid());
+  const int32_t dbu = std::max(1, database.get_micron_dbu());
+
+  std::vector<std::string> net_names;
+  for (const std::string* net_name : {&pg_model.get_default_power_net_name(), &pg_model.get_default_ground_net_name()}) {
+    if (!net_name->empty() && std::find(net_names.begin(), net_names.end(), *net_name) == net_names.end()) {
+      net_names.push_back(*net_name);
+    }
+  }
+  if (net_names.empty()) {
+    FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+    return;
+  }
+
+  int32_t added = 0;
+  for (const PGStripe& pg_stripe : config.pg_stripe_list) {
+    RoutingLayer* routing_layer = findRoutingLayer(pg_stripe.get_layer_name());
+    if (routing_layer == nullptr || routing_layer->get_prefer_direction() != Direction::kVertical) {
+      continue;
+    }
+    const std::string& layer_name = routing_layer->get_name();
+    const int32_t width = FPUTIL.transMicronToDBU(pg_stripe.get_width_micron(), dbu);
+    const int32_t pitch = FPUTIL.transMicronToDBU(pg_stripe.get_pitch_micron(), dbu);
+    if (width <= 0 || pitch <= 0) {
+      continue;
+    }
+    const int32_t band = std::max(1, pitch / 2);
+    const int32_t spacing = std::max(0, routing_layer->get_spacing());
+    const int32_t min_width = std::max(1, routing_layer->get_min_width());
+
+    std::set<std::string> reachable_layers{layer_name};
+    int32_t via_span = 0;
+    for (const PGLayerPair& layer_pair : config.pg_layer_pair_list) {
+      std::string other_layer_name;
+      if (layer_pair.get_first_layer_name() == layer_name) {
+        other_layer_name = layer_pair.get_second_layer_name();
+      } else if (layer_pair.get_second_layer_name() == layer_name) {
+        other_layer_name = layer_pair.get_first_layer_name();
+      } else {
+        continue;
+      }
+      reachable_layers.insert(other_layer_name);
+      via_span = std::max(via_span, FPI.getPGViaMinSpan(layer_name, other_layer_name));
+    }
+    const int32_t required_width = std::max(min_width, via_span);
+
+    for (const bool left_edge : {true, false}) {
+      const int32_t band_low = left_edge ? core.get_ll_x() : core.get_ur_x() - band;
+      const int32_t band_high = left_edge ? core.get_ll_x() + band : core.get_ur_x();
+      for (const std::string& net_name : net_names) {
+        bool has_uncovered_rail = false;
+        for (const PGSegment& rail : segments) {
+          if (rail.get_type() != PGSegmentType::kFollowPin || rail.get_net_name() != net_name
+              || !reachable_layers.contains(rail.get_layer_name())) {
+            continue;
+          }
+          if (rail.get_ll_x() < band_low || rail.get_ur_x() > band_high) {
+            continue;
+          }
+          bool covered = false;
+          for (const PGSegment& stripe : segments) {
+            if (stripe.get_type() != PGSegmentType::kStripe || stripe.get_net_name() != net_name || !stripe.is_vertical()
+                || !reachable_layers.contains(stripe.get_layer_name())) {
+              continue;
+            }
+            const PlanarRect overlap = getOverlapRect(segmentRect(rail), segmentRect(stripe));
+            if (overlap.get_width() > 0 && overlap.get_height() > 0) {
+              covered = true;
+              break;
+            }
+          }
+          if (!covered) {
+            has_uncovered_rail = true;
+            break;
+          }
+        }
+        if (!has_uncovered_rail) {
+          continue;
+        }
+
+        int32_t nearest_other_edge = left_edge ? INT32_MAX : INT32_MIN;
+        for (const PGSegment& other : segments) {
+          if (other.get_layer_name() != layer_name || !other.is_vertical() || other.get_net_name() == net_name) {
+            continue;
+          }
+          nearest_other_edge = left_edge ? std::min(nearest_other_edge, other.get_ll_x()) : std::max(nearest_other_edge, other.get_ur_x());
+        }
+        int32_t available = width;
+        if (left_edge && nearest_other_edge != INT32_MAX) {
+          available = nearest_other_edge - core.get_ll_x() - spacing;
+        } else if (!left_edge && nearest_other_edge != INT32_MIN) {
+          available = core.get_ur_x() - nearest_other_edge - spacing;
+        }
+        int32_t candidate_width = std::min(std::max(width, required_width), available);
+        candidate_width = candidate_width / grid * grid;
+        if (candidate_width < required_width) {
+          FPLOG.warn(Loc::current(), "Cannot add uncovered ", net_name, " edge stripe on ", layer_name, " at ", (left_edge ? "left" : "right"),
+                     " core edge: available width ", available, " < required ", required_width, " DBU.");
+          continue;
+        }
+
+        const int32_t x = left_edge ? core.get_ll_x() + candidate_width / 2 : core.get_ur_x() - candidate_width / 2;
+        const PlanarRect candidate(x - candidate_width / 2, core.get_ll_y(), x + candidate_width / 2, core.get_ur_y());
+        bool clear = true;
+        for (const PGSegment& other : segments) {
+          if (other.get_layer_name() != layer_name || !other.is_line() || other.get_net_name() == net_name) {
+            continue;
+          }
+          const PlanarRect other_rect = wireRect(other);
+          if (candidate.get_ll_x() - spacing < other_rect.get_ur_x() && other_rect.get_ll_x() < candidate.get_ur_x() + spacing
+              && candidate.get_ll_y() < other_rect.get_ur_y() && other_rect.get_ll_y() < candidate.get_ur_y()) {
+            clear = false;
+            break;
+          }
+        }
+        if (!clear) {
+          FPLOG.warn(Loc::current(), "Cannot add uncovered ", net_name, " edge stripe on ", layer_name, " at ", (left_edge ? "left" : "right"),
+                     " core edge: no legal spacing against existing stripes.");
+          continue;
+        }
+
+        const size_t before = segments.size();
+        addLineSegment(net_name, layer_name, PGSegmentType::kStripe, candidate_width, x, core.get_ll_y(), x, core.get_ur_y());
+        if (segments.size() == before) {
+          FPLOG.warn(Loc::current(), "Uncovered ", net_name, " edge stripe on ", layer_name, " at ", (left_edge ? "left" : "right"),
+                     " core edge was fully blocked by placements.");
+          continue;
+        }
+        ++added;
+        FPLOG.info(Loc::current(), "Added uncovered ", net_name, " edge stripe on ", layer_name, " at ", (left_edge ? "left" : "right"), " core edge: x=",
+                   x, " width=", candidate_width, " DBU.");
+      }
+    }
+  }
+
+  FPLOG.info(Loc::current(), "Added ", added, " uncovered core-edge stripe(s).");
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 

@@ -634,13 +634,6 @@ int32_t DefWrite::write_component()
                halo->get_extend_top());
     }
 
-    /// routed halo
-    auto route_halo = instance->get_route_halo();
-    if (route_halo != nullptr) {
-      writestr("      + ROUTEHALO %d %s %s\n", route_halo->get_route_distance(), route_halo->get_layer_bottom()->get_name().c_str(),
-               route_halo->get_layer_top()->get_name().c_str());
-    }
-
     writestr("      ;\n");
   }
 

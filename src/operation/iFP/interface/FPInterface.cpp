@@ -1238,6 +1238,21 @@ void FPInterface::outputPGNetList()
 {
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
   for (PGNet& pg_net : FPDM.getDatabase().get_pg_net_list()) {
+    idb::IdbNet* shadow_net = idb_design->get_net_list()->find_net(pg_net.get_name());
+    if (shadow_net != nullptr) {
+      if (shadow_net->get_pin_number() != 0 || shadow_net->get_segment_num() != 0) {
+        FPLOG.error(Loc::current(), "NETS entry '", pg_net.get_name(),
+                    "' duplicates SPECIALNETS and is not empty; refusing to export ambiguous DEF.");
+        _run_failed = true;
+        continue;
+      }
+      if (!idb_design->removeNetSafe(pg_net.get_name())) {
+        FPLOG.error(Loc::current(), "Failed to remove empty shadow NETS entry '", pg_net.get_name(), "'.");
+        _run_failed = true;
+        continue;
+      }
+      FPLOG.info(Loc::current(), "Removed empty shadow NETS entry '", pg_net.get_name(), "'.");
+    }
     idb::IdbConnectType connect_type = idb::IdbConnectType::kNone;
     if (pg_net.get_type() == PGNetType::kPower) {
       connect_type = idb::IdbConnectType::kPower;
@@ -1248,7 +1263,6 @@ void FPInterface::outputPGNetList()
     if (idb_special_net == nullptr) {
       FPLOG.error(Loc::current(), "Cannot create PG net '", pg_net.get_name(), "'.");
     }
-    idb_design->setNetConnectType(pg_net.get_name(), connect_type);
     // Only rules proven to apply to every instance may be exported as wildcards.
     idb_special_net->get_pin_string_list().clear();
     for (std::string& instance_pin_name : pg_net.get_instance_pin_name_list()) {
@@ -1275,6 +1289,12 @@ void FPInterface::outputPGNetList()
     }
     // Power/ground is exported through SPECIALNETS and IO-cell terminals only;
     // do not recreate top-level PINS for it.
+  }
+  for (idb::IdbSpecialNet* idb_special_net : idb_design->get_special_net_list()->get_net_list()) {
+    if (idb_special_net != nullptr && idb_design->get_net_list()->find_net(idb_special_net->get_net_name()) != nullptr) {
+      FPLOG.error(Loc::current(), "SPECIALNETS/NETS name conflict: '", idb_special_net->get_net_name(), "'.");
+      _run_failed = true;
+    }
   }
 }
 
