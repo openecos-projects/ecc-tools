@@ -427,8 +427,9 @@ void PhyPlacer::insertSideEndcap(PPModel& pp_model, int32_t& endcap_idx)
     const int32_t region_width = pp_region.get_end_coord() - pp_region.get_start_coord();
     if (region_width < left_endcap_width + right_endcap_width
         && !(config.left_endcap_name == config.right_endcap_name && region_width == left_endcap_width)) {
-      FPLOG.error(Loc::current(), "Row interval [", pp_region.get_start_coord(), ",", pp_region.get_end_coord(),
-                  "] is too narrow for both side endcaps at y=", pp_region.get_y_coord(), ".");
+      FPLOG.warn(Loc::current(), "Skipping side endcaps: row interval [", pp_region.get_start_coord(), ",", pp_region.get_end_coord(),
+                 "] is too narrow for both side endcaps at y=", pp_region.get_y_coord(), ".");
+      continue;
     }
     int32_t left_endcap_x_coord
         = pp_region.get_site_origin_x() + FPUTIL.alignUp(pp_region.get_start_coord() - pp_region.get_site_origin_x(), pp_region.get_site_width());
