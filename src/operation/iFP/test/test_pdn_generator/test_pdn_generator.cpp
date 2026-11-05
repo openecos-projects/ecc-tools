@@ -17,9 +17,14 @@
 #include <algorithm>
 
 #include "DataManager.hpp"
+#include "FPInterface.hpp"
+#include "IdbViaRule.h"
 #include "Logger.hpp"
 #include "PDNGenerator.hpp"
 #include "Utility.hpp"
+#include "def_read.h"
+#include "def_write.h"
+#include "idm.h"
 
 namespace ifp {
 
@@ -502,6 +507,15 @@ bool testGapRailRepair(const std::string& directory)
 bool testUncoveredEdgeStripe(const std::string& directory)
 {
   initPlacementHaloFixture(directory);
+  Row row;
+  row.set_rect(100, 10000, 800, 11000);
+  row.set_y(10000);
+  row.set_orient(PlacementOrientation::kN);
+  FPDM.getDatabase().get_row_list().push_back(row);
+  PGRail rail;
+  rail.set_layer_name("MET1");
+  rail.set_width_micron(0.08);
+  FPDM.getConfig().pg_rail_list.push_back(rail);
   PGStripe met4_stripe;
   met4_stripe.set_layer_name("MET4");
   met4_stripe.set_width_micron(0.5);
@@ -511,7 +525,6 @@ bool testUncoveredEdgeStripe(const std::string& directory)
   addConnect("MET1", "MET4");
   addConnect("MET4", "MET5");
 
-  addLine("VSS", "MET1", PGSegmentType::kFollowPin, 100, 10000, 800, 10000, 160);
   addLine("VDD", "MET1", PGSegmentType::kFollowPin, 0, 11000, 400000, 11000, 160);
   addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 11000, 400000, 11000, 1000);
   FPPG.generate();
@@ -519,7 +532,13 @@ bool testUncoveredEdgeStripe(const std::string& directory)
   bool passed = check(hasVerticalSegmentSpanning("VSS", "MET4", 500, 0, 400000), "Uncovered VSS rail must receive a core-edge stripe");
   passed = check(hasVerticalSegmentSpanning("VSS", "MET4", 9500, 0, 400000), "Existing VSS mesh stripe must remain") && passed;
   passed = check(!hasVerticalSegmentSpanning("VDD", "MET4", 500, 0, 400000), "Covered VDD edge must not receive another stripe") && passed;
+  passed = check(hasVia("VSS", "MET1", "MET4", 450, 10000), "VSS edge stripe must connect at the center of its overlap with the narrow row rail") && passed;
   passed = check(hasVia("VSS", "MET4", "MET5", 500, 11000), "VSS edge stripe must connect to the VSS mesh") && passed;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kFollowPin) {
+      passed = check(segment.get_width() == 160, "Core-edge repair must preserve follow-pin width") && passed;
+    }
+  }
   return passed;
 }
 
@@ -573,6 +592,200 @@ bool testOverlappingViaStacks(const std::string& directory)
   return check(via1_count == 1, "Expected one merged VIA1 stack") && check(via4_count == 1, "Expected one merged VIA4 stack");
 }
 
+bool checkPGExport(const std::string& directory, idb::IdbLefService& lef, idb::IdbDefService& def, int32_t rail_width)
+{
+  idb::IdbDesign* design = def.get_design();
+  design->set_design_name("PG_EXPORT");
+  design->get_units()->set_microns_dbu(1000);
+  lef.get_layout()->get_units()->set_microns_dbu(1000);
+  lef.get_layout()->get_die()->add_point(0, 0);
+  lef.get_layout()->get_die()->add_point(30000, 30000);
+  for (std::string name : {"VDD_A", "VSS_B", "DATA"}) {
+    design->get_net_list()->add_net(name, idb::IdbConnectType::kSignal);
+  }
+
+  idb::IdbCellMaster* master = lef.get_layout()->get_cell_master_list()->set_cell_master("TEST_MACRO");
+  master->set_type("BLOCK");
+  master->set_width(1000);
+  master->set_height(1000);
+  idb::IdbInstance* macro = design->get_instance_list()->add_instance("macro");
+  macro->set_cell_master(master);
+  macro->set_orient(idb::IdbOrient::kN_R0);
+  macro->set_status_fixed();
+  macro->set_coodinate(24000, 24000);
+  idb::IdbRouteHalo* route_halo = macro->set_route_halo();
+  route_halo->set_route_distance(100);
+  route_halo->set_layer_bottom(lef.get_layout()->get_layers()->find_layer("M99"));
+  route_halo->set_layer_top(lef.get_layout()->get_layers()->find_layer("M10"));
+
+  FPI.outputPGNetList();
+  FPI.outputPGNetList();
+  bool passed = check(design->get_net_list()->get_num() == 1 && design->get_net_list()->find_net("DATA") != nullptr,
+                      "PG export must remove empty shadow nets and preserve unrelated signal nets")
+                && check(design->get_special_net_list()->get_num() == 2, "Repeated PG binding must not duplicate special nets");
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    segment.set_generated(true);
+  }
+  FPI.outputPGSegmentList();
+  std::string path = directory + "/pg_export.def";
+  idb::DefWrite writer(&def);
+  passed = check(writer.writeDb(path.c_str()), "PG regression DEF must be written") && passed;
+  std::ifstream file(path);
+  std::string line;
+  while (std::getline(file, line)) {
+    passed = check(line.find("ROUTEHALO") == std::string::npos, "DEF must not reintroduce unsupported ROUTEHALO output") && passed;
+  }
+
+  idb::IdbDefService reloaded(lef.get_layout());
+  idb::DefRead reader(&reloaded);
+  passed = check(reader.createDb(path.c_str()), "Exported PG DEF must read back successfully") && passed;
+  passed = check(reloaded.get_design()->get_special_net_list()->get_num() == 2, "DEF round-trip must preserve both PG nets") && passed;
+  for (idb::IdbSpecialNet* original : design->get_special_net_list()->get_net_list()) {
+    idb::IdbSpecialNet* net = reloaded.get_design()->get_special_net_list()->find_net(original->get_net_name());
+    passed = check(net != nullptr, "DEF round-trip lost a PG net") && passed;
+    if (net == nullptr) {
+      continue;
+    }
+    idb::IdbConnectType expected_type = net->get_net_name() == "VDD_A" ? idb::IdbConnectType::kPower : idb::IdbConnectType::kGround;
+    passed = check(net->get_connect_type() == expected_type, "DEF round-trip must preserve POWER/GROUND types") && passed;
+    passed = check(reloaded.get_design()->get_net_list()->find_net(net->get_net_name()) == nullptr,
+                   "DEF NETS and SPECIALNETS must not share PG names") && passed;
+    passed = check(net->get_segment_num() == original->get_segment_num() && net->get_segment_num() > 0
+                       && net->get_via_num() == original->get_via_num() && net->get_via_num() > 0,
+                   "DEF round-trip must preserve routed PG segments and vias") && passed;
+    int32_t rail_count = 0;
+    for (idb::IdbSpecialWire* wire : net->get_wire_list()->get_wire_list()) {
+      for (idb::IdbSpecialWireSegment* segment : wire->get_segment_list()) {
+        if (segment->is_follow_pin()) {
+          rail_count++;
+          passed = check(segment->get_route_width() == rail_width, "DEF round-trip must preserve configured follow-pin width") && passed;
+        }
+      }
+    }
+    passed = check(rail_count == 1, "DEF must retain the follow-pin rail on each PG net") && passed;
+  }
+  return passed;
+}
+
+void addIDBViaRule(idb::IdbLefService& lef, std::string bottom_name, std::string cut_name, std::string top_name)
+{
+  idb::IdbLayers* layers = lef.get_layout()->get_layers();
+  idb::IdbLayerRouting* bottom = dynamic_cast<idb::IdbLayerRouting*>(layers->set_layer(bottom_name, "ROUTING"));
+  idb::IdbLayerCut* cut = dynamic_cast<idb::IdbLayerCut*>(layers->set_layer(cut_name, "CUT"));
+  idb::IdbLayerRouting* top = dynamic_cast<idb::IdbLayerRouting*>(layers->set_layer(top_name, "ROUTING"));
+  idb::IdbViaRuleGenerate* rule = lef.get_layout()->get_via_rule_list()->add_via_rule_generate(cut_name + "_RULE");
+  rule->set_layer_bottom(bottom);
+  rule->set_layer_cut(cut);
+  rule->set_layer_top(top);
+  rule->set_cut_rect(-45, -45, 45, 45);
+  rule->set_spacing(200, 200);
+  rule->get_enclosure_bottom()->set_overhang_1(40);
+  rule->get_enclosure_bottom()->set_overhang_2(35);
+  rule->get_enclosure_top()->set_overhang_1(40);
+  rule->get_enclosure_top()->set_overhang_2(35);
+  cut->set_via_rule(rule);
+}
+
+bool testConfiguredRailWidth(const std::string& directory)
+{
+  idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
+  idb::IdbDefService* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  addIDBViaRule(lef, "M99", "VIA_TEST", "M10");
+  lef.get_layout()->set_manufacture_grid(5);
+
+  // A 170-by-160 via is legal; its square span must not widen a 160 DBU rail.
+  bool passed = check(FPI.getPGViaMinSize("M99", "M10") == std::make_pair(170, 160), "Asymmetric via fixture must be active");
+  passed = check(FPI.getPGViaMinSpan("M99", "M10") == 170, "Via square span must differ from the required rail width") && passed;
+  for (int32_t configured_width : {160, 161}) {
+    initFixture(directory);
+    Database& database = FPDM.getDatabase();
+    database.set_micron_dbu(1000);
+    database.set_manufacture_grid(5);
+    Row row;
+    row.set_rect(1001, 2003, 21001, 22003);
+    row.set_y(2003);
+    row.set_orient(PlacementOrientation::kN);
+    database.get_row_list().push_back(row);
+    PGRail rail;
+    rail.set_layer_name("M99");
+    rail.set_width_micron(configured_width / 1000.0);
+    FPDM.getConfig().pg_rail_list.push_back(rail);
+    addLine("VSS_B", "M10", PGSegmentType::kStripe, 5001, 2003, 5001, 22003, 1000);
+    addLine("VDD_A", "M10", PGSegmentType::kStripe, 15001, 2003, 15001, 22003, 1000);
+    addConnect("M99", "M10");
+    FPI.resetPGViaAdjustment();
+    FPPG.generate();
+
+    int32_t expected_width = FPUTIL.alignUp(configured_width, 5);
+    int32_t rail_count = 0;
+    int32_t via_count = 0;
+    for (PGSegment& segment : database.get_pg_segment_list()) {
+      if (segment.get_type() == PGSegmentType::kFollowPin) {
+        rail_count++;
+        passed = check(segment.get_width() == expected_width, "Follow-pin rail must retain its grid-aligned configured width") && passed;
+      } else if (segment.get_type() == PGSegmentType::kStripe) {
+        passed = check(segment.get_width() == 1000, "Rail connection must not change stripe width") && passed;
+      } else if (segment.get_type() == PGSegmentType::kVia) {
+        via_count++;
+        // Integer DBU edges use half-width on each side of the rail centerline.
+        passed = check(segment.get_via_height() == 2 * (expected_width / 2), "Rail via height must match the rail overlap, not the square via span") && passed;
+        passed = check(FPI.getPGViaStack(segment).size() == 1, "Rail must retain a legal generated via") && passed;
+        for (InstancePinShape& shape : FPI.getPGViaShapes(segment)) {
+          passed = check(shape.get_height() <= expected_width, "Via enclosure must fit the rail transverse width") && passed;
+        }
+      }
+    }
+    passed = check(rail_count == 2 && via_count == 2, "Both VDD and VSS rails must remain connected") && passed;
+    if (configured_width == 160) {
+      passed = checkPGExport(directory, lef, def, expected_width) && passed;
+    }
+  }
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
+bool testTechnologyEdgeStripe(const std::string& directory)
+{
+  idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
+  idb::IdbDefService* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+  lef.get_layout()->set_manufacture_grid(1);
+  for (int32_t layer_idx = 1; layer_idx < 5; layer_idx++) {
+    addIDBViaRule(lef, "MET" + std::to_string(layer_idx), "VIA" + std::to_string(layer_idx), "MET" + std::to_string(layer_idx + 1));
+  }
+
+  bool passed = testUncoveredEdgeStripe(directory);
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() != PGSegmentType::kVia) {
+      continue;
+    }
+    int32_t expected_size = segment.get_bottom_layer_name() == "MET1" ? 3 : 1;
+    passed = check(static_cast<int32_t>(FPI.getPGViaStack(segment).size()) == expected_size,
+                   "Core-edge repair must retain the complete via stack from rail to mesh") && passed;
+    if (segment.get_bottom_layer_name() == "MET1") {
+      passed = check(segment.get_via_height() == 160, "Core-edge repair must fit the rail height through all three lower vias") && passed;
+    }
+  }
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
 }  // namespace ifp
 
 int main(int argc, char* argv[])
@@ -597,6 +810,8 @@ int main(int argc, char* argv[])
   passed = ifp::testUncoveredEdgeStripe(directory) && passed;
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
+  passed = ifp::testConfiguredRailWidth(directory) && passed;
+  passed = ifp::testTechnologyEdgeStripe(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
   ifp::Utility::destroyInst();

@@ -1069,17 +1069,7 @@ void PDNGenerator::buildRail(PGModel& pg_model)
     if (width <= 0) {
       continue;
     }
-    for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
-      std::string other_layer_name;
-      if (layer_pair.get_first_layer_name() == routing_layer->get_name()) {
-        other_layer_name = layer_pair.get_second_layer_name();
-      } else if (layer_pair.get_second_layer_name() == routing_layer->get_name()) {
-        other_layer_name = layer_pair.get_first_layer_name();
-      } else {
-        continue;
-      }
-      width = std::max(width, FPI.getPGViaMinSpan(routing_layer->get_name(), other_layer_name));
-    }
+    // Via enclosures are sized per axis at each connection, not by widening the entire rail.
     width = FPUTIL.alignUp(width, std::max(1, database.get_manufacture_grid()));
 
     for (Row& row : database.get_row_list()) {
