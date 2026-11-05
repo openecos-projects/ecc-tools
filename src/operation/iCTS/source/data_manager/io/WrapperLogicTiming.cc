@@ -327,15 +327,32 @@ auto isFiniteNonnegative(double value) -> bool
   return std::isfinite(value) && value >= 0.0;
 }
 
+// iDB keeps the LEF "attribute not specified" sentinel (-1) when a routing layer
+// LEF omits CAPACITANCE/EDGECAPACITANCE. Such a layer still has a usable wire
+// model (area capacitance only, zero coupling); only a negative value other than
+// the sentinel is a real error.
+auto lefCapacitanceOrZero(double value) -> std::optional<double>
+{
+  if (isFiniteNonnegative(value)) {
+    return value;
+  }
+  if (value == -1.0) {
+    return 0.0;
+  }
+  return std::nullopt;
+}
+
 auto makeSignalLayer(idb::IdbLayerRouting& layer, int32_t dbu_per_um) -> std::optional<WrapperSignalRoutingLayer>
 {
+  const auto area_capacitance = lefCapacitanceOrZero(layer.get_capacitance());
+  const auto edge_capacitance = lefCapacitanceOrZero(layer.get_edge_capacitance());
   if ((!layer.is_horizontal() && !layer.is_vertical()) || dbu_per_um <= 0 || layer.get_width() <= 0 || !std::isfinite(layer.get_resistance())
-      || layer.get_resistance() <= 0.0 || !isFiniteNonnegative(layer.get_capacitance()) || !isFiniteNonnegative(layer.get_edge_capacitance())) {
+      || layer.get_resistance() <= 0.0 || !area_capacitance.has_value() || !edge_capacitance.has_value()) {
     return std::nullopt;
   }
   const double width_um = static_cast<double>(layer.get_width()) / static_cast<double>(dbu_per_um);
   const double resistance_per_um = layer.get_resistance() / width_um;
-  const double capacitance_per_um = layer.get_capacitance() * width_um + 2.0 * layer.get_edge_capacitance();
+  const double capacitance_per_um = *area_capacitance * width_um + 2.0 * *edge_capacitance;
   if (!std::isfinite(width_um) || width_um <= 0.0 || !std::isfinite(resistance_per_um) || resistance_per_um <= 0.0 || !std::isfinite(capacitance_per_um)
       || capacitance_per_um <= 0.0) {
     return std::nullopt;
@@ -348,8 +365,8 @@ auto makeSignalLayer(idb::IdbLayerRouting& layer, int32_t dbu_per_um) -> std::op
       .width_dbu = layer.get_width(),
       .width_um = width_um,
       .sheet_resistance_ohm_per_square = layer.get_resistance(),
-      .area_capacitance_pf_per_um2 = layer.get_capacitance(),
-      .edge_capacitance_pf_per_um = layer.get_edge_capacitance(),
+      .area_capacitance_pf_per_um2 = *area_capacitance,
+      .edge_capacitance_pf_per_um = *edge_capacitance,
       .resistance_ohm_per_um = resistance_per_um,
       .capacitance_pf_per_um = capacitance_per_um,
   };
