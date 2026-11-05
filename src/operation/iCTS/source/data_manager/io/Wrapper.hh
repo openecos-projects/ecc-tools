@@ -279,6 +279,7 @@ struct WrapperTimingGraph
   std::vector<WrapperTimingCheck> checks;
   WrapperSignalRoutingAuthority signal_routing_authority{};
   std::size_t unsupported_arc_count = 0U;
+  std::vector<std::string> unsupported_arc_samples;
   double graph_construction_runtime_s = 0.0;
   double logic_rc_construction_runtime_s = 0.0;
   std::string diagnostic = "";

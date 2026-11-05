@@ -116,6 +116,19 @@ auto toWrapperTransition(idb::LibArc* arc) -> WrapperTimingTransition
                                                                                                  : WrapperTimingTransition::kRise;
 }
 
+auto noteUnsupportedArc(WrapperTimingGraph& graph, const std::string& inst_name, const std::string& master_name, const std::string& source_port,
+                         const std::string& sink_port, const std::string& source_name, const std::string& sink_name,
+                         const std::unordered_map<std::string, std::size_t>& node_index) -> void
+{
+  ++graph.unsupported_arc_count;
+  if (graph.unsupported_arc_samples.size() >= 8U) {
+    return;
+  }
+  graph.unsupported_arc_samples.push_back(inst_name + "(" + master_name + ") " + source_port + "->" + sink_port + " [src=" + source_name
+                                          + (node_index.contains(source_name) ? " live" : " dead") + ", snk=" + sink_name
+                                          + (node_index.contains(sink_name) ? " live" : " dead") + "]");
+}
+
 auto appendTimingNode(idb::IdbPin* pin, idb::LibCell* lib_cell, WrapperTimingGraph& graph, std::unordered_map<std::string, std::size_t>& node_index) -> bool
 {
   const auto pin_name = canonicalPinName(pin);
@@ -578,9 +591,16 @@ auto Wrapper::collectTimingGraph() const -> WrapperTimingGraph
         if (sink_pin != nullptr && sink_pin->get_net() == nullptr) {
           continue;
         }
+        // A combinational arc is only live when both endpoints sit on a signal
+        // net. ASAP7's SIMPLE Liberty declares CON -> SN arcs inside FAx1, where
+        // CON is an output pin that a half-adder use leaves unconnected; the arc
+        // then carries nothing and must not invalidate the whole graph.
+        if (source_pin != nullptr && source_pin->get_net() == nullptr) {
+          continue;
+        }
         if (source_pin == nullptr || sink_pin == nullptr || source_name.empty() || sink_name.empty() || !node_index.contains(source_name)
             || !node_index.contains(sink_name)) {
-          ++result.unsupported_arc_count;
+          noteUnsupportedArc(result, instance->get_name(), master_name, source_port, sink_port, source_name, sink_name, node_index);
           continue;
         }
         result.arcs.push_back(WrapperTimingArc{
@@ -600,7 +620,7 @@ auto Wrapper::collectTimingGraph() const -> WrapperTimingGraph
 
       if ((timing_type == idb::LibArc::TimingType::kRisingEdge || timing_type == idb::LibArc::TimingType::kFallingEdge) && node_index.contains(sink_name)) {
         if (source_pin == nullptr || sink_pin == nullptr || source_name.empty() || sink_name.empty()) {
-          ++result.unsupported_arc_count;
+          noteUnsupportedArc(result, instance->get_name(), master_name, source_port, sink_port, source_name, sink_name, node_index);
           continue;
         }
         result.launches.push_back(WrapperTimingLaunch{.inst_name = instance->get_name(),
@@ -615,7 +635,7 @@ auto Wrapper::collectTimingGraph() const -> WrapperTimingGraph
 
       if ((arc->isSetupArc() != 0U || arc->isHoldArc() != 0U) && node_index.contains(sink_name)) {
         if (source_pin == nullptr || sink_pin == nullptr || source_name.empty() || sink_name.empty()) {
-          ++result.unsupported_arc_count;
+          noteUnsupportedArc(result, instance->get_name(), master_name, source_port, sink_port, source_name, sink_name, node_index);
           continue;
         }
         result.checks.push_back(WrapperTimingCheck{.inst_name = instance->get_name(),
@@ -675,6 +695,9 @@ auto Wrapper::collectTimingGraph() const -> WrapperTimingGraph
   if (result.unsupported_arc_count > 0U) {
     result.status = WrapperTimingGraphStatus::kUnsupported;
     result.diagnostic = "one or more combinational Liberty arcs cannot be joined to live instance pins";
+    for (const auto& sample : result.unsupported_arc_samples) {
+      result.diagnostic += " | " + sample;
+    }
     return result;
   }
   result.status = WrapperTimingGraphStatus::kComplete;
