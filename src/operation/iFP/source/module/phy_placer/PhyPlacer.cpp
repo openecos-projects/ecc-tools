@@ -62,11 +62,12 @@ void PhyPlacer::place()
 
 void PhyPlacer::placePhyCell(PPModel& pp_model)
 {
-  _placed_macro_list.clear();
+  _placed_macro_idx_list.clear();
   _occupied_region_indices.clear();
-  for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+  for (int32_t idx = 0; idx < static_cast<int32_t>(FPDM.getDatabase().get_instance_list().size()); idx++) {
+    Instance& instance = FPDM.getDatabase().get_instance_list()[idx];
     if (instance.get_macro() && instance.get_placed()) {
-      _placed_macro_list.push_back(&instance);
+      _placed_macro_idx_list.push_back(idx);
     }
   }
 
@@ -212,8 +213,8 @@ std::vector<std::pair<int32_t, int32_t>> PhyPlacer::getMacroBlockageIntervalList
   Site& site = database.get_site_map()[row.get_site_name()];
   std::vector<std::pair<int32_t, int32_t>> macro_blockage_interval_list;
   int32_t rail_margin = getPdnRailMargin();
-  for (Instance* instance_ptr : _placed_macro_list) {
-    Instance& instance = *instance_ptr;
+  for (int32_t instance_idx : _placed_macro_idx_list) {
+    Instance& instance = database.get_instance_list()[instance_idx];
     PlanarRect& placement_halo_rect = instance.get_placement_halo_rect();
     if (row.get_ur_y() + rail_margin <= placement_halo_rect.get_ll_y() || placement_halo_rect.get_ur_y() <= row.get_ll_y() - rail_margin) {
       continue;
@@ -427,8 +428,9 @@ void PhyPlacer::insertSideEndcap(PPModel& pp_model, int32_t& endcap_idx)
     const int32_t region_width = pp_region.get_end_coord() - pp_region.get_start_coord();
     if (region_width < left_endcap_width + right_endcap_width
         && !(config.left_endcap_name == config.right_endcap_name && region_width == left_endcap_width)) {
-      FPLOG.error(Loc::current(), "Row interval [", pp_region.get_start_coord(), ",", pp_region.get_end_coord(),
-                  "] is too narrow for both side endcaps at y=", pp_region.get_y_coord(), ".");
+      FPLOG.warn(Loc::current(), "Skipping side endcaps: row interval [", pp_region.get_start_coord(), ",", pp_region.get_end_coord(),
+                 "] is too narrow for both side endcaps at y=", pp_region.get_y_coord(), ".");
+      continue;
     }
     int32_t left_endcap_x_coord
         = pp_region.get_site_origin_x() + FPUTIL.alignUp(pp_region.get_start_coord() - pp_region.get_site_origin_x(), pp_region.get_site_width());
@@ -550,8 +552,8 @@ void PhyPlacer::insertWellTapInRegion(PPModel& pp_model, PPRegion& pp_region, in
   const int32_t row_ll_y = pp_region.get_y_coord();
   const int32_t row_ur_y = row_ll_y + pp_region.get_site_height();
   auto near_macro_edge = [&](int32_t x_coord, int32_t cell_width) {
-    for (const Instance* macro : _placed_macro_list) {
-      const PlanarRect& halo = macro->get_placement_halo_rect();
+    for (int32_t macro_idx : _placed_macro_idx_list) {
+      const PlanarRect& halo = database.get_instance_list()[macro_idx].get_placement_halo_rect();
       if (halo.get_ur_y() <= row_ll_y || row_ur_y <= halo.get_ll_y()) {
         continue;
       }

@@ -22,6 +22,7 @@
 #include "IOPin.hpp"
 #include "Instance.hpp"
 #include "InstancePinShape.hpp"
+#include "PGConnectivity.hpp"
 #include "PGModel.hpp"
 #include "PGNet.hpp"
 #include "PGSegment.hpp"
@@ -103,6 +104,7 @@ class PDNGenerator
   bool isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1, int32_t y2);
   bool findRepairTopStripeY(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2, int32_t& top_y);
   void validatePGConnectivity(PGModel& pg_model);
+  PGConnectivity buildPGConnectivity();
 
 #if 1  // output
   void outputPowerLocation(PGModel& pg_model);
