@@ -87,6 +87,21 @@ void addLine(std::string net, std::string layer, PGSegmentType type, int32_t x1,
   FPDM.getDatabase().get_pg_segment_list().push_back(segment);
 }
 
+void addVia(std::string net, std::string bottom_layer, std::string top_layer, int32_t x, int32_t y, int32_t width, int32_t height)
+{
+  PGSegment via;
+  via.set_net_name(net);
+  via.set_type(PGSegmentType::kVia);
+  via.set_bottom_layer_name(bottom_layer);
+  via.set_top_layer_name(top_layer);
+  via.set_start_coord(x, y);
+  via.set_end_coord(x, y);
+  via.set_via_width(width);
+  via.set_via_height(height);
+  via.set_generated(true);
+  FPDM.getDatabase().get_pg_segment_list().push_back(via);
+}
+
 bool hasVia(std::string net, std::string bottom_layer, std::string top_layer, int32_t x, int32_t y)
 {
   for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
@@ -508,6 +523,56 @@ bool testUncoveredEdgeStripe(const std::string& directory)
   return passed;
 }
 
+bool testDanglingFollowPinTrim(const std::string& directory)
+{
+  initPlacementHaloFixture(directory);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 0, 1000, 2000, 1000, 160);
+  addLine("VDD", "MET1", PGSegmentType::kStripe, 500, 900, 500, 1100, 100);
+  FPPG.generate();
+
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() != PGSegmentType::kFollowPin || segment.get_net_name() != "VDD") {
+      continue;
+    }
+    return check(segment.get_start_x() == 450 && segment.get_end_x() == 550, "Dangling follow-pin tail must be trimmed to its last same-layer contact");
+  }
+  return check(false, "Expected a VDD follow-pin rail");
+}
+
+bool testOverlappingViaStacks(const std::string& directory)
+{
+  initPlacementHaloFixture(directory);
+  addVia("VDD", "MET1", "MET2", 10000, 10000, 1000, 160);
+  addVia("VDD", "MET1", "MET2", 10000, 9960, 1000, 100);
+  addVia("VDD", "MET4", "MET5", 20000, 20000, 1000, 1000);
+  addVia("VDD", "MET4", "MET5", 20250, 20000, 500, 1000);
+  FPPG.generate();
+
+  int32_t via1_count = 0;
+  int32_t via4_count = 0;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() != PGSegmentType::kVia) {
+      continue;
+    }
+    if (segment.get_bottom_layer_name() == "MET1" && segment.get_top_layer_name() == "MET2") {
+      ++via1_count;
+      if (!check(segment.get_via_width() == 1000 && segment.get_via_height() == 170 && segment.get_start_x() == 10000
+                     && segment.get_start_y() == 9995,
+                 "Overlapping VIA1 stacks must merge to their union")) {
+        return false;
+      }
+    } else if (segment.get_bottom_layer_name() == "MET4" && segment.get_top_layer_name() == "MET5") {
+      ++via4_count;
+      if (!check(segment.get_via_width() == 1000 && segment.get_via_height() == 1000 && segment.get_start_x() == 20000
+                     && segment.get_start_y() == 20000,
+                 "Contained VIA4 stack must merge into the enclosing stack")) {
+        return false;
+      }
+    }
+  }
+  return check(via1_count == 1, "Expected one merged VIA1 stack") && check(via4_count == 1, "Expected one merged VIA4 stack");
+}
+
 }  // namespace ifp
 
 int main(int argc, char* argv[])
@@ -530,6 +595,8 @@ int main(int argc, char* argv[])
   passed = ifp::testRailExtensionHalo(directory) && passed;
   passed = ifp::testGapRailRepair(directory) && passed;
   passed = ifp::testUncoveredEdgeStripe(directory) && passed;
+  passed = ifp::testOverlappingViaStacks(directory) && passed;
+  passed = ifp::testDanglingFollowPinTrim(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
   ifp::Utility::destroyInst();

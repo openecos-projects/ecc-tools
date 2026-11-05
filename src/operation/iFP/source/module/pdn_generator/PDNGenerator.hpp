@@ -88,8 +88,10 @@ class PDNGenerator
 
   void buildIOCoreConnect(PGModel& pg_model);
   void buildMacroConnect(PGModel& pg_model);
+  void mergeOverlappingViaStacks();
   void pruneDeadEndStripes();
   void trimStripeEnds();
+  void trimDanglingFollowPins();
 
   void repairPGConnectivity(PGModel& pg_model);
   std::vector<const PGSegment*> getIsolatedRailList(const std::string& net_name);

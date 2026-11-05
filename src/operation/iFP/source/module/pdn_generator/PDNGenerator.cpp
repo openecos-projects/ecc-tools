@@ -270,6 +270,8 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   buildIOCoreConnect(pg_model);
   mergeIoWireSegmentList();
   repairPGConnectivity(pg_model);
+  mergeOverlappingViaStacks();
+  trimDanglingFollowPins();
   validatePGConnectivity(pg_model);
 }
 
@@ -708,6 +710,131 @@ void PDNGenerator::trimStripeEnds()
   FPLOG.info(Loc::current(), "Trimmed ", trimmed, " stripe ends while preserving physical PG contacts.");
 }
 
+void PDNGenerator::trimDanglingFollowPins()
+{
+  Database& database = FPDM.getDatabase();
+  std::vector<PGSegment>& segments = database.get_pg_segment_list();
+  const int32_t grid = std::max(1, database.get_manufacture_grid());
+
+  using LayerRectMap = std::map<std::string, std::vector<PlanarRect>>;
+  std::map<std::string, LayerRectMap> pin_rects;
+  std::map<std::string, const PGNet*> pg_nets;
+  for (const PGNet& pg_net : database.get_pg_net_list()) {
+    pg_nets[pg_net.get_name()] = &pg_net;
+    for (const auto& [instance_name, pin_name] : pg_net.get_instance_pins()) {
+      auto instance_iter = database.get_instance_name_to_idx_map().find(instance_name);
+      if (instance_iter == database.get_instance_name_to_idx_map().end()) {
+        continue;
+      }
+      const Instance& instance = database.get_instance_list()[instance_iter->second];
+      if (!instance.get_placed() || instance.is_delete_instance()) {
+        continue;
+      }
+      auto master_iter = database.get_cell_master_map().find(instance.get_master_name());
+      if (master_iter == database.get_cell_master_map().end()) {
+        continue;
+      }
+      std::vector<InstancePinShape> pin_shapes;
+      for (const auto& shape : master_iter->second.get_pg_pin_shapes()) {
+        if (shape.get_pin_name() == pin_name) {
+          pin_shapes.push_back(shape);
+        }
+      }
+      for (const auto& shape : FPI.getPlacedShapes(instance, pin_shapes)) {
+        pin_rects[pg_net.get_name()][shape.get_layer_name()].emplace_back(shape.get_ll_x(), shape.get_ll_y(), shape.get_ur_x(), shape.get_ur_y());
+      }
+    }
+  }
+
+  std::map<std::string, LayerRectMap> via_rects;
+  for (const PGSegment& via : segments) {
+    if (via.get_type() != PGSegmentType::kVia || !via.get_generated() || via.get_via_width() <= 0 || via.get_via_height() <= 0) {
+      continue;
+    }
+    const int32_t half_width = via.get_via_width() / 2;
+    const int32_t half_height = via.get_via_height() / 2;
+    const PlanarRect via_rect(via.get_start_x() - half_width, via.get_start_y() - half_height, via.get_start_x() + half_width,
+                              via.get_start_y() + half_height);
+    for (const std::string* layer_name : {&via.get_bottom_layer_name(), &via.get_top_layer_name()}) {
+      if (!layer_name->empty()) {
+        via_rects[via.get_net_name()][*layer_name].push_back(via_rect);
+      }
+    }
+  }
+
+  int32_t trimmed = 0;
+  for (size_t index = 0; index < segments.size(); ++index) {
+    PGSegment& rail = segments[index];
+    if (rail.get_type() != PGSegmentType::kFollowPin || !rail.is_horizontal()) {
+      continue;
+    }
+    const int32_t width = rail.get_width();
+    const int32_t low = std::min(rail.get_start_x(), rail.get_end_x());
+    const int32_t high = std::max(rail.get_start_x(), rail.get_end_x());
+    const PlanarRect rail_rect(low, rail.get_start_y() - width / 2, high, rail.get_start_y() + width / 2);
+    int32_t connection_low = INT32_MAX;
+    int32_t connection_high = INT32_MIN;
+    auto add_connection_interval = [&](int32_t first, int32_t second) {
+      connection_low = std::min(connection_low, std::min(first, second));
+      connection_high = std::max(connection_high, std::max(first, second));
+    };
+    auto add_rect_connection = [&](const PlanarRect& rect) {
+      const int32_t overlap_x = std::min(rail_rect.get_ur_x(), rect.get_ur_x()) - std::max(rail_rect.get_ll_x(), rect.get_ll_x());
+      const int32_t overlap_y = std::min(rail_rect.get_ur_y(), rect.get_ur_y()) - std::max(rail_rect.get_ll_y(), rect.get_ll_y());
+      if (overlap_x >= 0 && overlap_y >= 0) {
+        add_connection_interval(rect.get_ll_x(), rect.get_ur_x());
+      }
+    };
+
+    auto pin_iter = pin_rects.find(rail.get_net_name());
+    if (pin_iter != pin_rects.end()) {
+      auto layer_iter = pin_iter->second.find(rail.get_layer_name());
+      if (layer_iter != pin_iter->second.end()) {
+        for (const PlanarRect& rect : layer_iter->second) {
+          add_rect_connection(rect);
+        }
+      }
+    }
+    auto via_iter = via_rects.find(rail.get_net_name());
+    if (via_iter != via_rects.end()) {
+      auto layer_iter = via_iter->second.find(rail.get_layer_name());
+      if (layer_iter != via_iter->second.end()) {
+        for (const PlanarRect& rect : layer_iter->second) {
+          add_rect_connection(rect);
+        }
+      }
+    }
+    for (size_t other_index = 0; other_index < segments.size(); ++other_index) {
+      if (other_index == index) {
+        continue;
+      }
+      const PGSegment& other = segments[other_index];
+      if (!other.is_line() || other.get_net_name() != rail.get_net_name() || other.get_layer_name() != rail.get_layer_name()) {
+        continue;
+      }
+      add_rect_connection(wireRect(other));
+    }
+    if (connection_low == INT32_MAX) {
+      continue;
+    }
+
+    int32_t new_low = std::max(low, connection_low);
+    int32_t new_high = std::min(high, connection_high);
+    new_low = std::max(low, FPUTIL.alignDown(new_low, grid));
+    new_high = std::min(high, FPUTIL.alignUp(new_high, grid));
+    if (new_low >= new_high || (new_low == low && new_high == high)) {
+      continue;
+    }
+    const bool ascending = rail.get_start_x() <= rail.get_end_x();
+    rail.set_start_x(ascending ? new_low : new_high);
+    rail.set_end_x(ascending ? new_high : new_low);
+    ++trimmed;
+  }
+  if (trimmed > 0) {
+    FPLOG.info(Loc::current(), "Trimmed ", trimmed, " dangling follow-pin rail end(s).");
+  }
+}
+
 void PDNGenerator::buildPGNet(PGModel& pg_model)
 {
   Monitor monitor;
@@ -942,6 +1069,18 @@ void PDNGenerator::buildRail(PGModel& pg_model)
     if (width <= 0) {
       continue;
     }
+    for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+      std::string other_layer_name;
+      if (layer_pair.get_first_layer_name() == routing_layer->get_name()) {
+        other_layer_name = layer_pair.get_second_layer_name();
+      } else if (layer_pair.get_second_layer_name() == routing_layer->get_name()) {
+        other_layer_name = layer_pair.get_first_layer_name();
+      } else {
+        continue;
+      }
+      width = std::max(width, FPI.getPGViaMinSpan(routing_layer->get_name(), other_layer_name));
+    }
+    width = FPUTIL.alignUp(width, std::max(1, database.get_manufacture_grid()));
 
     for (Row& row : database.get_row_list()) {
       std::string bottom_net_name = row.get_orient() == PlacementOrientation::kN || row.get_orient() == PlacementOrientation::kFN
@@ -1139,6 +1278,117 @@ void PDNGenerator::mergeIoWireSegmentList()
     rebuilt.push_back(std::move(segment));
   }
   segments = std::move(rebuilt);
+}
+
+void PDNGenerator::mergeOverlappingViaStacks()
+{
+  std::vector<PGSegment>& segments = FPDM.getDatabase().get_pg_segment_list();
+
+  using ViaKey = std::tuple<std::string, std::string, std::string, std::string>;
+  std::map<ViaKey, std::vector<size_t>> groups;
+  for (size_t index = 0; index < segments.size(); ++index) {
+    const PGSegment& segment = segments[index];
+    if (segment.get_type() != PGSegmentType::kVia || !segment.get_generated() || segment.get_via_width() <= 0
+        || segment.get_via_height() <= 0) {
+      continue;
+    }
+    groups[{segment.get_net_name(), segment.get_bottom_layer_name(), segment.get_top_layer_name(), segment.get_cut_layer_name()}].push_back(index);
+  }
+
+  std::vector<bool> removed(segments.size(), false);
+  int32_t merged_count = 0;
+  auto via_rect = [&](size_t index) {
+    const PGSegment& via = segments[index];
+    const int32_t half_width = via.get_via_width() / 2;
+    const int32_t half_height = via.get_via_height() / 2;
+    return PlanarRect(via.get_start_x() - half_width, via.get_start_y() - half_height, via.get_start_x() + half_width,
+                      via.get_start_y() + half_height);
+  };
+  auto contains_x = [](const PlanarRect& outer, const PlanarRect& inner) {
+    return outer.get_ll_x() <= inner.get_ll_x() && inner.get_ur_x() <= outer.get_ur_x();
+  };
+  auto contains_y = [](const PlanarRect& outer, const PlanarRect& inner) {
+    return outer.get_ll_y() <= inner.get_ll_y() && inner.get_ur_y() <= outer.get_ur_y();
+  };
+  auto should_merge = [&](const PlanarRect& first, const PlanarRect& second) {
+    const int32_t overlap_x = std::min(first.get_ur_x(), second.get_ur_x()) - std::max(first.get_ll_x(), second.get_ll_x());
+    const int32_t overlap_y = std::min(first.get_ur_y(), second.get_ur_y()) - std::max(first.get_ll_y(), second.get_ll_y());
+    if (overlap_x <= 0 || overlap_y <= 0) {
+      return false;
+    }
+    return contains_x(first, second) || contains_x(second, first) || contains_y(first, second) || contains_y(second, first);
+  };
+  auto cell_of = [](int32_t coordinate) {
+    constexpr int32_t kCellSize = 2000;
+    return coordinate >= 0 ? coordinate / kCellSize : (coordinate + 1) / kCellSize - 1;
+  };
+
+  for (auto& [key, indices] : groups) {
+    if (indices.size() < 2) {
+      continue;
+    }
+    bool changed = true;
+    for (int32_t round = 0; changed && round < 8; ++round) {
+      changed = false;
+      std::map<std::pair<int32_t, int32_t>, std::vector<size_t>> grid;
+      for (size_t index : indices) {
+        if (removed[index]) {
+          continue;
+        }
+        const PlanarRect rect = via_rect(index);
+        for (int32_t x = cell_of(rect.get_ll_x()); x <= cell_of(rect.get_ur_x()); ++x) {
+          for (int32_t y = cell_of(rect.get_ll_y()); y <= cell_of(rect.get_ur_y()); ++y) {
+            grid[{x, y}].push_back(index);
+          }
+        }
+      }
+      for (auto& [cell, cell_indices] : grid) {
+        for (size_t first_pos = 0; first_pos < cell_indices.size(); ++first_pos) {
+          const size_t first = cell_indices[first_pos];
+          if (removed[first]) {
+            continue;
+          }
+          for (size_t second_pos = first_pos + 1; second_pos < cell_indices.size(); ++second_pos) {
+            const size_t second = cell_indices[second_pos];
+            if (removed[second] || first == second) {
+              continue;
+            }
+            const PlanarRect first_rect = via_rect(first);
+            const PlanarRect second_rect = via_rect(second);
+            if (!should_merge(first_rect, second_rect)) {
+              continue;
+            }
+            const PlanarRect merged_rect(std::min(first_rect.get_ll_x(), second_rect.get_ll_x()),
+                                         std::min(first_rect.get_ll_y(), second_rect.get_ll_y()),
+                                         std::max(first_rect.get_ur_x(), second_rect.get_ur_x()),
+                                         std::max(first_rect.get_ur_y(), second_rect.get_ur_y()));
+            const int32_t x = (merged_rect.get_ll_x() + merged_rect.get_ur_x()) / 2;
+            const int32_t y = (merged_rect.get_ll_y() + merged_rect.get_ur_y()) / 2;
+            segments[first].set_start_coord(x, y);
+            segments[first].set_end_coord(x, y);
+            segments[first].set_via_width(merged_rect.get_width());
+            segments[first].set_via_height(merged_rect.get_height());
+            removed[second] = true;
+            ++merged_count;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (merged_count == 0) {
+    return;
+  }
+  std::vector<PGSegment> kept;
+  kept.reserve(segments.size() - merged_count);
+  for (size_t index = 0; index < segments.size(); ++index) {
+    if (!removed[index]) {
+      kept.push_back(std::move(segments[index]));
+    }
+  }
+  segments = std::move(kept);
+  FPLOG.info(Loc::current(), "Merged ", merged_count, " overlapping PG via stack(s).");
 }
 
 RoutingLayer* PDNGenerator::findRoutingLayer(std::string layer_name)
@@ -4018,6 +4268,12 @@ void PDNGenerator::repairPGConnectivity(PGModel& pg_model)
       int32_t center_x = (rail_group.ll_x + rail_group.ur_x) / 2;
       center_x = std::max(min_x, std::min(max_x, center_x));
       candidate_x_list.push_back(center_x);
+      const int32_t repair_grid = std::max(1, database.get_manufacture_grid());
+      const int32_t repair_step = std::max(repair_width, repair_grid);
+      for (int32_t candidate_x = min_x; candidate_x <= max_x; candidate_x += repair_step) {
+        candidate_x_list.push_back(candidate_x);
+      }
+      candidate_x_list.push_back(max_x);
       if (track_pitch > 0) {
         int32_t aligned_x = track_offset + (center_x - track_offset) / track_pitch * track_pitch;
         int32_t max_track_num = (max_x - min_x) / track_pitch + 1;
@@ -4035,7 +4291,14 @@ void PDNGenerator::repairPGConnectivity(PGModel& pg_model)
           }
         }
       }
-      std::sort(candidate_x_list.begin(), candidate_x_list.end());
+      std::sort(candidate_x_list.begin(), candidate_x_list.end(), [center_x](int32_t first, int32_t second) {
+        const int32_t first_distance = std::abs(first - center_x);
+        const int32_t second_distance = std::abs(second - center_x);
+        if (first_distance != second_distance) {
+          return first_distance < second_distance;
+        }
+        return first < second;
+      });
       candidate_x_list.erase(std::unique(candidate_x_list.begin(), candidate_x_list.end()), candidate_x_list.end());
 
       bool repaired = false;
