@@ -91,6 +91,17 @@ class PDNGenerator
   void pruneDeadEndStripes();
   void trimStripeEnds();
 
+  void repairPGConnectivity(PGModel& pg_model);
+  std::vector<const PGSegment*> getIsolatedRailList(const std::string& net_name);
+  bool isRailConnectedToStripe(const PGSegment& rail);
+  bool isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const;
+  std::string getRepairStripeLayerName();
+  std::string getRepairTopLayerName(const std::string& repair_layer_name);
+  int32_t getRepairStripeWidth(const std::string& layer_name);
+  bool isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1, int32_t y2);
+  bool findRepairTopStripeY(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2, int32_t& top_y);
+  void validatePGConnectivity(PGModel& pg_model);
+
 #if 1  // output
   void outputPowerLocation(PGModel& pg_model);
 #endif

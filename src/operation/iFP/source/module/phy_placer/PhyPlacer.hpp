@@ -50,6 +50,7 @@ class PhyPlacer
 
   void placePhyCell(PPModel& pp_model);
   void adjustTapDistance(int32_t& inst_space);
+  int32_t getPdnRailMargin() const;
 
   int32_t buildPPRegionList(PPModel& pp_model);
   void buildPPRegionInRow(PPModel& pp_model, Row& row, int32_t row_idx);

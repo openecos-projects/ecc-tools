@@ -269,6 +269,8 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   // pass may move stripe endpoints to preserve macro and PG contacts.
   buildIOCoreConnect(pg_model);
   mergeIoWireSegmentList();
+  repairPGConnectivity(pg_model);
+  validatePGConnectivity(pg_model);
 }
 
 void PDNGenerator::pruneDeadEndStripes()
@@ -3758,6 +3760,373 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
 }
 
 #if 1  // output
+
+
+bool PDNGenerator::isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const
+{
+  for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+    if ((layer_pair.get_first_layer_name() == first_layer_name && layer_pair.get_second_layer_name() == second_layer_name)
+        || (layer_pair.get_first_layer_name() == second_layer_name && layer_pair.get_second_layer_name() == first_layer_name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool PDNGenerator::isRailConnectedToStripe(const PGSegment& rail)
+{
+  if (!rail.is_line()) {
+    return true;
+  }
+  PlanarRect rail_rect = wireRect(rail);
+  for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+    std::string stripe_layer_name;
+    if (layer_pair.get_first_layer_name() == rail.get_layer_name()) {
+      stripe_layer_name = layer_pair.get_second_layer_name();
+    } else if (layer_pair.get_second_layer_name() == rail.get_layer_name()) {
+      stripe_layer_name = layer_pair.get_first_layer_name();
+    } else {
+      continue;
+    }
+    for (const PGSegment& stripe : FPDM.getDatabase().get_pg_segment_list()) {
+      if (!stripe.is_line() || stripe.get_net_name() != rail.get_net_name() || stripe.get_layer_name() != stripe_layer_name) {
+        continue;
+      }
+      PlanarRect overlap_rect = getOverlapRect(rail_rect, wireRect(stripe));
+      if (overlap_rect.get_width() > 0 && overlap_rect.get_height() > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+std::vector<const PGSegment*> PDNGenerator::getIsolatedRailList(const std::string& net_name)
+{
+  std::vector<const PGSegment*> isolated_rail_list;
+  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (pg_segment.get_type() != PGSegmentType::kFollowPin || pg_segment.get_net_name() != net_name) {
+      continue;
+    }
+    if (!isRailConnectedToStripe(pg_segment)) {
+      isolated_rail_list.push_back(&pg_segment);
+    }
+  }
+  return isolated_rail_list;
+}
+
+std::string PDNGenerator::getRepairStripeLayerName()
+{
+  std::string repair_layer_name;
+  int32_t repair_layer_order = INT32_MAX;
+  for (const PGStripe& pg_stripe : FPDM.getConfig().pg_stripe_list) {
+    RoutingLayer* routing_layer = findRoutingLayer(pg_stripe.get_layer_name());
+    if (routing_layer == nullptr || routing_layer->get_prefer_direction() != Direction::kVertical) {
+      continue;
+    }
+    if (routing_layer->get_order() < repair_layer_order) {
+      repair_layer_order = routing_layer->get_order();
+      repair_layer_name = routing_layer->get_name();
+    }
+  }
+  if (repair_layer_name.empty()) {
+    for (const PGStripe& pg_stripe : FPDM.getConfig().pg_stripe_list) {
+      RoutingLayer* routing_layer = findRoutingLayer(pg_stripe.get_layer_name());
+      if (routing_layer == nullptr) {
+        continue;
+      }
+      if (routing_layer->get_order() < repair_layer_order) {
+        repair_layer_order = routing_layer->get_order();
+        repair_layer_name = routing_layer->get_name();
+      }
+    }
+  }
+  return repair_layer_name;
+}
+
+std::string PDNGenerator::getRepairTopLayerName(const std::string& repair_layer_name)
+{
+  RoutingLayer* repair_layer = findRoutingLayer(repair_layer_name);
+  if (repair_layer == nullptr) {
+    return "";
+  }
+  std::string top_layer_name;
+  int32_t top_layer_order = -1;
+  for (const PGStripe& pg_stripe : FPDM.getConfig().pg_stripe_list) {
+    RoutingLayer* routing_layer = findRoutingLayer(pg_stripe.get_layer_name());
+    if (routing_layer == nullptr || routing_layer->get_order() <= repair_layer->get_order()
+        || routing_layer->get_prefer_direction() != Direction::kHorizontal
+        || !isLayerPairConfigured(repair_layer_name, routing_layer->get_name())) {
+      continue;
+    }
+    if (routing_layer->get_order() > top_layer_order) {
+      top_layer_order = routing_layer->get_order();
+      top_layer_name = routing_layer->get_name();
+    }
+  }
+  if (top_layer_name.empty()) {
+    for (const PGStripe& pg_stripe : FPDM.getConfig().pg_stripe_list) {
+      RoutingLayer* routing_layer = findRoutingLayer(pg_stripe.get_layer_name());
+      if (routing_layer == nullptr || routing_layer->get_order() <= repair_layer->get_order()
+          || !isLayerPairConfigured(repair_layer_name, routing_layer->get_name())) {
+        continue;
+      }
+      if (routing_layer->get_order() > top_layer_order) {
+        top_layer_order = routing_layer->get_order();
+        top_layer_name = routing_layer->get_name();
+      }
+    }
+  }
+  return top_layer_name;
+}
+
+int32_t PDNGenerator::getRepairStripeWidth(const std::string& layer_name)
+{
+  int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
+  for (const PGStripe& pg_stripe : FPDM.getConfig().pg_stripe_list) {
+    if (pg_stripe.get_layer_name() != layer_name) {
+      continue;
+    }
+    int32_t width = FPUTIL.transMicronToDBU(pg_stripe.get_width_micron(), micron_dbu);
+    if (width > 0) {
+      return width;
+    }
+  }
+  RoutingLayer* routing_layer = findRoutingLayer(layer_name);
+  return routing_layer == nullptr ? 0 : std::max(routing_layer->get_min_width(), 1);
+}
+
+bool PDNGenerator::isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1, int32_t y2)
+{
+  if (y1 == y2 || width <= 0) {
+    return false;
+  }
+  if (!getMacroBlockageIntervalList(layer_name, width, x, y1, x, y2).empty()) {
+    return false;
+  }
+  RoutingLayer* routing_layer = findRoutingLayer(layer_name);
+  int32_t spacing = routing_layer == nullptr ? 0 : std::max(0, routing_layer->get_spacing());
+  PlanarRect repair_rect(x - width / 2, std::min(y1, y2), x + width / 2, std::max(y1, y2));
+  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (!pg_segment.is_line() || pg_segment.get_net_name() == net_name || pg_segment.get_layer_name() != layer_name) {
+      continue;
+    }
+    PlanarRect segment_rect = wireRect(pg_segment);
+    if (repair_rect.get_ll_x() - spacing < segment_rect.get_ur_x() && segment_rect.get_ll_x() < repair_rect.get_ur_x() + spacing
+        && repair_rect.get_ll_y() < segment_rect.get_ur_y() && segment_rect.get_ll_y() < repair_rect.get_ur_y()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool PDNGenerator::findRepairTopStripeY(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2, int32_t& top_y)
+{
+  int32_t center_y = (y1 + y2) / 2;
+  std::vector<std::pair<int32_t, int32_t>> candidate_list;
+  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (pg_segment.get_type() != PGSegmentType::kStripe || pg_segment.get_net_name() != net_name || pg_segment.get_layer_name() != top_layer_name
+        || !pg_segment.is_horizontal()) {
+      continue;
+    }
+    PlanarRect stripe_rect = wireRect(pg_segment);
+    if (stripe_rect.get_ll_x() > x || x > stripe_rect.get_ur_x()) {
+      continue;
+    }
+    candidate_list.emplace_back(pg_segment.get_start_y(), std::abs(pg_segment.get_start_y() - center_y));
+  }
+  std::sort(candidate_list.begin(), candidate_list.end(), [](const auto& first, const auto& second) {
+    if (first.second != second.second) {
+      return first.second < second.second;
+    }
+    return first.first < second.first;
+  });
+  if (candidate_list.empty()) {
+    return false;
+  }
+  top_y = candidate_list.front().first;
+  return true;
+}
+
+void PDNGenerator::repairPGConnectivity(PGModel& pg_model)
+{
+  const std::string repair_layer_name = getRepairStripeLayerName();
+  const std::string top_layer_name = getRepairTopLayerName(repair_layer_name);
+  const int32_t repair_width = getRepairStripeWidth(repair_layer_name);
+  RoutingLayer* repair_layer = findRoutingLayer(repair_layer_name);
+  if (repair_layer_name.empty() || top_layer_name.empty() || repair_width <= 0 || repair_layer == nullptr) {
+    return;
+  }
+
+  struct RailGroup
+  {
+    int32_t ll_x = 0;
+    int32_t ur_x = 0;
+    int32_t ll_y = 0;
+    int32_t ur_y = 0;
+  };
+
+  Database& database = FPDM.getDatabase();
+  int32_t max_group_gap = 20 * std::max(1, database.get_micron_dbu());
+  int32_t track_pitch = repair_layer->get_prefer_track_pitch();
+  int32_t track_offset = repair_layer->get_prefer_track_offset();
+
+  for (PGNet& pg_net : database.get_pg_net_list()) {
+    std::vector<const PGSegment*> isolated_rail_list = getIsolatedRailList(pg_net.get_name());
+    if (isolated_rail_list.empty()) {
+      continue;
+    }
+    if (!isLayerPairConfigured(isolated_rail_list.front()->get_layer_name(), repair_layer_name)) {
+      continue;
+    }
+
+    std::sort(isolated_rail_list.begin(), isolated_rail_list.end(), [](const PGSegment* first, const PGSegment* second) {
+      if (first->get_ll_x() != second->get_ll_x()) {
+        return first->get_ll_x() < second->get_ll_x();
+      }
+      return first->get_ll_y() < second->get_ll_y();
+    });
+
+    std::vector<RailGroup> rail_group_list;
+    for (const PGSegment* rail : isolated_rail_list) {
+      PlanarRect rail_rect = wireRect(*rail);
+      bool merged = false;
+      for (RailGroup& rail_group : rail_group_list) {
+        if (rail_rect.get_ll_x() <= rail_group.ur_x && rail_group.ll_x <= rail_rect.get_ur_x()
+            && rail_rect.get_ll_y() <= rail_group.ur_y + max_group_gap && rail_group.ll_y <= rail_rect.get_ur_y() + max_group_gap) {
+          rail_group.ll_x = std::min(rail_group.ll_x, rail_rect.get_ll_x());
+          rail_group.ur_x = std::max(rail_group.ur_x, rail_rect.get_ur_x());
+          rail_group.ll_y = std::min(rail_group.ll_y, rail_rect.get_ll_y());
+          rail_group.ur_y = std::max(rail_group.ur_y, rail_rect.get_ur_y());
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        rail_group_list.push_back({rail_rect.get_ll_x(), rail_rect.get_ur_x(), rail_rect.get_ll_y(), rail_rect.get_ur_y()});
+      }
+    }
+
+    for (const RailGroup& rail_group : rail_group_list) {
+      int32_t min_x = rail_group.ll_x + repair_width / 2;
+      int32_t max_x = rail_group.ur_x - repair_width / 2;
+      if (min_x > max_x) {
+        continue;
+      }
+
+      std::vector<int32_t> candidate_x_list;
+      int32_t center_x = (rail_group.ll_x + rail_group.ur_x) / 2;
+      center_x = std::max(min_x, std::min(max_x, center_x));
+      candidate_x_list.push_back(center_x);
+      if (track_pitch > 0) {
+        int32_t aligned_x = track_offset + (center_x - track_offset) / track_pitch * track_pitch;
+        int32_t max_track_num = (max_x - min_x) / track_pitch + 1;
+        for (int32_t track_idx = 0; track_idx <= max_track_num; track_idx++) {
+          int32_t left_x = aligned_x - track_idx * track_pitch;
+          int32_t right_x = aligned_x + track_idx * track_pitch;
+          if (left_x >= min_x && left_x <= max_x) {
+            candidate_x_list.push_back(left_x);
+          }
+          if (right_x >= min_x && right_x <= max_x) {
+            candidate_x_list.push_back(right_x);
+          }
+          if (left_x < min_x && right_x > max_x) {
+            break;
+          }
+        }
+      }
+      std::sort(candidate_x_list.begin(), candidate_x_list.end());
+      candidate_x_list.erase(std::unique(candidate_x_list.begin(), candidate_x_list.end()), candidate_x_list.end());
+
+      bool repaired = false;
+      for (int32_t repair_x : candidate_x_list) {
+        int32_t top_y = 0;
+        if (!findRepairTopStripeY(pg_net.get_name(), top_layer_name, repair_x, rail_group.ll_y, rail_group.ur_y, top_y)) {
+          continue;
+        }
+        int32_t top_stripe_half_width = getRepairStripeWidth(top_layer_name) / 2;
+        int32_t repair_y1 = std::min(rail_group.ll_y, std::min(rail_group.ur_y, top_y - top_stripe_half_width));
+        int32_t repair_y2 = std::max(rail_group.ll_y, std::max(rail_group.ur_y, top_y + top_stripe_half_width));
+        if (!isRepairSegmentLegal(pg_net.get_name(), repair_layer_name, repair_width, repair_x, repair_y1, repair_y2)) {
+          continue;
+        }
+        addUnblockedLineSegment(pg_net.get_name(), repair_layer_name, PGSegmentType::kStripe, repair_width, repair_x, repair_y1, repair_x, repair_y2);
+        repaired = true;
+        break;
+      }
+      if (!repaired) {
+        FPLOG.warn(Loc::current(), "Failed to repair isolated PDN rail for net '", pg_net.get_name(), "' at x=[", rail_group.ll_x, ", ", rail_group.ur_x, "].");
+      }
+    }
+  }
+
+  buildLayerConnect(pg_model);
+}
+
+void PDNGenerator::validatePGConnectivity(PGModel& pg_model)
+{
+  Database& database = FPDM.getDatabase();
+  int32_t isolated_rail_num = 0;
+  for (const PGNet& pg_net : database.get_pg_net_list()) {
+    isolated_rail_num += static_cast<int32_t>(getIsolatedRailList(pg_net.get_name()).size());
+  }
+  if (isolated_rail_num > 0) {
+    FPLOG.warn(Loc::current(), "Found ", isolated_rail_num, " PDN follow-pin rail segment(s) without a same-net stripe connection.");
+  }
+
+  int32_t missing_rail_num = 0;
+  std::string first_missing_instance_name;
+  for (const Instance& instance : database.get_instance_list()) {
+    if (!instance.get_placed() || instance.get_macro() || instance.is_delete_instance() || !instance.is_new_instance() || instance.get_width() <= 0
+        || instance.get_height() <= 0) {
+      continue;
+    }
+    auto master_iter = database.get_cell_master_map().find(instance.get_master_name());
+    if (master_iter == database.get_cell_master_map().end()) {
+      continue;
+    }
+    const CellMaster& master = master_iter->second;
+    if (master.get_pad() || master.get_pad_filler() || master.get_corner()) {
+      continue;
+    }
+    const Row* instance_row = nullptr;
+    for (const Row& row : database.get_row_list()) {
+      if (row.get_y() == instance.get_y()) {
+        instance_row = &row;
+        break;
+      }
+    }
+    if (instance_row == nullptr) {
+      continue;
+    }
+    bool flat_row = instance_row->get_orient() == PlacementOrientation::kN || instance_row->get_orient() == PlacementOrientation::kFN;
+    const std::string& bottom_net_name = flat_row ? pg_model.get_default_ground_net_name() : pg_model.get_default_power_net_name();
+    const std::string& top_net_name = flat_row ? pg_model.get_default_power_net_name() : pg_model.get_default_ground_net_name();
+    int32_t instance_ll_x = instance.get_x();
+    int32_t instance_ur_x = instance.get_x() + instance.get_width();
+    auto has_rail = [&](const std::string& net_name, int32_t y_coord) {
+      for (const PGSegment& pg_segment : database.get_pg_segment_list()) {
+        if (pg_segment.get_type() != PGSegmentType::kFollowPin || pg_segment.get_net_name() != net_name || pg_segment.get_start_y() != y_coord) {
+          continue;
+        }
+        PlanarRect rail_rect = wireRect(pg_segment);
+        if (rail_rect.get_ll_x() <= instance_ll_x && instance_ur_x <= rail_rect.get_ur_x()) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (!has_rail(bottom_net_name, instance_row->get_y()) || !has_rail(top_net_name, instance_row->get_ur_y())) {
+      missing_rail_num++;
+      if (first_missing_instance_name.empty()) {
+        first_missing_instance_name = instance.get_name();
+      }
+    }
+  }
+  if (missing_rail_num > 0) {
+    FPLOG.warn(Loc::current(), "Found ", missing_rail_num, " placed phy cell(s) without complete PDN rail coverage, first: ", first_missing_instance_name, ".");
+  }
+}
 
 void PDNGenerator::outputPowerLocation(PGModel& pg_model)
 {

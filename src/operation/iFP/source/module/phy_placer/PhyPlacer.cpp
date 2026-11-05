@@ -193,15 +193,29 @@ void PhyPlacer::buildPPRegionInRow(PPModel& pp_model, Row& row, int32_t row_idx)
   }
 }
 
+int32_t PhyPlacer::getPdnRailMargin() const
+{
+  int32_t margin = 0;
+  int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
+  for (const PGRail& pg_rail : FPDM.getConfig().pg_rail_list) {
+    int32_t rail_width = FPUTIL.transMicronToDBU(pg_rail.get_width_micron(), micron_dbu);
+    if (rail_width > 0) {
+      margin = std::max(margin, rail_width / 2 + 1);
+    }
+  }
+  return margin;
+}
+
 std::vector<std::pair<int32_t, int32_t>> PhyPlacer::getMacroBlockageIntervalList(Row& row)
 {
   Database& database = FPDM.getDatabase();
   Site& site = database.get_site_map()[row.get_site_name()];
   std::vector<std::pair<int32_t, int32_t>> macro_blockage_interval_list;
+  int32_t rail_margin = getPdnRailMargin();
   for (Instance* instance_ptr : _placed_macro_list) {
     Instance& instance = *instance_ptr;
     PlanarRect& placement_halo_rect = instance.get_placement_halo_rect();
-    if (row.get_ur_y() <= placement_halo_rect.get_ll_y() || placement_halo_rect.get_ur_y() <= row.get_ll_y()) {
+    if (row.get_ur_y() + rail_margin <= placement_halo_rect.get_ll_y() || placement_halo_rect.get_ur_y() <= row.get_ll_y() - rail_margin) {
       continue;
     }
     int32_t site_origin_x = row.get_site_origin_x();

@@ -451,6 +451,39 @@ bool testRailExtensionHalo(const std::string& directory)
   return check(!hasVerticalSegmentSpanning("MET4", 150000, 100000, 200000), "Rail extension must not enter a macro placement halo");
 }
 
+bool testGapRailRepair(const std::string& directory)
+{
+  initPlacementHaloFixture(directory);
+  addPlacementHaloMacro(100000, 100000, 200000, 300000, 5000, 1000);
+  addPlacementHaloMacro(230000, 100000, 330000, 300000, 5000, 1000);
+
+  PGStripe met4_stripe;
+  met4_stripe.set_layer_name("MET4");
+  met4_stripe.set_width_micron(0.5);
+  met4_stripe.set_pitch_micron(500.0);
+  met4_stripe.set_offset_micron(74.75);
+  FPDM.getConfig().pg_stripe_list.push_back(met4_stripe);
+
+  PGStripe met5_stripe;
+  met5_stripe.set_layer_name("MET5");
+  met5_stripe.set_width_micron(0.5);
+  met5_stripe.set_pitch_micron(500.0);
+  met5_stripe.set_offset_micron(74.75);
+  FPDM.getConfig().pg_stripe_list.push_back(met5_stripe);
+
+  addConnect("MET1", "MET4");
+  addConnect("MET4", "MET5");
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 205000, 120000, 225000, 120000, 160);
+
+  FPPG.generate();
+
+  bool passed = true;
+  passed = check(hasVerticalSegmentSpanning("VDD", "MET4", 215000, 120000, 150000), "Isolated gap rail must receive a repair stripe") && passed;
+  passed = check(hasVia("VDD", "MET1", "MET4", 215000, 120000), "Repair stripe must connect to the isolated rail") && passed;
+  passed = check(hasVia("VDD", "MET4", "MET5", 215000, 150000), "Repair stripe must connect to the top stripe") && passed;
+  return passed;
+}
+
 bool testUncoveredEdgeStripe(const std::string& directory)
 {
   initPlacementHaloFixture(directory);
@@ -495,6 +528,7 @@ int main(int argc, char* argv[])
   passed = ifp::testStripePlacementHalo(directory) && passed;
   passed = ifp::testActualViaOverlap(directory) && passed;
   passed = ifp::testRailExtensionHalo(directory) && passed;
+  passed = ifp::testGapRailRepair(directory) && passed;
   passed = ifp::testUncoveredEdgeStripe(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
