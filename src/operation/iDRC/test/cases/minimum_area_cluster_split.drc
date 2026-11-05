@@ -1,0 +1,12 @@
+# One net built from four abutting 600x100 segments: 240000 >= 100000, so it is legal.
+case minimum_area_cluster_split
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 min_area=100000
+cut V1
+result n1 M1 0 0 600 100
+result n1 M1 600 0 1200 100
+result n1 M1 1200 0 1800 100
+result n1 M1 1800 0 2400 100
+expect none
+# cluster size 2000, expand 100: the second cluster only sees the last segment
+vary pitch=20
