@@ -328,13 +328,98 @@ bool testUnconnectedRail(const std::string& directory)
   addLine("VDD_A", "M2", PGSegmentType::kFollowPin, 1001, 22003, 21001, 22003, 160);
   addLine("VDD_A", "M10", PGSegmentType::kStripe, 5001, 2003, 5001, 22003, 1000);
   addConnect("M99", "M10");
-  FPPG.generate();
-  bool passed = true;
+  bool rejected = false;
+  try {
+    FPPG.generate();
+  } catch (const std::runtime_error& error) {
+    rejected = std::string(error.what()).find("without a physical connection") != std::string::npos;
+  }
+  bool passed = check(rejected, "An unconnected rail must stop the PDN flow");
   for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
     if (segment.get_type() == PGSegmentType::kStripe) {
       passed = check(segment.get_start_y() == 2003 && segment.get_end_y() == 22003, "Unconnected rail must not extend a stripe") && passed;
     }
     passed = check(segment.get_type() != PGSegmentType::kVia, "Wrong-net or unconfigured-layer rail must not generate a via") && passed;
+  }
+  return passed;
+}
+
+bool testDisconnectedMesh(const std::string& directory)
+{
+  bool passed = true;
+  for (bool lower_connection : {false, true}) {
+    initFixture(directory);
+    addLine("VDD_A", "M99", PGSegmentType::kFollowPin, 1001, 5003, 21001, 5003, 160);
+    addLine("VDD_A", "M10", PGSegmentType::kStripe, 5001, 2003, 5001, 22003, 1000);
+    if (lower_connection) {
+      addConnect("M99", "M10");
+      addLine("VDD_A", "M2", PGSegmentType::kStripe, 30001, 5003, 40001, 5003, 1000);
+      addConnect("M10", "M2");
+    }
+    bool rejected = false;
+    try {
+      FPPG.generate();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("without a physical connection") != std::string::npos;
+    }
+    passed = check(rejected, lower_connection ? "A rail/stripe island must connect to the supply mesh"
+                                             : "Projected cross-layer overlap without a via must not count as connected") && passed;
+  }
+  return passed;
+}
+
+bool testPhyRailCoverage(const std::string& directory)
+{
+  bool passed = true;
+  for (int32_t scenario = 0; scenario < 3; scenario++) {
+    initFixture(directory);
+    Database& database = FPDM.getDatabase();
+    Row row;
+    row.set_rect(1001, 2003, 21001, 3003);
+    row.set_y(2003);
+    row.set_orient(PlacementOrientation::kN);
+    database.get_row_list().push_back(row);
+    CellMaster master;
+    master.set_name("PHY");
+    master.set_width(200);
+    master.set_height(1000);
+    for (std::string pin_name : {"PWR", "GND"}) {
+      bool power = pin_name == "PWR";
+      master.get_pg_pin_types()[pin_name] = power ? PGNetType::kPower : PGNetType::kGround;
+      InstancePinShape pin;
+      pin.set_pin_name(pin_name);
+      pin.set_layer_name("M99");
+      int32_t y = power ? 1000 : 0;
+      pin.set_rect(0, y - 80, 200, y + 80);
+      master.get_pg_pin_shapes().push_back(pin);
+    }
+    database.get_cell_master_map()[master.get_name()] = master;
+    Instance instance;
+    instance.set_name("PHY_1");
+    instance.set_master_name("PHY");
+    instance.set_placed(true);
+    instance.set_new_instance(true);
+    instance.set_coord(scenario == 2 ? 0 : 2001, 2003);
+    instance.set_orient(PlacementOrientation::kN);
+    instance.set_bounding_rect(instance.get_x(), 2003, instance.get_x() + 200, 3003);
+    instance.set_width(200);
+    instance.set_height(1000);
+    database.get_instance_list().push_back(instance);
+    database.get_instance_name_to_idx_map()[instance.get_name()] = 0;
+    addLine("VSS_B", "M99", PGSegmentType::kFollowPin, 1001, 2003, 21001, 2003, 160);
+    if (scenario != 1) {
+      addLine("VDD_A", "M99", PGSegmentType::kFollowPin, 1001, 3003, 21001, 3003, 160);
+    }
+    addLine("VDD_A", "M10", PGSegmentType::kStripe, 5001, 2003, 5001, 22003, 1000);
+    addLine("VSS_B", "M10", PGSegmentType::kStripe, 15001, 2003, 15001, 22003, 1000);
+    addConnect("M99", "M10");
+    bool rejected = false;
+    try {
+      FPPG.generate();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("without complete PDN rail coverage") != std::string::npos;
+    }
+    passed = check(rejected == (scenario != 0), "Physical cells must occupy a usable row with both power rails") && passed;
   }
   return passed;
 }
@@ -526,6 +611,7 @@ bool testUncoveredEdgeStripe(const std::string& directory)
   addConnect("MET4", "MET5");
 
   addLine("VDD", "MET1", PGSegmentType::kFollowPin, 0, 11000, 400000, 11000, 160);
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 20000, 400000, 20000, 1000);
   addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 11000, 400000, 11000, 1000);
   FPPG.generate();
 
@@ -794,12 +880,15 @@ int main(int argc, char* argv[])
     return EXIT_FAILURE;
   }
   std::string directory = argv[1];
+  setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
   ifp::DataManager::initInst();
   ifp::PDNGenerator::initInst();
   FPUTIL.createDir(directory);
   bool passed = ifp::testPGSegmentRect();
   passed = ifp::testBoundaryRailConnections(directory) && passed;
   passed = ifp::testUnconnectedRail(directory) && passed;
+  passed = ifp::testDisconnectedMesh(directory) && passed;
+  passed = ifp::testPhyRailCoverage(directory) && passed;
   passed = ifp::testGeneratedStripes(directory) && passed;
   passed = ifp::testConnectionTypes(directory) && passed;
   passed = ifp::testMissingConnections(directory) && passed;

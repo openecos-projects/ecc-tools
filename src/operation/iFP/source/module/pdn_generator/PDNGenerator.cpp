@@ -4319,12 +4319,31 @@ void PDNGenerator::repairPGConnectivity(PGModel& pg_model)
 void PDNGenerator::validatePGConnectivity(PGModel& pg_model)
 {
   Database& database = FPDM.getDatabase();
+  std::vector<PGSegment>& segments = database.get_pg_segment_list();
+  PGConnectivity connectivity = buildPGConnectivity();
+  std::set<int32_t> supply_root_set;
+  const std::string& supply_layer = pg_model.get_power_layer_pair().get_second_layer_name();
+  for (int32_t idx = 0; idx < static_cast<int32_t>(segments.size()); idx++) {
+    const PGSegment& segment = segments[idx];
+    if (segment.get_type() == PGSegmentType::kStripe && (supply_layer.empty() || segment.get_layer_name() == supply_layer)) {
+      supply_root_set.insert(connectivity.getRoot(idx));
+    }
+  }
   int32_t isolated_rail_num = 0;
-  for (const PGNet& pg_net : database.get_pg_net_list()) {
-    isolated_rail_num += static_cast<int32_t>(getIsolatedRailList(pg_net.get_name()).size());
+  for (int32_t idx = 0; idx < static_cast<int32_t>(segments.size()); idx++) {
+    const PGSegment& segment = segments[idx];
+    if (segment.get_type() != PGSegmentType::kFollowPin || supply_root_set.contains(connectivity.getRoot(idx))) {
+      continue;
+    }
+    if (isolated_rail_num == 0) {
+      FPLOG.warn(Loc::current(), "Unconnected PDN rail: net=", segment.get_net_name(), " layer=", segment.get_layer_name(), " rect=(",
+                 segment.get_ll_x(), ",", segment.get_ll_y(), ")-(", segment.get_ur_x(), ",", segment.get_ur_y(), ").");
+    }
+    isolated_rail_num++;
   }
   if (isolated_rail_num > 0) {
-    FPLOG.warn(Loc::current(), "Found ", isolated_rail_num, " PDN follow-pin rail segment(s) without a same-net stripe connection.");
+    FPLOG.error(Loc::current(), "Found ", isolated_rail_num,
+                " PDN follow-pin rail segment(s) without a physical connection to the supply mesh. Floorplan output is stopped.");
   }
 
   int32_t missing_rail_num = 0;
@@ -4344,12 +4363,17 @@ void PDNGenerator::validatePGConnectivity(PGModel& pg_model)
     }
     const Row* instance_row = nullptr;
     for (const Row& row : database.get_row_list()) {
-      if (row.get_y() == instance.get_y()) {
+      if (row.get_y() == instance.get_y() && row.get_ll_x() <= instance.get_x() && instance.get_x() + instance.get_width() <= row.get_ur_x()
+          && instance.get_y() + instance.get_height() <= row.get_ur_y()) {
         instance_row = &row;
         break;
       }
     }
     if (instance_row == nullptr) {
+      missing_rail_num++;
+      if (first_missing_instance_name.empty()) {
+        first_missing_instance_name = instance.get_name();
+      }
       continue;
     }
     bool flat_row = instance_row->get_orient() == PlacementOrientation::kN || instance_row->get_orient() == PlacementOrientation::kFN;
@@ -4377,8 +4401,48 @@ void PDNGenerator::validatePGConnectivity(PGModel& pg_model)
     }
   }
   if (missing_rail_num > 0) {
-    FPLOG.warn(Loc::current(), "Found ", missing_rail_num, " placed phy cell(s) without complete PDN rail coverage, first: ", first_missing_instance_name, ".");
+    FPLOG.error(Loc::current(), "Found ", missing_rail_num, " placed phy cell(s) outside usable rows or without complete PDN rail coverage, first: ",
+                first_missing_instance_name, ". Floorplan output is stopped.");
   }
+}
+
+PGConnectivity PDNGenerator::buildPGConnectivity()
+{
+  Database& database = FPDM.getDatabase();
+  std::vector<PGSegment>& segments = database.get_pg_segment_list();
+  PGConnectivity connectivity(static_cast<int32_t>(segments.size()));
+  std::map<std::string, PGGeometryIndex> net_geometry_map;
+  for (int32_t idx = 0; idx < static_cast<int32_t>(segments.size()); idx++) {
+    PGSegment& segment = segments[idx];
+    std::vector<InstancePinShape> shapes;
+    if (segment.is_line()) {
+      InstancePinShape shape;
+      shape.set_layer_name(segment.get_layer_name());
+      PlanarRect rect = wireRect(segment);
+      shape.set_rect(rect.get_ll_x(), rect.get_ll_y(), rect.get_ur_x(), rect.get_ur_y());
+      shapes.push_back(shape);
+    } else if (segment.get_type() == PGSegmentType::kVia) {
+      shapes = FPI.getPGViaShapes(segment);
+      // Geometry-only clients have no IDB technology; use their explicit stack footprint.
+      if (shapes.empty() && FPI.getPGViaMinSize(segment.get_bottom_layer_name(), segment.get_top_layer_name()) == std::make_pair(0, 0)) {
+        for (const std::string& layer : {segment.get_bottom_layer_name(), segment.get_top_layer_name()}) {
+          InstancePinShape shape;
+          shape.set_layer_name(layer);
+          shape.set_rect(segment.get_start_x() - segment.get_via_width() / 2, segment.get_start_y() - segment.get_via_height() / 2,
+                         segment.get_start_x() + segment.get_via_width() / 2, segment.get_start_y() + segment.get_via_height() / 2);
+          shapes.push_back(shape);
+        }
+      }
+    }
+    PGGeometryIndex& geometry = net_geometry_map.try_emplace(segment.get_net_name(), std::max(1, database.get_micron_dbu() * 10)).first->second;
+    for (const InstancePinShape& shape : shapes) {
+      for (int32_t other_idx : geometry.touching(shape.get_layer_name(), shape)) {
+        connectivity.connect(idx, other_idx);
+      }
+      geometry.add(shape.get_layer_name(), shape, idx);
+    }
+  }
+  return connectivity;
 }
 
 void PDNGenerator::outputPowerLocation(PGModel& pg_model)

@@ -125,6 +125,7 @@ void FPInterface::initFP(std::map<std::string, std::any> config_map)
 
 void FPInterface::runFP()
 {
+  _run_failed = true;
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
@@ -154,6 +155,7 @@ void FPInterface::runFP()
   FPPG.generate();
   PDNGenerator::destroyInst();
 
+  _run_failed = false;
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -188,7 +190,12 @@ void FPInterface::destroyFP()
   FPLOG.info(Loc::current(), "Starting...");
 
   if (_run_failed) {
-    FPLOG.error(Loc::current(), "Skipping floorplan output because the run failed.");
+    FPLOG.warn(Loc::current(), "Skipping floorplan output because the run failed.");
+    DieBuilder::destroyInst();
+    IOPlacer::destroyInst();
+    MacroPlacer::destroyInst();
+    PhyPlacer::destroyInst();
+    PDNGenerator::destroyInst();
   } else {
     FPDM.output();
   }
@@ -484,7 +491,14 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
-  checkKeys(macro_placer_json, {"file_path", "macro_placement_halo", "macro_routing_halo"}, "macro_placer");
+  checkKeys(macro_placer_json, {"mode", "file_path", "macro_placement_halo", "macro_routing_halo"}, "macro_placer");
+  // Older ECC configurations write mode; placement is now selected by file_path.
+  if (macro_placer_json.contains("mode")) {
+    std::string mode = macro_placer_json["mode"].get<std::string>();
+    if (mode != "auto" && mode != "file") {
+      FPLOG.error(Loc::current(), "Unknown macro_placer.mode '", mode, "'. Expected auto or file.");
+    }
+  }
   std::string macro_file_path = macro_placer_json.value("file_path", "");
   config.input_macro_path = macro_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, macro_file_path);
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
