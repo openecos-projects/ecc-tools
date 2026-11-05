@@ -22,7 +22,10 @@
  */
 #include <cmath>
 #include <cstddef>
+#include <mutex>
 #include <optional>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "IdbLayer.h"
@@ -133,10 +136,31 @@ auto resolveWidthUm(idb::IdbLayout* layout, idb::IdbLayerRouting* layer, std::op
   return *width_um;
 }
 
+// iDB keeps the LEF "attribute not specified" sentinel (-1) for routing layers
+// whose LEF omits CAPACITANCE/EDGECAPACITANCE. Treat that sentinel as "not
+// modelled" (0) instead of feeding a negative capacitance into the RC model.
+auto definedOrZero(double value, idb::IdbLayerRouting* layer, const char* attribute) -> double
+{
+  if (std::isfinite(value) && value >= 0.0) {
+    return value;
+  }
+  static std::mutex mutex;
+  static std::set<std::string> reported;
+  const std::string name = layer != nullptr ? layer->get_name() : std::string{"<unknown>"};
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!reported.insert(name + "/" + attribute).second) {
+      return 0.0;
+    }
+  }
+  CTSLOG.warn(Loc::current(), "Wrapper: routing layer '", name, "' has no LEF ", attribute, "; using 0 instead of the -1 sentinel.");
+  return 0.0;
+}
+
 auto buildWireCapacitanceProfile(idb::IdbLayerRouting* layer, double length_um, double width_um) -> Wrapper::WireCapacitanceProfile
 {
-  const double area_cap_pf = layer->get_capacitance() * length_um * width_um;
-  const double edge_cap_pf = layer->get_edge_capacitance() * 2.0 * (length_um + width_um);
+  const double area_cap_pf = definedOrZero(layer->get_capacitance(), layer, "CAPACITANCE") * length_um * width_um;
+  const double edge_cap_pf = definedOrZero(layer->get_edge_capacitance(), layer, "EDGECAPACITANCE") * 2.0 * (length_um + width_um);
   const double ground_cap_pf = area_cap_pf;
   const double coupling_cap_pf = edge_cap_pf;
   return Wrapper::WireCapacitanceProfile{

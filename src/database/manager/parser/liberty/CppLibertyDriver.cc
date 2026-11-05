@@ -60,6 +60,44 @@ std::string trimString(const std::string& str)
     return str.substr(begin, end - begin + 1);
 }
 
+/**
+ * @brief Decide whether a token ends a simple attribute value that has no ';'.
+ *
+ * ASAP7's INVBUF and SEQ libraries omit the statement terminator on 42 `area :`
+ * lines, and until now only commercial parsers tolerated that. Two tokens show
+ * that the statement ended:
+ *
+ *   - '}' or end of file: the group closed, and reading on crosses that boundary;
+ *   - a keyword that begins a new line: that is the next statement. A Liberty
+ *     value may only continue on the following line through a backslash
+ *     continuation, which the scanner folds into one logical statement, so a bare
+ *     newline does end the value.
+ *
+ * Both cases were previously scanned through until the next ';', which absorbed
+ * the following statement (a whole `pin`/`pg_pin` group, or an entire `cell`) into
+ * the value string. The reader then saw a truncated cell and silently dropped it,
+ * so a 202-cell library exposed 53 cells and CTS failed on a missing pin model.
+ *
+ * The offending token is pushed back, never dropped, and the recovery is counted
+ * so the parse can report it.
+ */
+bool endsValue(int token, YYSTYPE& yylval, LibertyScanner& scanner, int& missing_terminators)
+{
+    if (token == '}') {
+        scanner.ungetToken(token, yylval);
+        ++missing_terminators;
+        return true;
+    }
+
+    if (token == KEYWORD && scanner.crossed_newline_before_token()) {
+        scanner.ungetToken(token, yylval);
+        ++missing_terminators;
+        return true;
+    }
+
+    return false;
+}
+
 }  // namespace
 
 LibertyDriver::LibertyDriver()
@@ -76,6 +114,7 @@ void LibertyDriver::clearParseState() noexcept
 {
     delete _result;
     _result = nullptr;
+    _missing_terminators = 0;
     while (!_group_stack.empty()) {
         delete _group_stack.top();
         _group_stack.pop();
@@ -175,7 +214,13 @@ bool LibertyDriver::parseScanner(LibertyScanner& scanner)
         return false;
     }
     
-    return parseGroupContent(scanner, token, yylval, yylloc);
+    const bool parsed = parseGroupContent(scanner, token, yylval, yylloc);
+    if (parsed && _missing_terminators > 0) {
+        ECCLOG.warn(ecc::Loc::current(), _filename, ": ", _missing_terminators,
+                    " simple attribute(s) had no ';' terminator; each was ended at the statement boundary instead of being "
+                    "read through, which would have absorbed the following statement.");
+    }
+    return parsed;
 }
 
 bool LibertyDriver::parseGroupContent(LibertyScanner& scanner, int first_token, YYSTYPE& first_yylval, YYLTYPE& first_yylloc)
@@ -402,22 +447,19 @@ LibValue* LibertyDriver::parseValue(LibertyScanner& scanner)
     if (token == FLOAT) {
         const double first_value = yylval.number;
         token = scanner.yylex(&yylval, &yylloc);
-        if (token == ';') {
+        if (token == ';' || endsValue(token, yylval, scanner, _missing_terminators)) {
             return new LibFloatValue(first_value);
         }
 
         std::ostringstream value;
         value.precision(17);
         value << first_value;
-        if (token != 0 && token != '}') {
-            value << tokenToString(token, yylval);
-        }
+        value << tokenToString(token, yylval);
         while ((token = scanner.yylex(&yylval, &yylloc)) != 0) {
             if (token == ';') {
                 break;
             }
-            if (token == '}') {
-                scanner.ungetToken(token, yylval);
+            if (endsValue(token, yylval, scanner, _missing_terminators)) {
                 break;
             }
             value << tokenToString(token, yylval);
@@ -430,8 +472,7 @@ LibValue* LibertyDriver::parseValue(LibertyScanner& scanner)
         if (token == ';') {
             break;
         }
-        if (token == '}') {
-            scanner.ungetToken(token, yylval);
+        if (endsValue(token, yylval, scanner, _missing_terminators)) {
             break;
         }
         value += tokenToString(token, yylval);
