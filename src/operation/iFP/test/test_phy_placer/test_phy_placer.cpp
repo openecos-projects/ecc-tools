@@ -16,6 +16,7 @@
 
 #include "DataManager.hpp"
 #include "Logger.hpp"
+#include "MacroPlacer.hpp"
 #include "PhyPlacer.hpp"
 #include "Utility.hpp"
 
@@ -79,9 +80,66 @@ void initFixture(int32_t narrow_width)
   macro.set_coord(2000 + narrow_width, 176000);
   macro.set_width(6000 - narrow_width);
   macro.set_height(3000);
+  macro.set_bounding_rect(2000 + narrow_width, 176000, 8000, 179000);
   macro.get_placement_halo_rect().set_rect(2000 + narrow_width, 176000, 8000, 179000);
-  database.get_instance_list().reserve(256);
+  std::vector<Instance>().swap(database.get_instance_list());
   database.get_instance_list().push_back(macro);
+}
+
+bool testPowerChannel(int32_t narrow_width, bool expected_narrow_rows, bool placed_cell = false)
+{
+  initFixture(narrow_width);
+  Database& database = FPDM.getDatabase();
+  Config& config = FPDM.getConfig();
+  config.macro_placement_halo = 0.0;
+  config.macro_routing_halo = 0.0;
+  RoutingLayer layer;
+  layer.set_name("VERTICAL");
+  layer.set_prefer_direction(Direction::kVertical);
+  layer.set_spacing(100);
+  database.get_routing_layer_name_to_idx_map()[layer.get_name()] = 0;
+  database.get_routing_layer_list().push_back(layer);
+  PGStripe stripe;
+  stripe.set_layer_name(layer.get_name());
+  stripe.set_width_micron(1.0);
+  config.pg_stripe_list.push_back(stripe);
+  PGRail rail;
+  rail.set_layer_name("RAIL");
+  config.pg_rail_list.push_back(rail);
+  PGLayerPair pair;
+  pair.set_first_layer_name(rail.get_layer_name());
+  pair.set_second_layer_name(layer.get_name());
+  config.pg_layer_pair_list.push_back(pair);
+
+  if (placed_cell) {
+    Instance instance;
+    instance.set_name("KEEP");
+    instance.set_placed(true);
+    instance.set_bounding_rect(2000, 176000, 2200, 177000);
+    database.get_instance_list().push_back(instance);
+    bool rejected = false;
+    try {
+      FPMP.place();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("contains placed instance") != std::string::npos;
+    }
+    return check(rejected && database.get_instance_list().size() == 2 && database.get_row_list().size() == 3,
+                 "Pruning must not delete or displace an existing logical instance");
+  }
+  FPMP.place();
+  bool passed = check(database.get_row_list().size() == (expected_narrow_rows ? 6U : 3U), "Macro-cut rows must reserve both PG tracks and spacing");
+  passed = check(database.get_new_row_list().size() == database.get_row_list().size(), "IDB export must use the same pruned row list") && passed;
+  FPPP.place();
+  for (const Instance& instance : database.get_instance_list()) {
+    if (instance.get_macro()) {
+      passed = check(instance.get_x() == 2000 + narrow_width, "Row pruning must not move the macro") && passed;
+      continue;
+    }
+    if (!expected_narrow_rows) {
+      passed = check(instance.get_x() >= 8000, "No physical cells may be inserted into discarded row slivers") && passed;
+    }
+  }
+  return passed;
 }
 
 bool testMacroCutRow(int32_t narrow_width, int32_t expected_side_count)
@@ -124,12 +182,20 @@ bool testMacroCutRow(int32_t narrow_width, int32_t expected_side_count)
 
 int main()
 {
+  setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
   ifp::DataManager::initInst();
   ifp::PhyPlacer::initInst();
+  ifp::MacroPlacer::initInst();
   bool passed = ifp::testMacroCutRow(200, 0);
   passed = ifp::testMacroCutRow(400, 1) && passed;
   passed = ifp::testMacroCutRow(600, 0) && passed;
   passed = ifp::testMacroCutRow(800, 2) && passed;
+  passed = ifp::testPowerChannel(200, false) && passed;
+  passed = ifp::testPowerChannel(1200, false) && passed;
+  passed = ifp::testPowerChannel(2000, false) && passed;
+  passed = ifp::testPowerChannel(2200, true) && passed;
+  passed = ifp::testPowerChannel(200, false, true) && passed;
+  ifp::MacroPlacer::destroyInst();
   ifp::PhyPlacer::destroyInst();
   ifp::DataManager::destroyInst();
   ifp::Utility::destroyInst();

@@ -4,6 +4,8 @@ add_executable(test_ifp_phy_placer
 
 target_link_libraries(test_ifp_phy_placer
     PRIVATE
+    ifp_interface
+    ifp_macro_placer
     ifp_phy_placer
     ifp_toolkit
 )

@@ -80,7 +80,7 @@ class PhyPlacer
   std::vector<PPRegion> getEmptyPPRegionList(PPModel& pp_model, PPRegion& boundary_region);
   void fillEdgeEndcap(PPModel& pp_model, PPRegion& empty_region, std::vector<std::string>& endcap_name_list, int32_t& endcap_idx);
 
-  std::vector<Instance*> _placed_macro_list;
+  std::vector<int32_t> _placed_macro_idx_list;
   std::unordered_map<int32_t, std::vector<size_t>> _occupied_region_indices;
 };
 
