@@ -28,6 +28,7 @@
 namespace idb {
 class IdbInstance;
 class IdbLayerCut;
+class IdbLayerRouting;
 class IdbSpecialWire;
 class IdbVia;
 enum class IdbConnectDirection : uint8_t;
@@ -129,6 +130,8 @@ class FPInterface
   std::vector<InstancePinShape> getPGViaShapes(PGSegment& pg_segment);
   idb::IdbVia* buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
   PGViaGeometry getIDBViaGeometry(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
+  bool adjustIDBViaEnclosureArea(idb::IdbLayerRouting* idb_layer, int32_t cut_width, int32_t cut_height, PGSegment& pg_segment,
+                                 int32_t& enclosure_x, int32_t& enclosure_y);
   void adjustLineSegmentListByViaEnclosure(std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
                                            PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
                                            int32_t enclosure_ur_x, int32_t enclosure_ur_y);
