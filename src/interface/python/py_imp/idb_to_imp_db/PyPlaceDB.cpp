@@ -47,9 +47,9 @@ double intersectArea(Box const& b1, Box const& b2)
   return dist[0] * dist[1];
 }
 
-bool isInvailidNet(IdbNet* net, bool with_sta)
+bool isInvailidNet(IdbNet* net, bool /*with_sta*/)
 {
-  return net->is_ground() || net->is_power() || net->is_pdn() || (!with_sta && net->is_clock())
+  return net->is_ground() || net->is_power() || net->is_pdn()
          || net->get_instance_pin_list()->get_pin_list().size() == 0;
 }
 
@@ -540,8 +540,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
       continue;
     }
     // Net const& net = db.net(i);
-    // Timing needs clock-pin identities, but placement must not optimize clock HPWL.
-    net_weights.append(net->is_clock() ? 0 : 1);
+    net_weights.append(1);
     net_name2id_map[pybind11::str(net->get_net_name())] = mNet2ID[net->get_net_name()];
     net_names.append(pybind11::str(net->get_net_name()));
     pybind11::list pins;
