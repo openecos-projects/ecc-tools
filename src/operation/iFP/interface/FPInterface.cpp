@@ -1974,19 +1974,83 @@ PGViaGeometry FPInterface::getIDBViaGeometry(idb::IdbLayerCut* idb_cut_layer, PG
       }
       int32_t candidate_row_num = 1 + (pg_segment.get_via_height() - min_height) / cut_pitch_y;
       int32_t candidate_col_num = 1 + (pg_segment.get_via_width() - min_width) / cut_pitch_x;
+      int32_t cut_width = cut_size_x + (candidate_col_num - 1) * cut_pitch_x;
+      int32_t cut_height = cut_size_y + (candidate_row_num - 1) * cut_pitch_y;
+      int32_t candidate_bottom_x = bottom_enclosure_x;
+      int32_t candidate_bottom_y = bottom_enclosure_y;
+      int32_t candidate_top_x = top_enclosure_x;
+      int32_t candidate_top_y = top_enclosure_y;
+      if (!adjustIDBViaEnclosureArea(idb_via_rule->get_layer_bottom(), cut_width, cut_height, pg_segment, candidate_bottom_x, candidate_bottom_y)
+          || !adjustIDBViaEnclosureArea(idb_via_rule->get_layer_top(), cut_width, cut_height, pg_segment, candidate_top_x, candidate_top_y)) {
+        continue;
+      }
       int64_t candidate_cut_num = static_cast<int64_t>(candidate_row_num) * candidate_col_num;
       if (max_cut_num < candidate_cut_num) {
         max_cut_num = candidate_cut_num;
         result.cut_row_num = candidate_row_num;
         result.cut_col_num = candidate_col_num;
-        result.bottom_enclosure_x = bottom_enclosure_x;
-        result.bottom_enclosure_y = bottom_enclosure_y;
-        result.top_enclosure_x = top_enclosure_x;
-        result.top_enclosure_y = top_enclosure_y;
+        result.bottom_enclosure_x = candidate_bottom_x;
+        result.bottom_enclosure_y = candidate_bottom_y;
+        result.top_enclosure_x = candidate_top_x;
+        result.top_enclosure_y = candidate_top_y;
       }
     }
   }
   return result;
+}
+
+bool FPInterface::adjustIDBViaEnclosureArea(idb::IdbLayerRouting* idb_layer, int32_t cut_width, int32_t cut_height, PGSegment& pg_segment,
+                                          int32_t& enclosure_x, int32_t& enclosure_y)
+{
+  int32_t min_area = idb_layer->get_area();
+  if (min_area <= 0 || (cut_width + 2.0 * enclosure_x) * (cut_height + 2.0 * enclosure_y) >= min_area) {
+    return true;
+  }
+
+  int32_t grid = std::max(dmInst->get_idb_layout()->get_munufacture_grid(), 1);
+  int32_t max_enclosure_x = FPUTIL.alignDown((pg_segment.get_via_width() - cut_width) / 2, grid);
+  int32_t max_enclosure_y = FPUTIL.alignDown((pg_segment.get_via_height() - cut_height) / 2, grid);
+  if (max_enclosure_x < enclosure_x || max_enclosure_y < enclosure_y) {
+    return false;
+  }
+
+  // 中间层可能没有同网导线补足面积，仅在原 via 范围内沿两轴尝试扩展，不加宽 rail。
+  double best_area = 0.0;
+  int32_t best_growth = 0;
+  int32_t best_x = enclosure_x;
+  int32_t best_y = enclosure_y;
+  for (int32_t swap_axis = 0; swap_axis < 2; swap_axis++) {
+    int32_t first_cut = swap_axis == 0 ? cut_width : cut_height;
+    int32_t second_cut = swap_axis == 0 ? cut_height : cut_width;
+    int32_t first_enclosure = swap_axis == 0 ? enclosure_x : enclosure_y;
+    int32_t second_enclosure = swap_axis == 0 ? enclosure_y : enclosure_x;
+    int32_t first_limit = swap_axis == 0 ? max_enclosure_x : max_enclosure_y;
+    int32_t second_limit = swap_axis == 0 ? max_enclosure_y : max_enclosure_x;
+    int32_t second_span = second_cut + 2 * second_enclosure;
+    int32_t required_first = min_area / second_span + (min_area % second_span != 0);
+    first_enclosure = std::min(first_limit, std::max(first_enclosure, FPUTIL.alignUp((required_first - first_cut + 1) / 2, grid)));
+    int32_t first_span = first_cut + 2 * first_enclosure;
+    int32_t required_second = min_area / first_span + (min_area % first_span != 0);
+    second_enclosure = std::max(second_enclosure, FPUTIL.alignUp((required_second - second_cut + 1) / 2, grid));
+    if (second_limit < second_enclosure) {
+      continue;
+    }
+    double area = first_span * (second_cut + 2.0 * second_enclosure);
+    int32_t growth = first_enclosure + second_enclosure - enclosure_x - enclosure_y;
+    if (area < min_area || (best_area > 0.0 && (best_growth < growth || (best_growth == growth && best_area <= area)))) {
+      continue;
+    }
+    best_area = area;
+    best_growth = growth;
+    best_x = swap_axis == 0 ? first_enclosure : second_enclosure;
+    best_y = swap_axis == 0 ? second_enclosure : first_enclosure;
+  }
+  if (best_area == 0.0) {
+    return false;
+  }
+  enclosure_x = best_x;
+  enclosure_y = best_y;
+  return true;
 }
 
 void FPInterface::adjustLineSegmentListByViaEnclosure(

@@ -839,6 +839,99 @@ bool testConfiguredRailWidth(const std::string& directory)
   return passed;
 }
 
+bool testViaMinimumArea(const std::string& directory)
+{
+  idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
+  idb::IdbDefService* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+  initFixture(directory);
+  lef.get_layout()->get_units()->set_microns_dbu(1000);
+  def.get_design()->get_units()->set_microns_dbu(1000);
+  lef.get_layout()->get_die()->add_point(0, 0);
+  lef.get_layout()->get_die()->add_point(10000, 10000);
+  def.get_design()->set_design_name("via_min_area");
+  for (int32_t layer_idx = 1; layer_idx < 4; layer_idx++) {
+    addIDBViaRule(lef, "MET" + std::to_string(layer_idx), "VIA" + std::to_string(layer_idx), "MET" + std::to_string(layer_idx + 1));
+    idb::IdbLayerCut* cut = dynamic_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("VIA" + std::to_string(layer_idx)));
+    cut->get_via_rule()->get_enclosure_bottom()->set_overhang_2(5);
+    cut->get_via_rule()->get_enclosure_top()->set_overhang_2(5);
+    cut->get_via_rule()->get_layer_bottom()->set_area(52000);
+    cut->get_via_rule()->get_layer_top()->set_area(52000);
+  }
+
+  bool passed = true;
+  idb::IdbLayerCut* cut = dynamic_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("VIA2"));
+  for (int32_t grid : {1, 5}) {
+    lef.get_layout()->set_manufacture_grid(grid);
+    for (bool rotate : {false, true}) {
+      PGSegment segment;
+      segment.set_bottom_layer_name("MET1");
+      segment.set_top_layer_name("MET4");
+      segment.set_via_width(rotate ? 160 : 400);
+      segment.set_via_height(rotate ? 400 : 160);
+      PGViaGeometry geometry = FPI.getIDBViaGeometry(cut, segment);
+      int32_t width = 90 + (geometry.cut_col_num - 1) * 200 + 2 * geometry.bottom_enclosure_x;
+      int32_t height = 90 + (geometry.cut_row_num - 1) * 200 + 2 * geometry.bottom_enclosure_y;
+      passed = check(geometry.cut_row_num * geometry.cut_col_num == 2, "Area repair must preserve the narrow two-cut array") && passed;
+      passed = check(width * height >= 52000 && width <= segment.get_via_width() && height <= segment.get_via_height(),
+                     "Via metal must meet AREA without leaving the original footprint") && passed;
+      passed = check(geometry.bottom_enclosure_x % grid == 0 && geometry.bottom_enclosure_y % grid == 0,
+                     "Enclosure growth must use the manufacturing grid") && passed;
+      passed = check((rotate ? width : height) == (grid == 1 ? 142 : 150), "Only the deficient pad dimension should grow") && passed;
+      passed = check(geometry.top_enclosure_x == geometry.bottom_enclosure_x && geometry.top_enclosure_y == geometry.bottom_enclosure_y,
+                     "Both via pads must meet the same fixture area rule") && passed;
+    }
+  }
+  lef.get_layout()->set_manufacture_grid(1);
+  PGSegment narrow;
+  narrow.set_bottom_layer_name("MET1");
+  narrow.set_top_layer_name("MET4");
+  narrow.set_via_width(400);
+  narrow.set_via_height(100);
+  passed = check(FPI.getPGViaStack(narrow).empty(), "An infeasible pad must not produce an undersized via stack") && passed;
+  narrow.set_via_height(160);
+  passed = check(FPI.getPGViaStack(narrow).size() == 3, "Area repair must retain all three vias in the rail-to-stripe stack") && passed;
+  for (InstancePinShape& shape : FPI.getPGViaShapes(narrow)) {
+    passed = check(shape.get_width() * shape.get_height() >= 52000 && shape.get_width() <= 400 && shape.get_height() <= 160,
+                   "Cached/exported shapes must use the repaired area and stay inside the footprint") && passed;
+  }
+  narrow.set_via_width(1000);
+  PGViaGeometry wide = FPI.getIDBViaGeometry(cut, narrow);
+  passed = check(wide.cut_row_num == 1 && wide.cut_col_num == 5 && wide.bottom_enclosure_x == 40 && wide.bottom_enclosure_y == 5
+                     && wide.top_enclosure_x == 40 && wide.top_enclosure_y == 5,
+                 "Existing legal wide vias must remain unchanged") && passed;
+
+  int32_t enclosure_x = 40;
+  int32_t enclosure_y = 5;
+  narrow.set_via_width(200);
+  narrow.set_via_height(300);
+  passed = check(FPI.adjustIDBViaEnclosureArea(cut->get_via_rule()->get_layer_bottom(), 90, 90, narrow, enclosure_x, enclosure_y)
+                     && (90 + 2 * enclosure_x) * (90 + 2 * enclosure_y) >= 52000 && 90 + 2 * enclosure_x <= 200 && 90 + 2 * enclosure_y <= 300,
+                 "Repair may use both axes when neither one-axis extension fits") && passed;
+
+  std::string path = directory + "/via_area.def";
+  idb::DefWrite writer(&def);
+  passed = check(writer.writeDb(path.c_str()), "Via area fixture must export to DEF") && passed;
+  idb::IdbDefService reloaded(lef.get_layout());
+  idb::DefRead reader(&reloaded);
+  passed = check(reader.createDb(path.c_str()), "Via area fixture must read back from DEF") && passed;
+  idb::IdbVia* via = reloaded.get_design()->get_via_list()->find_via("VIA2_400x160");
+  passed = check(via != nullptr, "DEF round-trip must retain the repaired via") && passed;
+  if (via != nullptr) {
+    idb::IdbRect rect = via->get_bottom_layer_shape().get_bounding_box();
+    passed = check(rect.get_width() == 370 && rect.get_height() == 142, "DEF round-trip must preserve repaired enclosure dimensions") && passed;
+  }
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
 bool testTechnologyEdgeStripe(const std::string& directory)
 {
   idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
@@ -900,6 +993,7 @@ int main(int argc, char* argv[])
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
   passed = ifp::testConfiguredRailWidth(directory) && passed;
+  passed = ifp::testViaMinimumArea(directory) && passed;
   passed = ifp::testTechnologyEdgeStripe(directory) && passed;
   ifp::PDNGenerator::destroyInst();
   ifp::DataManager::destroyInst();
