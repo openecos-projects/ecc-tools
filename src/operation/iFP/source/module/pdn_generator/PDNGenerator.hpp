@@ -25,6 +25,7 @@
 #include "PGConnectivity.hpp"
 #include "PGModel.hpp"
 #include "PGNet.hpp"
+#include "PGRepairGroup.hpp"
 #include "PGSegment.hpp"
 #include "PlanarCoord.hpp"
 #include "PlanarRect.hpp"
@@ -56,6 +57,9 @@ class PDNGenerator
   // function
 
   void generatePDN(PGModel& pg_model);
+  void pruneDeadEndStripes();
+  void trimStripeEnds();
+  void trimDanglingFollowPins();
 
   void buildPGNet(PGModel& pg_model);
   void resolveIOCoreConnectDefaults(PGModel& pg_model);
@@ -64,6 +68,7 @@ class PDNGenerator
   void buildRail(PGModel& pg_model);
   void mergeRailSegmentList();
   void mergeIoWireSegmentList();
+  void mergeOverlappingViaStacks();
   RoutingLayer* findRoutingLayer(std::string layer_name);
   void addLineSegment(std::string net_name, std::string layer_name, PGSegmentType segment_type, int32_t width, int32_t start_x, int32_t start_y, int32_t end_x,
                       int32_t end_y);
@@ -75,7 +80,6 @@ class PDNGenerator
 
   void buildStripe(PGModel& pg_model);
   void addUncoveredEdgeStripes(PGModel& pg_model);
-  void buildRing(PGModel& pg_model);
   void alignStripeSegmentList();
   void alignStripeSegment(PGSegment& stripe_segment);
   int32_t getClosestRailEdgeCoord(PGSegment& stripe_segment, Instance& instance, bool high_side);
@@ -83,26 +87,33 @@ class PDNGenerator
   void extendStripeToRail(PGSegment& stripe_segment);
   PlanarRect getOverlapRect(PlanarRect first_rect, PlanarRect second_rect);
   void initPowerLayerPair(PGModel& pg_model);
+  void buildRing(PGModel& pg_model);
   void buildLayerConnect(PGModel& pg_model);
   bool addViaSegment(PGModel& pg_model, std::string net_name, std::string bottom_layer_name, std::string top_layer_name, std::string cut_layer_name, int32_t x,
                      int32_t y, int32_t width, int32_t height);
 
   void buildIOCoreConnect(PGModel& pg_model);
   void buildMacroConnect(PGModel& pg_model);
-  void mergeOverlappingViaStacks();
-  void pruneDeadEndStripes();
-  void trimStripeEnds();
-  void trimDanglingFollowPins();
 
   void repairPGConnectivity(PGModel& pg_model);
-  std::vector<const PGSegment*> getIsolatedRailList(const std::string& net_name);
-  bool isRailConnectedToStripe(const PGSegment& rail);
-  bool isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const;
   std::string getRepairStripeLayerName();
   std::string getRepairTopLayerName(const std::string& repair_layer_name);
+  bool isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const;
   int32_t getRepairStripeWidth(const std::string& layer_name);
+  std::vector<PGRepairGroup> buildRepairGroupList(int32_t repair_width);
+  std::vector<const PGSegment*> getIsolatedRailList(const std::string& net_name);
+  bool isRailConnectedToStripe(const PGSegment& rail);
+  void buildRepairCandidateList(PGRepairGroup& group, const std::string& repair_layer_name, const std::string& top_layer_name, int32_t repair_width,
+                                const std::vector<int32_t>& inherited_x_list = {});
+  std::vector<int32_t> getRepairTopStripeYList(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2);
   bool isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1, int32_t y2);
-  bool findRepairTopStripeY(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2, int32_t& top_y);
+  std::vector<std::vector<int32_t>> buildRepairComponentList(const std::vector<PGRepairGroup>& group_list, int32_t spacing);
+  bool isRepairRectConflict(const PlanarRect& first, const PlanarRect& second, int32_t spacing);
+  bool selectRepairCandidateList(std::vector<PGRepairGroup>& group_list, const std::vector<int32_t>& group_idx_list, int32_t spacing);
+  bool isRepairCandidateCompatible(const PGSegment& candidate, const std::vector<PGRepairGroup>& group_list,
+                                   const std::vector<int32_t>& group_idx_list, int32_t spacing);
+  void splitRepairGroupList(std::vector<PGRepairGroup>& group_list, const std::set<int32_t>& split_group_idx_set,
+                            const std::string& repair_layer_name, const std::string& top_layer_name, int32_t repair_width);
   void validatePGConnectivity(PGModel& pg_model);
   PGConnectivity buildPGConnectivity();
 

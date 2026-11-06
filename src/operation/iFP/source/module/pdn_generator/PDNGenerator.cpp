@@ -4001,58 +4001,53 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
 
 #if 1  // output
 
-
-bool PDNGenerator::isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const
+void PDNGenerator::repairPGConnectivity(PGModel& pg_model)
 {
-  for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
-    if ((layer_pair.get_first_layer_name() == first_layer_name && layer_pair.get_second_layer_name() == second_layer_name)
-        || (layer_pair.get_first_layer_name() == second_layer_name && layer_pair.get_second_layer_name() == first_layer_name)) {
-      return true;
-    }
+  std::string repair_layer_name = getRepairStripeLayerName();
+  std::string top_layer_name = getRepairTopLayerName(repair_layer_name);
+  int32_t repair_width = getRepairStripeWidth(repair_layer_name);
+  RoutingLayer* repair_layer = findRoutingLayer(repair_layer_name);
+  if (repair_layer_name.empty() || top_layer_name.empty() || repair_width <= 0 || repair_layer == nullptr) {
+    return;
   }
-  return false;
-}
 
-bool PDNGenerator::isRailConnectedToStripe(const PGSegment& rail)
-{
-  if (!rail.is_line()) {
-    return true;
+  std::vector<PGRepairGroup> group_list = buildRepairGroupList(repair_width);
+  for (PGRepairGroup& group : group_list) {
+    buildRepairCandidateList(group, repair_layer_name, top_layer_name, repair_width);
   }
-  PlanarRect rail_rect = wireRect(rail);
-  for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
-    std::string stripe_layer_name;
-    if (layer_pair.get_first_layer_name() == rail.get_layer_name()) {
-      stripe_layer_name = layer_pair.get_second_layer_name();
-    } else if (layer_pair.get_second_layer_name() == rail.get_layer_name()) {
-      stripe_layer_name = layer_pair.get_first_layer_name();
-    } else {
-      continue;
+  int32_t spacing = std::max(0, repair_layer->get_spacing());
+  // Plan competing nets together before publishing any new stripe.
+  while (true) {
+    for (PGRepairGroup& group : group_list) {
+      group.set_selected_idx(-1);
     }
-    for (const PGSegment& stripe : FPDM.getDatabase().get_pg_segment_list()) {
-      if (!stripe.is_line() || stripe.get_net_name() != rail.get_net_name() || stripe.get_layer_name() != stripe_layer_name) {
-        continue;
-      }
-      PlanarRect overlap_rect = getOverlapRect(rail_rect, wireRect(stripe));
-      if (overlap_rect.get_width() > 0 && overlap_rect.get_height() > 0) {
-        return true;
+    std::set<int32_t> split_group_idx_set;
+    for (const std::vector<int32_t>& group_idx_list : buildRepairComponentList(group_list, spacing)) {
+      if (!selectRepairCandidateList(group_list, group_idx_list, spacing)) {
+        for (int32_t group_idx : group_idx_list) {
+          if (group_list[group_idx].get_rail_rect_list().size() > 1) {
+            split_group_idx_set.insert(group_idx);
+          }
+        }
       }
     }
+    if (split_group_idx_set.empty()) {
+      break;
+    }
+    // A shared corridor is only an optimization; individual rails may need different repair positions.
+    splitRepairGroupList(group_list, split_group_idx_set, repair_layer_name, top_layer_name, repair_width);
   }
-  return false;
-}
-
-std::vector<const PGSegment*> PDNGenerator::getIsolatedRailList(const std::string& net_name)
-{
-  std::vector<const PGSegment*> isolated_rail_list;
-  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
-    if (pg_segment.get_type() != PGSegmentType::kFollowPin || pg_segment.get_net_name() != net_name) {
+  for (PGRepairGroup& group : group_list) {
+    if (group.get_selected_idx() < 0) {
+      FPLOG.warn(Loc::current(), "Failed to jointly repair isolated PDN rails for net '", group.get_net_name(), "' at x=[",
+                 group.get_rail_rect().get_ll_x(), ", ", group.get_rail_rect().get_ur_x(), "].");
       continue;
     }
-    if (!isRailConnectedToStripe(pg_segment)) {
-      isolated_rail_list.push_back(&pg_segment);
-    }
+    PGSegment& candidate = group.get_candidate_list()[group.get_selected_idx()];
+    addUnblockedLineSegment(candidate.get_net_name(), candidate.get_layer_name(), candidate.get_type(), candidate.get_width(),
+                            candidate.get_start_x(), candidate.get_start_y(), candidate.get_end_x(), candidate.get_end_y());
   }
-  return isolated_rail_list;
+  buildLayerConnect(pg_model);
 }
 
 std::string PDNGenerator::getRepairStripeLayerName()
@@ -4120,6 +4115,17 @@ std::string PDNGenerator::getRepairTopLayerName(const std::string& repair_layer_
   return top_layer_name;
 }
 
+bool PDNGenerator::isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const
+{
+  for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+    if ((layer_pair.get_first_layer_name() == first_layer_name && layer_pair.get_second_layer_name() == second_layer_name)
+        || (layer_pair.get_first_layer_name() == second_layer_name && layer_pair.get_second_layer_name() == first_layer_name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 int32_t PDNGenerator::getRepairStripeWidth(const std::string& layer_name)
 {
   int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
@@ -4136,7 +4142,241 @@ int32_t PDNGenerator::getRepairStripeWidth(const std::string& layer_name)
   return routing_layer == nullptr ? 0 : std::max(routing_layer->get_min_width(), 1);
 }
 
-bool PDNGenerator::isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1, int32_t y2)
+std::vector<PGRepairGroup> PDNGenerator::buildRepairGroupList(int32_t repair_width)
+{
+  Database& database = FPDM.getDatabase();
+  int32_t max_group_gap = 20 * std::max(1, database.get_micron_dbu());
+  std::string repair_layer_name = getRepairStripeLayerName();
+  std::vector<PGRepairGroup> group_list;
+  for (PGNet& pg_net : database.get_pg_net_list()) {
+    std::vector<const PGSegment*> isolated_rail_list = getIsolatedRailList(pg_net.get_name());
+    if (isolated_rail_list.empty()) {
+      continue;
+    }
+    if (!isLayerPairConfigured(isolated_rail_list.front()->get_layer_name(), repair_layer_name)) {
+      continue;
+    }
+
+    std::sort(isolated_rail_list.begin(), isolated_rail_list.end(), [](const PGSegment* first, const PGSegment* second) {
+      if (first->get_ll_x() != second->get_ll_x()) {
+        return first->get_ll_x() < second->get_ll_x();
+      }
+      return first->get_ll_y() < second->get_ll_y();
+    });
+
+    std::vector<PGRepairGroup> net_group_list;
+    for (const PGSegment* rail : isolated_rail_list) {
+      PlanarRect rail_rect = wireRect(*rail);
+      bool merged = false;
+      for (PGRepairGroup& group : net_group_list) {
+        PlanarRect& group_rect = group.get_rail_rect();
+        int32_t ll_x = std::max(group_rect.get_ll_x(), rail_rect.get_ll_x());
+        int32_t ur_x = std::min(group_rect.get_ur_x(), rail_rect.get_ur_x());
+        if (ur_x - ll_x >= repair_width && rail_rect.get_ll_y() <= group_rect.get_ur_y() + max_group_gap
+            && group_rect.get_ll_y() <= rail_rect.get_ur_y() + max_group_gap) {
+          // A straight repair must fit every rail, not just their bounding union.
+          group.set_rail_rect(PlanarRect(ll_x, std::min(group_rect.get_ll_y(), rail_rect.get_ll_y()), ur_x,
+                                        std::max(group_rect.get_ur_y(), rail_rect.get_ur_y())));
+          group.get_rail_rect_list().push_back(rail_rect);
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        PGRepairGroup group;
+        group.set_net_name(pg_net.get_name());
+        group.set_rail_rect(rail_rect);
+        group.get_rail_rect_list().push_back(rail_rect);
+        net_group_list.push_back(group);
+      }
+    }
+    group_list.insert(group_list.end(), net_group_list.begin(), net_group_list.end());
+  }
+  std::sort(group_list.begin(), group_list.end(), [](const PGRepairGroup& first, const PGRepairGroup& second) {
+    if (first.get_net_name() != second.get_net_name()) {
+      return first.get_net_name() < second.get_net_name();
+    }
+    if (first.get_rail_rect().get_ll_x() != second.get_rail_rect().get_ll_x()) {
+      return first.get_rail_rect().get_ll_x() < second.get_rail_rect().get_ll_x();
+    }
+    return first.get_rail_rect().get_ll_y() < second.get_rail_rect().get_ll_y();
+  });
+  return group_list;
+}
+
+std::vector<const PGSegment*> PDNGenerator::getIsolatedRailList(const std::string& net_name)
+{
+  std::vector<const PGSegment*> isolated_rail_list;
+  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (pg_segment.get_type() != PGSegmentType::kFollowPin || pg_segment.get_net_name() != net_name) {
+      continue;
+    }
+    if (!isRailConnectedToStripe(pg_segment)) {
+      isolated_rail_list.push_back(&pg_segment);
+    }
+  }
+  return isolated_rail_list;
+}
+
+bool PDNGenerator::isRailConnectedToStripe(const PGSegment& rail)
+{
+  if (!rail.is_line()) {
+    return true;
+  }
+  PlanarRect rail_rect = wireRect(rail);
+  for (const PGLayerPair& layer_pair : FPDM.getConfig().pg_layer_pair_list) {
+    std::string stripe_layer_name;
+    if (layer_pair.get_first_layer_name() == rail.get_layer_name()) {
+      stripe_layer_name = layer_pair.get_second_layer_name();
+    } else if (layer_pair.get_second_layer_name() == rail.get_layer_name()) {
+      stripe_layer_name = layer_pair.get_first_layer_name();
+    } else {
+      continue;
+    }
+    for (const PGSegment& stripe : FPDM.getDatabase().get_pg_segment_list()) {
+      if (!stripe.is_line() || stripe.get_net_name() != rail.get_net_name() || stripe.get_layer_name() != stripe_layer_name) {
+        continue;
+      }
+      PlanarRect overlap_rect = getOverlapRect(rail_rect, wireRect(stripe));
+      if (overlap_rect.get_width() > 0 && overlap_rect.get_height() > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void PDNGenerator::buildRepairCandidateList(PGRepairGroup& group, const std::string& repair_layer_name, const std::string& top_layer_name,
+                                           int32_t repair_width, const std::vector<int32_t>& inherited_x_list)
+{
+  Database& database = FPDM.getDatabase();
+  RoutingLayer& layer = *findRoutingLayer(repair_layer_name);
+  PlanarRect& rail_rect = group.get_rail_rect();
+  group.get_candidate_list().clear();
+  int32_t grid = std::max(1, database.get_manufacture_grid());
+  int32_t min_x = FPUTIL.alignUp(rail_rect.get_ll_x() + repair_width / 2, grid);
+  int32_t max_x = FPUTIL.alignDown(rail_rect.get_ur_x() - repair_width / 2, grid);
+  if (min_x > max_x) {
+    return;
+  }
+
+  int32_t center_x = FPUTIL.alignDown((min_x + max_x) / 2, grid);
+  int32_t step = FPUTIL.alignUp(repair_width + std::max(0, layer.get_spacing()), grid);
+  std::vector<int32_t> x_list{center_x, min_x, max_x};
+  for (int32_t x : inherited_x_list) {
+    if (min_x <= x && x <= max_x && x % grid == 0) {
+      x_list.push_back(x);
+    }
+  }
+  for (int32_t offset = 0; offset <= max_x - min_x; offset += step) {
+    x_list.push_back(min_x + offset);
+    x_list.push_back(max_x - offset);
+  }
+  // Include clearance boundaries so narrow legal slots do not depend on the sampling pitch.
+  for (const PGSegment& segment : database.get_pg_segment_list()) {
+    if (!segment.is_line() || segment.get_layer_name() != repair_layer_name || segment.get_net_name() == group.get_net_name()) {
+      continue;
+    }
+    PlanarRect rect = wireRect(segment);
+    int32_t left_x = FPUTIL.alignDown(rect.get_ll_x() - std::max(0, layer.get_spacing()) - repair_width / 2, grid);
+    int32_t right_x = FPUTIL.alignUp(rect.get_ur_x() + std::max(0, layer.get_spacing()) + repair_width / 2, grid);
+    if (min_x <= left_x && left_x <= max_x) {
+      x_list.push_back(left_x);
+    }
+    if (min_x <= right_x && right_x <= max_x) {
+      x_list.push_back(right_x);
+    }
+  }
+  for (int32_t x = min_x; x <= max_x; x += FPUTIL.alignUp(repair_width, grid)) {
+    x_list.push_back(x);
+  }
+  int32_t track_pitch = layer.get_prefer_track_pitch();
+  if (track_pitch > 0) {
+    int32_t start_x = layer.get_prefer_track_offset() + FPUTIL.alignUp(min_x - layer.get_prefer_track_offset(), track_pitch);
+    for (int32_t x = start_x; x <= max_x; x += track_pitch) {
+      if (x % grid == 0) {
+        x_list.push_back(x);
+      }
+    }
+  }
+  std::sort(x_list.begin(), x_list.end(), [center_x](int32_t first, int32_t second) {
+    if (std::abs(first - center_x) != std::abs(second - center_x)) {
+      return std::abs(first - center_x) < std::abs(second - center_x);
+    }
+    return first < second;
+  });
+  x_list.erase(std::unique(x_list.begin(), x_list.end()), x_list.end());
+
+  for (int32_t x : x_list) {
+    for (int32_t top_y : getRepairTopStripeYList(group.get_net_name(), top_layer_name, x, rail_rect.get_ll_y(), rail_rect.get_ur_y())) {
+      int32_t top_half_width = getRepairStripeWidth(top_layer_name) / 2;
+      int32_t y1 = std::min(rail_rect.get_ll_y(), top_y - top_half_width);
+      int32_t y2 = std::max(rail_rect.get_ur_y(), top_y + top_half_width);
+      if (!isRepairSegmentLegal(group.get_net_name(), repair_layer_name, repair_width, x, y1, y2)) {
+        continue;
+      }
+      PGSegment candidate;
+      candidate.set_net_name(group.get_net_name());
+      candidate.set_layer_name(repair_layer_name);
+      candidate.set_type(PGSegmentType::kStripe);
+      candidate.set_width(repair_width);
+      candidate.set_start_coord(x, y1);
+      candidate.set_end_coord(x, y2);
+      bool contained = false;
+      for (const PGSegment& existing : group.get_candidate_list()) {
+        if (existing.get_start_x() == x && y1 <= existing.get_start_y() && existing.get_end_y() <= y2) {
+          contained = true;
+          break;
+        }
+      }
+      if (contained) {
+        continue;
+      }
+      for (auto candidate_iter = group.get_candidate_list().begin(); candidate_iter != group.get_candidate_list().end();) {
+        if (candidate_iter->get_start_x() == x && candidate_iter->get_start_y() <= y1 && y2 <= candidate_iter->get_end_y()) {
+          candidate_iter = group.get_candidate_list().erase(candidate_iter);
+        } else {
+          candidate_iter++;
+        }
+      }
+      group.get_candidate_list().push_back(candidate);
+    }
+  }
+}
+
+std::vector<int32_t> PDNGenerator::getRepairTopStripeYList(const std::string& net_name, const std::string& top_layer_name, int32_t x,
+                                                        int32_t y1, int32_t y2)
+{
+  int32_t center_y = (y1 + y2) / 2;
+  std::vector<std::pair<int32_t, int32_t>> candidate_list;
+  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (pg_segment.get_type() != PGSegmentType::kStripe || pg_segment.get_net_name() != net_name || pg_segment.get_layer_name() != top_layer_name
+        || !pg_segment.is_horizontal()) {
+      continue;
+    }
+    PlanarRect stripe_rect = wireRect(pg_segment);
+    if (stripe_rect.get_ll_x() > x || x > stripe_rect.get_ur_x()) {
+      continue;
+    }
+    candidate_list.emplace_back(pg_segment.get_start_y(), std::abs(pg_segment.get_start_y() - center_y));
+  }
+  std::sort(candidate_list.begin(), candidate_list.end(), [](const auto& first, const auto& second) {
+    if (first.second != second.second) {
+      return first.second < second.second;
+    }
+    return first.first < second.first;
+  });
+  std::vector<int32_t> y_list;
+  for (const auto& [y, distance] : candidate_list) {
+    if (y_list.empty() || y_list.back() != y) {
+      y_list.push_back(y);
+    }
+  }
+  return y_list;
+}
+
+bool PDNGenerator::isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1,
+                                       int32_t y2)
 {
   if (y1 == y2 || width <= 0) {
     return false;
@@ -4160,160 +4400,119 @@ bool PDNGenerator::isRepairSegmentLegal(const std::string& net_name, const std::
   return true;
 }
 
-bool PDNGenerator::findRepairTopStripeY(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2, int32_t& top_y)
+std::vector<std::vector<int32_t>> PDNGenerator::buildRepairComponentList(const std::vector<PGRepairGroup>& group_list, int32_t spacing)
 {
-  int32_t center_y = (y1 + y2) / 2;
-  std::vector<std::pair<int32_t, int32_t>> candidate_list;
-  for (const PGSegment& pg_segment : FPDM.getDatabase().get_pg_segment_list()) {
-    if (pg_segment.get_type() != PGSegmentType::kStripe || pg_segment.get_net_name() != net_name || pg_segment.get_layer_name() != top_layer_name
-        || !pg_segment.is_horizontal()) {
+  PGConnectivity connectivity(static_cast<int32_t>(group_list.size()));
+  std::vector<PlanarRect> bounds;
+  for (const PGRepairGroup& group : group_list) {
+    PlanarRect rect = group.get_rail_rect();
+    for (const PGSegment& candidate : group.get_candidate_list()) {
+      rect.set_rect(std::min(rect.get_ll_x(), candidate.get_ll_x()), std::min(rect.get_ll_y(), candidate.get_ll_y()),
+                    std::max(rect.get_ur_x(), candidate.get_ur_x()), std::max(rect.get_ur_y(), candidate.get_ur_y()));
+    }
+    bounds.push_back(rect);
+  }
+  for (int32_t first = 0; first < static_cast<int32_t>(group_list.size()); first++) {
+    for (int32_t second = first + 1; second < static_cast<int32_t>(group_list.size()); second++) {
+      if (group_list[first].get_net_name() != group_list[second].get_net_name() && isRepairRectConflict(bounds[first], bounds[second], spacing)) {
+        connectivity.connect(first, second);
+      }
+    }
+  }
+  std::map<int32_t, std::vector<int32_t>> component_map;
+  for (int32_t idx = 0; idx < static_cast<int32_t>(group_list.size()); idx++) {
+    component_map[connectivity.getRoot(idx)].push_back(idx);
+  }
+  std::vector<std::vector<int32_t>> component_list;
+  for (auto& [root, group_idx_list] : component_map) {
+    component_list.push_back(std::move(group_idx_list));
+  }
+  return component_list;
+}
+
+bool PDNGenerator::isRepairRectConflict(const PlanarRect& first, const PlanarRect& second, int32_t spacing)
+{
+  return first.get_ll_x() < second.get_ur_x() + spacing && second.get_ll_x() < first.get_ur_x() + spacing
+         && first.get_ll_y() < second.get_ur_y() + spacing && second.get_ll_y() < first.get_ur_y() + spacing;
+}
+
+bool PDNGenerator::selectRepairCandidateList(std::vector<PGRepairGroup>& group_list, const std::vector<int32_t>& group_idx_list, int32_t spacing)
+{
+  int32_t next_idx = -1;
+  std::vector<int32_t> next_candidate_list;
+  // Forward checking avoids committing a stripe that leaves another net no legal candidate.
+  for (int32_t group_idx : group_idx_list) {
+    PGRepairGroup& group = group_list[group_idx];
+    if (group.get_selected_idx() >= 0) {
       continue;
     }
-    PlanarRect stripe_rect = wireRect(pg_segment);
-    if (stripe_rect.get_ll_x() > x || x > stripe_rect.get_ur_x()) {
+    std::vector<int32_t> candidate_list;
+    for (int32_t idx = 0; idx < static_cast<int32_t>(group.get_candidate_list().size()); idx++) {
+      if (isRepairCandidateCompatible(group.get_candidate_list()[idx], group_list, group_idx_list, spacing)) {
+        candidate_list.push_back(idx);
+      }
+    }
+    if (candidate_list.empty()) {
+      return false;
+    }
+    if (next_idx < 0 || candidate_list.size() < next_candidate_list.size()) {
+      next_idx = group_idx;
+      next_candidate_list = std::move(candidate_list);
+    }
+  }
+  if (next_idx < 0) {
+    return true;
+  }
+  PGRepairGroup& next = group_list[next_idx];
+  for (int32_t candidate_idx : next_candidate_list) {
+    next.set_selected_idx(candidate_idx);
+    if (selectRepairCandidateList(group_list, group_idx_list, spacing)) {
+      return true;
+    }
+    next.set_selected_idx(-1);
+  }
+  return false;
+}
+
+bool PDNGenerator::isRepairCandidateCompatible(const PGSegment& candidate, const std::vector<PGRepairGroup>& group_list,
+                                              const std::vector<int32_t>& group_idx_list, int32_t spacing)
+{
+  for (int32_t group_idx : group_idx_list) {
+    const PGRepairGroup& group = group_list[group_idx];
+    if (group.get_selected_idx() < 0 || group.get_net_name() == candidate.get_net_name()) {
       continue;
     }
-    candidate_list.emplace_back(pg_segment.get_start_y(), std::abs(pg_segment.get_start_y() - center_y));
-  }
-  std::sort(candidate_list.begin(), candidate_list.end(), [](const auto& first, const auto& second) {
-    if (first.second != second.second) {
-      return first.second < second.second;
+    if (isRepairRectConflict(wireRect(candidate), wireRect(group.get_candidate_list()[group.get_selected_idx()]), spacing)) {
+      return false;
     }
-    return first.first < second.first;
-  });
-  if (candidate_list.empty()) {
-    return false;
   }
-  top_y = candidate_list.front().first;
   return true;
 }
 
-void PDNGenerator::repairPGConnectivity(PGModel& pg_model)
+void PDNGenerator::splitRepairGroupList(std::vector<PGRepairGroup>& group_list, const std::set<int32_t>& split_group_idx_set,
+                                      const std::string& repair_layer_name, const std::string& top_layer_name, int32_t repair_width)
 {
-  const std::string repair_layer_name = getRepairStripeLayerName();
-  const std::string top_layer_name = getRepairTopLayerName(repair_layer_name);
-  const int32_t repair_width = getRepairStripeWidth(repair_layer_name);
-  RoutingLayer* repair_layer = findRoutingLayer(repair_layer_name);
-  if (repair_layer_name.empty() || top_layer_name.empty() || repair_width <= 0 || repair_layer == nullptr) {
-    return;
-  }
-
-  struct RailGroup
-  {
-    int32_t ll_x = 0;
-    int32_t ur_x = 0;
-    int32_t ll_y = 0;
-    int32_t ur_y = 0;
-  };
-
-  Database& database = FPDM.getDatabase();
-  int32_t max_group_gap = 20 * std::max(1, database.get_micron_dbu());
-  int32_t track_pitch = repair_layer->get_prefer_track_pitch();
-  int32_t track_offset = repair_layer->get_prefer_track_offset();
-
-  for (PGNet& pg_net : database.get_pg_net_list()) {
-    std::vector<const PGSegment*> isolated_rail_list = getIsolatedRailList(pg_net.get_name());
-    if (isolated_rail_list.empty()) {
+  std::vector<PGRepairGroup> split_group_list;
+  for (int32_t group_idx = 0; group_idx < static_cast<int32_t>(group_list.size()); group_idx++) {
+    PGRepairGroup& group = group_list[group_idx];
+    if (!split_group_idx_set.contains(group_idx)) {
+      split_group_list.push_back(std::move(group));
       continue;
     }
-    if (!isLayerPairConfigured(isolated_rail_list.front()->get_layer_name(), repair_layer_name)) {
-      continue;
+    std::vector<int32_t> inherited_x_list;
+    for (const PGSegment& candidate : group.get_candidate_list()) {
+      inherited_x_list.push_back(candidate.get_start_x());
     }
-
-    std::sort(isolated_rail_list.begin(), isolated_rail_list.end(), [](const PGSegment* first, const PGSegment* second) {
-      if (first->get_ll_x() != second->get_ll_x()) {
-        return first->get_ll_x() < second->get_ll_x();
-      }
-      return first->get_ll_y() < second->get_ll_y();
-    });
-
-    std::vector<RailGroup> rail_group_list;
-    for (const PGSegment* rail : isolated_rail_list) {
-      PlanarRect rail_rect = wireRect(*rail);
-      bool merged = false;
-      for (RailGroup& rail_group : rail_group_list) {
-        if (rail_rect.get_ll_x() <= rail_group.ur_x && rail_group.ll_x <= rail_rect.get_ur_x()
-            && rail_rect.get_ll_y() <= rail_group.ur_y + max_group_gap && rail_group.ll_y <= rail_rect.get_ur_y() + max_group_gap) {
-          rail_group.ll_x = std::min(rail_group.ll_x, rail_rect.get_ll_x());
-          rail_group.ur_x = std::max(rail_group.ur_x, rail_rect.get_ur_x());
-          rail_group.ll_y = std::min(rail_group.ll_y, rail_rect.get_ll_y());
-          rail_group.ur_y = std::max(rail_group.ur_y, rail_rect.get_ur_y());
-          merged = true;
-          break;
-        }
-      }
-      if (!merged) {
-        rail_group_list.push_back({rail_rect.get_ll_x(), rail_rect.get_ur_x(), rail_rect.get_ll_y(), rail_rect.get_ur_y()});
-      }
-    }
-
-    for (const RailGroup& rail_group : rail_group_list) {
-      int32_t min_x = rail_group.ll_x + repair_width / 2;
-      int32_t max_x = rail_group.ur_x - repair_width / 2;
-      if (min_x > max_x) {
-        continue;
-      }
-
-      std::vector<int32_t> candidate_x_list;
-      int32_t center_x = (rail_group.ll_x + rail_group.ur_x) / 2;
-      center_x = std::max(min_x, std::min(max_x, center_x));
-      candidate_x_list.push_back(center_x);
-      const int32_t repair_grid = std::max(1, database.get_manufacture_grid());
-      const int32_t repair_step = std::max(repair_width, repair_grid);
-      for (int32_t candidate_x = min_x; candidate_x <= max_x; candidate_x += repair_step) {
-        candidate_x_list.push_back(candidate_x);
-      }
-      candidate_x_list.push_back(max_x);
-      if (track_pitch > 0) {
-        int32_t aligned_x = track_offset + (center_x - track_offset) / track_pitch * track_pitch;
-        int32_t max_track_num = (max_x - min_x) / track_pitch + 1;
-        for (int32_t track_idx = 0; track_idx <= max_track_num; track_idx++) {
-          int32_t left_x = aligned_x - track_idx * track_pitch;
-          int32_t right_x = aligned_x + track_idx * track_pitch;
-          if (left_x >= min_x && left_x <= max_x) {
-            candidate_x_list.push_back(left_x);
-          }
-          if (right_x >= min_x && right_x <= max_x) {
-            candidate_x_list.push_back(right_x);
-          }
-          if (left_x < min_x && right_x > max_x) {
-            break;
-          }
-        }
-      }
-      std::sort(candidate_x_list.begin(), candidate_x_list.end(), [center_x](int32_t first, int32_t second) {
-        const int32_t first_distance = std::abs(first - center_x);
-        const int32_t second_distance = std::abs(second - center_x);
-        if (first_distance != second_distance) {
-          return first_distance < second_distance;
-        }
-        return first < second;
-      });
-      candidate_x_list.erase(std::unique(candidate_x_list.begin(), candidate_x_list.end()), candidate_x_list.end());
-
-      bool repaired = false;
-      for (int32_t repair_x : candidate_x_list) {
-        int32_t top_y = 0;
-        if (!findRepairTopStripeY(pg_net.get_name(), top_layer_name, repair_x, rail_group.ll_y, rail_group.ur_y, top_y)) {
-          continue;
-        }
-        int32_t top_stripe_half_width = getRepairStripeWidth(top_layer_name) / 2;
-        int32_t repair_y1 = std::min(rail_group.ll_y, std::min(rail_group.ur_y, top_y - top_stripe_half_width));
-        int32_t repair_y2 = std::max(rail_group.ll_y, std::max(rail_group.ur_y, top_y + top_stripe_half_width));
-        if (!isRepairSegmentLegal(pg_net.get_name(), repair_layer_name, repair_width, repair_x, repair_y1, repair_y2)) {
-          continue;
-        }
-        addUnblockedLineSegment(pg_net.get_name(), repair_layer_name, PGSegmentType::kStripe, repair_width, repair_x, repair_y1, repair_x, repair_y2);
-        repaired = true;
-        break;
-      }
-      if (!repaired) {
-        FPLOG.warn(Loc::current(), "Failed to repair isolated PDN rail for net '", pg_net.get_name(), "' at x=[", rail_group.ll_x, ", ", rail_group.ur_x, "].");
-      }
+    for (const PlanarRect& rail_rect : group.get_rail_rect_list()) {
+      PGRepairGroup split_group;
+      split_group.set_net_name(group.get_net_name());
+      split_group.set_rail_rect(rail_rect);
+      split_group.get_rail_rect_list().push_back(rail_rect);
+      buildRepairCandidateList(split_group, repair_layer_name, top_layer_name, repair_width, inherited_x_list);
+      split_group_list.push_back(std::move(split_group));
     }
   }
-
-  buildLayerConnect(pg_model);
+  group_list = std::move(split_group_list);
 }
 
 void PDNGenerator::validatePGConnectivity(PGModel& pg_model)

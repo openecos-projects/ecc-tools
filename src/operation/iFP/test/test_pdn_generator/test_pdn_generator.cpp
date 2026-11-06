@@ -589,6 +589,382 @@ bool testGapRailRepair(const std::string& directory)
   return passed;
 }
 
+PlanarRect initNarrowGapRailFixture(const std::string& directory, int32_t channel_width, bool reverse_net_order)
+{
+  initPlacementHaloFixture(directory);
+  if (reverse_net_order) {
+    auto& connections = FPDM.getConfig().pg_connect_list;
+    std::reverse(connections.begin(), connections.end());
+  }
+  for (RoutingLayer& layer : FPDM.getDatabase().get_routing_layer_list()) {
+    if (layer.get_name() == "MET4") {
+      layer.set_spacing(100);
+    }
+  }
+
+  const PlanarRect channel(20000, 10000, 20000 + channel_width, 16000);
+  addPlacementHaloMacro(10000, 5000, channel.get_ll_x() - 1000, 30000, 1000, 100);
+  addPlacementHaloMacro(channel.get_ur_x() + 1000, 5000, channel.get_ur_x() + 10000, 30000, 1000, 100);
+  for (std::string layer : {"MET4", "MET5"}) {
+    PGStripe stripe;
+    stripe.set_layer_name(layer);
+    stripe.set_width_micron(0.5);
+    // Suppress regular stripes and keep the channel outside core-edge repair bands.
+    stripe.set_pitch_micron(10.0);
+    stripe.set_offset_micron(500.0);
+    FPDM.getConfig().pg_stripe_list.push_back(stripe);
+  }
+  addConnect("MET1", "MET4");
+  addConnect("MET4", "MET5");
+
+  for (int32_t rail_idx = 0; rail_idx < 4; ++rail_idx) {
+    const int32_t y = channel.get_ll_y() + 2000 * rail_idx;
+    addLine(rail_idx % 2 == 0 ? "VDD" : "VSS", "MET1", PGSegmentType::kFollowPin, channel.get_ll_x(), y, channel.get_ur_x(), y, 160);
+  }
+  // Remote trunks establish MET5 as the supply layer without covering any channel rail.
+  for (std::string net : {"VDD", "VSS"}) {
+    const int32_t x = net == "VDD" ? 4000 : 6000;
+    const int32_t supply_y = channel.get_ur_y() + (net == "VDD" ? 4000 : 8000);
+    addLine(net, "MET4", PGSegmentType::kStripe, x, 0, x, 400000, 1000);
+    addLine(net, "MET5", PGSegmentType::kStripe, 0, supply_y, 400000, supply_y, 1000);
+  }
+  return channel;
+}
+
+bool checkNarrowGapRailRepair(const std::string& directory, int32_t channel_width, bool reverse_net_order)
+{
+  const PlanarRect channel = initNarrowGapRailFixture(directory, channel_width, reverse_net_order);
+  const std::string scenario = std::to_string(channel_width) + " DBU channel, " + (reverse_net_order ? "VSS first: " : "VDD first: ");
+  try {
+    FPPG.generate();
+  } catch (const std::runtime_error& error) {
+    return check(false, scenario + "Joint rail repair must succeed: " + error.what());
+  }
+
+  bool passed = true;
+  std::map<std::string, const PGSegment*> repairs;
+  int32_t rail_count = 0;
+  for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kFollowPin) {
+      ++rail_count;
+    }
+    if (segment.get_type() != PGSegmentType::kStripe || segment.get_layer_name() != "MET4" || segment.get_ur_x() <= channel.get_ll_x()
+        || segment.get_ll_x() >= channel.get_ur_x()) {
+      continue;
+    }
+    passed = check(segment.is_vertical() && segment.get_width() == 1000, scenario + "Repair stripes must retain their configured width") && passed;
+    passed = check(segment.get_start_x() - segment.get_width() / 2 >= channel.get_ll_x()
+                       && segment.get_start_x() + segment.get_width() / 2 <= channel.get_ur_x(),
+                   scenario + "Repair stripes must stay between both placement halos") && passed;
+    passed = check(repairs.emplace(segment.get_net_name(), &segment).second, scenario + "Each net needs only one grouped repair stripe") && passed;
+  }
+  passed = check(rail_count == 4, scenario + "Repair must preserve all four alternating rails") && passed;
+  if (!check(repairs.size() == 2 && repairs.contains("VDD") && repairs.contains("VSS"), scenario + "Both nets must receive repair stripes")) {
+    return false;
+  }
+
+  const PGSegment& power = *repairs.at("VDD");
+  const PGSegment& ground = *repairs.at("VSS");
+  const int32_t spacing = std::abs(power.get_start_x() - ground.get_start_x()) - (power.get_width() + ground.get_width()) / 2;
+  passed = check(spacing >= 100, scenario + "Opposite-net repair stripes must keep MET4 spacing") && passed;
+  if (channel_width == 2100) {
+    passed = check(spacing == 100, scenario + "Exact-fit repair must use the available width without relaxing spacing") && passed;
+  }
+
+  for (int32_t rail_idx = 0; rail_idx < 4; ++rail_idx) {
+    const std::string net = rail_idx % 2 == 0 ? "VDD" : "VSS";
+    const int32_t y = channel.get_ll_y() + 2000 * rail_idx;
+    const PGSegment& repair = *repairs.at(net);
+    bool rail_present = false;
+    for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+      if (segment.get_type() == PGSegmentType::kFollowPin && segment.get_net_name() == net && segment.get_layer_name() == "MET1"
+          && segment.is_horizontal() && segment.get_start_y() == y && segment.get_width() == 160) {
+        rail_present = true;
+      }
+    }
+    passed = check(rail_present, scenario + "Every original rail must survive with its net, layer and width intact") && passed;
+    passed = check(std::min(repair.get_start_y(), repair.get_end_y()) <= y - 80
+                       && std::max(repair.get_start_y(), repair.get_end_y()) >= y + 80,
+                   scenario + "Each repair stripe must span both same-net rails") && passed;
+    passed = check(hasVia(net, "MET1", "MET4", repair.get_start_x(), y), scenario + "Every rail must have a same-net repair via") && passed;
+  }
+  for (std::string net : {"VDD", "VSS"}) {
+    const int32_t supply_y = channel.get_ur_y() + (net == "VDD" ? 4000 : 8000);
+    passed = check(hasVia(net, "MET4", "MET5", repairs.at(net)->get_start_x(), supply_y),
+                   scenario + "Each repair stripe must connect to its MET5 supply") && passed;
+  }
+  return passed;
+}
+
+bool testNarrowGapRailRepair(const std::string& directory)
+{
+  bool passed = true;
+  for (bool reverse_net_order : {false, true}) {
+    passed = checkNarrowGapRailRepair(directory, 2200, reverse_net_order) && passed;
+  }
+  return passed;
+}
+
+bool testExactFitGapRailRepair(const std::string& directory)
+{
+  bool passed = true;
+  for (bool reverse_net_order : {false, true}) {
+    passed = checkNarrowGapRailRepair(directory, 2100, reverse_net_order) && passed;
+  }
+  return passed;
+}
+
+bool testTooNarrowGapRailRepair(const std::string& directory)
+{
+  bool passed = true;
+  for (bool reverse_net_order : {false, true}) {
+    initNarrowGapRailFixture(directory, 2000, reverse_net_order);
+    bool rejected = false;
+    try {
+      FPPG.generate();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("without a physical connection") != std::string::npos;
+    }
+    passed = check(rejected, "A 2000 DBU channel cannot fit both 1000 DBU repair stripes and 100 DBU spacing; final validation must reject it") && passed;
+  }
+  return passed;
+}
+
+void initRepairReviewFixture(const std::string& directory)
+{
+  initPlacementHaloFixture(directory);
+  FPDM.getDatabase().set_manufacture_grid(10);
+  for (RoutingLayer& layer : FPDM.getDatabase().get_routing_layer_list()) {
+    if (layer.get_name() == "MET4") {
+      layer.set_spacing(100);
+      layer.set_prefer_track_pitch(400);
+      layer.set_prefer_track_offset(0);
+    }
+  }
+  for (std::string layer : {"MET4", "MET5"}) {
+    PGStripe stripe;
+    stripe.set_layer_name(layer);
+    stripe.set_width_micron(0.5);
+    stripe.set_pitch_micron(10.0);
+    stripe.set_offset_micron(500.0);
+    FPDM.getConfig().pg_stripe_list.push_back(stripe);
+  }
+  addConnect("MET1", "MET4");
+  addConnect("MET4", "MET5");
+}
+
+bool testRepairClearanceBoundary(const std::string& directory)
+{
+  initRepairReviewFixture(directory);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20000, 10000, 24000, 10000, 160);
+  for (int32_t x : {20400, 22600}) {
+    addLine("VSS", "MET4", PGSegmentType::kStripe, x, 0, x, 40000, 1000);
+  }
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 20000, 400000, 20000, 1000);
+  addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 24000, 400000, 24000, 1000);
+  try {
+    FPPG.generate();
+  } catch (const std::runtime_error& error) {
+    return check(false, std::string("The unique legal repair slot at x=21500 must be considered: ") + error.what());
+  }
+
+  bool passed = true;
+  int32_t repair_count = 0;
+  for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() != PGSegmentType::kStripe || segment.get_net_name() != "VDD" || segment.get_layer_name() != "MET4") {
+      continue;
+    }
+    ++repair_count;
+    passed = check(segment.is_vertical() && segment.get_start_x() == 21500 && segment.get_width() == 1000,
+                   "Repair must use the only spacing-legal position, even though it is not on the 400 DBU track grid") && passed;
+  }
+  passed = check(repair_count == 1, "A single rail needs exactly one full-width repair in the clearance slot") && passed;
+  passed = check(hasVia("VDD", "MET1", "MET4", 21500, 10000), "The clearance-slot repair must connect to its rail") && passed;
+  passed = check(hasVia("VDD", "MET4", "MET5", 21500, 20000), "The clearance-slot repair must connect to its supply") && passed;
+  return passed;
+}
+
+bool testBlockedRepairGroupSplit(const std::string& directory)
+{
+  initRepairReviewFixture(directory);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20000, 10000, 23000, 10000, 160);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20600, 14000, 23600, 14000, 160);
+  addLine("VSS", "MET4", PGSegmentType::kStripe, 21800, 0, 21800, 40000, 1000);
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 20000, 400000, 20000, 1000);
+  addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 24000, 400000, 24000, 1000);
+  try {
+    FPPG.generate();
+  } catch (const std::runtime_error& error) {
+    return check(false, std::string("A blocked common corridor must fall back to separate rail repairs: ") + error.what());
+  }
+
+  bool passed = true;
+  const PGSegment* left_repair = nullptr;
+  const PGSegment* right_repair = nullptr;
+  int32_t repair_count = 0;
+  int32_t rail_count = 0;
+  for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kFollowPin) {
+      ++rail_count;
+      passed = check(segment.get_net_name() == "VDD" && segment.get_layer_name() == "MET1" && segment.get_width() == 160,
+                     "Splitting a repair group must preserve both original rails") && passed;
+    }
+    if (segment.get_type() != PGSegmentType::kStripe || segment.get_net_name() != "VDD" || segment.get_layer_name() != "MET4") {
+      continue;
+    }
+    ++repair_count;
+    const int32_t x = segment.get_start_x();
+    passed = check(segment.is_vertical() && segment.get_width() == 1000 && std::abs(x - 21800) >= 1100,
+                   "Split repairs must retain their width and clearance from the opposite-net stripe") && passed;
+    if (20500 <= x && x <= 20700) {
+      left_repair = &segment;
+    } else if (22900 <= x && x <= 23100) {
+      right_repair = &segment;
+    }
+  }
+  passed = check(rail_count == 2, "Both rails must survive a blocked-group split") && passed;
+  if (!check(repair_count == 2 && left_repair != nullptr && right_repair != nullptr,
+             "The disjoint legal windows must receive separate full-width repairs")) {
+    return false;
+  }
+  for (const auto& [repair, y] : {std::make_pair(left_repair, 10000), std::make_pair(right_repair, 14000)}) {
+    passed = check(std::min(repair->get_start_y(), repair->get_end_y()) <= y - 80
+                       && std::max(repair->get_start_y(), repair->get_end_y()) >= y + 80,
+                   "Each split repair must span its original rail") && passed;
+    passed = check(hasVia("VDD", "MET1", "MET4", repair->get_start_x(), y), "Each original rail must have its own repair via") && passed;
+    passed = check(hasVia("VDD", "MET4", "MET5", repair->get_start_x(), 20000), "Each split repair must reach the supply mesh") && passed;
+  }
+  return passed;
+}
+
+bool testSplitRepairCandidateInheritance(const std::string& directory)
+{
+  initRepairReviewFixture(directory);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20000, 10000, 24000, 10000, 160);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20700, 14000, 23700, 14000, 160);
+  // The distant group forces both VDD groups in the shared conflict component to split.
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 19000, 90000, 21900, 90000, 160);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20500, 94000, 22700, 94000, 160);
+  addLine("VSS", "MET1", PGSegmentType::kFollowPin, 20600, 18000, 21600, 18000, 160);
+  addLine("VSS", "MET1", PGSegmentType::kFollowPin, 22800, 22000, 23800, 22000, 160);
+  const std::vector<PGSegment> original_rails = FPDM.getDatabase().get_pg_segment_list();
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 150000, 400000, 150000, 1000);
+  addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 154000, 400000, 154000, 1000);
+  try {
+    FPPG.generate();
+  } catch (const std::runtime_error& error) {
+    return check(false, std::string("Splitting a failed component must retain the parent repair position at x=22200: ") + error.what());
+  }
+
+  bool passed = true;
+  int32_t rail_count = 0;
+  std::vector<const PGSegment*> repairs;
+  for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kFollowPin) {
+      ++rail_count;
+      passed = check(segment.get_layer_name() == "MET1" && segment.get_width() == 160,
+                     "Candidate inheritance must preserve the original rail layer and width") && passed;
+    }
+    if (segment.get_type() != PGSegmentType::kStripe || segment.get_layer_name() != "MET4") {
+      continue;
+    }
+    repairs.push_back(&segment);
+    passed = check(segment.is_vertical() && segment.get_width() == 1000 && segment.get_start_x() % 10 == 0,
+                   "Inherited repair candidates must retain full width and manufacturing-grid alignment") && passed;
+    const int32_t supply_y = segment.get_net_name() == "VDD" ? 150000 : 154000;
+    passed = check(hasVia(segment.get_net_name(), "MET4", "MET5", segment.get_start_x(), supply_y),
+                   "Every split repair must connect to its own top supply") && passed;
+  }
+  passed = check(rail_count == 6, "Candidate inheritance must preserve all six rails") && passed;
+  for (const PGSegment& rail : original_rails) {
+    bool connected = false;
+    for (const PGSegment* repair : repairs) {
+      const int32_t x = repair->get_start_x();
+      const int32_t y = rail.get_start_y();
+      if (repair->get_net_name() == rail.get_net_name() && rail.get_start_x() <= x - repair->get_width() / 2
+          && x + repair->get_width() / 2 <= rail.get_end_x()
+          && std::min(repair->get_start_y(), repair->get_end_y()) <= y - rail.get_width() / 2
+          && std::max(repair->get_start_y(), repair->get_end_y()) >= y + rail.get_width() / 2
+          && hasVia(rail.get_net_name(), "MET1", "MET4", x, y)) {
+        connected = true;
+      }
+    }
+    passed = check(connected, "Every original rail must receive a full-width, physically connected repair after splitting") && passed;
+  }
+  for (int32_t y : {10000, 14000}) {
+    passed = check(hasVia("VDD", "MET1", "MET4", 22200, y), "Both initial VDD rails must retain the inherited parent candidate at x=22200") && passed;
+  }
+  passed = check(hasVia("VSS", "MET1", "MET4", 21100, 18000) && hasVia("VSS", "MET1", "MET4", 23300, 22000),
+                 "The narrow VSS rails must keep their forced repair positions") && passed;
+  for (size_t first = 0; first < repairs.size(); ++first) {
+    for (size_t second = first + 1; second < repairs.size(); ++second) {
+      const PGSegment& a = *repairs[first];
+      const PGSegment& b = *repairs[second];
+      if (a.get_net_name() == b.get_net_name() || std::max(a.get_ll_y(), b.get_ll_y()) >= std::min(a.get_ur_y(), b.get_ur_y())) {
+        continue;
+      }
+      passed = check(std::abs(a.get_start_x() - b.get_start_x()) - (a.get_width() + b.get_width()) / 2 >= 100,
+                     "Inherited candidates must preserve spacing between all overlapping opposite-net repairs") && passed;
+    }
+  }
+  return passed;
+}
+
+bool testRepeatedRepairTopStripes(const std::string& directory)
+{
+  bool passed = true;
+  for (bool reverse_supply_order : {false, true}) {
+    initRepairReviewFixture(directory);
+    for (int32_t y : {10000, 30000}) {
+      addLine("VDD", "MET1", PGSegmentType::kFollowPin, 20000, y, 24000, y, 160);
+    }
+    addLine("VSS", "MET4", PGSegmentType::kStripe, 6000, 0, 6000, 40000, 1000);
+    addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 24000, 400000, 24000, 1000);
+    std::vector<int32_t> supply_y_list{20000, 12000, 28000, 20000, 8000, 32000};
+    if (reverse_supply_order) {
+      std::reverse(supply_y_list.begin(), supply_y_list.end());
+    }
+    for (int32_t y : supply_y_list) {
+      addLine("VDD", "MET5", PGSegmentType::kStripe, 0, y, 400000, y, 1000);
+    }
+    try {
+      FPPG.generate();
+    } catch (const std::runtime_error& error) {
+      passed = check(false, std::string("Repeated top supplies must allow one grouped repair: ") + error.what()) && passed;
+      continue;
+    }
+
+    int32_t repair_count = 0;
+    int32_t top_via_count = 0;
+    for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+      if (segment.get_net_name() != "VDD") {
+        continue;
+      }
+      if (segment.get_type() == PGSegmentType::kStripe && segment.get_layer_name() == "MET4") {
+        ++repair_count;
+        passed = check(segment.is_vertical() && segment.get_start_x() == 22000 && segment.get_width() == 1000
+                           && segment.get_start_y() == 9920 && segment.get_end_y() == 30080,
+                       "In-span supplies must share a centered repair without a dominated extension beyond the rails") && passed;
+      }
+      if (segment.get_type() == PGSegmentType::kVia && segment.get_bottom_layer_name() == "MET4" && segment.get_top_layer_name() == "MET5") {
+        ++top_via_count;
+      }
+    }
+    passed = check(repair_count == 1, "Repeated or farther supplies must not emit duplicate same-X repairs") && passed;
+    passed = check(top_via_count == 3, "Repeated top stripes must produce one via per distinct in-span crossing") && passed;
+    for (int32_t y : {10000, 30000}) {
+      passed = check(hasVia("VDD", "MET1", "MET4", 22000, y), "The shared repair must connect both grouped rails") && passed;
+    }
+    for (int32_t y : {12000, 20000, 28000}) {
+      passed = check(hasVia("VDD", "MET4", "MET5", 22000, y), "The shared repair must connect every in-span supply") && passed;
+    }
+    for (int32_t y : {8000, 32000}) {
+      passed = check(!hasVia("VDD", "MET4", "MET5", 22000, y), "A redundant farther supply must not lengthen the repair") && passed;
+    }
+  }
+  return passed;
+}
+
 bool testUncoveredEdgeStripe(const std::string& directory)
 {
   initPlacementHaloFixture(directory);
@@ -989,6 +1365,13 @@ int main(int argc, char* argv[])
   passed = ifp::testActualViaOverlap(directory) && passed;
   passed = ifp::testRailExtensionHalo(directory) && passed;
   passed = ifp::testGapRailRepair(directory) && passed;
+  passed = ifp::testNarrowGapRailRepair(directory) && passed;
+  passed = ifp::testExactFitGapRailRepair(directory) && passed;
+  passed = ifp::testTooNarrowGapRailRepair(directory) && passed;
+  passed = ifp::testRepairClearanceBoundary(directory) && passed;
+  passed = ifp::testBlockedRepairGroupSplit(directory) && passed;
+  passed = ifp::testSplitRepairCandidateInheritance(directory) && passed;
+  passed = ifp::testRepeatedRepairTopStripes(directory) && passed;
   passed = ifp::testUncoveredEdgeStripe(directory) && passed;
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
