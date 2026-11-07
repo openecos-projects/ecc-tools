@@ -66,6 +66,20 @@ void DataManager::input(std::map<std::string, std::any>& config_map)
   DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
 }
 
+void DataManager::inputDatabase(std::map<std::string, std::any>& config_map, Database database)
+{
+  auto monitor = Monitor::create();
+  DRCLOG.info(Loc::current(), "Starting...");
+  wrapConfig(config_map);
+  _database = std::move(database);
+  wrapLayerInfo();
+  buildConfig();
+  buildDatabase();
+  printConfig();
+  printDatabase();
+  DRCLOG.info(Loc::current(), "Completed", monitor ? monitor->getStatsInfo() : "");
+}
+
 #if 1  // 获得唯一的pitch
 
 int32_t DataManager::getOnlyPitch()

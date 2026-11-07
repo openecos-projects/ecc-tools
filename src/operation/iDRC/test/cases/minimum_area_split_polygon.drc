@@ -1,0 +1,11 @@
+# Production cluster parameters: pitch 200 -> cluster size 20000, expand margin 1000.
+# One net: A [0,18999] abuts B [18999,20500], both 100 tall. The full polygon is
+# 20500*100 = 2050000 >= 300000, so it is legal. The cluster at x >= 20000 only
+# receives B (A enlarged by 1000 ends at 19999), whose area is 1501*100 = 150100.
+case minimum_area_split_polygon
+die 0 0 100000 100000
+routing M1 dir=H pitch=200 min_area=300000
+cut V1
+result n1 M1 0 0 18999 100
+result n1 M1 18999 0 20500 100
+expect none
