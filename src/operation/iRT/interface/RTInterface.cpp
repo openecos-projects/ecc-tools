@@ -893,10 +893,40 @@ void RTInterface::wrapObstacleList()
       if (idb_routing_blockage == nullptr || idb_routing_blockage->get_layer() == nullptr || !idb_routing_blockage->get_layer()->is_routing()) {
         continue;
       }
+      GTLPolySetInt blockage_polyset;
       for (idb::IdbRect* rect : idb_routing_blockage->get_rect_list()) {
+        blockage_polyset += GTLRectInt(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+      idb::IdbInstance* idb_instance = idb_routing_blockage->get_instance();
+      if (idb_instance != nullptr) {
+        GTLPolySetInt pin_polyset;
+        for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
+          for (idb::IdbLayerShape* port_box : idb_pin->get_port_box_list()) {
+            if (port_box->get_layer() != idb_routing_blockage->get_layer()) {
+              continue;
+            }
+            for (idb::IdbRect* rect : port_box->get_rect_list()) {
+              pin_polyset += GTLRectInt(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+            }
+          }
+          for (idb::IdbVia* idb_via : idb_pin->get_via_list()) {
+            for (idb::IdbLayerShape via_shape : {idb_via->get_top_layer_shape(), idb_via->get_bottom_layer_shape()}) {
+              if (via_shape.get_layer() != idb_routing_blockage->get_layer()) {
+                continue;
+              }
+              idb::IdbRect via_box = via_shape.get_bounding_box();
+              pin_polyset += GTLRectInt(via_box.get_low_x(), via_box.get_low_y(), via_box.get_high_x(), via_box.get_high_y());
+            }
+          }
+        }
+        blockage_polyset -= pin_polyset;
+      }
+      std::vector<GTLRectInt> blockage_rect_list;
+      gtl::get_max_rectangles(blockage_rect_list, blockage_polyset);
+      for (GTLRectInt& rect : blockage_rect_list) {
         Obstacle obstacle;
-        obstacle.set_real_ll(rect->get_low_x(), rect->get_low_y());
-        obstacle.set_real_ur(rect->get_high_x(), rect->get_high_y());
+        obstacle.set_real_ll(gtl::xl(rect), gtl::yl(rect));
+        obstacle.set_real_ur(gtl::xh(rect), gtl::yh(rect));
         obstacle.set_layer_idx(idb_routing_blockage->get_layer()->get_id());
         routing_obstacle_list.push_back(obstacle);
       }
