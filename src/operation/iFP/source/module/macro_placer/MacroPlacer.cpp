@@ -173,6 +173,7 @@ void MacroPlacer::cutRowList()
     FPLOG.warn(Loc::current(), "Removed ", removed_row_num, " macro-cut row fragment(s), area=", removed_area,
                " um^2: narrower than the configured two-net PG channel (", min_channel_width, " DBU). No physical cells or rails will be placed there.");
   }
+  reportMissingRowIntervals(usable_row_list);
   if (!cut_row_list.empty() && usable_row_list.empty()) {
     FPLOG.error(Loc::current(), "No usable rows remain after reserving the configured PG channel.");
   }
@@ -273,6 +274,42 @@ void MacroPlacer::addCutRow(Row& row, std::vector<Row>& cut_row_list, int32_t st
   cut_row.set_orient(row.get_orient());
   cut_row.set_rect(start_x, row.get_ll_y(), end_x, row.get_ur_y());
   cut_row_list.push_back(cut_row);
+}
+
+void MacroPlacer::reportMissingRowIntervals(const std::vector<Row>& usable_row_list)
+{
+  std::map<int32_t, int32_t> missing_row_y_to_ur_y_map;
+  for (const Row& row : FPDM.getDatabase().get_row_list()) {
+    auto row_iter = missing_row_y_to_ur_y_map.emplace(row.get_y(), row.get_ur_y()).first;
+    row_iter->second = std::max(row_iter->second, row.get_ur_y());
+  }
+  for (const Row& row : usable_row_list) {
+    missing_row_y_to_ur_y_map.erase(row.get_y());
+  }
+  if (missing_row_y_to_ur_y_map.empty()) {
+    return;
+  }
+
+  std::stringstream missing_y_intervals;
+  for (auto row_iter = missing_row_y_to_ur_y_map.begin(); row_iter != missing_row_y_to_ur_y_map.end();) {
+    int32_t start_y = row_iter->first;
+    int32_t end_y = row_iter->second;
+    int32_t row_y_num = 1;
+    if (row_iter != missing_row_y_to_ur_y_map.begin()) {
+      missing_y_intervals << ", ";
+    }
+    ++row_iter;
+    while (row_iter != missing_row_y_to_ur_y_map.end() && row_iter->first == end_y) {
+      end_y = row_iter->second;
+      row_y_num++;
+      ++row_iter;
+    }
+    missing_y_intervals << "[" << start_y << "," << end_y << ") (" << row_y_num << " row y-level(s))";
+  }
+  FPLOG.warn(Loc::current(), "Sparse row grid: ", missing_row_y_to_ur_y_map.size(),
+             " original row y-level(s) lost all usable fragments after macro cutting/PG-channel pruning. Missing y intervals (DBU, [begin,end)): ",
+             missing_y_intervals.str(),
+             ". Downstream placement/sizing must support sparse physical row indices; no dummy rows were inserted and surviving rows were not compacted.");
 }
 
 // private

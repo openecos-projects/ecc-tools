@@ -55,6 +55,7 @@ class MacroPlacer
   void cutRow(Row& row, std::vector<Row>& cut_row_list);
   std::vector<std::pair<int32_t, int32_t>> getRowBlockageIntervalList(Row& row);
   void addCutRow(Row& row, std::vector<Row>& cut_row_list, int32_t start_x, int32_t end_x, int32_t cut_row_idx);
+  void reportMissingRowIntervals(const std::vector<Row>& usable_row_list);
 
   std::vector<Instance*> _placed_macro_list;
 };
