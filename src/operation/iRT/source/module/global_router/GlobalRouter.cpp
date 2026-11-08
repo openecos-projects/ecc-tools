@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "DataManager.hpp"
+#include "DetourStat.hpp"
 #include "GDSPlotter.hpp"
 #include "GRCost.hpp"
 #include "Logger.hpp"
@@ -86,10 +87,15 @@ void GlobalRouter::route()
   initNetList();
 
   patternRoute();
+  reportDetourStat("GR pattern");
   detourRoute();
+  reportDetourStat("GR detour");
   mazeRouteFailedNets();
+  reportDetourStat("GR maze failed");
   mazeRerouteOverflowNets();
+  reportDetourStat("GR maze overflow");
   fallbackRoute();
+  reportDetourStat("GR fallback");
   // debugPlot("after_route");
 
   uploadGRResult();
@@ -482,6 +488,29 @@ void GlobalRouter::uploadGRResult()
       result_list.emplace_back(LayerCoord(via_stack.coord, via_stack.bottom_layer_idx), LayerCoord(via_stack.coord, via_stack.top_layer_idx));
     }
   }
+}
+
+void GlobalRouter::reportDetourStat(const std::string& stage)
+{
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
+  std::map<int32_t, double> routed_length_map;
+  for (GRNet& net : net_list_) {
+    double routed_length = 0;
+    for (const GRWireSegment& wire_segment : net.get_tree().wire_list) {
+      if (wire_segment.first.get_layer_idx() != wire_segment.second.get_layer_idx()) {
+        continue;
+      }
+      PlanarRect& first_rect = gcell_map[wire_segment.first.get_x()][wire_segment.first.get_y()];
+      PlanarRect& second_rect = gcell_map[wire_segment.second.get_x()][wire_segment.second.get_y()];
+      routed_length += RTUTIL.getManhattanDistance(first_rect.getMidPoint(), second_rect.getMidPoint()) / micron_dbu;
+    }
+    if (routed_length <= 0) {
+      continue;
+    }
+    routed_length_map[net.get_origin_net()->get_net_idx()] = routed_length;
+  }
+  DetourStat::report(routed_length_map, RTDM.getDatabase().get_net_steiner_length_map(), RTDM.getDatabase().get_net_list(), stage);
 }
 
 void GlobalRouter::printSummary() const

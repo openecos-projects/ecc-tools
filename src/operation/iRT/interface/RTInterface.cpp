@@ -118,6 +118,8 @@ void RTInterface::runRT()
   RTUTIL.releaseMemory("PinAccessor");
   // outputDef("irt_pa.def");
 
+  initNetSteinerLengthMap();
+
   initRegionRoute();
 
   GlobalRouter::initInst();
@@ -190,6 +192,51 @@ void RTInterface::initRegionRoute()
   region_route.set_enable(true);
   RTLOG.info(Loc::current(), "Enabled regional routing in rect ", real_rect.get_ll_x(), ",", real_rect.get_ll_y(), "-", real_rect.get_ur_x(), ",",
              real_rect.get_ur_y(), " for ", region_route.get_net_idx_set().size(), " complete nets across the die");
+}
+
+void RTInterface::initNetSteinerLengthMap()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
+  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  std::map<int32_t, double>& net_steiner_length_map = RTDM.getDatabase().get_net_steiner_length_map();
+  net_steiner_length_map.clear();
+
+  std::vector<double> steiner_length_list(net_list.size(), 0.0);
+#pragma omp parallel for schedule(dynamic, 1)
+  for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(net_list.size()); net_idx++) {
+    Net& net = net_list[net_idx];
+    if (net.get_pin_list().size() < 2) {
+      continue;
+    }
+    std::vector<PlanarCoord> coord_list;
+    coord_list.reserve(net.get_pin_list().size());
+    for (Pin& pin : net.get_pin_list()) {
+      coord_list.push_back(pin.get_access_point().get_real_coord());
+    }
+    std::ranges::sort(coord_list, CmpPlanarCoordByXASC());
+    coord_list.erase(std::unique(coord_list.begin(), coord_list.end()), coord_list.end());
+    if (coord_list.size() < 2) {
+      continue;
+    }
+    TBTask tb_task;
+    tb_task.set_topo_mode(TBTopoMode::kGeometry);
+    tb_task.set_planar_coord_list(coord_list);
+    double steiner_length = 0;
+    for (Segment<PlanarCoord>& segment : RTTB.getPlanarTopoList(tb_task)) {
+      steiner_length += RTUTIL.getManhattanDistance(segment);
+    }
+    steiner_length_list[net_idx] = steiner_length / micron_dbu;
+  }
+  for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(net_list.size()); net_idx++) {
+    if (steiner_length_list[net_idx] > 0) {
+      net_steiner_length_map[net_idx] = steiner_length_list[net_idx];
+    }
+  }
+  RTLOG.info(Loc::current(), "Net steiner length num: ", net_steiner_length_map.size());
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
 void RTInterface::destroyRT()

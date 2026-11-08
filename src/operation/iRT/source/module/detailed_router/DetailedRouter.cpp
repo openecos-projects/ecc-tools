@@ -23,6 +23,7 @@
 #include "DRIterParam.hpp"
 #include "DRNet.hpp"
 #include "DRNode.hpp"
+#include "DetourStat.hpp"
 #include "GDSPlotter.hpp"
 #include "Monitor.hpp"
 #include "PatchGeometry.hpp"
@@ -204,6 +205,7 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
       runRepairIteration(dr_model, repair_param, step_iter);
     }
   }
+  reportDetourStat(dr_model, "DR final");
   uploadDRModel(dr_model);
 }
 
@@ -4188,6 +4190,27 @@ void DetailedRouter::printSummary(DRModel& dr_model)
   }
   RTUTIL.printTableList({routing_wire_length_map_table, cut_via_num_map_table, routing_patch_num_map_table});
   RTUTIL.printTableList({routing_violation_num_map_table});
+  reportDetourStat(dr_model, RTUTIL.getString("DR iter ", dr_model.get_iter()));
+}
+
+void DetailedRouter::reportDetourStat(DRModel& dr_model, const std::string& stage)
+{
+  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
+  std::map<int32_t, double> routed_length_map;
+  for (auto& [net_idx, segment_list] : dr_model.get_curr_result().get_net_detailed_result_map()) {
+    double routed_length = 0;
+    for (Segment<LayerCoord>& segment : segment_list) {
+      if (segment.get_first().get_layer_idx() != segment.get_second().get_layer_idx()) {
+        continue;
+      }
+      routed_length += RTUTIL.getManhattanDistance(segment.get_first(), segment.get_second()) / micron_dbu;
+    }
+    if (routed_length <= 0) {
+      continue;
+    }
+    routed_length_map[net_idx] = routed_length;
+  }
+  DetourStat::report(routed_length_map, RTDM.getDatabase().get_net_steiner_length_map(), RTDM.getDatabase().get_net_list(), stage);
 }
 
 void DetailedRouter::outputNetCSV(DRModel& dr_model)

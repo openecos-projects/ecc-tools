@@ -1535,6 +1535,7 @@ void DataManager::destroyDatabaseResult()
 {
   _database.get_net_global_result_map().clear();
   _database.get_net_detailed_result_map().clear();
+  _database.get_net_steiner_length_map().clear();
   _database.get_net_detailed_patch_map().clear();
   _database.get_access_point_rtree().clear();
   _database.get_global_result_rtree().clear();

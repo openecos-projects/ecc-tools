@@ -210,6 +210,7 @@ class DetailedRouter
 #if 1  // exhibit
   void updateSummary(DRModel& dr_model);
   void printSummary(DRModel& dr_model);
+  void reportDetourStat(DRModel& dr_model, const std::string& stage);
   void outputNetCSV(DRModel& dr_model);
   void outputViolationCSV(DRModel& dr_model);
 #endif

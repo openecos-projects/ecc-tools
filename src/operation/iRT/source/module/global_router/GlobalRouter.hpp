@@ -70,6 +70,7 @@ class GlobalRouter
 
   // output
   void uploadGRResult();
+  void reportDetourStat(const std::string& stage);
   void printSummary() const;
   bool isLayerInRange(int32_t layer_idx) const;
   void debugPlot(const std::string& flag) const;
