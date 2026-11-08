@@ -246,10 +246,20 @@ std::vector<std::pair<int32_t, int32_t>> MacroPlacer::getRowBlockageIntervalList
   Database& database = FPDM.getDatabase();
   Site& site = database.get_site_map()[row.get_site_name()];
   std::vector<std::pair<int32_t, int32_t>> blockage_interval_list;
+
+  int32_t rail_margin = 0;
+  for (const PGRail& pg_rail : FPDM.getConfig().pg_rail_list) {
+    int32_t rail_width = FPUTIL.transMicronToDBU(pg_rail.get_width_micron(), database.get_micron_dbu());
+    if (rail_width > 0) {
+      rail_margin = std::max(rail_margin, rail_width / 2 + 1);
+    }
+  }
+
   for (Instance* instance_ptr : _placed_macro_list) {
     Instance& instance = *instance_ptr;
     PlanarRect& placement_halo_rect = instance.get_placement_halo_rect();
-    if (placement_halo_rect.get_ur_y() <= row.get_ll_y() || row.get_ur_y() <= placement_halo_rect.get_ll_y()) {
+    if (row.get_ur_y() + rail_margin <= placement_halo_rect.get_ll_y()
+        || placement_halo_rect.get_ur_y() <= row.get_ll_y() - rail_margin) {
       continue;
     }
     int32_t site_origin_x = row.get_site_origin_x();
