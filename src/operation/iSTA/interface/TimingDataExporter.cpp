@@ -434,8 +434,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
       continue;
     }
     const auto current_pin = database.network().pins().find(current->second);
-    if ((current_pin == database.network().pins().end() || current_pin->second.get_net_name().empty())
-        && !sink->second.get_net_name().empty()) {
+    if ((current_pin == database.network().pins().end() || current_pin->second.get_net_name().empty()) && !sink->second.get_net_name().empty()) {
       current->second = arc.sink_pin;
     }
   }
@@ -498,6 +497,19 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
         }
         snapshot.timing_check_arcs.push_back(std::move(exported));
       }
+    }
+  }
+
+  // The external LUT-based schema has no inferred gate-check representation.
+  // Keep its endpoint identity and reject qualification explicitly instead of
+  // exporting a zero/missing Liberty LUT as a valid optimization constraint.
+  for (const auto& [endpoint, checks] : database.graph().clockGatingChecks()) {
+    addDiagnostic("inferred clock-gating check is not supported by the external timing model at " + endpoint);
+    auto pin = pin_ids.find(endpoint);
+    if (pin != pin_ids.end()) {
+      auto& qualification = snapshot.pins.at(pin->second).max_qualification;
+      qualification.valid = {false, false};
+      qualification.reason = {TimingMaxQualificationReason::kUnsupportedConstraint, TimingMaxQualificationReason::kUnsupportedConstraint};
     }
   }
 

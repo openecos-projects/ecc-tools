@@ -146,7 +146,7 @@ bool STAInterface::initSTA(std::map<std::string, std::any> config_map)
 
 bool STAInterface::initialize(std::map<std::string, std::any> config_map, InputScope scope)
 {
-  for (const std::string key : {"-min_slew_degradation", "-adjust_driver_resistance"}) {
+  for (const std::string key : {"-min_slew_degradation", "-adjust_driver_resistance", "-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
     if (config_map.contains(key)) {
       int32_t value = std::any_cast<int32_t>(config_map.at(key));
       if (value != 0 && value != 1)
@@ -175,7 +175,7 @@ bool STAInterface::initialize(std::map<std::string, std::any> config_map, InputS
   STALOG.info(Loc::current(), "Starting...");
 
   DataManager::initInst();
-  readDesign(config_map, scope);
+  readDesign(config_map);
   DelayCalculator::initInst();
   SdcCommand::initInst();
   sdc::registerSdcCommands(SdcCommand::getInst());
@@ -184,6 +184,8 @@ bool STAInterface::initialize(std::map<std::string, std::any> config_map, InputS
     if (!file.empty())
       readHierarchy(STADM.getDatabase().network(), *dmInst->get_idb_layout(), file);
   }
+  if (scope == InputScope::kTiming)
+    ReadParasitics(STADM.getDatabase().parasitics(), STADM.getDatabase().network()).read();
   // Simulation values are derived from constraints and are rebuilt by analysis.
   STADM.getDatabase().graph().simValues().clear();
   if (!readSdc(STADM.getDatabase().sdc())) {
@@ -220,7 +222,7 @@ void STAInterface::prepareTimingModel()
   if (!_initialized) {
     throw std::runtime_error("STA must be initialized before prepareTimingModel");
   }
-  TimingAnalyzer analyzer(STADM.getDatabase(), STADC);
+  TimingAnalyzer analyzer(STADM.getDatabase(), STADC, STADM.getConfig().check_constant_capacitance != 0);
   if (_model_ready && analyzer.isStructureCurrent()) {
     return;
   }
@@ -245,7 +247,7 @@ void STAInterface::runSTA()
   STALOG.info(Loc::current(), "Starting...");
 
   try {
-    TimingAnalyzer(STADM.getDatabase(), STADC).analyze(_model_ready);
+    TimingAnalyzer(STADM.getDatabase(), STADC, STADM.getConfig().check_constant_capacitance != 0).analyze(_model_ready);
 
     TimingReporter(STADM.getDatabase(), STADM.getConfig()).report();
 
@@ -284,7 +286,7 @@ void STAInterface::extractLib()
   STALOG.info(Loc::current(), "Starting...");
 
   try {
-    TimingAnalyzer(STADM.getDatabase(), STADC).analyze();
+    TimingAnalyzer(STADM.getDatabase(), STADC, STADM.getConfig().check_constant_capacitance != 0).analyze();
 
     auto timing_model = ModelExtractor(STADM.getDatabase()).extract();
     std::string output_path = STADM.getConfig().tc_temp_directory_path;
@@ -392,7 +394,7 @@ ClockTreeGraphData STAInterface::exportClockTreeGraph()
   return ista::exportClockTreeGraph(STADM.getDatabase());
 }
 
-void STAInterface::readDesign(std::map<std::string, std::any>& config_map, InputScope scope)
+void STAInterface::readDesign(std::map<std::string, std::any>& config_map)
 {
   Monitor monitor;
   STALOG.info(Loc::current(), "Starting...");
@@ -400,8 +402,6 @@ void STAInterface::readDesign(std::map<std::string, std::any>& config_map, Input
   STADM.getDatabase().sdc().set_sdc_file_path(dmInst->get_config().get_sdc_path());
   readNetwork(STADM.getDatabase().network());
   ReadLiberty(STADM.getDatabase().liberty(), STADM.getDatabase().network()).read();
-  if (scope == InputScope::kTiming)
-    ReadParasitics(STADM.getDatabase().parasitics()).read();
   STADM.buildDesign();
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

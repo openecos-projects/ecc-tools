@@ -224,6 +224,8 @@ std::string ReportPathContext::getEndPointCheckText(TimingPath& path)
 {
   const bool falling = path.get_capture_clock_pin_transition() == TransType::kFall;
   const auto& clock = path.get_capture_clock_name();
+  if (path.get_check_type() == TimingCheckType::kClockGatingSetup || path.get_check_type() == TimingCheckType::kClockGatingHold)
+    return std::string("(clock gating check against ") + (falling ? "falling-edge clock " : "rising-edge clock ") + clock + ")";
   if (path.get_check_type() == TimingCheckType::kRecovery || path.get_check_type() == TimingCheckType::kRemoval)
     return std::string(path.get_check_type() == TimingCheckType::kRecovery ? "(recovery check against " : "(removal check against ")
            + (falling ? "falling-edge clock " : "rising-edge clock ") + clock + ")";
@@ -348,6 +350,10 @@ std::string ReportPathContext::getReportPinName(const std::string& pin_name)
 
 std::string ReportPathContext::getLibraryCheckText(TimingPath& timing_path, DelayType delay_type)
 {
+  if (timing_path.get_check_type() == TimingCheckType::kClockGatingSetup)
+    return "clock gating setup time";
+  if (timing_path.get_check_type() == TimingCheckType::kClockGatingHold)
+    return "clock gating hold time";
   if (timing_path.get_check_type() == TimingCheckType::kRecovery) {
     return "library recovery time";
   }

@@ -297,7 +297,7 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
 }
 
 const ClockPinValues& ClockPinValuesQuery::values(const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
-                                                 AnalysisType check, std::optional<TransType> source)
+                                                  AnalysisType check, std::optional<TransType> source)
 {
   if (_mode == CacheMode::kNone) {
     _live = clockPinValues(_database, pin, clock, analysis, transition, check, source);
@@ -306,8 +306,8 @@ const ClockPinValues& ClockPinValuesQuery::values(const std::string& pin, std::s
   const auto key = std::tuple{std::string_view(pin), clock, analysis, transition, check, source};
   if (const auto found = _values.find(key); found != _values.end())
     return found->second;
-  return _values.emplace(Key{pin, clock, analysis, transition, check, source},
-                         clockPinValues(_database, pin, clock, analysis, transition, check, source)).first->second;
+  return _values.emplace(Key{pin, clock, analysis, transition, check, source}, clockPinValues(_database, pin, clock, analysis, transition, check, source))
+      .first->second;
 }
 
 double TimingStateQuery::clockPathBound(const std::string& pin_name, std::string_view clock_name, TransType transition, std::optional<TransType> source) const
@@ -400,9 +400,8 @@ bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining
       for (auto& [edge, states] : edges) {
         // A directly seeded state can carry a different slew. Its endpoint
         // check need not match the physical slew of arriving states.
-        if (!states.empty() && std::any_of(states.begin(), states.end(), [&](const auto& item) {
-              return item.second.get_slew() != states.begin()->second.get_slew();
-            }))
+        if (!states.empty()
+            && std::any_of(states.begin(), states.end(), [&](const auto& item) { return item.second.get_slew() != states.begin()->second.get_slew(); }))
           continue;
         std::map<PathStateGroup, double> witnesses;
         for (const auto& [tag, state] : states) {
@@ -668,6 +667,8 @@ bool TimingStateQuery::isRegisterEndPoint(const std::string& end_point)
 
 bool TimingStateQuery::isTimingCheckEndPoint(const std::string& end_point)
 {
+  if (_database.graph().clockGatingChecks().contains(end_point))
+    return true;
   Database& database = _database;
   Pin& pin = database.network().pins()[end_point];
   if (pin.get_is_port() || database.network().instances().count(pin.get_instance_name()) == 0) {

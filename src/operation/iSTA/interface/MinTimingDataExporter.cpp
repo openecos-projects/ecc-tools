@@ -17,11 +17,11 @@
 #include "PinCapacitanceCalculator.hpp"
 #include "TimingData.hpp"
 #include "graph/TimingStateQuery.hpp"
-#include "timing_checker/PathChecker.hpp"
 #include "liberty/TimingArc.hpp"
 #include "liberty/TimingCheckArc.hpp"
 #include "network/Instance.hpp"
 #include "network/Pin.hpp"
+#include "timing_checker/PathChecker.hpp"
 
 namespace ista {
 namespace {
@@ -46,8 +46,7 @@ bool hasMinCaptureState(Database& database, const std::string& pin_name, TransTy
   for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
     if (state.is_source_path_only || !database.sdc().get_clock_map().contains(clock_name))
       continue;
-    if (state.is_structural
-        && !clockPinValues(database, pin_name, clock_name, AnalysisType::kMin, transition).propagated)
+    if (state.is_structural && !clockPinValues(database, pin_name, clock_name, AnalysisType::kMin, transition).propagated)
       return true;
     const auto value = state.arrival(AnalysisType::kMin, transition);
     if (value.has_value() && std::isfinite(*value))
@@ -93,8 +92,8 @@ bool hasCheckTable(const LibertyArcData& arc, std::size_t edge)
   return edge == 0 ? !arc.rise_check.values.empty() : !arc.fall_check.values.empty();
 }
 
-TimingMinQualification qualifyMinCheck(Database& database, const TimingEndpointArcData& endpoint,
-                                       const TimingData& snapshot, const std::set<MinCheckKey>& active_checks)
+TimingMinQualification qualifyMinCheck(Database& database, const TimingEndpointArcData& endpoint, const TimingData& snapshot,
+                                       const std::set<MinCheckKey>& active_checks)
 {
   const auto check_type = static_cast<TimingCheckType>(endpoint.check_type);
   if (check_type != TimingCheckType::kHold && check_type != TimingCheckType::kRemoval)
@@ -102,11 +101,8 @@ TimingMinQualification qualifyMinCheck(Database& database, const TimingEndpointA
   if (!hasMinCaptureState(database, endpoint.source_pin, endpoint.timing_type == 1 ? TransType::kRise : TransType::kFall))
     return excluded(TimingMinQualificationReason::kNoCaptureClockState);
   auto result = excluded(TimingMinQualificationReason::kInactiveCheck);
-  const auto cell = std::find_if(snapshot.lib_cells.begin(), snapshot.lib_cells.end(), [&](const auto& value) {
-    return value.name == endpoint.library_cell;
-  });
-  if (cell == snapshot.lib_cells.end() || endpoint.library_arc_id < 0
-      || static_cast<std::size_t>(endpoint.library_arc_id) >= cell->arcs.size())
+  const auto cell = std::find_if(snapshot.lib_cells.begin(), snapshot.lib_cells.end(), [&](const auto& value) { return value.name == endpoint.library_cell; });
+  if (cell == snapshot.lib_cells.end() || endpoint.library_arc_id < 0 || static_cast<std::size_t>(endpoint.library_arc_id) >= cell->arcs.size())
     return excluded(TimingMinQualificationReason::kInactiveCheck);
   const auto& arc = cell->arcs[endpoint.library_arc_id];
   for (std::size_t edge = 0; edge < 2; ++edge) {
@@ -115,8 +111,7 @@ TimingMinQualification qualifyMinCheck(Database& database, const TimingEndpointA
       continue;
     }
     auto active = [&](int32_t capture_transition) {
-      return active_checks.contains({endpoint.source_pin, endpoint.sink_pin, endpoint.check_type,
-                                     edge == 0 ? 1 : -1, capture_transition});
+      return active_checks.contains({endpoint.source_pin, endpoint.sink_pin, endpoint.check_type, edge == 0 ? 1 : -1, capture_transition});
     };
     const bool legal_context = endpoint.timing_type == 0 ? active(1) || active(-1) : active(endpoint.timing_type);
     result.valid[edge] = hasCheckTable(arc, edge) && legal_context;
@@ -139,8 +134,7 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
     pin.min_rise_aat_ps = pin.min_fall_aat_ps = 9.0e7;
     pin.min_rise_rat_ps = pin.min_fall_rat_ps = -9.0e7;
     pins.emplace(pin.name, &pin);
-    if (pin.is_port && (pin.direction == static_cast<int32_t>(PinDirection::kOutput)
-                        || pin.direction == static_cast<int32_t>(PinDirection::kInout))) {
+    if (pin.is_port && (pin.direction == static_cast<int32_t>(PinDirection::kOutput) || pin.direction == static_cast<int32_t>(PinDirection::kInout))) {
       // HoldRC adds these to endpoint pin caps before summing the net load.
       // Export only this output port's external load, never the other sinks.
       pin.min_output_rise_load_pf = pin_capacitance.pinCapacitance(pin.name, AnalysisType::kMin, TransType::kRise) * snapshot.capacitance_unit_pf;
@@ -177,7 +171,7 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
           }
           if (start_points.contains(name)) {
             const auto key = std::make_tuple(name, path.get_clock_name(), path.get_path_state_tag(), static_cast<int32_t>(source_type),
-                                              transitionCode(transition), transitionCode(path.get_launch_clock_trans_type()));
+                                             transitionCode(transition), transitionCode(path.get_launch_clock_trans_type()));
             if (launch_keys.insert(key).second) {
               TimingMinLaunchData launch;
               launch.start_point = name;
@@ -191,18 +185,18 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
               launch.slew_ps = path.get_slew() * snapshot.time_unit_ps;
               launch.launch_time_ps = path.get_launch_time() * snapshot.time_unit_ps;
               if (!launch.launch_pin.empty())
-                launch.launch_slew_ps = query.getClockSlew(launch.launch_pin, launch.launch_clock, AnalysisType::kMin,
-                                                          path.get_launch_clock_trans_type(), path.get_launch_clock_trans_type())
-                                       * snapshot.time_unit_ps;
+                launch.launch_slew_ps = query.getClockSlew(launch.launch_pin, launch.launch_clock, AnalysisType::kMin, path.get_launch_clock_trans_type(),
+                                                           path.get_launch_clock_trans_type())
+                                        * snapshot.time_unit_ps;
               snapshot.min_launches.push_back(std::move(launch));
             }
           }
           if (!endpoints.contains(name))
             continue;
           const auto endpoint_pin = database.network().pins().find(name);
-          const bool is_output_port = endpoint_pin != database.network().pins().end() && endpoint_pin->second.get_is_port()
-                                      && (endpoint_pin->second.get_direction() == PinDirection::kOutput
-                                          || endpoint_pin->second.get_direction() == PinDirection::kInout);
+          const bool is_output_port
+              = endpoint_pin != database.network().pins().end() && endpoint_pin->second.get_is_port()
+                && (endpoint_pin->second.get_direction() == PinDirection::kOutput || endpoint_pin->second.get_direction() == PinDirection::kInout);
           if (is_output_port && !hasLaunchClockState(database, path))
             continue;
           const auto checked = checker.checkPathCandidates(path, name, AnalysisType::kMin);
@@ -213,6 +207,8 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
           // consumers must retain the context before endpoint reduction.
           for (const auto& candidate : checked) {
             const auto& check = candidate.check();
+            if (check.type == TimingCheckType::kClockGatingHold)
+              continue;  // schema 2 consumers require a Liberty hold LUT.
             TimingMinContextData context;
             context.start_point = path.get_start_point();
             context.end_point = name;
@@ -238,9 +234,9 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             context.uncertainty_ps = check.uncertainty * snapshot.time_unit_ps;
             context.cppr_ps = check.reconvergence * snapshot.time_unit_ps;
             if (!check.capture_pin.empty())
-              context.capture_slew_ps = query.getClockSlew(check.capture_pin, check.capture_clock, AnalysisType::kMin,
-                                                          check.capture_pin_transition, check.capture_transition)
-                                        * snapshot.time_unit_ps;
+              context.capture_slew_ps
+                  = query.getClockSlew(check.capture_pin, check.capture_clock, AnalysisType::kMin, check.capture_pin_transition, check.capture_transition)
+                    * snapshot.time_unit_ps;
             if (!context.launch_pin.empty())
               context.launch_clock_slew_ps = query.getClockSlew(context.launch_pin, context.launch_clock, AnalysisType::kMin,
                                                                 path.get_launch_clock_trans_type(), path.get_launch_clock_trans_type())
@@ -291,13 +287,17 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
   std::set<MinCheckKey> active_checks;
   for (const auto& context : snapshot.min_contexts)
     if (context.check_type != 0)
-      active_checks.emplace(context.capture_pin, context.end_point, context.check_type,
-                            context.data_transition, context.capture_pin_transition);
+      active_checks.emplace(context.capture_pin, context.end_point, context.check_type, context.data_transition, context.capture_pin_transition);
   for (auto& arc : snapshot.timing_check_arcs)
     arc.min_qualification = qualifyMinCheck(database, arc, snapshot, active_checks);
   for (auto& arc : snapshot.constraint_arcs)
     arc.min_qualification = qualifyMinCheck(database, arc, snapshot, active_checks);
   for (auto& pin : snapshot.pins) {
+    if (database.graph().clockGatingChecks().contains(pin.name)) {
+      pin.min_qualification.valid = {false, false};
+      pin.min_qualification.reason = {TimingMinQualificationReason::kUnsupportedConstraint, TimingMinQualificationReason::kUnsupportedConstraint};
+      continue;
+    }
     if (pin.is_port) {
       auto output = qualifyMinOutput(database, pin.name);
       const bool has_output_context = pin.min_qualification.valid[0] || pin.min_qualification.valid[1];
@@ -317,8 +317,8 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
         pin.min_qualification.valid[edge] = false;
         pin.min_qualification.reason[edge] = TimingMinQualificationReason::kDisabledTransition;
       } else if (pin.min_qualification.valid[edge] && !pin.min_path_valid[edge]
-                 && !(pin.is_port && (pin.direction == static_cast<int32_t>(PinDirection::kOutput)
-                                      || pin.direction == static_cast<int32_t>(PinDirection::kInout)))) {
+                 && !(pin.is_port
+                      && (pin.direction == static_cast<int32_t>(PinDirection::kOutput) || pin.direction == static_cast<int32_t>(PinDirection::kInout)))) {
         pin.min_qualification.valid[edge] = false;
         pin.min_qualification.reason[edge] = TimingMinQualificationReason::kNoMinPathState;
       }

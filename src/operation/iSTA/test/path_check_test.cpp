@@ -106,10 +106,8 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
     const auto budgeted = checker.checkPath(path, "ff:D", mode);
     // PT2018: -ignore_clock_latency also excludes clock uncertainty. The
     // endpoint setup/hold check remains part of the explicit data-path budget.
-    const double expected_budget = ignore ? (mode == AnalysisType::kMax ? 2. : 4.)
-                                          : (mode == AnalysisType::kMax ? 2.4 : 5.);
-    require(budgeted && std::abs(budgeted->required() - expected_budget) < 1e-8,
-            "path-delay budget applied the wrong clock uncertainty or latency");
+    const double expected_budget = ignore ? (mode == AnalysisType::kMax ? 2. : 4.) : (mode == AnalysisType::kMax ? 2.4 : 5.);
+    require(budgeted && std::abs(budgeted->required() - expected_budget) < 1e-8, "path-delay budget applied the wrong clock uncertainty or latency");
   }
   db.sdc().get_clock_map().at("b").set_setup_uncertainty(0.);
   db.sdc().get_clock_map().at("b").set_hold_uncertainty(0.);
@@ -243,6 +241,52 @@ static void checkSlewRange()
   path.set_slew(.1);
   result = checker.checkPath(path, "ff:D", AnalysisType::kMin);
   require(result && std::abs(result->check().check_time - 1.1) < 1e-9, "hold must use the most restrictive check across physical slews");
+
+  // Both conditional Liberty variants remain possible. A min data path must
+  // still satisfy the largest hold/removal requirement (PT2022 CEB fixture).
+  for (auto type : {TimingCheckType::kSetup, TimingCheckType::kHold, TimingCheckType::kRecovery, TimingCheckType::kRemoval}) {
+    const auto mode = type == TimingCheckType::kSetup || type == TimingCheckType::kRecovery ? AnalysisType::kMax : AnalysisType::kMin;
+    auto& check_arc = instance.get_check_arc_list().front();
+    check_arc.set_check_type(type);
+    for (bool negative : {false, true}) {
+      const double loose = negative ? -.03 : .1036;
+      const double strict = negative ? -.01 : .112;
+      TimingArc first, second;
+      first.set_arc_idx(17);
+      second.set_arc_idx(23);
+      first.get_check_table_map()[TransType::kRise].set_value_list({loose});
+      second.get_check_table_map()[TransType::kRise].set_value_list({strict});
+      for (bool reverse : {false, true}) {
+        check_arc.set_timing_arc_list(reverse ? std::vector<TimingArc>{second, first} : std::vector<TimingArc>{first, second});
+        const auto checked = checker.checkPath(path, "ff:D", mode);
+        require(checked && std::abs(checked->check().check_time - strict) < 1e-12, "parallel constraint variants chose the easier timing check");
+        require(checked->check().selected_check_arc_idx == 23, "strict check value lost its Liberty arc identity");
+      }
+      if (negative) {
+        db.sdc().timingDerates().set(mode, false, TransType::kRise, DerateDelay::kCheck, 3.);
+        const auto derated = checker.checkPath(path, "ff:D", mode);
+        require(derated && std::abs(derated->check().check_time - .03) < 1e-12 && derated->check().selected_check_arc_idx == 17,
+                "negative check candidates were reduced before derating");
+        db.sdc().timingDerates() = TimingDerates{};
+      }
+      LogicExpressionTerm select;
+      select.set_operation_type(LogicOperationType::kPort);
+      select.set_port_name("SELECT");
+      second.get_when_expression().set_term_list({select});
+      check_arc.set_timing_arc_list({first, second});
+      for (auto value : {TimingCaseValue::kZero, TimingCaseValue::kOne, TimingCaseValue::kNone}) {
+        db.graph().simValues().setValue("ff:SELECT", value);
+        const auto conditional = checker.checkPath(path, "ff:D", mode);
+        require(conditional && std::abs(conditional->check().check_time - (value == TimingCaseValue::kZero ? loose : strict)) < 1e-12,
+                "conditional timing check ignored known-false or unknown when condition");
+      }
+      first.get_when_expression().set_term_list({select});
+      check_arc.set_timing_arc_list({first, second});
+      db.graph().simValues().setValue("ff:SELECT", TimingCaseValue::kZero);
+      require(!checker.checkPath(path, "ff:D", mode), "all-disabled variants fabricated an unconditional check");
+      db.graph().simValues().clear();
+    }
+  }
 }
 
 static void outputPathBudget()
@@ -289,8 +333,7 @@ static void outputPathBudget()
       path.set_exception_state_list(ExceptionMatcher(db.sdc(), db.network()).initState("in", "clk", TransType::kRise, mode, TransType::kRise));
       const auto result = checker.checkPath(path, "out", mode);
       const double expected = ignore ? 3.4 : mode == AnalysisType::kMax ? 3.2 : 3.8;
-      require(result && std::abs(result->required() - expected) < 1e-9,
-              "clock-independent output budget lost its I/O delay or retained a clock margin");
+      require(result && std::abs(result->required() - expected) < 1e-9, "clock-independent output budget lost its I/O delay or retained a clock margin");
     }
   }
 }

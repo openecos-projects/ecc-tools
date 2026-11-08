@@ -21,6 +21,7 @@
 #include <type_traits>
 
 #include "ClockChecker.hpp"
+#include "ClockGatingChecker.hpp"
 #include "ClockPropagator.hpp"
 #include "DataPropagator.hpp"
 #include "DelayCalculator.hpp"
@@ -157,6 +158,7 @@ void TimingAnalyzer::analyze(bool reuse_structure)
 
   database.graph().clearTiming();
   ClockPropagator(database, _delay).propagate();
+  ClockGatingChecker(database).infer();
   DataPropagator(database, _delay).propagate();
 
   {
@@ -166,7 +168,7 @@ void TimingAnalyzer::analyze(bool reuse_structure)
     PathAnalyzer(database, check).analyze();
   }
   database.fanoutChecks() = FanoutChecker(database).check();
-  database.electricalChecks() = ElectricalChecker(database, _delay).check();
+  database.electricalChecks() = ElectricalChecker(database, _delay, _check_constant_capacitance).check();
   database.clockChecks() = ClockChecker(database).check();
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
