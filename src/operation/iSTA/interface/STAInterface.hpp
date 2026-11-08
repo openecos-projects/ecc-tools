@@ -54,7 +54,7 @@ class STAInterface
     kConstraints
   };
   bool initialize(std::map<std::string, std::any> config_map, InputScope scope);
-  void readDesign(std::map<std::string, std::any>& config_map, InputScope scope);
+  void readDesign(std::map<std::string, std::any>& config_map);
 
   bool _initialized = false;
   bool _model_ready = false;

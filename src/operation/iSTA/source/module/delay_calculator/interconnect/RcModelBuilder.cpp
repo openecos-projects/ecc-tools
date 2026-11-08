@@ -277,9 +277,8 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     wire_capacitance += node.get_capacitance();
   const double resistance = _rc.totalResistance(parasitic_net) * 1e-3;
   const double count = static_cast<double>(loads.size());
-  const bool balanced = loads.size() <= 5;
   PinCapacitanceCalculator pin_capacitance(_database);
-  std::array<double, 2> constants;
+  std::array<double, 2> constants, reduced_constants;
   for (auto edge : {TransType::kRise, TransType::kFall}) {
     double pin_load = pin_capacitance.driverCapacitance(_rc.pinName(source_node_name), analysis_type, edge);
     for (auto pin : loads)
@@ -290,9 +289,15 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     // networks use total RC for the ordinary low-RC cutoff and response.
     // The enhancement also bounds the reduction to 10% of total RC.
     const double total_load = wire_capacitance + pin_load;
-    const double reduced_load = balanced ? std::max(wire_capacitance / (count + 1.) + pin_load / count, .1 * total_load) : total_load;
-    constants[edge == TransType::kRise ? 0 : 1] = resistance * reduced_load;
+    const double reduced_load = std::max(wire_capacitance / (count + 1.) + pin_load / count, .1 * total_load);
+    constants[edge == TransType::kRise ? 0 : 1] = resistance * total_load;
+    reduced_constants[edge == TransType::kRise ? 0 : 1] = resistance * reduced_load;
   }
+  // Ordinary total RC has priority. The enhanced model extends the small-net
+  // range; applying it inside the ordinary range understates every wire delay.
+  const bool balanced = _config.small_rc_fanout_reduction != 0 && std::max(constants[0], constants[1]) >= .002 && loads.size() <= 5;
+  if (balanced)
+    constants = reduced_constants;
   // Both low-RC models use a 2 ps cutoff. Select both edges together;
   // never replace a partially annotated
   // or multi-driver network with this approximation.

@@ -21,6 +21,38 @@
 
 namespace ista::sdc {
 
+namespace {
+
+// A register output is traversed by a path, but is not its launch boundary.
+// Keep this validation local to false paths: max/min delay intentionally allow
+// internal pins to segment a path, and -through may name register outputs.
+bool isRegisterOutput(const Database& database, const ExceptionObject& object)
+{
+  if (object.type != ExceptionObjectType::kPin)
+    return false;
+  const auto& pins = database.network().pins();
+  auto pin = pins.find(object.name);
+  if (pin == pins.end() || pin->second.get_is_port())
+    return false;
+  const auto& constraints = database.sdc().get_port_constraint_map();
+  auto constraint = constraints.find(object.name);
+  if (constraint != constraints.end() && !constraint->second.get_input_delay_list().empty())
+    return false;
+  const auto& instances = database.network().instances();
+  auto instance = instances.find(pin->second.get_instance_name());
+  if (instance == instances.end() || !instance->second.get_is_sequential())
+    return false;
+  const auto& cells = database.liberty().get_cell_map();
+  auto cell = cells.find(instance->second.get_cell_name());
+  if (cell == cells.end())
+    return false;
+  const auto& ports = cell->second.get_port_map();
+  auto port = ports.find(pin->second.get_pin_name());
+  return port != ports.end() && port->second.get_is_output() && !port->second.get_is_input();
+}
+
+}  // namespace
+
 TclSetFalsePath::TclSetFalsePath(const char* cmd_name, ClientData client_data) : TclPathException(cmd_name, client_data, true)
 {
   addOption(new ecc::TclSwitchOption("-setup"));
@@ -34,6 +66,21 @@ unsigned TclSetFalsePath::exec()
   TimingException exception = parsePathSelector(database, true);
   if (hasEmptySelector())
     return 1;
+  auto from = exception.get_from_objects();
+  const bool explicit_from = !from.empty();
+  for (auto it = from.begin(); it != from.end();) {
+    if (isRegisterOutput(database, *it)) {
+      STALOG.warn(Loc::current(), "set_false_path ignores non-startpoint register output ", it->name);
+      it = from.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  // An empty stored selector means every startpoint. Never broaden an invalid
+  // command into a global exception, including when -reset_path was requested.
+  if (explicit_from && from.empty())
+    return 1;
+  exception.set_from_objects(from);
   exception.set_type(TimingExceptionType::kFalsePath);
   applyAnalysisQualifiers(exception);
   if (getOptionOrArg("-reset_path")->is_set_val()) {

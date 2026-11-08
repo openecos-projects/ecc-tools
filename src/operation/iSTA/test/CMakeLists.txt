@@ -265,7 +265,7 @@ add_test(NAME ista_named_clock_startpoint COMMAND test_ista_clock_propagation so
 add_executable(test_ista_sdc_identity EXCLUDE_FROM_ALL sdc_identity_test.cpp)
 add_executable(test_ista_sdc_limits EXCLUDE_FROM_ALL sdc_limits_test.cpp)
 target_link_libraries(test_ista_sdc_limits PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager ista_graph_query)
-foreach(case transition capacitance derate corners scoped check force hierarchy pulse)
+foreach(case transition capacitance derate corners scoped check force hierarchy pulse abbreviation)
   add_test(NAME ista_sdc_limits_${case} COMMAND test_ista_sdc_limits ${case})
 endforeach()
 target_link_libraries(test_ista_sdc_identity PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager)
@@ -345,7 +345,7 @@ add_test(NAME ista_clock_check_reader COMMAND test_ista_clock_check_reader ${CMA
 
 add_executable(test_ista_sdc_semantics EXCLUDE_FROM_ALL sdc_semantics_test.cpp)
 target_link_libraries(test_ista_sdc_semantics PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager ista_graph_query)
-foreach(case uncertainty reset groups generated waveform latency local_clock driving units status empty_collection writer_names removed_refs removed_source clock_stages)
+foreach(case uncertainty reset groups generated waveform latency local_clock driving units status empty_collection writer_names removed_refs removed_source clock_stages false_startpoint)
   add_test(NAME ista_sdc_semantics_${case} COMMAND test_ista_sdc_semantics ${case})
 endforeach()
 
@@ -399,3 +399,8 @@ add_executable(test_ista_sdc_rebuild EXCLUDE_FROM_ALL sdc_rebuild_test.cpp)
 target_link_libraries(test_ista_sdc_rebuild PRIVATE ista_timing_analyzer ista_delay_calculator ista_sdc_writer ista_sdc_frontend)
 add_test(NAME ista_sdc_rebuild COMMAND test_ista_sdc_rebuild)
 set_tests_properties(ista_sdc_rebuild PROPERTIES TIMEOUT 60)
+
+add_executable(test_ista_clock_gating EXCLUDE_FROM_ALL clock_gating_test.cpp)
+target_link_libraries(test_ista_clock_gating PRIVATE ista_clock_checker ista_path_checker ista_delay_calculator ista_sdc ista_interface ista_data_exporter)
+add_test(NAME ista_clock_gating COMMAND test_ista_clock_gating)
+set_tests_properties(ista_clock_gating PROPERTIES TIMEOUT 30)

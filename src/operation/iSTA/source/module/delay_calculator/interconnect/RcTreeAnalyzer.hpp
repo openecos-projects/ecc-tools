@@ -40,11 +40,15 @@ class RcTreeAnalyzer
     _parasitic_resistor_map_cache.clear();
     _trees.clear();
     _timing.clear();
+    _incomplete_networks.clear();
+    _balanced_models.clear();
   }
   double load(const std::string& net, AnalysisType analysis, TransType trans, const std::string& node) const;
   std::optional<double> delay(const std::string& net, AnalysisType analysis, TransType trans, const std::string& node) const;
   std::optional<double> impulse(const std::string& net, AnalysisType analysis, TransType trans, const std::string& node) const;
   bool hasDisabledDriver(const std::string& net, const std::string& source) const;
+  bool hasIncompleteNetwork(ParasiticNet& net, const std::string& source);
+  double wireCapacitance(ParasiticNet& net) const;
   double balancedDelay(ParasiticNet& net, const std::string& source, std::string& sink, AnalysisType analysis, TransType edge);
   double totalResistance(ParasiticNet& parasitic_net);
   double nodeCapacitance(ParasiticNet& parasitic_net, std::string& pin_name);
@@ -82,6 +86,13 @@ class RcTreeAnalyzer
   PinCapacitanceCalculator& _pin_capacitance;
   std::map<std::string, std::map<std::string, std::vector<std::pair<std::string, double>>>> _parasitic_resistor_map_cache;
   std::map<std::string, RcTree> _trees;
+  std::map<std::pair<std::string, std::string>, bool> _incomplete_networks;
+  struct BalancedModel
+  {
+    double resistance_per_load = 0.;
+    double wire_capacitance_per_load = 0.;
+  };
+  std::map<std::pair<std::string, std::string>, BalancedModel> _balanced_models;
   std::map<std::string, std::map<AnalysisType, std::map<TransType, RcTiming>>> _timing;
 };
 }  // namespace ista

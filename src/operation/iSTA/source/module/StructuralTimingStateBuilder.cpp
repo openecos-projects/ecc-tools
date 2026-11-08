@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "StructuralTimingStateBuilder.hpp"
-#include "StartpointInitializer.hpp"
 
 #include <algorithm>
 #include <set>
@@ -8,20 +7,22 @@
 #include <utility>
 #include <vector>
 
+#include "ClockGatingChecker.hpp"
 #include "Database.hpp"
+#include "StartpointInitializer.hpp"
 #include "graph/Arc.hpp"
 #include "graph/Graph.hpp"
 #include "graph/TimingPoint.hpp"
 #include "graph/TimingStateQuery.hpp"
+#include "graph_builder/GraphBuilder.hpp"
 #include "liberty/LibertyCell.hpp"
 #include "liberty/LibertyLibrary.hpp"
 #include "liberty/TimingArc.hpp"
 #include "liberty/TimingCellArc.hpp"
-#include "graph_builder/GraphBuilder.hpp"
-#include "timing_propagator/clock/ClockNetworkBuilder.hpp"
-#include "timing_propagator/data/TransitionFilter.hpp"
 #include "network/Network.hpp"
 #include "sdc/ExceptionMatcher.hpp"
+#include "timing_propagator/clock/ClockNetworkBuilder.hpp"
+#include "timing_propagator/data/TransitionFilter.hpp"
 
 namespace ista {
 namespace {
@@ -81,8 +82,7 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
       for (const auto analysis : {AnalysisType::kMax, AnalysisType::kMin}) {
         for (const auto source_type : {PathSourceType::kInput, PathSourceType::kRegister}) {
           for (const auto input_transition : {TransType::kRise, TransType::kFall}) {
-            if (!allowsTransition(database.network(), database.graph().simValues(), arc.get_source_pin(), input_transition,
-                                  arc.get_type() == ArcType::kNet))
+            if (!allowsTransition(database.network(), database.graph().simValues(), arc.get_source_pin(), input_transition, arc.get_type() == ArcType::kNet))
               continue;
             const auto source_analysis = source.get_path_state_map().find(analysis);
             if (source_analysis == source.get_path_state_map().end())
@@ -93,8 +93,8 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
             const auto path_it = source_type_it->second.find(input_transition);
             if (path_it == source_type_it->second.end())
               continue;
-            const auto outputs = arc.get_type() == ArcType::kCell ? cellOutputTransitions(database, arc, input_transition)
-                                                                   : std::vector<TransType>{input_transition};
+            const auto outputs
+                = arc.get_type() == ArcType::kCell ? cellOutputTransitions(database, arc, input_transition) : std::vector<TransType>{input_transition};
             for (const auto& [source_tag, source_state] : path_it->second) {
               if (source_state.get_is_clock_source_path())
                 continue;
@@ -104,9 +104,9 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
                   continue;
                 const auto progress = matcher.advanceState(through_index, source_state.get_exception_state_list(), arc.get_sink_pin(), output_transition,
                                                            arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
-                const auto tag = matcher.makePathStateTag(source_state.get_clock_name(), source_state.get_launch_clock_trans_type(), progress,
-                                                          source_state.get_is_clock_source_path(), source_state.crprPathTag(),
-                                                          source_state.get_launch_clock_edge_index());
+                const auto tag
+                    = matcher.makePathStateTag(source_state.get_clock_name(), source_state.get_launch_clock_trans_type(), progress,
+                                               source_state.get_is_clock_source_path(), source_state.crprPathTag(), source_state.get_launch_clock_edge_index());
                 auto& target_map = sink.get_path_state_map()[analysis][source_type][output_transition];
                 if (target_map.contains(tag))
                   continue;
@@ -143,6 +143,7 @@ void StructuralTimingStateBuilder::build(Database& database, DelayCalculator& de
   for (auto& [name, point] : database.graph().driverPoints())
     for (auto& [clock, state] : point.get_clock_state_map())
       state.is_structural = true;
+  ClockGatingChecker(database).infer();
   ExceptionThroughIndex through_index(database.sdc(), database.network());
   // Reuse the same boundary seeding as complete STA. In particular, min
   // input delays and ideal clock latency/transition must not become zeros.
