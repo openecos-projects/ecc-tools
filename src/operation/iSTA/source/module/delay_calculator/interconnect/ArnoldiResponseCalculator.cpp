@@ -106,6 +106,8 @@ DriverResponse ArnoldiResponseCalculator::calculate(std::string& output_pin, Tim
     return timing_result;
 
   ParasiticNet& parasitic_net = database.parasitics().nets()[output_pin_data.get_net_name()];
+  if (_rc.hasIncompleteNetwork(parasitic_net, output_pin))
+    return timing_result;
   std::string source_node_name = _rc.nodeName(parasitic_net, output_pin);
   if (source_node_name.empty()) {
     return timing_result;

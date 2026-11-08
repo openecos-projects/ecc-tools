@@ -293,7 +293,8 @@ void PathReportWriter::outputRequiredClockInfo(std::ostream& report_file, Timing
   if (timing_path.get_check_type() != TimingCheckType::kNone) {
     const double check = (delay_type == DelayType::kMin || timing_path.get_check_type() == TimingCheckType::kRecovery ? 1 : -1) * timing_path.get_check_time();
     path += check;
-    if (std::fabs(check) > ista::kTimingTolerance)
+    if (std::fabs(check) > ista::kTimingTolerance || timing_path.get_check_type() == TimingCheckType::kClockGatingSetup
+        || timing_path.get_check_type() == TimingCheckType::kClockGatingHold)
       outputTimingLine(report_file, _report_path_context.getLibraryCheckText(timing_path, delay_type), check, path, true, "", label_width);
   } else if (const auto delay = timing_path.get_output_delay()) {
     path -= *delay;

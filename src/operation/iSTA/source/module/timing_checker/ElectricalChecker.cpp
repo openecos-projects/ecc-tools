@@ -25,7 +25,7 @@ double slewRange(const Library& library, TransType edge)
   const double upper = edge == TransType::kRise ? library.get_slew_upper_threshold_pct_rise() : library.get_slew_upper_threshold_pct_fall();
   return (normalize(upper) - normalize(lower)) / library.get_slew_derate_from_library();
 }
-std::set<std::string> dataClocks(TimingPoint& point, AnalysisType analysis, TransType edge)
+std::set<std::string> dataClocks(const TimingPoint& point, AnalysisType analysis, TransType edge)
 {
   std::set<std::string> clocks;
   auto mode = point.get_path_state_map().find(analysis);
@@ -118,12 +118,12 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
         continue;
       const auto& pin = db.network().pins().at(driver);
       const bool separate_driver = db.graph().driverPoints().contains(driver);
-      if (!db.graph().simValues().allowsTransition(driver, TransType::kRise, separate_driver)
+      if (!_check_constant_capacitance && !db.graph().simValues().allowsTransition(driver, TransType::kRise, separate_driver)
           && !db.graph().simValues().allowsTransition(driver, TransType::kFall, separate_driver))
         continue;
-      if (!db.graph().points().contains(driver) && !separate_driver)
+      const auto* point = db.graph().points().contains(driver) || separate_driver ? &db.graph().driverPoint(driver) : nullptr;
+      if (!point && !_check_constant_capacitance)
         continue;
-      auto& point = db.graph().driverPoint(driver);
       for (auto analysis : {AnalysisType::kMin, AnalysisType::kMax})
         for (auto edge : {TransType::kRise, TransType::kFall}) {
           const double capacitance = _delay.pinLoad(driver, analysis, edge);
@@ -142,16 +142,21 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
             for (const auto& load : net.get_load_pin_list()) {
               const auto& receiver = db.network().pins().at(load);
               if (load == driver || receiver.get_is_port() || receiver.get_direction() != PinDirection::kInout
-                  || db.graph().simValues().driverDisabled(load) == false || isIdealClockPin(db, load) || !db.graph().simValues().allowsTransition(load, edge))
+                  || db.graph().simValues().driverDisabled(load) == false || isIdealClockPin(db, load)
+                  || (!_check_constant_capacitance && !db.graph().simValues().allowsTransition(load, edge)))
                 continue;
               const auto forced = db.sdc().electricalLimits().forcedLimit(ElectricalRule::kCapacitance, load, false);
               record(ElectricalRule::kCapacitance, receiver, clock, clock_path, analysis, edge, capacitance, forced ? forced : maximum);
             }
           };
-          for (const auto& clock : dataClocks(point, analysis, edge))
-            evaluate(clock, false);
-          for (const auto& [clock, state] : point.get_clock_state_map())
-            evaluate(clock, true);
+          if (point) {
+            for (const auto& clock : dataClocks(*point, analysis, edge))
+              evaluate(clock, false);
+            for (const auto& [clock, state] : point->get_clock_state_map())
+              evaluate(clock, true);
+          } else {
+            evaluate("", false);
+          }
         }
     }
   }

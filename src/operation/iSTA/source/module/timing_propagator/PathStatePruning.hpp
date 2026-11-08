@@ -19,6 +19,8 @@ class PathStatePruning
   bool canPruneTo(const std::string& endpoint, const std::string& launch) const
   {
     const auto& graph = _database.graph();
+    if (graph.clockGatingChecks().contains(endpoint))
+      return false;
     for (const auto& [mode, sources] : graph.points().at(endpoint).get_path_state_map())
       for (const auto& [source, edges] : sources)
         for (const auto& [edge, states] : edges)
@@ -35,8 +37,7 @@ class PathStatePruning
           const auto definition = sdc.get_clock_map().find(clock);
           if (definition == sdc.get_clock_map().end())
             return false;
-          const auto origins = clock_pin.empty() ? std::vector<TransType>{local}
-                                                : clockSourceTransitions(_database, clock_pin, clock, capture_mode, local);
+          const auto origins = clock_pin.empty() ? std::vector<TransType>{local} : clockSourceTransitions(_database, clock_pin, clock, capture_mode, local);
           for (auto origin : origins) {
             has_capture = true;
             // Empty exception progress deliberately evaluates only clock groups.
@@ -95,8 +96,8 @@ class PathStatePruning
   }
 
  private:
-  bool hasPathDelay(const std::string& launch, const std::string& endpoint, const std::string& capture, AnalysisType mode,
-                    TransType data_edge, TransType capture_edge, bool capture_known = true) const
+  bool hasPathDelay(const std::string& launch, const std::string& endpoint, const std::string& capture, AnalysisType mode, TransType data_edge,
+                    TransType capture_edge, bool capture_known = true) const
   {
     for (const auto& exception : _database.sdc().get_path_exception_list()) {
       if (exception.get_type() != (mode == AnalysisType::kMax ? TimingExceptionType::kMaxDelay : TimingExceptionType::kMinDelay)
@@ -109,8 +110,7 @@ class PathStatePruning
           && !from.contains({ExceptionObjectType::kClock, launch}))
         continue;
       const auto& to = exception.get_to_objects();
-      if (!capture_known
-          && std::any_of(to.begin(), to.end(), [](const auto& object) { return object.type == ExceptionObjectType::kClock; }))
+      if (!capture_known && std::any_of(to.begin(), to.end(), [](const auto& object) { return object.type == ExceptionObjectType::kClock; }))
         return true;
       if (!_matcher.matchesEndpointSelector(to, endpoint, capture, false))
         continue;

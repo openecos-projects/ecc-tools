@@ -99,6 +99,19 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
   require(constrained && constrained->check().capture_pin == "ff:CK2" && std::abs(constrained->required() - (mode == AnalysisType::kMax ? 2.7 : 4.7)) < 1e-8,
           "path delay exception reselected the first register capture pin");
 
+  db.sdc().get_clock_map().at("b").set_setup_uncertainty(.3);
+  db.sdc().get_clock_map().at("b").set_hold_uncertainty(.3);
+  for (bool ignore : {false, true}) {
+    db.sdc().get_path_exception_list().back().set_ignore_clock_latency(ignore);
+    const auto budgeted = checker.checkPath(path, "ff:D", mode);
+    // PT2018: -ignore_clock_latency also excludes clock uncertainty. The
+    // endpoint setup/hold check remains part of the explicit data-path budget.
+    const double expected_budget = ignore ? (mode == AnalysisType::kMax ? 2. : 4.) : (mode == AnalysisType::kMax ? 2.4 : 5.);
+    require(budgeted && std::abs(budgeted->required() - expected_budget) < 1e-8, "path-delay budget applied the wrong clock uncertainty or latency");
+  }
+  db.sdc().get_clock_map().at("b").set_setup_uncertainty(0.);
+  db.sdc().get_clock_map().at("b").set_hold_uncertainty(0.);
+
   db.sdc().get_path_exception_list().clear();
   path.set_exception_state_list({});
   db.sdc().timingDerates().set(mode, false, TransType::kFall, DerateDelay::kCheck, 1.2, DerateObject::kCell, "ff");
@@ -228,10 +241,106 @@ static void checkSlewRange()
   path.set_slew(.1);
   result = checker.checkPath(path, "ff:D", AnalysisType::kMin);
   require(result && std::abs(result->check().check_time - 1.1) < 1e-9, "hold must use the most restrictive check across physical slews");
+
+  // Both conditional Liberty variants remain possible. A min data path must
+  // still satisfy the largest hold/removal requirement (PT2022 CEB fixture).
+  for (auto type : {TimingCheckType::kSetup, TimingCheckType::kHold, TimingCheckType::kRecovery, TimingCheckType::kRemoval}) {
+    const auto mode = type == TimingCheckType::kSetup || type == TimingCheckType::kRecovery ? AnalysisType::kMax : AnalysisType::kMin;
+    auto& check_arc = instance.get_check_arc_list().front();
+    check_arc.set_check_type(type);
+    for (bool negative : {false, true}) {
+      const double loose = negative ? -.03 : .1036;
+      const double strict = negative ? -.01 : .112;
+      TimingArc first, second;
+      first.set_arc_idx(17);
+      second.set_arc_idx(23);
+      first.get_check_table_map()[TransType::kRise].set_value_list({loose});
+      second.get_check_table_map()[TransType::kRise].set_value_list({strict});
+      for (bool reverse : {false, true}) {
+        check_arc.set_timing_arc_list(reverse ? std::vector<TimingArc>{second, first} : std::vector<TimingArc>{first, second});
+        const auto checked = checker.checkPath(path, "ff:D", mode);
+        require(checked && std::abs(checked->check().check_time - strict) < 1e-12, "parallel constraint variants chose the easier timing check");
+        require(checked->check().selected_check_arc_idx == 23, "strict check value lost its Liberty arc identity");
+      }
+      if (negative) {
+        db.sdc().timingDerates().set(mode, false, TransType::kRise, DerateDelay::kCheck, 3.);
+        const auto derated = checker.checkPath(path, "ff:D", mode);
+        require(derated && std::abs(derated->check().check_time - .03) < 1e-12 && derated->check().selected_check_arc_idx == 17,
+                "negative check candidates were reduced before derating");
+        db.sdc().timingDerates() = TimingDerates{};
+      }
+      LogicExpressionTerm select;
+      select.set_operation_type(LogicOperationType::kPort);
+      select.set_port_name("SELECT");
+      second.get_when_expression().set_term_list({select});
+      check_arc.set_timing_arc_list({first, second});
+      for (auto value : {TimingCaseValue::kZero, TimingCaseValue::kOne, TimingCaseValue::kNone}) {
+        db.graph().simValues().setValue("ff:SELECT", value);
+        const auto conditional = checker.checkPath(path, "ff:D", mode);
+        require(conditional && std::abs(conditional->check().check_time - (value == TimingCaseValue::kZero ? loose : strict)) < 1e-12,
+                "conditional timing check ignored known-false or unknown when condition");
+      }
+      first.get_when_expression().set_term_list({select});
+      check_arc.set_timing_arc_list({first, second});
+      db.graph().simValues().setValue("ff:SELECT", TimingCaseValue::kZero);
+      require(!checker.checkPath(path, "ff:D", mode), "all-disabled variants fabricated an unconditional check");
+      db.graph().simValues().clear();
+    }
+  }
+}
+
+static void outputPathBudget()
+{
+  using namespace ista;
+  Database db;
+  Config config;
+  db.network().pins()["out"].set_is_port(true);
+  auto& clock = db.sdc().get_clock_map()["clk"];
+  clock.set_clock_name("clk");
+  clock.set_period(10.);
+  clock.set_setup_uncertainty(.3);
+  clock.set_hold_uncertainty(.3);
+  TimingIoDelay output;
+  output.set_clock_name("clk");
+  output.set_clock_trans_type(TransType::kRise);
+  output.set_delay(2.);
+  output.set_trans_type(TransType::kRise);
+  db.sdc().get_port_constraint_map()["out"].set_output_delays({output}, false);
+  TimingPathState path;
+  path.set_start_point("in");
+  path.set_clock_name("clk");
+  path.set_launch_clock_trans_type(TransType::kRise);
+  path.set_trans_type(TransType::kRise);
+  path.set_launch_time(.4);
+  path.set_arrival(1.);
+  DelayCalculator delay(db, config);
+  PathChecker checker(db, delay);
+  for (auto mode : {AnalysisType::kMax, AnalysisType::kMin}) {
+    clock.set_source_latency(mode, ClockVariation::kEarly, TransType::kRise, .2);
+    clock.set_source_latency(mode, ClockVariation::kLate, TransType::kRise, .2);
+    clock.set_network_latency(mode, TransType::kRise, .3);
+  }
+  for (auto mode : {AnalysisType::kMax, AnalysisType::kMin}) {
+    TimingException exception;
+    output.set_analysis_type(mode);
+    db.sdc().get_port_constraint_map()["out"].set_output_delays({output}, false);
+    exception.set_type(mode == AnalysisType::kMax ? TimingExceptionType::kMaxDelay : TimingExceptionType::kMinDelay);
+    exception.set_to_objects({{ExceptionObjectType::kPort, "out"}});
+    exception.set_delay(5.);
+    for (bool ignore : {false, true}) {
+      exception.set_ignore_clock_latency(ignore);
+      db.sdc().get_path_exception_list() = {exception};
+      path.set_exception_state_list(ExceptionMatcher(db.sdc(), db.network()).initState("in", "clk", TransType::kRise, mode, TransType::kRise));
+      const auto result = checker.checkPath(path, "out", mode);
+      const double expected = ignore ? 3.4 : mode == AnalysisType::kMax ? 3.2 : 3.8;
+      require(result && std::abs(result->required() - expected) < 1e-9, "clock-independent output budget lost its I/O delay or retained a clock margin");
+    }
+  }
 }
 
 int main()
 {
+  outputPathBudget();
   using namespace ista;
   Logger::initInst();
   asynchronousChecks();

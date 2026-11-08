@@ -7,6 +7,7 @@ target_link_libraries(test_ifp_pdn_generator
     ifp_interface
     ifp_pdn_generator
     ifp_toolkit
+    idm
 )
 
 add_test(NAME test_ifp_pdn_generator

@@ -24,7 +24,10 @@ class DelayCalculator;
 class TimingAnalyzer
 {
  public:
-  TimingAnalyzer(Database& database, DelayCalculator& delay) : _database(database), _delay(delay) {}
+  TimingAnalyzer(Database& database, DelayCalculator& delay, bool check_constant_capacitance = false)
+      : _database(database), _delay(delay), _check_constant_capacitance(check_constant_capacitance)
+  {
+  }
   void prepareStructure();
   void analyze(bool reuse_structure = false);
   bool isStructureCurrent() const;
@@ -32,5 +35,6 @@ class TimingAnalyzer
  private:
   Database& _database;
   DelayCalculator& _delay;
+  bool _check_constant_capacitance;
 };
 }  // namespace ista

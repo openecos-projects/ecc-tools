@@ -67,7 +67,13 @@ struct CharBuilderConfig
   bool allow_auto_wirelength_unit = false;
   bool use_boundary_primitive_patterns = false;
   std::optional<double> max_slew_ns = std::nullopt;
+  // Present only when `max_slew_ns` came from an SDC transition limit. The sampling
+  // ceiling is then the tighter of the SDC rule and the cells' Liberty rules.
+  std::optional<double> sdc_max_slew_ns = std::nullopt;
   std::optional<double> max_cap_pf = std::nullopt;
+  // Present only when `max_cap_pf` came from an SDC capacitance limit. The lattice then
+  // stops at the tighter of the SDC rule and the cells' Liberty rules.
+  std::optional<double> sdc_max_cap_pf = std::nullopt;
   std::optional<double> char_buf_redundancy_pct = std::nullopt;
   std::optional<unsigned> slew_steps = std::nullopt;
   std::optional<unsigned> cap_steps = std::nullopt;

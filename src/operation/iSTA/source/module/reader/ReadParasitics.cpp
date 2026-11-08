@@ -7,8 +7,12 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <unordered_set>
 
+#include "Logger.hpp"
 #include "idm.h"
+#include "network/Network.hpp"
 #include "parasitics/Parasitics.hpp"
 #include "spef/SpefParser.hh"
 
@@ -34,8 +38,21 @@ void ReadParasitics::read()
 
 void ReadParasitics::readNet(spef::Net& spef_net)
 {
+  std::string net_name = spef_net.name;
+  if (!_network.nets().contains(net_name)) {
+    // A top-level assign may be linked under its internal wire name while
+    // extraction names the same connection after the port. Resolve only an
+    // actual port alias, then validate every extracted terminal below.
+    const auto port = _network.pins().find(net_name);
+    if (port != _network.pins().end() && port->second.get_is_port())
+      net_name = port->second.get_net_name();
+  }
+  // An ECO can leave the old extracted terminals in SPEF. Those nodes must
+  // not replace the loads of the linked netlist or become a fictitious RC tree.
+  if (!connectionsMatch(spef_net, net_name))
+    return;
   ParasiticNet parasitic_net;
-  parasitic_net.set_net_name(spef_net.name);
+  parasitic_net.set_net_name(net_name);
   parasitic_net.set_lumped_capacitance(readCapacitance(spef_net.lcap));
   for (spef::ConnEntry& spef_conn : spef_net.conns) {
     readConnection(parasitic_net, spef_conn);
@@ -46,14 +63,49 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   for (spef::ResCap& spef_cap : spef_net.caps) {
     readCapacitance(parasitic_net, spef_cap);
   }
-  // The default O-2018.06-SP1 model normalizes extracted nodes to at least 1 aF.
+  // The U-2022.12 model normalizes extracted nodes to at least 1 zF.
   // Apply this in pF after duplicate CAP entries have been summed, including
   // nodes present only in CONN/RES. Liberty pin capacitance is added later.
-  constexpr double minimum_node_capacitance = 1e-6;
+  constexpr double minimum_node_capacitance = 1e-9;
   for (auto& [name, node] : parasitic_net.get_node_map()) {
     node.set_capacitance(std::max(node.get_capacitance(), minimum_node_capacitance));
   }
   _parasitics.nets()[parasitic_net.get_net_name()] = parasitic_net;
+}
+
+bool ReadParasitics::connectionsMatch(const spef::Net& net, const std::string& net_name) const
+{
+  const auto found = _network.nets().find(net_name);
+  if (found == _network.nets().end()) {
+    STALOG.warn(Loc::current(), "Ignoring SPEF net absent from the timing network: ", net.name);
+    return false;
+  }
+  const auto& pins = found->second.get_pin_name_list();
+  const std::unordered_set<std::string_view> pin_names(pins.begin(), pins.end());
+  for (const auto& connection : net.conns) {
+    if (connection.conn_direction == spef::ConnectionDirection::kInternal)
+      continue;  // *N entries describe wire geometry, not netlist terminals.
+    const auto matches = [&](const std::string& name) {
+      if (pin_names.contains(name))
+        return true;
+      const auto boundary = _network.hierarchyPins().find(name);
+      return boundary != _network.hierarchyPins().end() && boundary->second.error.empty() && boundary->second.net == net_name;
+    };
+    std::string name = connection.pin_port_name;
+    bool matched = matches(name);
+    // Only replace an instance/pin separator, preserving hierarchy separators.
+    for (auto slash = name.rfind('/'); !matched && slash != std::string::npos; slash = slash == 0 ? std::string::npos : name.rfind('/', slash - 1)) {
+      name[slash] = ':';
+      matched = matches(name);
+      name[slash] = '/';
+    }
+    if (!matched) {
+      STALOG.warn(Loc::current(), "Ignoring stale SPEF net ", net.name, ": terminal ", connection.pin_port_name,
+                  " is not connected in the timing network; retaining netlist pin/port loads");
+      return false;
+    }
+  }
+  return true;
 }
 
 void ReadParasitics::readConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn)
@@ -100,7 +152,10 @@ double ReadParasitics::readResistance(double spef_resistance)
 {
   std::string spef_unit = _parasitics.get_resistance_unit();
   std::string target_unit = "OHM";
-  return spef_resistance * unitScale(spef_unit, target_unit);
+  // Normalize in physical ohms, independently of the SPEF R_UNIT. The
+  // U-2022.12 minimum also affects the total-RC choice of interconnect model.
+  constexpr double minimum_resistance = .01;
+  return std::max(spef_resistance * unitScale(spef_unit, target_unit), minimum_resistance);
 }
 
 double ReadParasitics::unitScale(std::string& spef_unit, std::string& target_unit)

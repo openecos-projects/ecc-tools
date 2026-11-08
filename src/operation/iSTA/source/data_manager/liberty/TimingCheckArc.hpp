@@ -39,6 +39,9 @@ class TimingCheckArc
   const std::vector<TimingArc>& get_timing_arc_list() const { return _timing_arc_list; }
   std::vector<TimingArc>& get_timing_arc_list() { return _timing_arc_list; }
   TransType get_clock_trans_type() const { return _clock_trans_type; }
+  // Empty for linked Liberty checks; inferred checks belong to one analyzed
+  // clock cone and must not acquire other clocks present on the same pin.
+  const std::string& captureClock() const { return _capture_clock; }
   // setter
   void set_clock_port(const std::string& clock_port) { _clock_port = clock_port; }
   void set_data_port(const std::string& data_port) { _data_port = data_port; }
@@ -46,6 +49,7 @@ class TimingCheckArc
   void set_check_time(const double check_time) { _check_time = check_time; }
   void set_timing_arc_list(const std::vector<TimingArc>& timing_arc_list) { _timing_arc_list = timing_arc_list; }
   void set_clock_trans_type(const TransType& clock_trans_type) { _clock_trans_type = clock_trans_type; }
+  void setCaptureClock(const std::string& clock) { _capture_clock = clock; }
   // function
 
  private:
@@ -55,6 +59,7 @@ class TimingCheckArc
   double _check_time = 0.0;
   std::vector<TimingArc> _timing_arc_list;
   TransType _clock_trans_type = TransType::kRise;
+  std::string _capture_clock;
 };
 
 }  // namespace ista

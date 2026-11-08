@@ -51,6 +51,8 @@ DriverResponse InputPortResponseCalculator::calculate(ParasiticNet& parasitic_ne
   if (!database.network().pins().contains(source_pin_name) || !database.network().pins().at(source_pin_name).get_is_port()) {
     return result;
   }
+  if (_rc.hasIncompleteNetwork(parasitic_net, source_pin_name))
+    return result;
   ParasiticArnoldiModel& model = _models.arnoldiModel(parasitic_net, source_node_name, analysis_type, trans_type);
   if (!model.get_is_valid() || model.get_order() <= 0) {
     return result;

@@ -76,7 +76,7 @@ class PGSegment
   void set_generated(bool generated) { _generated = generated; }
 
   // function
-  bool is_line() const { return _type == PGSegmentType::kFollowPin || _type == PGSegmentType::kStripe; }
+  bool is_line() const { return _type != PGSegmentType::kNone && _type != PGSegmentType::kVia; }
   bool is_horizontal() const { return is_line() && _start_y == _end_y; }
   bool is_vertical() const { return is_line() && _start_x == _end_x; }
   int32_t get_ll_x() const { return _start_x == _end_x ? _start_x - _width / 2 : std::min(_start_x, _end_x); }

@@ -486,8 +486,7 @@ auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optio
   }
 
   std::unordered_set<std::uint64_t> cell_edge_keys;
-  for (FastStaNetId net_id = 0U; net_id < context->nets.size(); ++net_id) {
-    const auto& net = context->nets.at(net_id);
+  for (const auto& net : context->nets) {
     if (net.domain != FastStaNetDomain::kClock || net.driver_node_id >= included.size() || !included.at(net.driver_node_id)) {
       continue;
     }
@@ -505,7 +504,7 @@ auto FastSTA::collectClockGraph(FastStaContextId context_id) const -> std::optio
     }
   }
 
-  const auto append_cell_edge = [&](FastStaNodeId from_id, FastStaNodeId to_id, const std::string& cell_master, bool negative_unate) {
+  const auto append_cell_edge = [&](FastStaNodeId from_id, FastStaNodeId to_id, const std::string& cell_master, bool negative_unate) -> void {
     if (from_id >= included.size() || to_id >= included.size() || !included.at(from_id) || !included.at(to_id)) {
       return;
     }

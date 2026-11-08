@@ -83,7 +83,6 @@ constexpr double kDefaultRootInputSlewNs = 0.0;
 constexpr double kDefaultMaxSinkTranNs = 1.5;
 constexpr double kDefaultMaxCapPf = 1.5;
 constexpr unsigned kDefaultMaxFanout = 32U;
-constexpr unsigned kMaxFanout = 1024U;
 
 auto buildInvalidConfigKeyWarning(const std::string& key, const std::string& json_file) -> std::string
 {
@@ -428,9 +427,9 @@ auto Config::SanitizeExposedValues() -> void
   if (_has_max_cap && (!std::isfinite(_max_cap) || _max_cap <= 0.0)) {
     _max_cap = fall_back("max_cap", _max_cap, kDefaultMaxCapPf, "(0, inf) pF");
   }
-  if (_max_fanout == 0U || _max_fanout > kMaxFanout) {
-    _warnings.push_back("max_fanout: configured " + std::to_string(_max_fanout) + " is outside [1, " + std::to_string(kMaxFanout) + "]; using "
-                        + std::to_string(kDefaultMaxFanout));
+  if (_max_fanout < kMinFanout || _max_fanout > kMaxFanout) {
+    _warnings.push_back("max_fanout: configured " + std::to_string(_max_fanout) + " is outside [" + std::to_string(kMinFanout) + ", "
+                        + std::to_string(kMaxFanout) + "]; using " + std::to_string(kDefaultMaxFanout));
     CTSLOG.warn(Loc::current(), "CTS config warning: ", _warnings.back());
     _max_fanout = kDefaultMaxFanout;
   }

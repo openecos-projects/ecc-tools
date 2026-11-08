@@ -38,6 +38,8 @@ TclInitSTA::TclInitSTA(const char* cmd_name) : TclCmd(cmd_name)
   // int32_t min_slew_degradation;     // optional
   _config_list.push_back(std::make_pair("-min_slew_degradation", ValueType::kString));
   _config_list.push_back(std::make_pair("-adjust_driver_resistance", ValueType::kString));
+  _config_list.push_back(std::make_pair("-small_rc_fanout_reduction", ValueType::kString));
+  _config_list.push_back(std::make_pair("-check_constant_capacitance", ValueType::kString));
   // std::string timing_corner;         // optional
   _config_list.push_back(std::make_pair("-timing_corner", ValueType::kString));
   // int32_t max_paths;                 // optional
@@ -60,7 +62,8 @@ unsigned TclInitSTA::exec()
     return 0;
   }
   std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
-  for (const std::string key : {"-min_slew_degradation", "-adjust_driver_resistance"}) {
+  for (const std::string key :
+       {"-min_slew_degradation", "-adjust_driver_resistance", "-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
     if (!config_map.contains(key))
       continue;
     std::string value = std::any_cast<std::string>(config_map.at(key));
@@ -72,9 +75,16 @@ unsigned TclInitSTA::exec()
     config_map[key] = int32_t(value == "1");
   }
   try {
-    STAI.initSTA(config_map);
+    if (!STAI.initSTA(config_map)) {
+      Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(),
+                       Tcl_NewStringObj("native STA initialization rejected SDC constraints", -1));
+      STAI.destroySTA();
+      return 0;
+    }
   } catch (const std::exception& error) {
-    Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(), Tcl_NewStringObj(error.what(), -1));
+    const std::string diagnostic = error.what();
+    STAI.destroySTA();
+    Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(), Tcl_NewStringObj(diagnostic.c_str(), -1));
     return 0;
   }
   return 1;

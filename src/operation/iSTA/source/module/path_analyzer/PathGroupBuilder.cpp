@@ -40,6 +40,8 @@ void PathGroupBuilder::addPathEnd(std::vector<TimingPath>& paths)
 
 std::string PathGroupBuilder::groupName(TimingPath& path)
 {
+  if (path.get_check_type() == TimingCheckType::kClockGatingSetup || path.get_check_type() == TimingCheckType::kClockGatingHold)
+    return "**clock_gating_default**";
   if (path.get_check_type() == TimingCheckType::kRecovery || path.get_check_type() == TimingCheckType::kRemoval) {
     return "**async_default**";
   }

@@ -2,10 +2,104 @@
 #include <unistd.h>
 
 #include <filesystem>
+#include <fstream>
 
 #include "SdcTestDesign.hpp"
 #include "SdcWriter.hpp"
 #include "graph/TimingStateQuery.hpp"
+
+// Guard the ECC stage contract at the file-reader boundary, including a
+// virtual clock sorted before the physical clock in all_clocks.
+static void testClockStageFiles()
+{
+  auto& constraints = STADM.getDatabase().sdc();
+  auto& interpreter = SdcCommand::getInst();
+  const auto directory = std::filesystem::temp_directory_path() / ("sta-clock-stages-" + std::to_string(getpid()));
+  require(std::filesystem::create_directory(directory), "could not create stage test directory");
+  struct Cleanup
+  {
+    std::filesystem::path directory;
+    ~Cleanup()
+    {
+      std::error_code ignored;
+      std::filesystem::remove_all(directory, ignored);
+    }
+  } cleanup{directory};
+  for (const auto* stage : {"pre_CTS", "post_CTS"})
+    std::filesystem::create_directory(directory / stage);
+  const auto bad_file = directory / "invalid.tcl";
+  {
+    std::ofstream file(bad_file);
+    file << "set_propagated_clock missing_clock\n";
+  }
+
+  for (int clocks = 0; clocks < 3; ++clocks) {
+    const bool has_virtual = clocks != 1;
+    const bool has_physical = clocks != 0;
+    const auto reference = has_virtual ? "VCLK_clk" : "clk";
+    std::string common;
+    if (has_virtual)
+      common += "create_clock -name VCLK_clk -period 10\n";
+    if (has_physical)
+      common += "create_clock -name clk -period 10 [get_ports clk]\n";
+    common += "set_clock_latency -source 0.5 [all_clocks]\n"
+              "set_clock_latency 1.25 [all_clocks]\n"
+              "set_clock_uncertainty -setup 0.2 [all_clocks]\n"
+              "set_clock_uncertainty -hold 0.1 [all_clocks]\n"
+              "set_clock_transition 0.15 [all_clocks]\n"
+              "set_input_transition 0.2 [get_ports in]\n"
+              "set_load 0.3 [get_ports out]\n";
+    common += std::string("set_input_delay -max 3 -clock ") + reference + " [get_ports in]\n";
+    common += std::string("set_output_delay -min -0.1 -clock ") + reference + " [get_ports out]\n";
+    for (bool post_cts : {false, true}) {
+      constraints.clearConstraints();
+      const auto file_path = directory / (post_cts ? "post_CTS" : "pre_CTS") / "TYP_25_TYPICAL.tcl";
+      {
+        std::ofstream file(file_path);
+        file << common;
+        if (post_cts)
+          file << "set_propagated_clock [all_clocks]\n";
+        file << "set ::clock_stage_loaded 1\n";
+        file.close();
+        require(file.good(), "could not write stage fixture");
+      }
+      require(interpreter.evalScriptFile(bad_file.string()) == TCL_ERROR, "unknown clock silently accepted");
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        Tcl_UnsetVar(interpreter.getInterp(), "clock_stage_loaded", TCL_GLOBAL_ONLY);
+        require(interpreter.evalScriptFile(file_path.string()) == TCL_OK, "stage file rejected virtual clock");
+        require(interpreter.getErrors().empty(), "warning retained a file-reader error");
+        const char* completed = Tcl_GetVar(interpreter.getInterp(), "clock_stage_loaded", TCL_GLOBAL_ONLY);
+        require(completed && std::string(completed) == "1", "script stopped at set_propagated_clock");
+        require(constraints.get_clock_map().size() == (has_virtual && has_physical ? 2u : 1u), "clock collection changed");
+        for (auto& [name, clock] : constraints.get_clock_map()) {
+          const bool physical = name == "clk";
+          require(clock.get_is_propagated() == (post_cts && physical), "incorrect pre/post-CTS clock mode");
+          require(clock.get_source_list().empty() == !physical, "virtual clock acquired a physical source");
+          require(clock.get_source_latency(AnalysisType::kMin, ClockVariation::kEarly, TransType::kRise) == 0.5, "propagation changed source latency");
+          require(clock.get_network_latency(AnalysisType::kMax, TransType::kFall) == (post_cts && physical ? 0. : 1.25),
+                  "propagation lost virtual latency or retained physical network latency");
+          require(clock.get_setup_uncertainty() == 0.2 && clock.get_hold_uncertainty() == 0.1, "uncertainty changed");
+          if (physical)
+            require(clock.get_transition_map().at(AnalysisType::kMax).at(TransType::kRise) == 0.15, "physical clock transition changed");
+          else
+            require(clock.get_transition_map().empty(), "virtual clock acquired a transition waveform");
+        }
+        auto& ports = constraints.get_port_constraint_map();
+        const auto& inputs = ports.at("in").get_input_delay_list();
+        const auto& outputs = ports.at("out").get_output_delay_list();
+        require(inputs.size() == 2 && outputs.size() == 2, "I/O delay lanes lost or duplicated");
+        for (const auto& value : inputs)
+          require(value.get_clock_name() == reference && value.get_delay() == 3. && value.get_analysis_type() == AnalysisType::kMax,
+                  "input delay or reference clock changed");
+        for (const auto& value : outputs)
+          require(value.get_clock_name() == reference && value.get_delay() == -0.1 && value.get_analysis_type() == AnalysisType::kMin,
+                  "output delay or reference clock changed");
+        require(ports.at("in").get_input_transition(AnalysisType::kMax, TransType::kRise) == 0.2, "input slew changed");
+        require(ports.at("out").get_load(AnalysisType::kMax, TransType::kRise) == 0.3, "output load changed");
+      }
+    }
+  }
+}
 
 int main(int argc, char** argv)
 {
@@ -20,7 +114,9 @@ int main(int argc, char** argv)
   auto& interp = SdcCommand::getInst();
   const std::string mode = argc > 1 ? argv[1] : "uncertainty";
   eval("foreach c {A B C D} { create_clock -name $c -period 10 }");
-  if (mode == "writer_names") {
+  if (mode == "clock_stages") {
+    testClockStageFiles();
+  } else if (mode == "writer_names") {
     eval("create_clock -name M -period 10 [get_ports clk]; set_clock_latency .7 [get_pins cdc/buf/Y]");
     std::ostringstream output;
     sdc::writeSdc(db, output);
@@ -116,10 +212,8 @@ int main(int argc, char** argv)
     require(sdc.get_clock_map().at("M").get_period() == period, "failed command changed the old clock");
   } else if (mode == "empty_collection") {
     const std::vector<std::string> commands = {
-        "set_false_path -to [get_pins -quiet no_such_pin]",
-        "set_max_delay 1 -to [get_pins -quiet no_such_pin]",
-        "set_min_delay 1 -through [get_pins -quiet no_such_pin]",
-        "set_multicycle_path 2 -setup -from [get_pins -quiet no_such_pin]",
+        "set_false_path -to [get_pins -quiet no_such_pin]",       "set_max_delay 1 -to [get_pins -quiet no_such_pin]",
+        "set_min_delay 1 -through [get_pins -quiet no_such_pin]", "set_multicycle_path 2 -setup -from [get_pins -quiet no_such_pin]",
         "reset_path -to [get_pins -quiet no_such_pin]",
     };
     for (const auto& command : commands) {
@@ -290,6 +384,34 @@ int main(int argc, char** argv)
     sdc.get_path_exception_list().clear();
     eval("set_false_path -rise_from A -to C; reset_path -from A -to C");
     require(!sdc.get_path_exception_list().empty(), "unqualified selector removed edge-specific exception");
+  } else if (mode == "false_startpoint") {
+    for (const auto* selector : {"-from", "-rise_from", "-fall_from"}) {
+      eval(std::string("set_false_path ") + selector + " [get_pins cdc/source_reg/Q] -to [get_pins cdc/sink_reg/D]");
+      require(sdc.get_path_exception_list().empty(), "ordinary register output was accepted as false-path startpoint");
+    }
+    eval("set_false_path -from [get_pins {cdc/source_reg/Q cdc/source_reg/CK}] -to [get_pins cdc/sink_reg/D]");
+    require(sdc.get_path_exception_list().size() == 1
+                && sdc.get_path_exception_list().front().get_from_objects() == ExceptionObjects{{ExceptionObjectType::kPin, "cdc/source_reg:CK"}},
+            "invalid Q filter discarded or widened a valid clock-pin selector");
+    eval("set_false_path -reset_path -from [get_pins cdc/source_reg/Q] -to [get_pins cdc/sink_reg/D]");
+    require(sdc.get_path_exception_list().size() == 1, "empty invalid selector reset existing exceptions");
+    sdc.get_path_exception_list().clear();
+    eval("set_false_path -through [get_pins cdc/source_reg/Q]");
+    require(sdc.get_path_exception_list().size() == 1, "Q ceased to be a legal through point");
+    sdc.get_path_exception_list().clear();
+    eval("set_false_path -to [get_pins cdc/sink_reg/D]");
+    require(sdc.get_path_exception_list().size() == 1, "omitted from selector lost its wildcard meaning");
+    sdc.get_path_exception_list().clear();
+    for (const auto* cmd : {"set_max_delay 1", "set_min_delay 1"}) {
+      eval(std::string(cmd) + " -from [get_pins cdc/source_reg/Q] -to [get_pins cdc/sink_reg/D]");
+    }
+    require(sdc.get_path_exception_list().size() == 2, "false-path validation leaked into segmented path-delay constraints");
+    sdc.get_path_exception_list().clear();
+    TimingIoDelay input_delay;
+    input_delay.set_clock_name("A");
+    sdc.get_port_constraint_map()["cdc/source_reg:Q"].set_input_delays({input_delay}, false);
+    eval("set_false_path -from [get_pins cdc/source_reg/Q] -to [get_pins cdc/sink_reg/D]");
+    require(sdc.get_path_exception_list().size() == 1, "explicitly constrained input-delay pin was rejected");
   } else if (mode == "groups") {
     eval("set_clock_groups -asynchronous -group A -group B");
     require(interp.evalString("set_clock_groups -asynchronous -allow_paths -group A -group B") == TCL_ERROR, "contradictory group relation accepted");

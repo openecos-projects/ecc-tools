@@ -36,6 +36,7 @@
 
 #include "ClockLayout.hh"
 #include "Config.hh"
+#include "ConstraintBudgets.hh"
 #include "Design.hh"
 #include "FastSTA.hh"
 #include "LogTable.hh"
@@ -43,7 +44,8 @@
 #include "Monitor.hh"
 #include "QOR.hh"
 #include "Wrapper.hh"
-#include "adapter/sdc/SDCClockReader.hh"
+#include "adapter/sdc/ClockTrace.hh"
+#include "adapter/sdc/IstaConstraintReader.hh"
 #include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
@@ -79,6 +81,74 @@ auto hasTimingConstraints(const SdcClockData& constraints) -> bool
 auto countTraceStatus(const ClockTraceSummary& summary, std::string_view status) -> std::size_t
 {
   return static_cast<std::size_t>(std::ranges::count_if(summary.records, [status](const ClockTraceRecord& record) -> bool { return record.status == status; }));
+}
+
+auto electricalScopeName(SdcElectricalScope scope) -> const char*
+{
+  switch (scope) {
+    case SdcElectricalScope::kDesign:
+      return "design";
+    case SdcElectricalScope::kPort:
+      return "port";
+    case SdcElectricalScope::kPin:
+      return "pin";
+    case SdcElectricalScope::kLibPin:
+      return "lib-pin";
+    case SdcElectricalScope::kClock:
+      return "clock";
+  }
+  return "unknown";
+}
+
+auto electricalRuleName(SdcElectricalRule rule) -> const char*
+{
+  switch (rule) {
+    case SdcElectricalRule::kFanout:
+      return "max_fanout";
+    case SdcElectricalRule::kTransition:
+      return "max_transition (ns)";
+    case SdcElectricalRule::kCapacitance:
+      return "max_capacitance (pF)";
+  }
+  return "unknown";
+}
+
+auto designRuleSourceName(const ConstraintBudget& row) -> std::string
+{
+  if (row.rejected) {
+    return "sdc rejected; " + std::string(row.configured ? "config" : "config default");
+  }
+  if (row.from_sdc) {
+    return "sdc";
+  }
+  return row.configured ? "config" : "config default";
+}
+
+// SDC owns the electrical budgets: a design-scoped limit replaces the configured one
+// and the loss is reported once per rule. The resolved values are written into the
+// session configuration because that is the single object every consumer reads.
+auto applyDesignRules(const std::vector<SdcElectricalLimit>& rules, Config& config) -> void
+{
+  LogTableRows rows;
+  for (const auto& row : ApplyConstraintBudgets(rules, config)) {
+    if (row.from_sdc) {
+      CTSLOG.warn(Loc::current(), "CTS design rule ", row.rule, ": SDC ", row.value, " replaces the configured value.");
+    } else if (row.rejected) {
+      CTSLOG.warn(Loc::current(), "CTS design rule ", row.rule, ": the SDC limit is unusable; keeping ", row.value, ".");
+    }
+    rows.push_back({row.rule, ToLogTableCell(row.value), designRuleSourceName(row)});
+  }
+  EmitLogTable(Loc::current(), "CTS Design Rules", {"Rule", "Value", "Source"}, rows);
+  LogTableRows scoped_rows;
+  for (const auto& limit : rules) {
+    if (limit.scope != SdcElectricalScope::kDesign) {
+      scoped_rows.push_back({electricalRuleName(limit.rule), electricalScopeName(limit.scope), limit.object_name, ToLogTableCell(limit.value),
+                             "not applied to global CTS budget"});
+    }
+  }
+  if (!scoped_rows.empty()) {
+    EmitLogTable(Loc::current(), "CTS Scoped Native Constraints", {"Rule", "Scope", "Object", "Value", "Application"}, scoped_rows);
+  }
 }
 
 auto logRuntimeConfiguration(const Config& config, const Wrapper& wrapper, const std::string& config_file) -> void
@@ -361,7 +431,9 @@ auto DataManager::readClockData() -> DataManagerStatus
   SdcClockData sdc_clock_data;
   const auto sdc_path = dmInst->get_config().get_sdc_path();
   if (!sdc_path.empty()) {
-    sdc_clock_data = SdcClockReader(sdc_path).readClockData();
+    // Populate the shared raw Liberty generation once; native STA reuses it.
+    static_cast<void>(_wrapper.queryLibertyRevision());
+    sdc_clock_data = IstaConstraintReader::read(_config.get_work_dir());
     if (!sdc_clock_data.ok()) {
       auto status = failureStatus(DataManagerStatusCode::kExternalDataError, "sdc_constraints_rejected");
       status.diagnostics = std::move(sdc_clock_data.diagnostics);
@@ -374,6 +446,9 @@ auto DataManager::readClockData() -> DataManagerStatus
       return status;
     }
   }
+  // The design rules are settled before anything downstream reads a budget, because
+  // SDC is their authority and the configuration is only the fallback.
+  applyDesignRules(sdc_clock_data.electrical_limits, _config);
   std::set<std::string> traceable_clock_names;
   std::map<std::string, double> period_by_clock;
   std::map<std::string, bool> period_resolved_by_clock;
@@ -512,7 +587,10 @@ auto DataManager::initializeTiming() -> DataManagerStatus
       .wire_width_um = _config.get_wire_width() > 0.0 ? std::optional<double>{_config.get_wire_width()} : std::nullopt,
       .root_input_slew_ns = root_slew_ns,
       .max_cap_pf = _config.has_max_cap() ? std::optional<double>{_config.get_max_cap()} : std::nullopt,
+      .sdc_max_cap_pf = _config.has_sdc_max_cap() ? std::optional<double>{_config.get_sdc_max_cap_pf()} : std::nullopt,
       .max_sink_tran_ns = max_sink_tran_ns,
+      .sdc_max_transition_ns = _config.has_sdc_max_transition() ? std::optional<double>{_config.get_sdc_max_transition_ns()} : std::nullopt,
+      .max_fanout = static_cast<double>(_config.get_max_fanout()),
       .worker_count = Wrapper::queryParallelWorkerCount(),
   });
   Monitor graph_monitor;
