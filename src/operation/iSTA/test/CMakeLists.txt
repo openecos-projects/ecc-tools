@@ -57,6 +57,11 @@ target_link_libraries(test_ista_read_parasitics PRIVATE ista_reader ista_model i
 add_test(NAME ista_read_parasitics COMMAND test_ista_read_parasitics)
 set_tests_properties(ista_read_parasitics PROPERTIES TIMEOUT 30)
 
+add_executable(test_ista_missing_liberty EXCLUDE_FROM_ALL missing_liberty_test.cpp)
+target_link_libraries(test_ista_missing_liberty PRIVATE ista_reader ista_model liberty idm)
+add_test(NAME ista_missing_liberty COMMAND test_ista_missing_liberty ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(ista_missing_liberty PROPERTIES TIMEOUT 30)
+
 add_executable(test_ista_read_network EXCLUDE_FROM_ALL read_network_test.cpp)
 target_link_libraries(test_ista_read_network PRIVATE ista_reader ista_data_manager idm idb)
 add_test(NAME ista_read_network COMMAND test_ista_read_network)
