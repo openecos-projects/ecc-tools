@@ -306,6 +306,7 @@ void RTInterface::wrapDatabase()
   wrapLayerViaMasterList();
   wrapObstacleList();
   wrapMacroList();
+  wrapMacroObsList();
   wrapNetList();
 }
 
@@ -1024,6 +1025,57 @@ void RTInterface::wrapMacroList()
     macro.set_inst_name(idb_instance->get_name());
     macro.set_body_rect(body_rect);
     macro_list.push_back(std::move(macro));
+  }
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void RTInterface::wrapMacroObsList()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  std::vector<MacroObs>& macro_obs_list = RTDM.getDatabase().get_macro_obs_list();
+  auto* idb_design = dmInst->get_idb_def_service()->get_design();
+  std::vector<idb::IdbInstance*>& idb_instance_list = idb_design->get_instance_list()->get_instance_list();
+
+  for (idb::IdbInstance* idb_instance : idb_instance_list) {
+    if (idb_instance == nullptr || idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
+      continue;
+    }
+    idb::IdbCellMaster* idb_cell_master = idb_instance->get_cell_master();
+    if (!idb_cell_master->has_macro_property()) {
+      continue;
+    }
+    idb::macro::MacroProperty* macro_property = idb_cell_master->get_macro_property();
+    MacroObs macro_obs;
+    for (idb::IdbLayerShape* obs_box : idb_instance->get_obs_box_list()) {
+      if (obs_box->get_layer() == nullptr) {
+        continue;
+      }
+      if (!obs_box->get_layer()->is_routing() && !obs_box->get_layer()->is_cut()) {
+        continue;
+      }
+      idb::macro::ObsSpacing* obs_spacing = macro_property->find_obs_spacing(obs_box->get_layer());
+      if (obs_spacing == nullptr || obs_spacing->get_min_spacing() <= 0) {
+        continue;
+      }
+      MacroObsLayer macro_obs_layer;
+      macro_obs_layer.layer_idx = obs_box->get_layer()->get_id();
+      macro_obs_layer.is_routing = obs_box->get_layer()->is_routing();
+      macro_obs_layer.min_spacing = obs_spacing->get_min_spacing();
+      idb::IdbRect bounding_box = obs_box->get_bounding_box();
+      macro_obs_layer.bounding_box
+          = PlanarRect(bounding_box.get_low_x(), bounding_box.get_low_y(), bounding_box.get_high_x(), bounding_box.get_high_y());
+      for (idb::IdbRect* rect : obs_box->get_rect_list()) {
+        macro_obs_layer.obs_rect_list.emplace_back(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+      macro_obs.obs_layer_list.push_back(std::move(macro_obs_layer));
+    }
+    if (macro_obs.obs_layer_list.empty()) {
+      continue;
+    }
+    macro_obs_list.push_back(std::move(macro_obs));
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());

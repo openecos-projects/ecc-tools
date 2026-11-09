@@ -1365,6 +1365,7 @@ void DetailedRouter::buildOrientNetMap(DRBox& dr_box)
   for (const DRFixedShape& shape : dr_box.get_fixed_geometry().get_shape_list()) {
     updateFixedRectToGraph(dr_box, ChangeType::kAdd, shape.net_idx, shape.rect, shape.is_routing);
   }
+  updateMacroRectToGraph(dr_box);
   for (auto& [net_idx, segment_list] : dr_box.get_net_env_result_map()) {
     for (Segment<LayerCoord>* segment : segment_list) {
       updateFixedRectToGraph(dr_box, ChangeType::kAdd, net_idx, segment);
@@ -1387,6 +1388,26 @@ void DetailedRouter::buildOrientNetMap(DRBox& dr_box)
   }
   for (Violation& violation : dr_box.get_curr_result().get_route_violation_list()) {
     addRouteViolationToGraph(dr_box, violation);
+  }
+}
+
+void DetailedRouter::updateMacroRectToGraph(DRBox& dr_box)
+{
+  PlanarRect& box_rect = dr_box.get_box_rect().get_real_rect();
+  for (MacroObsLayer* macro_obs_layer : RTDM.getMacroObsLayerList(dr_box.get_box_rect())) {
+    if (!macro_obs_layer->is_routing) {
+      continue;
+    }
+    PlanarRect enlarged_box_rect = RTUTIL.getEnlargedRect(box_rect, macro_obs_layer->min_spacing);
+    std::vector<std::pair<int32_t, int32_t>> spacing_pair_list
+        = {{macro_obs_layer->min_spacing, macro_obs_layer->min_spacing}};
+    for (const PlanarRect& obs_rect : macro_obs_layer->obs_rect_list) {
+      if (!RTUTIL.isClosedOverlap(obs_rect, enlarged_box_rect)) {
+        continue;
+      }
+      NetShape net_shape(-1, LayerRect(obs_rect, macro_obs_layer->layer_idx), true);
+      updateRoutingNetShapeToGraph(dr_box, ChangeType::kAdd, net_shape, true, spacing_pair_list);
+    }
   }
 }
 
@@ -3863,6 +3884,14 @@ void DetailedRouter::updateNetShapeToGraph(DRBox& dr_box, ChangeType change_type
 
 void DetailedRouter::updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed)
 {
+  std::array<std::pair<int32_t, int32_t>, 2> spacing_pair_list = getRoutingSpacingPairList(net_shape);
+  updateRoutingNetShapeToGraph(dr_box, change_type, net_shape, is_fixed,
+                               std::vector<std::pair<int32_t, int32_t>>(spacing_pair_list.begin(), spacing_pair_list.end()));
+}
+
+void DetailedRouter::updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed,
+                                                  const std::vector<std::pair<int32_t, int32_t>>& spacing_pair_list)
+{
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
   std::map<int32_t, PlanarRect>& layer_enclosure_map = RTDM.getDatabase().get_layer_enclosure_map();
   if (!net_shape.get_is_routing()) {
@@ -3870,7 +3899,6 @@ void DetailedRouter::updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType chan
   }
   int32_t layer_idx = net_shape.get_layer_idx();
   RoutingLayer& routing_layer = routing_layer_list[layer_idx];
-  std::array<std::pair<int32_t, int32_t>, 2> spacing_pair_list = getRoutingSpacingPairList(net_shape);
   int32_t half_wire_width = routing_layer.get_min_width() / 2;
   PlanarRect& enclosure = layer_enclosure_map[layer_idx];
   int32_t enclosure_half_x_span = enclosure.getXSpan() / 2;

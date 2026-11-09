@@ -20,6 +20,7 @@
 #include "Die.hpp"
 #include "Logger.hpp"
 #include "Macro.hpp"
+#include "MacroObs.hpp"
 #include "Net.hpp"
 #include "Obstacle.hpp"
 #include "RTHeader.hpp"
@@ -67,6 +68,7 @@ class Database
   std::vector<Obstacle>& get_routing_obstacle_list() { return _routing_obstacle_list; }
   std::vector<Obstacle>& get_cut_obstacle_list() { return _cut_obstacle_list; }
   std::vector<Macro>& get_macro_list() { return _macro_list; }
+  std::vector<MacroObs>& get_macro_obs_list() { return _macro_obs_list; }
   std::vector<Net>& get_net_list() { return _net_list; }
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_global_result_map() { return _net_global_result_map; }
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& get_net_detailed_result_map() { return _net_detailed_result_map; }
@@ -114,6 +116,7 @@ class Database
   std::vector<Obstacle> _routing_obstacle_list;
   std::vector<Obstacle> _cut_obstacle_list;
   std::vector<Macro> _macro_list;
+  std::vector<MacroObs> _macro_obs_list;
   std::vector<Net> _net_list;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_global_result_map;
   std::map<int32_t, std::vector<Segment<LayerCoord>>> _net_detailed_result_map;

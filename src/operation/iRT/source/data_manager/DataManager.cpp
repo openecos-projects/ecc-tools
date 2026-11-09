@@ -167,6 +167,22 @@ std::map<int32_t, std::set<EXTLayerRect*>> DataManager::getNetFixedRectMap(bool 
   return net_fixed_rect_map;
 }
 
+std::vector<MacroObsLayer*> DataManager::getMacroObsLayerList(EXTPlanarRect& region)
+{
+  std::vector<MacroObsLayer*> macro_obs_layer_list;
+  PlanarRect& region_rect = region.get_real_rect();
+  for (MacroObs& macro_obs : _database.get_macro_obs_list()) {
+    for (MacroObsLayer& macro_obs_layer : macro_obs.obs_layer_list) {
+      PlanarRect enlarged_region_rect = RTUTIL.getEnlargedRect(region_rect, macro_obs_layer.min_spacing);
+      if (!RTUTIL.isClosedOverlap(macro_obs_layer.bounding_box, enlarged_region_rect)) {
+        continue;
+      }
+      macro_obs_layer_list.push_back(&macro_obs_layer);
+    }
+  }
+  return macro_obs_layer_list;
+}
+
 std::vector<Violation> DataManager::getViolationList(EXTPlanarRect& region)
 {
   std::vector<Violation> violation_list;
@@ -541,6 +557,7 @@ void DataManager::buildDatabase()
   buildGCellAxis();
   buildDie();
   buildMacroList();
+  buildMacroObsList();
   buildLayerViaMasterList();
   buildLayerViaMasterInfo();
   buildObstacleList();
@@ -910,6 +927,28 @@ void DataManager::checkMacroList()
   for (Macro& macro : macro_list) {
     if (!RTUTIL.hasRegularRect(macro.get_body_rect(), die.get_real_rect())) {
       RTLOG.error(Loc::current(), "The macro is outside die for instance ", macro.get_inst_name());
+    }
+  }
+}
+
+void DataManager::buildMacroObsList()
+{
+  transMacroObsList();
+}
+
+void DataManager::transMacroObsList()
+{
+  std::map<int32_t, int32_t>& routing_idb_layer_id_to_idx_map = _database.get_routing_idb_layer_id_to_idx_map();
+  std::map<int32_t, int32_t>& cut_idb_layer_id_to_idx_map = _database.get_cut_idb_layer_id_to_idx_map();
+  std::vector<MacroObs>& macro_obs_list = _database.get_macro_obs_list();
+
+  for (MacroObs& macro_obs : macro_obs_list) {
+    for (MacroObsLayer& macro_obs_layer : macro_obs.obs_layer_list) {
+      if (macro_obs_layer.is_routing) {
+        macro_obs_layer.layer_idx = routing_idb_layer_id_to_idx_map[macro_obs_layer.layer_idx];
+      } else {
+        macro_obs_layer.layer_idx = cut_idb_layer_id_to_idx_map[macro_obs_layer.layer_idx];
+      }
     }
   }
 }

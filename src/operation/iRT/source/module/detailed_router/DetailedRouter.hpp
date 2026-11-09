@@ -99,6 +99,7 @@ class DetailedRouter
   void buildLayerNodeMap(DRBox& dr_box);
   void buildDRNodeNeighbor(DRBox& dr_box);
   void buildOrientNetMap(DRBox& dr_box);
+  void updateMacroRectToGraph(DRBox& dr_box);
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
@@ -195,6 +196,8 @@ class DetailedRouter
   void addRouteViolationToGraph(DRBox& dr_box, LayerRect& searched_rect, std::vector<Segment<LayerCoord>>& overlap_segment_list);
   void updateNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed,
+                                    const std::vector<std::pair<int32_t, int32_t>>& spacing_pair_list);
   void updatePlanarRectToGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateViaRectToGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateCutNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
