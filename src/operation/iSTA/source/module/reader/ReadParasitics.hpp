@@ -29,14 +29,17 @@ class ParasiticNet;
 class ParasiticNode;
 
 class Parasitics;
+class Network;
 class ReadParasitics
 {
  public:
-  explicit ReadParasitics(Parasitics& parasitics) : _parasitics(parasitics) {}
+  ReadParasitics(Parasitics& parasitics, const Network& network) : _parasitics(parasitics), _network(network) {}
   void read();
 
  private:
   Parasitics& _parasitics;
+  const Network& _network;
+  bool connectionsMatch(const spef::Net& net, const std::string& net_name) const;
   void readNet(spef::Net& spef_net);
   void readConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn);
   void readCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap);

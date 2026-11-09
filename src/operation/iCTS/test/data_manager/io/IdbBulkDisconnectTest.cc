@@ -21,8 +21,6 @@
  * @brief Regression and scale tests for iDB-owned bulk regular-net disconnection.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <memory>
@@ -35,6 +33,7 @@
 #include "IdbInstance.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

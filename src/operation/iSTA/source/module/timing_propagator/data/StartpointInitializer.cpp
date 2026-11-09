@@ -601,7 +601,8 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   const std::vector<int32_t> exception_state_list
       = ExceptionMatcher(database.sdc(), database.network()).advanceState(_through_index, initial_exception_state_list, start_point, trans_type);
   const std::string crpr_pin = reference_pin.empty() ? getStartPointCrprClockPin(start_point) : std::string(reference_pin);
-  const bool preserve_crpr = _path_query.clockPathHasVariation(crpr_pin, clock_name, clock_trans_type, launch_transition);
+  const double crpr_bound = _path_query.clockPathBound(crpr_pin, clock_name, clock_trans_type, launch_transition);
+  const bool preserve_crpr = crpr_bound > 0.;
   const std::string path_state_tag
       = ExceptionMatcher(database.sdc(), database.network())
             .makePathStateTag(clock_name, launch_transition, exception_state_list, clock_source_path, preserve_crpr ? crpr_pin : "", edge_index);
@@ -630,6 +631,7 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   path_state.set_is_clock_source_path(clock_source_path);
   path_state.set_crpr_clock_pin(crpr_pin);
   path_state.set_preserve_crpr_path(preserve_crpr);
+  path_state.setClockPathBound(crpr_bound);
   path_state.set_path_state_tag(path_state_tag);
   path_state.set_predecessor_path_state_tag("");
   path_state.set_exception_state_list(exception_state_list);

@@ -91,6 +91,24 @@ int main(int argc, char** argv)
                                 "set_timing_derate -late -cell_check -cell_delay 1.1", "set_timing_derate -late -cell_check -net_delay 1.1"})
       require(interp.evalString(invalid) == TCL_ERROR, "incompatible check derate options accepted");
     expected = "set_timing_derate";
+  } else if (mode == "abbreviation") {
+    eval("set_max_transition 0.5 -clock -r core");
+    eval("set_max_transition 1.0 -data core");
+    const auto& limits = db.sdc().electricalLimits();
+    near(*limits.limit(ElectricalRule::kTransition, "", false, "", "core", true, TransType::kRise), .5, "abbreviated clock/rise selectors lost");
+    near(*limits.limit(ElectricalRule::kTransition, "", false, "", "core", false, TransType::kFall), 1., "abbreviated data selector lost");
+    require(!limits.limit(ElectricalRule::kTransition, "", false, "", "core", true, TransType::kFall),
+            "data/rise constraint leaked into falling clock transition");
+    const auto count = limits.entries().size();
+    require(interp.evalString("set_max_transition 0.3 -f core") == TCL_ERROR, "ambiguous -fall/-force prefix accepted");
+    require(limits.entries().size() == count, "ambiguous option changed constraints");
+    eval("set_timing_derate -late -data 1.2");
+    eval("set_timing_derate -late -data -inc -0.1");
+    near(cellDelay("cdc/buf"), 2.2, "exact option or negative abbreviated option value changed");
+    eval("set_input_delay -clock core 0.25 [get_ports in]");
+    require(db.sdc().get_port_constraint_map().at("in").get_input_delay_list().front().get_clock_trans_type() == TransType::kRise,
+            "exact -clock was confused with its longer -clock_fall option");
+    expected = "-clock_path";
   } else if (mode == "transition") {
     eval("set_max_transition 0.5 -clock_path -rise [get_clocks core]");
     eval("set_max_transition 1.0 -data_path [get_clocks core]");

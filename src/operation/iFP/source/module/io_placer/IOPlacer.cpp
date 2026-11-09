@@ -28,6 +28,8 @@
 #include <vector>
 
 #include "DataManager.hpp"
+#include "DieBuilder.hpp"
+#include "IOCellPlacer.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
@@ -108,9 +110,14 @@ void IOPlacer::place()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
-  buildNetIOPinIndex();
-  resetIOPinPlacement();
-  placeIOPin();
+  Config& config = FPDM.getConfig();
+  if (config.io_placer_mode == IOPlacerMode::kIOCell) {
+    placeIOCell();
+  } else {
+    buildNetIOPinIndex();
+    resetIOPinPlacement();
+    placeIOPin();
+  }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -120,14 +127,166 @@ void IOPlacer::placeAuto()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
+  Config& config = FPDM.getConfig();
+  if (config.io_placer_mode == IOPlacerMode::kIOCell) {
+    placeIOCell();
+    FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+    return;
+  }
   buildNetIOPinIndex();
   resetIOPinPlacement();
-  Config& config = FPDM.getConfig();
   if (!config.io_pin_layer_name_list.empty()) {
     autoPlacePins(config.io_pin_layer_name_list);
   }
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+bool IOPlacer::planDieForIO()
+{
+  Config& config = FPDM.getConfig();
+  if (config.io_cell_mode != PlacementMode::kAuto) {
+    FPLOG.info(Loc::current(), "IO capacity auto-resize applies to io_cell.mode=auto only; skipping.");
+    return true;
+  }
+  Database& database = FPDM.getDatabase();
+  if (database.get_micron_dbu() <= 0) {
+    FPLOG.error(Loc::current(), "Cannot check IO capacity with an invalid micron DBU.");
+    return false;
+  }
+  const double dbu = database.get_micron_dbu();
+
+  if (_io_cell_placer == nullptr) {
+    _io_cell_placer = std::make_unique<IOCellPlacer>(config);
+  }
+  IOCellPlacer& placer = *_io_cell_placer;
+  IOCapacityReport report = placer.checkCapacity();
+
+  std::ofstream report_file;
+  if (!config.ip_temp_directory_path.empty()) {
+    report_file.open(config.ip_temp_directory_path + "io_capacity.rpt");
+  }
+  auto write_report = [&](const IOCapacityReport& current) {
+    if (!report_file.is_open()) {
+      return;
+    }
+    const double die_width = (database.get_die().get_ur_x() - database.get_die().get_ll_x()) / dbu;
+    const double die_height = (database.get_die().get_ur_y() - database.get_die().get_ll_y()) / dbu;
+    report_file << "IO capacity check\n";
+    report_file << "die " << die_width << " x " << die_height << " um\n";
+    for (const auto& side : current.sides) {
+      report_file << side.edge_name << " (DBU): line=" << side.line_length << " power=" << side.power_length
+                  << " signal=" << side.signal_length << " free=" << side.free_length << " deficit=" << side.deficit;
+      if (!side.error.empty()) {
+        report_file << " error=" << side.error;
+      }
+      report_file << "\n";
+    }
+    report_file << "capacity: " << (current.fits ? "PASS" : "FAIL") << "\n";
+    report_file.flush();
+  };
+
+  // One planning pass normally suffices; the extra attempts only absorb
+  // site-alignment rounding after a die_util scale.
+  constexpr int32_t kMaxAttempts = 4;
+  for (int32_t attempt = 0; attempt < kMaxAttempts; ++attempt) {
+    const double die_width = (database.get_die().get_ur_x() - database.get_die().get_ll_x()) / dbu;
+    const double die_height = (database.get_die().get_ur_y() - database.get_die().get_ll_y()) / dbu;
+    write_report(report);
+    if (!report.error.empty()) {
+      FPLOG.error(Loc::current(), report.error);
+      return false;
+    }
+    FPLOG.info(Loc::current(), "IO capacity check (attempt ", attempt, "): ", report.fits ? "PASS" : "FAIL", " (die ",
+               die_width, " x ", die_height, " um).");
+    if (report.fits) {
+      return true;
+    }
+    if (!config.io_cell_auto_resize) {
+      FPLOG.error(Loc::current(), "IO cell capacity is insufficient and auto resize is disabled.");
+      return false;
+    }
+    for (const auto& side : report.sides) {
+      if (side.deficit > 0) {
+        FPLOG.warn(Loc::current(), "  ", side.edge_name, ": line=", side.line_length, " required=", side.required_line,
+                   " deficit=", side.deficit);
+      }
+    }
+    if (attempt + 1 == kMaxAttempts) {
+      break;
+    }
+
+    const double required_die_width = report.required_die_width_dbu > 0 ? report.required_die_width_dbu / dbu : die_width;
+    const double required_die_height = report.required_die_height_dbu > 0 ? report.required_die_height_dbu / dbu : die_height;
+    bool resized = false;
+
+    if (config.die_mode == DieMode::kDieSize) {
+      // Each axis grows only as much as its own sides require.
+      const double new_width = std::max(die_width, required_die_width);
+      const double new_height = std::max(die_height, required_die_height);
+      if (new_width > die_width + 1e-9 || new_height > die_height + 1e-9) {
+        config.die_width_micron = new_width;
+        config.die_height_micron = new_height;
+        resized = true;
+        FPLOG.info(Loc::current(), "Resized die_size for IO capacity: ", new_width, " x ", new_height, " um.");
+      }
+    } else if (config.die_mode == DieMode::kDieUtil) {
+      const Core& core = database.get_core();
+      const double core_width = (core.get_ur_x() - core.get_ll_x()) / dbu;
+      const double core_height = (core.get_ur_y() - core.get_ll_y()) / dbu;
+      if (core_width <= 0.0 || core_height <= 0.0) {
+        FPLOG.error(Loc::current(), "Cannot grow die_util with an invalid core size.");
+        return false;
+      }
+      // Die = core + margins, so subtract the margins before scaling the core.
+      const double margin_width = std::max(0.0, die_width - core_width);
+      const double margin_height = std::max(0.0, die_height - core_height);
+      const double required_core_width = std::max(0.0, required_die_width - margin_width);
+      const double required_core_height = std::max(0.0, required_die_height - margin_height);
+      double scale = 1.0;
+      if (required_core_width > core_width) {
+        scale = std::max(scale, required_core_width / core_width);
+      }
+      if (required_core_height > core_height) {
+        scale = std::max(scale, required_core_height / core_height);
+      }
+      if (scale > 1.0 + 1e-9) {
+        // Uniform scaling keeps the configured aspect ratio; utilization drops by scale^2.
+        const double new_utilization = config.die_utilization / (scale * scale);
+        if (new_utilization <= 0.0) {
+          FPLOG.error(Loc::current(), "IO capacity requires an invalid die utilization ", new_utilization, ".");
+          return false;
+        }
+        config.die_utilization = new_utilization;
+        resized = true;
+        FPLOG.info(Loc::current(), "Grew die_util uniformly by ", scale, "; utilization ", new_utilization, ".");
+      }
+    } else {
+      FPLOG.error(Loc::current(), "IO cell capacity is insufficient and die_builder.mode is not set.");
+      return false;
+    }
+
+    if (!resized) {
+      break;
+    }
+    DieBuilder::initInst();
+    FPDB.build();
+    DieBuilder::destroyInst();
+    report = placer.checkCapacity();
+  }
+
+  FPLOG.error(Loc::current(), "IO cell capacity is still insufficient after ", kMaxAttempts, " attempt(s).");
+  return false;
+}
+
+void IOPlacer::placeIOCell()
+{
+  if (_io_cell_placer == nullptr) {
+    _io_cell_placer = std::make_unique<IOCellPlacer>(FPDM.getConfig());
+  }
+  if (!_io_cell_placer->place()) {
+    FPLOG.error(Loc::current(), "IO Cell placement failed.");
+  }
 }
 
 void IOPlacer::placeIOPin()
@@ -515,75 +674,6 @@ int32_t IOPlacer::calculatePinDepth(IOEdgeType edge_type, int32_t width, const s
   return static_cast<int32_t>(depth);
 }
 
-void IOPlacer::placeIOPinsOnEdge(IOEdgeType edge_type, std::vector<IOPin>& io_pin_list, int32_t& io_pin_idx, int32_t edge_pin_num, std::string layer_name,
-                                 int32_t width, const std::string& access_layer_name, int32_t access_pitch, int32_t track_offset, int32_t track_pitch)
-{
-  Die& die = FPDM.getDatabase().get_die();
-  Core& core = FPDM.getDatabase().get_core();
-  int32_t depth = calculatePinDepth(edge_type, width, layer_name, access_layer_name);
-  int32_t io_pin_num = static_cast<int32_t>(io_pin_list.size());
-  int32_t side_pin_num = std::min(edge_pin_num, io_pin_num - io_pin_idx);
-
-  for (int32_t side_pin_idx = 0; side_pin_idx < side_pin_num; side_pin_idx++) {
-    int32_t x = -1;
-    int32_t y = -1;
-    switch (edge_type) {
-      case IOEdgeType::kLeft:
-        x = die.get_ll_x() + depth / 2;
-        y = getAlongCoord(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
-                          track_pitch);
-        break;
-      case IOEdgeType::kRight:
-        x = die.get_ur_x() - depth / 2;
-        y = getAlongCoord(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
-                          track_pitch);
-        break;
-      case IOEdgeType::kBottom:
-        x = getAlongCoord(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
-                          track_pitch);
-        y = die.get_ll_y() + depth / 2;
-        break;
-      case IOEdgeType::kTop:
-        x = getAlongCoord(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), width, access_pitch, side_pin_num, side_pin_idx, track_offset,
-                          track_pitch);
-        y = die.get_ur_y() - depth / 2;
-        break;
-      default:
-        return;
-    }
-    addIOPinPort(io_pin_list[io_pin_idx++], edge_type, x, y, width, depth, layer_name);
-  }
-}
-
-int32_t IOPlacer::getAlongCoord(int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span, int32_t access_pitch,
-                                int32_t side_pin_num, int32_t pin_idx, int32_t track_offset, int32_t track_pitch)
-{
-  int32_t legal_low = std::max(range_low, die_low + access_pitch);
-  int32_t legal_high = std::min(range_high, die_high - access_pitch);
-  auto align_up = [track_offset, track_pitch](int32_t value) { return track_offset + FPUTIL.alignUp(value - track_offset, track_pitch); };
-  auto align_down = [track_offset, track_pitch](int32_t value) { return track_offset + FPUTIL.alignDown(value - track_offset, track_pitch); };
-  int32_t lower_half_span = pin_span / 2;
-  int32_t upper_half_span = pin_span - lower_half_span;
-  int32_t start = align_up(legal_low + lower_half_span);
-  int32_t end = align_down(legal_high - upper_half_span);
-
-  if (start > end) {
-    start = align_up(range_low + lower_half_span);
-    end = align_down(range_high - upper_half_span);
-  }
-  if (start > end) {
-    return track_offset + FPUTIL.alignNearest((range_low + range_high) / 2 - track_offset, track_pitch);
-  }
-  if (side_pin_num <= 1) {
-    return track_offset + FPUTIL.alignNearest((start + end) / 2 - track_offset, track_pitch);
-  }
-
-  int64_t span = static_cast<int64_t>(end - start);
-  int32_t coord = start + static_cast<int32_t>((span * pin_idx + (side_pin_num - 1) / 2) / static_cast<int64_t>(side_pin_num - 1));
-  coord = track_offset + FPUTIL.alignNearest(coord - track_offset, track_pitch);
-  return std::max(start, std::min(end, coord));
-}
-
 void IOPlacer::addIOPinPort(IOPin& io_pin, IOEdgeType edge_type, int32_t x, int32_t y, int32_t width, int32_t depth, std::string layer_name)
 {
   io_pin.set_placed(true);
@@ -656,6 +746,8 @@ void IOPlacer::updateNetIOPin(IOPin& io_pin)
 }
 
 // private
+
+IOPlacer::~IOPlacer() = default;
 
 IOPlacer* IOPlacer::_ip_instance = nullptr;
 

@@ -21,8 +21,6 @@
  * @brief Top-level IO pins on a clock net are ignore loads: read, clone, and writeback coverage.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -39,12 +37,13 @@
 #include "IdbNet.h"
 #include "IdbPins.h"
 #include "IdbTerm.h"
-#include "data_manager/adapter/sdc/SDCClockReader.hh"
+#include "data_manager/adapter/sdc/ClockTrace.hh"
 #include "data_manager/design/Clock.hh"
 #include "data_manager/design/Design.hh"
 #include "data_manager/design/Net.hh"
 #include "data_manager/design/Pin.hh"
 #include "data_manager/io/Wrapper.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

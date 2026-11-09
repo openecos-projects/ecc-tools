@@ -1,14 +1,7 @@
 add_library(
   icts_source_data_manager_adapter_sdc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCClockReader.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCCaseAnalysis.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockParser.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockCommands.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockEvaluator.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockValue.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCConstraintOptions.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCClockConstraints.cc
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser/SDCGeneratedClocks.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/IstaConstraintReader.cc
+  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/SDCGeneratedClockResolver.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceResolver.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTracePins.cc
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace/ClockTraceOwnership.cc
@@ -18,11 +11,13 @@ add_library(
 target_include_directories(
   icts_source_data_manager_adapter_sdc
   PUBLIC
+  # First, so a plain "Config.hh" in this component means the CTS session
+  # configuration, not the Liberty parser's own Config.hh.
+  ${ICTS_DATA_MANAGER}/config
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}
   ${ICTS_DATA_MANAGER_ADAPTER}
   ${ICTS_DATA_MANAGER}
   PRIVATE
-  ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_parser
   ${ICTS_DATA_MANAGER_ADAPTER_SDC}/clock_trace
   ${ICTS_TOOLKIT}
   ${HOME_DATABASE}/data/design
@@ -42,7 +37,7 @@ target_link_libraries(
   icts_source_data_manager_config
   icts_source_toolkit_logger
   liberty
-  ista_sdc_frontend
+  ista_interface
   ista_data_manager
 )
 

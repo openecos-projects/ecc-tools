@@ -25,4 +25,5 @@ bool CtsAutoRun(const std::filesystem::path& cts_config, const std::filesystem::
 bool CtsReport(const std::filesystem::path& path);
 bool CtsDestroy();
 pybind11::dict CtsTimingFeature();
+pybind11::dict CtsClockGraph();
 }  // namespace python_interface

@@ -21,8 +21,6 @@
  * @brief Unit tests for explicit TopologyGen target depth handling.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <memory>
@@ -35,6 +33,7 @@
 #include "data_manager/spatial/Point.hh"
 #include "data_manager/spatial/Tree.hh"
 #include "geometry/Geometry.hh"
+#include "gtest/gtest.h"
 #include "module/topology/TopologyGen.hh"
 #include "module/topology/config/TopologyConfig.hh"
 

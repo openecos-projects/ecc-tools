@@ -61,6 +61,8 @@ double LoadCalculator::netLoad(Net& net, const std::string& driver_pin, Analysis
 
   if (database.parasitics().nets().count(net.get_net_name()) > 0) {
     ParasiticNet& parasitic_net = database.parasitics().nets()[net.get_net_name()];
+    if (_rc.hasIncompleteNetwork(parasitic_net, driver_pin))
+      return _rc.wireCapacitance(parasitic_net) + netPinLoad(net, driver_pin, analysis_type, output_trans_type);
     return parasiticLoad(driver_pin, parasitic_net, analysis_type, output_trans_type);
   }
   return netPinLoad(net, driver_pin, analysis_type, output_trans_type);

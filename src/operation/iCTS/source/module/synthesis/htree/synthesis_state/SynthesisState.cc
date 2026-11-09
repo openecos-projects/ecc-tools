@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <limits>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "BufferingPattern.hh"

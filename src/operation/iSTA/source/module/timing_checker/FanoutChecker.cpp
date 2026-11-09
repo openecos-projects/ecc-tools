@@ -42,6 +42,9 @@ std::vector<FanoutCheck> FanoutChecker::check() const
       if (_sim_values.isDriverDisabled(driver) || isIdealClockPin(_database, driver)) {
         continue;
       }
+      const bool separate_driver = _database.graph().driverPoints().contains(driver);
+      if (!_sim_values.allowsTransition(driver, TransType::kRise, separate_driver) && !_sim_values.allowsTransition(driver, TransType::kFall, separate_driver))
+        continue;
       double driver_fanout_load = fanout_load;
       if (!pin.get_is_port() && loads.contains(driver)) {
         const LibertyPort* port = _network.libertyPort(_liberty, pin);

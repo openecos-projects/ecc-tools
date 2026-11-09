@@ -1,0 +1,10 @@
+# Spacing between two environment (fixed) shapes is not the checked result's fault:
+# iDRC only reports violations that involve at least one result shape.
+case prl_spacing_env_only
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 spacing=90
+cut V1
+env pin_a M1 0 0 1000 500
+env pin_b M1 1060 0 2000 500
+result n1 M1 5000 5000 6000 5500
+expect none

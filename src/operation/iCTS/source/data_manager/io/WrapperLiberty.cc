@@ -41,7 +41,6 @@
 #include "IdbUnits.h"
 #include "Logger.hh"
 #include "Monitor.hh"
-#include "TimingConstraints.hh"
 #include "Type.hh"
 #include "Wrapper.hh"
 #include "config/Config.hh"
@@ -461,29 +460,6 @@ auto Wrapper::loadLibertyIfNeeded() const -> void
               ", cells=", cell_count, ", index_seconds=", index_seconds, index_monitor.getStatsInfo());
 }
 
-auto Wrapper::querySdcUnits() const -> std::optional<SdcUnits>
-{
-  loadLibertyIfNeeded();
-  if (_liberty_generation == nullptr) {
-    return std::nullopt;
-  }
-  std::optional<SdcUnits> units;
-  for (const auto& library : _liberty_generation->get_libraries()) {
-    if (library == nullptr || !library->has_cap_unit() || !library->has_time_unit()) {
-      return std::nullopt;
-    }
-    const SdcUnits candidate{.time_unit_ns = library->convert_time_unit_to_ns(1.0),
-                             .capacitance_unit_pf = idb::ConvertCapUnit(library->get_cap_unit(), idb::CapacitiveUnit::kPF, 1.0)};
-    if (!std::isfinite(candidate.time_unit_ns) || candidate.time_unit_ns <= 0.0 || !std::isfinite(candidate.capacitance_unit_pf)
-        || candidate.capacitance_unit_pf <= 0.0
-        || (units.has_value() && (units->time_unit_ns != candidate.time_unit_ns || units->capacitance_unit_pf != candidate.capacitance_unit_pf))) {
-      return std::nullopt;
-    }
-    units = candidate;
-  }
-  return units;
-}
-
 auto Wrapper::queryLibertyRevision() const -> std::uint64_t
 {
   loadLibertyIfNeeded();
@@ -538,6 +514,18 @@ auto Wrapper::queryCellOutPinCapTableAxisMax(const std::string& cell_master) con
                                                                 idb::LibLutTableTemplate::Variable::EQUAL_OR_OPPOSITE_OUTPUT_NET_CAPACITANCE});
 }
 
+auto Wrapper::queryLibertyClockSourceDriveCapLimit(const Pin* clock_source) const -> std::optional<double>
+{
+  if (clock_source == nullptr) {
+    return std::nullopt;
+  }
+  auto* inst = clock_source->get_inst();
+  if (inst == nullptr) {
+    return std::nullopt;
+  }
+  return queryLibOutputPinCapLimitPf(findLibertyCell(inst->get_cell_master()), clock_source);
+}
+
 auto Wrapper::queryClockSourceDriveCapLimit(const ClockSourceDriveCapLimitInput& input) const -> std::optional<double>
 {
   const auto* clock_source = input.clock_source;
@@ -545,26 +533,26 @@ auto Wrapper::queryClockSourceDriveCapLimit(const ClockSourceDriveCapLimitInput&
     return std::nullopt;
   }
 
-  if (auto* inst = clock_source->get_inst(); inst != nullptr) {
-    const auto& cell_master = inst->get_cell_master();
-    auto* lib_cell = findLibertyCell(cell_master);
-    const auto lib_cap_limit_pf = queryLibOutputPinCapLimitPf(lib_cell, clock_source);
-    if (lib_cap_limit_pf.has_value()) {
-      return lib_cap_limit_pf;
+  const auto positive_or_null
+      = [](double value) -> std::optional<double> { return std::isfinite(value) && value > 0.0 ? std::optional<double>{value} : std::nullopt; };
+  const auto liberty_limit = queryLibertyClockSourceDriveCapLimit(clock_source);
+
+  // An SDC capacitance limit is the design owner's rule, so it outranks the configured
+  // fallback and may only tighten the source's own Liberty rule.
+  if (const auto& sdc_limit = input.sdc_max_cap_pf; sdc_limit.has_value()) {
+    if (const auto usable_sdc_limit = positive_or_null(*sdc_limit); usable_sdc_limit.has_value()) {
+      return liberty_limit.has_value() && *liberty_limit < *usable_sdc_limit ? liberty_limit : usable_sdc_limit;
     }
-
-    return queryConfiguredMaxCapBoundaryPf(input.configured_max_cap_pf, clock_source);
+  }
+  if (liberty_limit.has_value()) {
+    return liberty_limit;
   }
 
-  const auto configured_cap_limit_pf = queryConfiguredMaxCapBoundaryPf(input.configured_max_cap_pf, clock_source);
-  if (configured_cap_limit_pf.has_value()) {
-    return configured_cap_limit_pf;
-  }
-  if (!clock_source->is_io()) {
+  if (clock_source->get_inst() == nullptr && !clock_source->is_io()) {
     CTSLOG.warn(Loc::current(), "Clock-source drive-cap query skipped: CTS pin \"", Design::getPinFullName(clock_source),
                 "\" has no owning inst and is not marked as top-level IO.");
   }
-  return std::nullopt;
+  return queryConfiguredMaxCapBoundaryPf(input.configured_max_cap_pf, clock_source);
 }
 
 auto Wrapper::queryClockSourceDriveCapLimit(const Config& config, const Pin* clock_source) const -> std::optional<double>
@@ -572,6 +560,7 @@ auto Wrapper::queryClockSourceDriveCapLimit(const Config& config, const Pin* clo
   return queryClockSourceDriveCapLimit(ClockSourceDriveCapLimitInput{
       .clock_source = clock_source,
       .configured_max_cap_pf = config.has_max_cap() && config.get_max_cap() > 0.0 ? std::optional<double>{config.get_max_cap()} : std::nullopt,
+      .sdc_max_cap_pf = config.has_sdc_max_cap() && config.get_sdc_max_cap_pf() > 0.0 ? std::optional<double>{config.get_sdc_max_cap_pf()} : std::nullopt,
   });
 }
 
@@ -606,27 +595,43 @@ auto Wrapper::queryCellInPinSlewTableAxisMax(const std::string& cell_master) con
 
 auto Wrapper::queryPinSlewLimit(const PinSlewLimitInput& input) const -> std::optional<double>
 {
-  const auto* pin = input.pin;
+  const auto positive_or_null
+      = [](double value) -> std::optional<double> { return std::isfinite(value) && value > 0.0 ? std::optional<double>{value} : std::nullopt; };
+  const auto liberty_limit = queryLibertyPinSlewLimit(input.pin);
+
+  // An SDC transition limit is the design owner's rule, so it outranks the configured
+  // fallback and may only tighten the receiving cell's own Liberty rule. Without one the
+  // cell rule stands alone and the configured value remains the last resort, which is
+  // the historical behaviour.
+  std::optional<double> result = liberty_limit;
+  if (const auto& sdc_limit = input.sdc_max_transition_ns; sdc_limit.has_value()) {
+    const auto usable_sdc_limit = positive_or_null(*sdc_limit);
+    if (usable_sdc_limit.has_value()) {
+      result = result.has_value() ? std::min(*result, *usable_sdc_limit) : usable_sdc_limit;
+    }
+  }
+  if (!result.has_value()) {
+    result = positive_or_null(input.configured_max_sink_tran_ns);
+  }
+  return result;
+}
+
+auto Wrapper::queryLibertyPinSlewLimit(const Pin* pin) const -> std::optional<double>
+{
   if (pin == nullptr) {
     return std::nullopt;
   }
-
   auto* inst = pin->get_inst();
   if (inst == nullptr) {
-    const double configured_limit_ns = input.configured_max_sink_tran_ns;
-    return std::isfinite(configured_limit_ns) && configured_limit_ns > 0.0 ? std::optional<double>{configured_limit_ns} : std::nullopt;
+    return std::nullopt;
   }
-
   const auto& cell_master = inst->get_cell_master();
   if (cell_master.empty()) {
-    const double configured_limit_ns = input.configured_max_sink_tran_ns;
-    return std::isfinite(configured_limit_ns) && configured_limit_ns > 0.0 ? std::optional<double>{configured_limit_ns} : std::nullopt;
+    return std::nullopt;
   }
-
   auto* lib_cell = findLibertyCell(cell_master);
   if (lib_cell == nullptr) {
-    const double configured_limit_ns = input.configured_max_sink_tran_ns;
-    return std::isfinite(configured_limit_ns) && configured_limit_ns > 0.0 ? std::optional<double>{configured_limit_ns} : std::nullopt;
+    return std::nullopt;
   }
 
   const auto port_name = normalizePortName(pin->get_name());
@@ -651,9 +656,7 @@ auto Wrapper::queryPinSlewLimit(const PinSlewLimitInput& input) const -> std::op
       }
     }
   }
-
-  const double configured_limit_ns = input.configured_max_sink_tran_ns;
-  return std::isfinite(configured_limit_ns) && configured_limit_ns > 0.0 ? std::optional<double>{configured_limit_ns} : std::nullopt;
+  return std::nullopt;
 }
 
 auto Wrapper::queryPinSlewLimit(const Config& config, const Pin* pin) const -> std::optional<double>
@@ -661,6 +664,7 @@ auto Wrapper::queryPinSlewLimit(const Config& config, const Pin* pin) const -> s
   return queryPinSlewLimit(PinSlewLimitInput{
       .pin = pin,
       .configured_max_sink_tran_ns = config.get_max_sink_tran(),
+      .sdc_max_transition_ns = config.has_sdc_max_transition() ? std::optional<double>{config.get_sdc_max_transition_ns()} : std::nullopt,
   });
 }
 

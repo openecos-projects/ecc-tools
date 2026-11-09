@@ -300,6 +300,12 @@ int main(int argc, char** argv)
   TimingAnalyzer(db, delay).analyze();
   if (!db.electricalChecks().empty())
     throw std::runtime_error("static net must not acquire switching electrical checks");
+  const auto static_checks = ElectricalChecker(db, delay, true).check();
+  require(static_checks.size() == 1 && static_checks.front().rule == ElectricalRule::kCapacitance && std::abs(static_checks.front().actual - .3) < 1e-12,
+          "explicit constant-net capacitance checking lost the SDC port load");
+  TimingAnalyzer(db, delay, true).analyze();
+  require(db.electricalChecks().size() == 1 && db.electricalChecks().front().rule == ElectricalRule::kCapacitance,
+          "analysis did not forward constant-net capacitance policy");
   db.sdc().get_case_analysis_map().clear();
   TimingAnalyzer(db, delay).analyze();
   db.sdc().electricalLimits() = ElectricalLimits{};

@@ -14,14 +14,14 @@
 #include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
+#include "NetThresholdAdjustment.hpp"
+#include "SparseElectricalExport.hpp"
+#include "SparseTimingSnapshot.hpp"
+#include "TimingData.hpp"
+#include "graph/TimingStateQuery.hpp"
 #include "liberty/LibertyCell.hpp"
 #include "liberty/TimingArc.hpp"
 #include "liberty/TimingCheckArc.hpp"
-#include "NetThresholdAdjustment.hpp"
-#include "SparseTimingSnapshot.hpp"
-#include "SparseElectricalExport.hpp"
-#include "TimingData.hpp"
-#include "graph/TimingStateQuery.hpp"
 #include "path/PathEnd.hpp"
 #include "sdc/ExceptionMatcher.hpp"
 #include "timing_checker/PathChecker.hpp"
@@ -49,8 +49,7 @@ struct EndpointArcHash
   std::size_t operator()(const EndpointArcKey& key) const
   {
     auto hash = std::hash<std::string_view>{}(key.sink);
-    for (auto value : {std::hash<std::string_view>{}(key.source), std::hash<int32_t>{}(key.check_type),
-                       std::hash<int32_t>{}(key.library_arc)})
+    for (auto value : {std::hash<std::string_view>{}(key.source), std::hash<int32_t>{}(key.check_type), std::hash<int32_t>{}(key.library_arc)})
       hash ^= value + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     return hash;
   }
@@ -100,8 +99,8 @@ std::string localPortName(const std::string& pin_name)
   return separator == std::string::npos ? pin_name : pin_name.substr(separator + 1);
 }
 
-int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pin, const std::string& clock_pin,
-                                  TimingCheckType check_type, TransType clock_transition, int32_t selected_arc_idx)
+int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pin, const std::string& clock_pin, TimingCheckType check_type,
+                                  TransType clock_transition, int32_t selected_arc_idx)
 {
   if (selected_arc_idx < 0)
     return -1;
@@ -187,6 +186,8 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   STALOG.info(Loc::current(), "Compiling ", early ? "min" : "max", " sparse timing snapshot...");
   view.enabled = true;
   view.early = early;
+  for (const auto& [endpoint, checks] : database.graph().clockGatingChecks())
+    view.unsupported.push_back("inferred clock-gating check requires a gate-window rule at " + endpoint);
   if (!early)
     snapshot.schema_version = 3;
   auto& exceptions = database.sdc().get_path_exception_list();
@@ -287,10 +288,8 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         // tagged graph from a register clock-to-Q arc.
         const auto pin = database.network().pins().find(name);
         const auto port_constraint = database.sdc().get_port_constraint_map().find(name);
-        if (pin != database.network().pins().end() && pin->second.get_is_port()
-            && port_constraint != database.sdc().get_port_constraint_map().end()
-            && (early ? port_constraint->second.get_has_input_delay_min() : port_constraint->second.get_has_input_delay_max())
-            && state.source_type != 2) {
+        if (pin != database.network().pins().end() && pin->second.get_is_port() && port_constraint != database.sdc().get_port_constraint_map().end()
+            && (early ? port_constraint->second.get_has_input_delay_min() : port_constraint->second.get_has_input_delay_max()) && state.source_type != 2) {
           state.seed = state.valid;
         }
         pin_states[name].emplace(key, view.states.size());
@@ -301,11 +300,9 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   };
   collectStates(database.graph().points(), 0);
   collectStates(database.graph().driverPoints(), 1);
-  STALOG.info(Loc::current(), "Sparse ", early ? "min" : "max", " states collected: states=", view.states.size(),
-              ", tags=", view.tags.size(), ", launch_tags=", view.launch_tags.size(), "; phase ", monitor.getStatsInfo());
-  const auto peak = std::max_element(pin_states.begin(), pin_states.end(), [](const auto& a, const auto& b) {
-    return a.second.size() < b.second.size();
-  });
+  STALOG.info(Loc::current(), "Sparse ", early ? "min" : "max", " states collected: states=", view.states.size(), ", tags=", view.tags.size(),
+              ", launch_tags=", view.launch_tags.size(), "; phase ", monitor.getStatsInfo());
+  const auto peak = std::max_element(pin_states.begin(), pin_states.end(), [](const auto& a, const auto& b) { return a.second.size() < b.second.size(); });
   if (peak != pin_states.end()) {
     STALOG.info(Loc::current(), "Sparse highest-state pin: ", peak->first, ", states=", peak->second.size());
     int samples = 0;
@@ -413,17 +410,18 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
           for (int output = 0; output < 2; ++output) {
             bool legal = input == output;
             if constexpr (std::is_same_v<std::decay_t<decltype(arc)>, TimingGraphArcData>) {
-              legal = (arc.sense == 1 ? input == output : arc.sense == -1 ? input != output : true)
+              legal = (arc.sense == 1    ? input == output
+                       : arc.sense == -1 ? input != output
+                                         : true)
                       && (arc.timing_type == 0 || arc.timing_type == (input == 0 ? 1 : -1));
             }
             if (!legal)
               continue;
             const auto progress = matcher.advanceState(through_index, path->get_exception_state_list(), arc.sink_pin,
-                                                        output == 0 ? TransType::kRise : TransType::kFall,
-                                                        cell ? "" : arc.source_pin);
+                                                       output == 0 ? TransType::kRise : TransType::kFall, cell ? "" : arc.source_pin);
             StateKey sink_key = key;
             std::get<2>(sink_key) = matcher.makePathStateTag(path->get_clock_name(), path->get_launch_clock_trans_type(), progress,
-                                                          path->get_is_clock_source_path(), path->crprPathTag(), path->get_launch_clock_edge_index());
+                                                             path->get_is_clock_source_path(), path->crprPathTag(), path->get_launch_clock_edge_index());
             std::get<3>(sink_key) = sink_role;
             auto sink = sinks->second.find(sink_key);
             if (sink == sinks->second.end())
@@ -493,8 +491,8 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
     view.net_threshold_adjustments.push_back(netThresholdAdjustment(database, arc.source_pin, arc.sink_pin));
   }
   appendSparseElectricalEdges(snapshot, database, view);
-  STALOG.info(Loc::current(), "Sparse ", early ? "min" : "max", " edges collected: cell=", view.cell_edges.size(),
-              ", net=", view.net_edges.size(), ", slew_only=", view.slew_only_cell_edges.size(), "; phase ", monitor.getStatsInfo());
+  STALOG.info(Loc::current(), "Sparse ", early ? "min" : "max", " edges collected: cell=", view.cell_edges.size(), ", net=", view.net_edges.size(),
+              ", slew_only=", view.slew_only_cell_edges.size(), "; phase ", monitor.getStatsInfo());
 
   // Some output ports are represented as virtual timing endpoints with no DEF
   // net row. Their native path arrival is already the launch-side electrical
@@ -509,8 +507,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
     const auto constraint = database.sdc().get_port_constraint_map().find(state.pin);
     if (pin != database.network().pins().end() && pin->second.get_is_port() && state.source_type == 2
         && constraint != database.sdc().get_port_constraint_map().end()
-        && (early ? constraint->second.get_has_output_delay_min() : constraint->second.get_has_output_delay_max())
-        && !net_destinations.contains(state_id)) {
+        && (early ? constraint->second.get_has_output_delay_min() : constraint->second.get_has_output_delay_max()) && !net_destinations.contains(state_id)) {
       state.seed = state.valid;
     }
   }
@@ -547,6 +544,10 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         continue;
 
       const auto& check = endpoint->check();
+      if (check.type == TimingCheckType::kClockGatingSetup) {
+        view.unsupported.push_back("inferred clock-gating check requires a gate-window rule at " + state.pin);
+        continue;
+      }
       const std::string capture = endpoint->captureClock();
       if (!domains.contains(capture)) {
         view.unsupported.push_back("unknown capture clock at " + state.pin);
@@ -562,14 +563,13 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         if (arc != endpoint_arcs.end())
           endpoint_arc = arc->second;
         if (endpoint_arc < 0) {
-          view.unsupported.push_back(selected_library_arc < 0 ? "missing selected max check LUT at " + state.pin
-                                                              : "missing max check LUT at " + state.pin);
+          view.unsupported.push_back(selected_library_arc < 0 ? "missing selected max check LUT at " + state.pin : "missing max check LUT at " + state.pin);
           continue;
         }
       }
 
-      const auto resolved = matcher.resolve(path.get_start_point(), path.get_clock_name(), state.pin, capture, AnalysisType::kMax,
-                                            path.get_trans_type(), check.capture_transition, path.get_exception_state_list());
+      const auto resolved = matcher.resolve(path.get_start_point(), path.get_clock_name(), state.pin, capture, AnalysisType::kMax, path.get_trans_type(),
+                                            check.capture_transition, path.get_exception_state_list());
       SparseTimingCheck row;
       row.state = state_id;
       row.capture_domain = domains.at(capture);
@@ -587,11 +587,10 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         row.constraint = static_cast<int32_t>(chosen - exceptions.data());
       if (row.valid) {
         row.check_coefficient = check.capture_pin.empty() ? 0.0 : -1.0;
-        row.clock_slew_ps = check.capture_pin.empty()
-                                ? 0.0
-                                : state_query.getClockSlew(check.capture_pin, capture, AnalysisType::kMax, check.capture_pin_transition,
-                                                            check.capture_transition)
-                                      * snapshot.time_unit_ps;
+        row.clock_slew_ps = check.capture_pin.empty() ? 0.0
+                                                      : state_query.getClockSlew(check.capture_pin, capture, AnalysisType::kMax, check.capture_pin_transition,
+                                                                                 check.capture_transition)
+                                                            * snapshot.time_unit_ps;
         if (structural_model && !check.capture_pin.empty()) {
           const auto clock_pin = pin_ids.find(check.capture_pin);
           if (clock_pin != pin_ids.end()) {

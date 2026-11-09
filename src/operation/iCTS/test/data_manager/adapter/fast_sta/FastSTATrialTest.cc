@@ -21,8 +21,6 @@
  * @brief Clock trial electrical/power equivalence and exact snapshot restoration.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -53,6 +51,7 @@
 #include "design/Net.hh"
 #include "design/Pin.hh"
 #include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"
@@ -291,7 +290,7 @@ class FastSTATrialTestInterface : public ::testing::Test
     _environment = {.wrapper = &_wrapper, .dbu_per_um = 1000, .routing_layer = 1, .root_input_slew_ns = .03};
     _authority.bindEnvironment(_environment);
     _constraints.clocks.push_back({.clock_name = "ROOT",
-                                   .targets = {{.kind = icts::SdcObjectKind::kPort, .pattern = "clk"}},
+                                   .targets = {{.kind = icts::SdcObjectKind::kPort, .name = "clk"}},
                                    .generated_sources = {},
                                    .period_ns = 1.0,
                                    .period_resolved = true,
@@ -299,7 +298,7 @@ class FastSTATrialTestInterface : public ::testing::Test
                                    .generated_edges = {},
                                    .generated_edge_shifts_ns = {},
                                    .waveform_resolved = true});
-    _constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .pattern = "ROOT"});
+    _constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .name = "ROOT"});
   }
 
   auto makeGraph(const std::string& master) -> std::optional<icts::WrapperTimingGraph>
@@ -410,15 +409,15 @@ class FastSTATrialTestInterface : public ::testing::Test
     auto constraints = _constraints;
     constraints.clocks.push_back({.kind = icts::SdcClockDecl::Kind::kGenerated,
                                   .clock_name = "GEN",
-                                  .targets = {{.kind = icts::SdcObjectKind::kPin, .pattern = "gen/Y"}},
-                                  .generated_sources = {{.kind = icts::SdcObjectKind::kPin, .pattern = "gen/A"}},
+                                  .targets = {{.kind = icts::SdcObjectKind::kPin, .name = "gen/Y"}},
+                                  .generated_sources = {{.kind = icts::SdcObjectKind::kPin, .name = "gen/A"}},
                                   .master_clock_name = "ROOT",
                                   .divide_by = 2,
                                   .waveform_ns = {},
                                   .generated_edges = {},
                                   .generated_edge_shifts_ns = {},
                                   .divide_by_explicit = true});
-    constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .pattern = "GEN"});
+    constraints.propagated_clocks.push_back({.kind = icts::SdcObjectKind::kClock, .name = "GEN"});
     return constraints;
   }
 

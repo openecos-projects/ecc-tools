@@ -206,6 +206,20 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
   if (!pole_residue.get_is_valid()) {
     return std::nullopt;
   }
+  double waveform_resistance = drive_resistance;
+  auto update_waveform = [&](bool force = false) {
+    // Reuse the network response within 5% relative conductance change.
+    // G = 1/R: compare to the last actual rebuild, not the last driver fit,
+    // so successive small changes cannot accumulate beyond the tolerance.
+    if (force || std::abs(waveform_resistance / drive_resistance - 1.) > .05) {
+      auto updated = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
+      if (!updated.get_is_valid())
+        return false;
+      pole_residue = std::move(updated);
+      waveform_resistance = drive_resistance;
+    }
+    return true;
+  };
 
   double effective_capacitance = total_capacitance;
   bool request_adjustment = false;
@@ -222,6 +236,7 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
   auto fit_load = [&](bool match_crossing) {
     double lower_capacitance = 0.;
     double upper_capacitance = std::numeric_limits<double>::infinity();
+    double previous_residual = std::numeric_limits<double>::infinity();
     bool converged = false;
     // Fit the distributed source crossing for both ordinary and adjusted
     // two-load drivers. Charge matching remains the fallback for table data
@@ -273,31 +288,50 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
         if (next_fit) {
           driver_fit = next_fit;
           drive_resistance = next_fit->resistance;
-          pole_residue = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
+          const double previous_resistance = waveform_resistance;
+          if (!update_waveform())
+            return false;
+          if (waveform_resistance != previous_resistance) {
+            // A changed response invalidates both the crossing and its bracket.
+            lower_capacitance = 0.;
+            upper_capacitance = previous_residual = std::numeric_limits<double>::infinity();
+            converged = false;
+            continue;
+          }
         }
         break;
       }
       // Solve matched(C) - C = 0. Nonlinear tables can make plain fixed-point
       // iteration oscillate around a valid solution. Retain the residual-sign
       // bracket and switch to bisection when iteration stops making progress.
+      // A joint fit may rebuild the response when C changes: keep contracting
+      // steps instead of jumping to a different network model. Fixed-R charge
+      // and adjusted fits retain periodic bisection, including slow contraction.
       if (capacitance > effective_capacitance)
         lower_capacitance = effective_capacitance;
       else
         upper_capacitance = effective_capacitance;
-      if (std::isfinite(upper_capacitance) && (iter >= 8 || capacitance <= lower_capacitance || capacitance >= upper_capacitance)) {
+      const double residual = std::abs(capacitance - effective_capacitance);
+      if (std::isfinite(upper_capacitance)
+          && ((iter >= 8 && (!driver_fit || residual >= previous_residual)) || capacitance <= lower_capacitance || capacitance >= upper_capacitance)) {
         effective_capacitance = lower_capacitance + .5 * (upper_capacitance - lower_capacitance);
       } else {
         effective_capacitance = capacitance;
       }
+      previous_residual = residual;
       if (!match_crossing && driver_fit) {
         driver_fit = effective_capacitance == capacitance ? next_fit : fit_table(effective_capacitance);
         if (!driver_fit)
           return false;
         drive_resistance = driver_fit->resistance;
         driver_ramp = driver_fit->ramp;
-        pole_residue = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
-        if (!pole_residue.get_is_valid())
+        const double previous_resistance = waveform_resistance;
+        if (!update_waveform())
           return false;
+        if (waveform_resistance != previous_resistance) {
+          lower_capacitance = 0.;
+          upper_capacitance = previous_residual = std::numeric_limits<double>::infinity();
+        }
       } else {
         driver_ramp = tableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, effective_capacitance, lower_threshold, upper_threshold,
                                 voltage_log, slew_derate, min_slew_factor);
@@ -316,8 +350,7 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     drive_resistance = charge_resistance;
     driver_ramp = charge_ramp;
     effective_capacitance = total_capacitance;
-    pole_residue = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
-    if (!pole_residue.get_is_valid())
+    if (!update_waveform(true))
       return std::nullopt;
     converged = fit_load(false);
   }
@@ -333,8 +366,7 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     effective_capacitance = total_capacitance;
     driver_ramp = tableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, total_capacitance, lower_threshold, upper_threshold, voltage_log,
                             slew_derate, min_slew_factor);
-    pole_residue = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
-    if (!pole_residue.get_is_valid() || !(driver_ramp > 0.) || !std::isfinite(driver_ramp))
+    if (!update_waveform(true) || !(driver_ramp > 0.) || !std::isfinite(driver_ramp))
       return std::nullopt;
     // The adjusted driver matches its lumped table delay to the distributed
     // source crossing; receiver delay and slew use this same fitted waveform.

@@ -39,6 +39,9 @@ class DataManager
   static void destroyInst();
   // function
   void input(std::map<std::string, std::any>& config_map);
+  // Same as input(), but takes the technology from an already populated database instead of idb.
+  // Layer indices in the database are treated like idb layer ids and remapped by buildDatabase().
+  void inputDatabase(std::map<std::string, std::any>& config_map, Database database);
 
 #if 1  // 获得唯一的pitch
   int32_t getOnlyPitch();

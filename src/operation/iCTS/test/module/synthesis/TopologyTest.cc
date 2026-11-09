@@ -21,8 +21,6 @@
  * @brief Guard-behavior coverage for Topology invalid inputs.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -43,6 +41,7 @@
 #include "data_manager/design/Pin.hh"
 #include "data_manager/io/Wrapper.hh"
 #include "data_manager/spatial/Point.hh"
+#include "gtest/gtest.h"
 #include "module/synthesis/realization/ClockTreeRealization.hh"
 #include "module/synthesis/topology/SourceTrunkStage.hh"
 #include "module/synthesis/topology/Topology.hh"

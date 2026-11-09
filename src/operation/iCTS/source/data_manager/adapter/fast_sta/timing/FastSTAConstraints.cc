@@ -23,8 +23,6 @@
 
 #include "FastSTAConstraints.hh"
 
-#include <fnmatch.h>
-
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -39,7 +37,7 @@
 
 #include "FastSTACondition.hh"
 #include "Logger.hh"
-#include "SDCClockReader.hh"
+#include "SDCGeneratedClockResolver.hh"
 #include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "liberty/FastSTALibertyModel.hh"
@@ -64,15 +62,14 @@ auto validateConstraintObjects(const FastStaContext& context) -> std::optional<s
           found = FastStaConstraints::matches(context, object, kInvalidFastStaNodeId, context.clock_name);
         }
       } else if (object.kind == SdcObjectKind::kNet) {
-        found = std::ranges::any_of(
-            context.nets, [&](const auto& net) -> bool { return object.pattern == net.name || fnmatch(object.pattern.c_str(), net.name.c_str(), 0) == 0; });
+        found = std::ranges::any_of(context.nets, [&](const auto& net) -> bool { return object.name == net.name; });
       } else {
         for (FastStaNodeId node_id = 0U; node_id < context.nodes.size() && !found; ++node_id) {
           found = FastStaConstraints::matches(context, object, node_id);
         }
       }
       if (!found) {
-        failure = "sdc_object_unresolved:" + std::string(command) + ":" + std::string(field) + ":" + object.pattern;
+        failure = "sdc_object_unresolved:" + std::string(command) + ":" + std::string(field) + ":" + object.name;
         return;
       }
     }
@@ -122,7 +119,7 @@ auto resolveCaseValues(FastStaContext& context) -> std::optional<std::string>
     node.clock_inactive = false;
   }
   for (const auto& assignment : context.constraints.case_analyses) {
-    if (assignment.value != 0 && assignment.value != 1) {
+    if (assignment.value != SdcCaseValue::kZero && assignment.value != SdcCaseValue::kOne) {
       return "case_analysis_value_not_boolean";
     }
     for (const auto& object : assignment.objects) {
@@ -130,7 +127,7 @@ auto resolveCaseValues(FastStaContext& context) -> std::optional<std::string>
       for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
         if (FastStaConstraints::matches(context, object, node_id)) {
           auto& node = context.nodes.at(node_id);
-          const auto value = assignment.value != 0;
+          const auto value = assignment.value == SdcCaseValue::kOne;
           if (node.case_value.has_value() && *node.case_value != value) {
             return "conflicting_case_analysis:" + node.name;
           }
@@ -140,7 +137,7 @@ auto resolveCaseValues(FastStaContext& context) -> std::optional<std::string>
         }
       }
       if (!found) {
-        return "case_analysis_object_unresolved:" + object.pattern;
+        return "case_analysis_object_unresolved:" + object.name;
       }
     }
   }
@@ -227,10 +224,9 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     for (const auto& target : declaration.targets) {
       bool found = false;
       for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-        const auto net_driver_target
-            = target.kind != SdcObjectKind::kNet || std::ranges::any_of(context.nodes.at(node_id).output_net_ids, [&](const auto net_id) -> bool {
-                return target.pattern == context.nets.at(net_id).name || fnmatch(target.pattern.c_str(), context.nets.at(net_id).name.c_str(), 0) == 0;
-              });
+        const auto net_driver_target = target.kind != SdcObjectKind::kNet
+                                       || std::ranges::any_of(context.nodes.at(node_id).output_net_ids,
+                                                              [&](const auto net_id) -> bool { return target.name == context.nets.at(net_id).name; });
         if (!net_driver_target || !FastStaConstraints::matches(context, target, node_id)) {
           continue;
         }
@@ -243,7 +239,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
         }
         found = true;
       }
-      if (!found && !declaration.is_virtual && declaration.clock_name == context.clock_name && target.pattern == context.clock_net_name
+      if (!found && !declaration.is_virtual && declaration.clock_name == context.clock_name && target.name == context.clock_net_name
           && context.source_node_id < context.nodes.size()) {
         // A clock sizing context intentionally omits the data-path timing
         // graph. Preserve the already identified physical source when the
@@ -254,7 +250,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
         found = true;
       }
       if (!found && !declaration.is_virtual) {
-        return "clock_target_unresolved:" + declaration.clock_name + ":" + target.pattern;
+        return "clock_target_unresolved:" + declaration.clock_name + ":" + target.name;
       }
     }
   }
@@ -290,7 +286,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
   std::queue<FastStaNodeId> ready;
   std::vector<bool> clock_sources(context.nodes.size(), false);
   std::vector<bool> reached(context.nodes.size(), false);
-  for (const auto node_id : context.clock_source_node_ids) {
+  const auto seed = [&](FastStaNodeId node_id) -> void {
     clock_sources.at(node_id) = true;
     auto& node = context.nodes.at(node_id);
     node.clock_name = declared_clock.at(node_id).empty() ? context.clock_name : declared_clock.at(node_id);
@@ -302,6 +298,9 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     }
     ready.push(node_id);
     reached.at(node_id) = true;
+  };
+  for (const auto node_id : context.clock_source_node_ids) {
+    seed(node_id);
   }
   const auto reach = [&](FastStaNodeId node_id, const std::string& parent_clock) -> void {
     if (clock_sources.at(node_id)) {
@@ -315,72 +314,103 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
       ready.push(node_id);
     }
   };
-  while (!ready.empty()) {
-    const auto node_id = ready.front();
-    ready.pop();
-    auto& node = context.nodes.at(node_id);
-    for (const auto net_id : node.output_net_ids) {
-      auto& net = context.nets.at(net_id);
-      net.domain = FastStaNetDomain::kClock;
-      for (const auto load_id : net.load_node_ids) {
-        reach(load_id, node.clock_name);
+  const auto propagate = [&]() -> std::optional<std::string> {
+    while (!ready.empty()) {
+      const auto node_id = ready.front();
+      ready.pop();
+      auto& node = context.nodes.at(node_id);
+      for (const auto net_id : node.output_net_ids) {
+        auto& net = context.nets.at(net_id);
+        net.domain = FastStaNetDomain::kClock;
+        for (const auto load_id : net.load_node_ids) {
+          reach(load_id, node.clock_name);
+        }
+      }
+      for (const auto arc_index : cell_arcs.at(node_id)) {
+        const auto& arc = context.timing_arcs.at(arc_index);
+        if (clock_sources.at(arc.to_node_id)) {
+          continue;
+        }
+        auto& output = context.nodes.at(arc.to_node_id);
+        const auto& model = context.liberty_cell_by_master.at(arc.cell_master);
+        const auto active = std::ranges::any_of(model.timing_arcs, [&](const auto& variant) -> bool {
+          return variant.from_port == arc.from_port && variant.to_port == arc.to_port
+                 && FastStaCondition::evaluate(variant.when, FastStaConstraints::caseLookup(context, output.inst_name)) != FastStaLogicValue::kZero;
+        });
+        if (!active && !model.clock_gate.has_value()) {
+          continue;
+        }
+        const auto existing = context.buffer_input_node_id_by_inst.find(output.inst_name);
+        if (existing != context.buffer_input_node_id_by_inst.end() && existing->second != node_id) {
+          // The clock tree already decided which input this instance takes the clock from,
+          // from the trace's own propagation arc: a clock gate, an IO pad, or a stage whose
+          // select is not pinned. A second clock-capable input is the other side of that
+          // same stage, not a second clock entering it.
+          continue;
+        }
+        node.kind = FastStaNodeKind::kBufferInput;
+        output.kind = FastStaNodeKind::kBufferOutput;
+        context.buffer_input_node_id_by_inst[output.inst_name] = node_id;
+        context.buffer_output_node_id_by_inst[output.inst_name] = arc.to_node_id;
+        output.clock_from_port = arc.from_port;
+        output.clock_to_port = arc.to_port;
+        reach(arc.to_node_id, node.clock_name);
+      }
+      for (const auto launch_index : launch_arcs.at(node_id)) {
+        const auto& launch = context.timing_launches.at(launch_index);
+        if (declared_clock.at(launch.output_node_id).empty() || clock_sources.at(launch.output_node_id)) {
+          continue;
+        }
+        const auto* declaration = FastStaConstraints::clock(context, declared_clock.at(launch.output_node_id));
+        if (declaration != nullptr && declaration->combinational) {
+          return "generated_combinational_clock_crosses_sequential_arc:" + declaration->clock_name;
+        }
+        auto& output = context.nodes.at(launch.output_node_id);
+        node.kind = FastStaNodeKind::kBufferInput;
+        output.kind = FastStaNodeKind::kBufferOutput;
+        output.clock_from_port = launch.clock_port;
+        output.clock_to_port = launch.output_port;
+        output.clock_edge_triggered = true;
+        output.clock_trigger_transition = launch.clock_transition;
+        context.buffer_input_node_id_by_inst[output.inst_name] = node_id;
+        context.buffer_output_node_id_by_inst[output.inst_name] = launch.output_node_id;
+        reach(launch.output_node_id, node.clock_name);
+      }
+      if (node.kind == FastStaNodeKind::kBufferInput) {
+        const auto output = context.buffer_output_node_id_by_inst.find(node.inst_name);
+        if (output != context.buffer_output_node_id_by_inst.end() && !clock_sources.at(output->second)) {
+          reach(output->second, node.clock_name);
+        }
       }
     }
-    for (const auto arc_index : cell_arcs.at(node_id)) {
-      const auto& arc = context.timing_arcs.at(arc_index);
-      if (clock_sources.at(arc.to_node_id)) {
-        continue;
-      }
-      auto& output = context.nodes.at(arc.to_node_id);
-      const auto& model = context.liberty_cell_by_master.at(arc.cell_master);
-      const auto active = std::ranges::any_of(model.timing_arcs, [&](const auto& variant) -> bool {
-        return variant.from_port == arc.from_port && variant.to_port == arc.to_port
-               && FastStaCondition::evaluate(variant.when, FastStaConstraints::caseLookup(context, output.inst_name)) != FastStaLogicValue::kZero;
-      });
-      if (!active && !model.clock_gate.has_value()) {
-        continue;
-      }
-      const auto existing = context.buffer_input_node_id_by_inst.find(output.inst_name);
-      if (existing != context.buffer_input_node_id_by_inst.end() && existing->second != node_id) {
-        // The clock tree already decided which input this instance takes the clock from,
-        // from the trace's own propagation arc: a clock gate, an IO pad, or a stage whose
-        // select is not pinned. A second clock-capable input is the other side of that
-        // same stage, not a second clock entering it.
-        continue;
-      }
-      node.kind = FastStaNodeKind::kBufferInput;
-      output.kind = FastStaNodeKind::kBufferOutput;
-      context.buffer_input_node_id_by_inst[output.inst_name] = node_id;
-      context.buffer_output_node_id_by_inst[output.inst_name] = arc.to_node_id;
-      output.clock_from_port = arc.from_port;
-      output.clock_to_port = arc.to_port;
-      reach(arc.to_node_id, node.clock_name);
+    return std::nullopt;
+  };
+  if (auto error = propagate(); error.has_value()) {
+    return error;
+  }
+  std::vector<FastStaNodeId> promoted_generated_sources;
+  for (const auto& declaration : context.constraints.clocks) {
+    if (declaration.kind != SdcClockDecl::Kind::kGenerated) {
+      continue;
     }
-    for (const auto launch_index : launch_arcs.at(node_id)) {
-      const auto& launch = context.timing_launches.at(launch_index);
-      if (declared_clock.at(launch.output_node_id).empty() || clock_sources.at(launch.output_node_id)) {
+    for (FastStaNodeId node_id = 0U; node_id < declared_clock.size(); ++node_id) {
+      if (declared_clock.at(node_id) != declaration.clock_name || reached.at(node_id)) {
         continue;
       }
-      const auto* declaration = FastStaConstraints::clock(context, declared_clock.at(launch.output_node_id));
-      if (declaration != nullptr && declaration->combinational) {
-        return "generated_combinational_clock_crosses_sequential_arc:" + declaration->clock_name;
-      }
-      auto& output = context.nodes.at(launch.output_node_id);
-      node.kind = FastStaNodeKind::kBufferInput;
-      output.kind = FastStaNodeKind::kBufferOutput;
-      output.clock_from_port = launch.clock_port;
-      output.clock_to_port = launch.output_port;
-      output.clock_edge_triggered = true;
-      output.clock_trigger_transition = launch.clock_transition;
-      context.buffer_input_node_id_by_inst[output.inst_name] = node_id;
-      context.buffer_output_node_id_by_inst[output.inst_name] = launch.output_node_id;
-      reach(launch.output_node_id, node.clock_name);
+      // A generated clock whose target is separated from its master by a black
+      // box has no physical clock path to that target. Seed the declared target
+      // itself so downstream physical clock tree nodes retain the generated
+      // clock identity and timing.
+      seed(node_id);
+      context.clock_source_node_ids.push_back(node_id);
+      promoted_generated_sources.push_back(node_id);
     }
-    if (node.kind == FastStaNodeKind::kBufferInput) {
-      const auto output = context.buffer_output_node_id_by_inst.find(node.inst_name);
-      if (output != context.buffer_output_node_id_by_inst.end() && !clock_sources.at(output->second)) {
-        reach(output->second, node.clock_name);
-      }
+  }
+  if (!promoted_generated_sources.empty()) {
+    std::ranges::sort(context.clock_source_node_ids);
+    context.clock_source_node_ids.erase(std::ranges::unique(context.clock_source_node_ids).begin(), context.clock_source_node_ids.end());
+    if (auto error = propagate(); error.has_value()) {
+      return error;
     }
   }
   std::vector<std::vector<FastStaNodeId>> clock_edges(context.nodes.size());
@@ -415,17 +445,91 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     }
   }
   std::size_t visited = 0U;
+  std::size_t visited_all = 0U;
   while (!ready.empty()) {
     const auto node_id = ready.front();
     ready.pop();
-    ++visited;
+    ++visited_all;
+    if (context.nodes.at(node_id).domain == FastStaNodeDomain::kClock) {
+      ++visited;
+    }
     for (const auto child : clock_edges.at(node_id)) {
       if (--indegree.at(child) == 0U) {
         ready.push(child);
       }
     }
   }
+  if (visited == clock_node_count && visited_all != clock_node_count) {
+    CTSLOG.info(Loc::current(), "FastSTA clock graph: clock_nodes=", clock_node_count, ", visited_all=", visited_all,
+                ", ignored_non_clock_targets=", visited_all - clock_node_count, ".");
+  }
   if (visited != clock_node_count) {
+    std::vector<unsigned char> color(context.nodes.size(), 0U);
+    std::vector<FastStaNodeId> parent(context.nodes.size(), kInvalidFastStaNodeId);
+    std::vector<FastStaNodeId> cycle;
+    for (FastStaNodeId start = 0U; start < context.nodes.size() && cycle.empty(); ++start) {
+      if (context.nodes.at(start).domain != FastStaNodeDomain::kClock || indegree.at(start) == 0U || color.at(start) != 0U) {
+        continue;
+      }
+      std::vector<std::pair<FastStaNodeId, std::size_t>> stack;
+      color.at(start) = 1U;
+      stack.emplace_back(start, 0U);
+      while (!stack.empty() && cycle.empty()) {
+        auto& [node_id, next_edge] = stack.back();
+        const auto& edges = clock_edges.at(node_id);
+        if (next_edge >= edges.size()) {
+          color.at(node_id) = 2U;
+          stack.pop_back();
+          continue;
+        }
+        const auto child = edges.at(next_edge++);
+        if (color.at(child) == 0U) {
+          color.at(child) = 1U;
+          parent.at(child) = node_id;
+          stack.emplace_back(child, 0U);
+          continue;
+        }
+        if (color.at(child) == 1U) {
+          for (auto current = node_id; current != child; current = parent.at(current)) {
+            cycle.push_back(current);
+          }
+          cycle.push_back(child);
+          std::ranges::reverse(cycle);
+        }
+      }
+    }
+    if (!cycle.empty()) {
+      std::string detail;
+      for (const auto node_id : cycle) {
+        const auto& node = context.nodes.at(node_id);
+        if (!detail.empty()) {
+          detail += " -> ";
+        }
+        detail += node.name + "[kind=" + std::to_string(static_cast<int>(node.kind)) + ",clock=" + node.clock_name
+                  + ",indegree=" + std::to_string(indegree.at(node_id)) + "]";
+      }
+      CTSLOG.error(Loc::current(), "FastSTA clock cycle: ", detail, ".");
+    } else {
+      std::string residual;
+      std::size_t residual_count = 0U;
+      for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+        const auto& node = context.nodes.at(node_id);
+        if (node.domain != FastStaNodeDomain::kClock || indegree.at(node_id) == 0U) {
+          continue;
+        }
+        ++residual_count;
+        if (residual_count > 16U) {
+          continue;
+        }
+        if (!residual.empty()) {
+          residual += " -> ";
+        }
+        residual += node.name + "[kind=" + std::to_string(static_cast<int>(node.kind)) + ",clock=" + node.clock_name
+                    + ",indegree=" + std::to_string(indegree.at(node_id)) + ",outdegree=" + std::to_string(clock_edges.at(node_id).size()) + "]";
+      }
+      CTSLOG.error(Loc::current(), "FastSTA clock cycle details unavailable: clock_nodes=", clock_node_count, ", visited_clock=", visited,
+                   ", visited_all=", visited_all, ", residual_clock_nodes=", residual_count, ", sample=", residual, ".");
+    }
     return "clock_timing_graph_contains_cycle";
   }
   for (auto& declaration : context.constraints.clocks) {
@@ -482,7 +586,7 @@ auto resolveClockDomains(FastStaContext& context) -> std::optional<std::string>
     }
     declaration.master_clock_name = master;
   }
-  SdcClockReader::resolveGeneratedClocks(context.constraints);
+  SDCGeneratedClockResolver::resolve(context.constraints);
   for (const auto& declaration : context.constraints.clocks) {
     if (!declaration.period_resolved || !std::isfinite(declaration.period_ns) || declaration.period_ns <= 0.0 || !declaration.waveform_resolved
         || declaration.waveform_ns.size() != 2U) {
@@ -528,7 +632,7 @@ auto FastStaConstraints::transitionMatches(SdcTransition selection, FastStaTrans
 auto FastStaConstraints::matches(const FastStaContext& context, const SdcObjectRef& object, FastStaNodeId node_id, const std::string& clock_name) -> bool
 {
   if (object.kind == SdcObjectKind::kClock) {
-    return !clock_name.empty() && (object.pattern == clock_name || fnmatch(object.pattern.c_str(), clock_name.c_str(), 0) == 0);
+    return !clock_name.empty() && (object.name == clock_name);
   }
   if (node_id >= context.nodes.size()) {
     return false;
@@ -541,17 +645,13 @@ auto FastStaConstraints::matches(const FastStaContext& context, const SdcObjectR
     return false;
   }
   if (object.kind == SdcObjectKind::kNet) {
-    if (node.incoming_net_id < context.nets.size()
-        && (object.pattern == context.nets.at(node.incoming_net_id).name
-            || fnmatch(object.pattern.c_str(), context.nets.at(node.incoming_net_id).name.c_str(), 0) == 0)) {
+    if (node.incoming_net_id < context.nets.size() && (object.name == context.nets.at(node.incoming_net_id).name)) {
       return true;
     }
-    return std::ranges::any_of(node.output_net_ids, [&](auto net_id) -> bool {
-      return net_id < context.nets.size()
-             && (object.pattern == context.nets.at(net_id).name || fnmatch(object.pattern.c_str(), context.nets.at(net_id).name.c_str(), 0) == 0);
-    });
+    return std::ranges::any_of(node.output_net_ids,
+                               [&](auto net_id) -> bool { return net_id < context.nets.size() && (object.name == context.nets.at(net_id).name); });
   }
-  return node.name == object.pattern || fnmatch(object.pattern.c_str(), node.name.c_str(), 0) == 0;
+  return node.name == object.name;
 }
 
 auto FastStaConstraints::clock(const FastStaContext& context, const std::string& name) -> const SdcClockDecl*

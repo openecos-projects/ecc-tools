@@ -26,6 +26,8 @@
 #include <utility>
 #include <vector>
 
+#include "Logger.hpp"
+
 namespace ista {
 
 bool RcTreeAnalyzer::hasDisabledDriver(const std::string& name, const std::string& source) const
@@ -40,19 +42,59 @@ bool RcTreeAnalyzer::hasDisabledDriver(const std::string& name, const std::strin
 
 double RcTreeAnalyzer::balancedDelay(ParasiticNet& net, const std::string& source, std::string& sink, AnalysisType analysis, TransType edge)
 {
-  const auto found = _database.network().nets().find(net.get_net_name());
-  if (found == _database.network().nets().end())
-    return 0.;
-  const auto& loads = found->second.get_load_pin_list();
-  const auto count = std::count_if(loads.begin(), loads.end(), [&](const auto& pin) { return pin != source; });
-  if (count == 0)
-    return 0.;
-  double wire_cap = 0.;
+  auto [entry, inserted] = _balanced_models.try_emplace({net.get_net_name(), source});
+  auto& model = entry->second;
+  if (inserted) {
+    const auto found = _database.network().nets().find(net.get_net_name());
+    if (found == _database.network().nets().end())
+      return 0.;
+    const auto& loads = found->second.get_load_pin_list();
+    const auto count = std::count_if(loads.begin(), loads.end(), [&](const auto& pin) { return pin != source; });
+    if (count == 0)
+      return 0.;
+    double wire_cap = 0.;
+    for (const auto& [name, node] : net.get_node_map())
+      wire_cap += node.get_capacitance();
+    if (net.get_node_map().empty())
+      wire_cap = net.get_lumped_capacitance();
+    if (hasIncompleteNetwork(net, source))
+      wire_cap = wireCapacitance(net);
+    model = {totalResistance(net) * 1e-3 / count, wire_cap / count};
+  }
+  return model.resistance_per_load * (_pin_capacitance.pinCapacitance(sink, analysis, edge) + model.wire_capacitance_per_load);
+}
+
+double RcTreeAnalyzer::wireCapacitance(ParasiticNet& net) const
+{
+  if (net.get_lumped_capacitance() > 0.)
+    return net.get_lumped_capacitance();
+  double capacitance = 0.;
   for (const auto& [name, node] : net.get_node_map())
-    wire_cap += node.get_capacitance();
-  if (net.get_node_map().empty())
-    wire_cap = net.get_lumped_capacitance();
-  return totalResistance(net) * 1e-3 / count * (_pin_capacitance.pinCapacitance(sink, analysis, edge) + wire_cap / count);
+    capacitance += node.get_capacitance();
+  return capacitance;
+}
+
+bool RcTreeAnalyzer::hasIncompleteNetwork(ParasiticNet& net, const std::string& source)
+{
+  auto [entry, inserted] = _incomplete_networks.try_emplace({net.get_net_name(), source}, false);
+  if (!inserted)
+    return entry->second;
+  const auto logical = _database.network().nets().find(net.get_net_name());
+  if (logical == _database.network().nets().end())
+    return false;
+  auto root = nodeName(net, source);
+  const auto& tree = rootedTree(net, root);
+  const std::set<std::string> reachable(tree.nodes.begin(), tree.nodes.end());
+  for (const auto& pin : logical->second.get_pin_name_list()) {
+    const auto node = nodeName(net, pin);
+    if (node.empty() || !reachable.contains(node)) {
+      entry->second = true;
+      STALOG.warn(Loc::current(), "Incomplete SPEF connectivity on ", net.get_net_name(), ": ", pin,
+                  "; using total wire R/C and all netlist loads in a balanced tree");
+      break;
+    }
+  }
+  return entry->second;
 }
 
 double RcTreeAnalyzer::totalResistance(ParasiticNet& parasitic_net)

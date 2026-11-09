@@ -21,7 +21,6 @@
  * @brief Parsed Liberty and SDC facts must retain their meaning through timing evaluation.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -31,6 +30,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
+#include <map>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -39,24 +39,64 @@
 #include <utility>
 #include <vector>
 
+#include "DataManager.hpp"
+#include "Database.hpp"
+#if __has_include(<tcl8.6/tcl.h>)
+#include <tcl8.6/tcl.h>
+#else
+#include <tcl.h>
+#endif
+
 #include "FastSTA.hh"
 #include "FastSTAConstraints.hh"
 #include "FastSTAPower.hh"
 #include "IdbCellMaster.h"
 #include "IdbLayout.h"
 #include "IdbUnits.h"
-#include "SDCClockReader.hh"
+#include "IstaConstraintReader.hh"
+#include "SdcCommand.hpp"
 #include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
 #include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"
 #include "liberty/FastSTALibertyModel.hh"
 #include "liberty/Lib.hh"
+#include "network/Network.hpp"
+#include "network/Pin.hpp"
 
 namespace icts_test {
 namespace {
+
+// Set up native Network objects for value-consumer tests. Parsing is exclusively
+// iSTA's frontend; the production loaded-iDB lifecycle has its own adapter tests.
+auto NativeConstraintFacts(const std::string& path) -> icts::SdcClockData
+{
+  EXPECT_FALSE(ista::DataManager::isInitialized());
+  ista::DataManager::initInst();
+  struct OwnedDatabase
+  {
+    ~OwnedDatabase() { ista::DataManager::destroyInst(); }
+  } owned;
+  auto& database = ista::DataManager::getInst().getDatabase();
+  database.network().setName("input_facts");
+  for (const std::string name : {"clk", "clkA", "clkB", "out", "branch", "nested", "inst/A", "buf/A", "buf/Y"}) {
+    auto& pin = database.network().pins()[name];
+    pin.set_full_name(name);
+    pin.set_pin_name(name);
+    pin.set_is_port(name.find('/') == std::string::npos);
+    if (!pin.get_is_port()) {
+      pin.set_instance_name(name == "inst/A" ? "inst" : "buf");
+      pin.set_pin_name(name == "buf/Y" ? "Y" : "A");
+    }
+  }
+  ista::SdcCommand interpreter;
+  ista::sdc::registerSdcCommands(interpreter);
+  EXPECT_EQ(interpreter.evalScriptFile(path), TCL_OK);
+  return icts::IstaConstraintReader::snapshot(database);
+}
 
 class ScopedTimingInput
 {
@@ -232,7 +272,7 @@ TEST_F(FastSTAInputFactsTestInterface, ExplicitSdcUnitsCannotSupplyMissingLibert
 {
   const ScopedTimingInput sdc("set_units -time ns -capacitance pf\ncreate_clock -name clk -period 10\n");
   ASSERT_TRUE(sdc.ready());
-  const auto constraints = icts::SdcClockReader(sdc.path(), {.time_unit_ns = 0.0, .capacitance_unit_pf = 0.0}).readClockData();
+  const auto constraints = NativeConstraintFacts(sdc.path());
   ASSERT_EQ(constraints.clocks.size(), 1U);
   EXPECT_DOUBLE_EQ(constraints.clocks.front().period_ns, 10.0);
   EXPECT_FALSE(loadModel(ReplaceInput(_library, "time_unit : \"1ns\";", "")).has_value());
@@ -244,12 +284,27 @@ TEST_F(FastSTAInputFactsTestInterface, ExplicitSdcUnitsCannotSupplyMissingLibert
   EXPECT_TRUE(loadModel(_library).has_value());
 }
 
+TEST(FastSTAParsedInputTest, NativeBoundNamesAreExactIdentitiesNotPatterns)
+{
+  icts::FastStaContext context;
+  context.nodes.resize(2U);
+  context.nodes.at(0U).name = "bus[0]";
+  context.nodes.at(0U).top_level = true;
+  context.nodes.at(1U).name = "bus0";
+  context.nodes.at(1U).top_level = true;
+  const icts::SdcObjectRef bound{.kind = icts::SdcObjectKind::kPort, .name = "bus[0]"};
+  EXPECT_TRUE(icts::FastStaConstraints::matches(context, bound, 0U));
+  EXPECT_FALSE(icts::FastStaConstraints::matches(context, bound, 1U));
+  const icts::SdcObjectRef literal_star{.kind = icts::SdcObjectKind::kClock, .name = "*"};
+  EXPECT_FALSE(icts::FastStaConstraints::matches(context, literal_star, 0U, "C"));
+}
+
 auto ParsedClockGraph(const std::string& commands) -> icts::FastStaContext
 {
   const ScopedTimingInput sdc("create_clock -name A -period 10 [get_ports clkA]\ncreate_clock -name B -period 20 [get_ports clkB]\n" + commands);
   EXPECT_TRUE(sdc.ready());
   icts::FastStaContext context;
-  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
+  context.constraints = NativeConstraintFacts(sdc.path());
   EXPECT_TRUE(context.constraints.ok());
   for (const auto* name : {"clkA", "clkB", "out", "branch", "nested", "inst/A"}) {
     icts::FastStaNode node;
@@ -318,6 +373,61 @@ TEST(FastSTAParsedInputTest, GeneratedClockRequiresItsActualMasterAndSourcePath)
   ASSERT_FALSE(nested_error.has_value()) << nested_error.value_or("");
   EXPECT_DOUBLE_EQ(icts::FastStaConstraints::clock(nested, "H")->period_ns, 80.0);
   EXPECT_EQ(nested.nodes.at(4U).clock_name, "H");
+}
+
+TEST(FastSTAParsedInputTest, GeneratedClockSeedsBlackBoxTargetAndDownstreamClockTree)
+{
+  const ScopedTimingInput sdc(
+      "create_clock -name REF -period 10 [get_ports ref]\n"
+      "create_generated_clock -name PLL -source [get_ports ref] -master_clock REF -divide_by 2 [get_pins PLL/CKOUT]\n");
+  ASSERT_TRUE(sdc.ready());
+  icts::FastStaContext context;
+  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
+  ASSERT_TRUE(context.constraints.ok());
+  context.nodes = {
+      {.kind = icts::FastStaNodeKind::kSource, .name = "ref", .top_level = true, .domain = icts::FastStaNodeDomain::kLogic, .input = true},
+      {.kind = icts::FastStaNodeKind::kSink, .name = "PLL/CKOUT", .domain = icts::FastStaNodeDomain::kLogic, .output = true},
+      {.kind = icts::FastStaNodeKind::kBufferInput,
+       .name = "buf/A",
+       .inst_name = "buf",
+       .pin_name = "A",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+      {.kind = icts::FastStaNodeKind::kBufferOutput,
+       .name = "buf/Y",
+       .inst_name = "buf",
+       .pin_name = "Y",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .output = true},
+      {.kind = icts::FastStaNodeKind::kSink,
+       .name = "sink/CLK",
+       .inst_name = "sink",
+       .pin_name = "CLK",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+  };
+  context.nodes.at(0U).output_net_ids = {};
+  context.nodes.at(1U).output_net_ids = {0U};
+  context.nodes.at(2U).incoming_net_id = 0U;
+  context.nodes.at(3U).output_net_ids = {1U};
+  context.nodes.at(4U).incoming_net_id = 1U;
+  context.nets = {
+      {.name = "pll_clock", .driver_node_id = 1U, .load_node_ids = {2U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+      {.name = "leaf_clock", .driver_node_id = 3U, .load_node_ids = {4U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+  };
+  context.buffer_input_node_id_by_inst = {{"buf", 2U}};
+  context.buffer_output_node_id_by_inst = {{"buf", 3U}};
+
+  const auto error = icts::FastStaConstraints::prepare(context);
+  ASSERT_FALSE(error.has_value()) << error.value_or("");
+  EXPECT_EQ(context.nodes.at(1U).kind, icts::FastStaNodeKind::kSource);
+  EXPECT_EQ(context.nodes.at(1U).domain, icts::FastStaNodeDomain::kClock);
+  EXPECT_EQ(context.nodes.at(1U).clock_name, "PLL");
+  for (const auto node_id : {2U, 3U, 4U}) {
+    EXPECT_EQ(context.nodes.at(node_id).domain, icts::FastStaNodeDomain::kClock);
+    EXPECT_EQ(context.nodes.at(node_id).clock_name, "PLL");
+  }
+  EXPECT_NE(std::ranges::find(context.clock_source_node_ids, 1U), context.clock_source_node_ids.end());
 }
 
 TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUpstreamMasterEdits)
@@ -397,7 +507,7 @@ TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUp
     const ScopedTimingInput sdc(std::string("create_clock -name ROOT -period 10 [get_ports clk]\n") + "create_clock -name SECOND -period 20 [get_pins "
                                 + source_pin + "]\n" + "set_clock_transition 0.12 [get_clocks SECOND]\n" + "set_propagated_clock [get_clocks {ROOT SECOND}]\n");
     ASSERT_TRUE(sdc.ready());
-    const auto constraints = icts::SdcClockReader(sdc.path()).readClockData();
+    const auto constraints = NativeConstraintFacts(sdc.path());
     ASSERT_TRUE(constraints.ok());
     ASSERT_EQ(constraints.clocks.size(), 2U);
     const auto primary_clock = std::ranges::find(constraints.clocks, std::string{"SECOND"}, &icts::SdcClockDecl::clock_name);

@@ -29,14 +29,6 @@
 
 namespace icts {
 
-struct SdcUnits
-{
-  double time_unit_ns = 1.0;
-  double capacitance_unit_pf = 1.0;
-
-  auto operator==(const SdcUnits&) const -> bool = default;
-};
-
 enum class SdcObjectKind
 {
   kPort,
@@ -49,8 +41,7 @@ enum class SdcObjectKind
 struct SdcObjectRef
 {
   SdcObjectKind kind = SdcObjectKind::kUnknown;
-  std::string pattern = "";
-  bool from_collection_cmd = false;
+  std::string name = "";
 
   auto operator==(const SdcObjectRef&) const -> bool = default;
 };
@@ -70,16 +61,16 @@ struct SdcClockDecl
   std::string master_clock_name = "";
   double period_ns = 0.0;
   bool period_resolved = false;
-  int divide_by = 1;
-  int multiply_by = 1;
+  double divide_by = 1.0;
+  double multiply_by = 1.0;
   bool invert = false;
+  bool preinvert = false;
   bool is_virtual = false;
   // Alternating rise/fall edges. Generated waveforms remain unresolved until
   // their source clock has been identified by the timing graph when necessary.
   std::vector<double> waveform_ns;
-  std::vector<int> generated_edges;
+  std::vector<double> generated_edges;
   std::vector<double> generated_edge_shifts_ns;
-  bool waveform_explicit = false;
   bool waveform_resolved = false;
   bool divide_by_explicit = false;
   bool multiply_by_explicit = false;
@@ -90,9 +81,19 @@ struct SdcClockDecl
   auto operator==(const SdcClockDecl&) const -> bool = default;
 };
 
+enum class SdcCaseValue
+{
+  kZero,
+  kOne,
+  kRise,
+  kFall,
+  kStatic,
+  kNone,
+};
+
 struct SdcCaseAnalysis
 {
-  int value = 0;
+  SdcCaseValue value = SdcCaseValue::kZero;
   std::vector<SdcObjectRef> objects;
 
   auto operator==(const SdcCaseAnalysis&) const -> bool = default;
@@ -114,6 +115,37 @@ struct SdcClockTransition
   bool max = true;
 
   auto operator==(const SdcClockTransition&) const -> bool = default;
+};
+
+// Native STA electrical constraint facts. Object names and scopes are already bound
+// by iSTA; consumers must not interpret them as Tcl queries or wildcard patterns.
+enum class SdcElectricalRule
+{
+  kFanout,
+  kTransition,
+  kCapacitance,
+};
+
+enum class SdcElectricalScope
+{
+  kDesign,
+  kPort,
+  kPin,
+  kLibPin,
+  kClock,
+};
+
+struct SdcElectricalLimit
+{
+  SdcElectricalRule rule = SdcElectricalRule::kFanout;
+  SdcElectricalScope scope = SdcElectricalScope::kDesign;
+  std::string object_name;
+  double value = 0.0;
+  bool clock_path = false;
+  SdcTransition transition = SdcTransition::kBoth;
+  bool force = false;
+
+  auto operator==(const SdcElectricalLimit&) const -> bool = default;
 };
 
 enum class SdcConstraintStatusCode
@@ -141,6 +173,7 @@ struct SdcClockData
   std::vector<std::string> diagnostics;
   std::vector<SdcClockTransition> clock_transitions;
   std::vector<SdcObjectRef> propagated_clocks;
+  std::vector<SdcElectricalLimit> electrical_limits;
   // Issues that make the clock model iCTS consumes unusable. These alone decide `status`.
   SdcConstraintStatusCode status = SdcConstraintStatusCode::kOk;
   std::vector<SdcConstraintIssue> issues;

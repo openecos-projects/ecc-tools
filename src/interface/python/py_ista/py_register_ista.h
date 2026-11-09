@@ -35,6 +35,7 @@ void register_ista(py::module& m)
   m.def("destroy_sta", destroySTA);
   m.def("is_model_ready", isModelReady);
   m.def("is_timing_ready", isTimingReady);
+  m.def("sta_clock_graph", staClockGraph);
 }
 
 }  // namespace python_interface

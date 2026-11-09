@@ -113,8 +113,8 @@ auto propagateTiming(FastStaContext& context, std::queue<FastStaNodeId>& ready_n
 
 }  // namespace
 
-auto FastStaTiming::collectAffectedLogicNodes(const FastStaContext& context, const FastStaDirtyRegion& dirty_region)
-    -> std::optional<std::vector<FastStaNodeId>>
+auto FastStaTiming::collectAffectedLogicNodes(const FastStaContext& context,
+                                              const FastStaDirtyRegion& dirty_region) -> std::optional<std::vector<FastStaNodeId>>
 {
   if (!HasTimingPropagationState(context)) {
     return std::vector<FastStaNodeId>{};
@@ -280,6 +280,34 @@ auto FastStaTiming::updateClockTopology(FastStaContext& context, const FastStaDi
   context.timing_valid = HasCompleteSinkTiming(context);
   context.clock_timing_valid = context.timing_valid;
   summary.status = context.timing_valid ? FastStaTimingStatus::kComplete : FastStaTimingStatus::kInvalidInput;
+  if (!context.timing_valid) {
+    std::size_t invalid_count = 0U;
+    std::string invalid_sample;
+    const auto valid_point
+        = [](const auto& point) -> bool { return point.valid && std::isfinite(point.arrival_ns) && std::isfinite(point.slew_ns) && point.slew_ns >= 0.0; };
+    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
+      const auto& node = context.nodes.at(node_id);
+      if (node.domain != FastStaNodeDomain::kClock || node.clock_inactive) {
+        continue;
+      }
+      const bool valid = valid_point(node.timing) && std::ranges::all_of(node.early_timing, valid_point) && std::ranges::all_of(node.late_timing, valid_point);
+      if (valid) {
+        continue;
+      }
+      ++invalid_count;
+      if (invalid_count > 16U) {
+        continue;
+      }
+      if (!invalid_sample.empty()) {
+        invalid_sample += " -> ";
+      }
+      invalid_sample += node.name + "[kind=" + std::to_string(static_cast<int>(node.kind)) + ",clock=" + node.clock_name
+                        + ",timing_valid=" + std::to_string(node.timing.valid) + ",arrival_ns=" + std::to_string(node.timing.arrival_ns)
+                        + ",slew_ns=" + std::to_string(node.timing.slew_ns) + ",early=" + std::to_string(node.early_timing.size())
+                        + ",late=" + std::to_string(node.late_timing.size()) + "]";
+    }
+    summary.fallback_reason = "clock_topology_incomplete_timing:" + std::to_string(invalid_count) + ":" + invalid_sample;
+  }
   summary.max_skew_ns = context.skew.valid ? context.skew.skew_ns : 0.0;
   summary.runtime_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   context.timing_summary = std::move(summary);

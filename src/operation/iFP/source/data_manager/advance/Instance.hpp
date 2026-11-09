@@ -45,6 +45,10 @@ class Instance
   bool get_placed() const { return _placed; }
   bool is_new_instance() const { return _new_instance; }
   bool is_placement_updated() const { return _placement_updated; }
+  bool is_delete_instance() const { return _delete_instance; }
+  bool is_from_netlist() const { return _from_netlist; }
+  const std::string& get_io_cell_net_name() const { return _io_cell_net_name; }
+  const std::string& get_io_cell_pin_name() const { return _io_cell_pin_name; }
 
   // const getter
   const std::string& get_name() const { return _name; }
@@ -78,6 +82,10 @@ class Instance
   void set_placed(bool placed) { _placed = placed; }
   void set_new_instance(bool new_instance) { _new_instance = new_instance; }
   void set_placement_updated(bool placement_updated) { _placement_updated = placement_updated; }
+  void set_delete_instance(bool delete_instance) { _delete_instance = delete_instance; }
+  void set_from_netlist(bool from_netlist) { _from_netlist = from_netlist; }
+  void set_io_cell_net_name(std::string net_name) { _io_cell_net_name = net_name; }
+  void set_io_cell_pin_name(std::string pin_name) { _io_cell_pin_name = pin_name; }
 
   // function
 
@@ -99,6 +107,11 @@ class Instance
   bool _placed = false;
   bool _new_instance = false;
   bool _placement_updated = false;
+  std::string _io_cell_net_name;
+  std::string _io_cell_pin_name;
+  bool _delete_instance = false;
+  // True for instances wrapped from iDB; false for cells created by iFP.
+  bool _from_netlist = false;
 };
 
 }  // namespace ifp

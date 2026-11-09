@@ -22,12 +22,12 @@
  */
 
 #include <features.h>
-#include <gtest/gtest.h>
 
 #include <optional>
 #include <string>
 
 #include "Utility.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

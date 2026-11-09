@@ -30,7 +30,9 @@ enum class TimingCheckType
   kRecovery,
   kRemoval,
   kWidth,
-  kPeriod
+  kPeriod,
+  kClockGatingSetup,
+  kClockGatingHold
 };
 
 struct GetTimingCheckTypeName
@@ -59,6 +61,12 @@ struct GetTimingCheckTypeName
         break;
       case TimingCheckType::kPeriod:
         timing_check_type_name = "period";
+        break;
+      case TimingCheckType::kClockGatingSetup:
+        timing_check_type_name = "clock_gating_setup";
+        break;
+      case TimingCheckType::kClockGatingHold:
+        timing_check_type_name = "clock_gating_hold";
         break;
       default:
         STALOG.error(Loc::current(), "Unrecognized type!");

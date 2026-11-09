@@ -34,6 +34,7 @@
 #include <utility>
 #include <vector>
 
+#include "ClockTrace.hh"
 #include "IdbCellMaster.h"
 #include "IdbDesign.h"
 #include "IdbEnum.h"
@@ -42,7 +43,6 @@
 #include "IdbPins.h"
 #include "IdbTerm.h"
 #include "LibParserCpp.hh"
-#include "SDCClockReader.hh"
 #include "SDCClockTraceAlgorithm.hh"
 #include "TimingConstraints.hh"
 #include "liberty/Lib.hh"
@@ -624,20 +624,20 @@ auto ResolveRefNets(idb::IdbDesign* idb_design, const SdcObjectRef& ref) -> std:
 
   switch (ref.kind) {
     case SdcObjectKind::kPort:
-      append_net(ResolvePortNet(idb_design, ref.pattern));
+      append_net(ResolvePortNet(idb_design, ref.name));
       break;
     case SdcObjectKind::kPin:
-      append_net(ResolvePinNet(idb_design, ref.pattern));
+      append_net(ResolvePinNet(idb_design, ref.name));
       break;
     case SdcObjectKind::kNet:
-      append_net(net_list == nullptr ? nullptr : net_list->find_net(ref.pattern));
+      append_net(net_list == nullptr ? nullptr : net_list->find_net(ref.name));
       break;
     case SdcObjectKind::kClock:
       break;
     case SdcObjectKind::kUnknown:
-      append_net(net_list == nullptr ? nullptr : net_list->find_net(ref.pattern));
-      append_net(ResolvePortNet(idb_design, ref.pattern));
-      append_net(ResolvePinNet(idb_design, ref.pattern));
+      append_net(net_list == nullptr ? nullptr : net_list->find_net(ref.name));
+      append_net(ResolvePortNet(idb_design, ref.name));
+      append_net(ResolvePinNet(idb_design, ref.name));
       break;
   }
   return nets;
@@ -649,12 +649,12 @@ auto BuildCaseConstraintSet(const SdcClockData& clock_data) -> CaseConstraintSet
   for (const auto& analysis : clock_data.case_analyses) {
     for (const auto& object : analysis.objects) {
       if (object.kind == SdcObjectKind::kPin) {
-        constraints.pin_names.insert(object.pattern);
+        constraints.pin_names.insert(object.name);
       } else if (object.kind == SdcObjectKind::kNet) {
-        constraints.net_names.insert(object.pattern);
+        constraints.net_names.insert(object.name);
       } else if (object.kind == SdcObjectKind::kUnknown) {
-        constraints.pin_names.insert(object.pattern);
-        constraints.net_names.insert(object.pattern);
+        constraints.pin_names.insert(object.name);
+        constraints.net_names.insert(object.name);
       }
     }
   }
@@ -692,8 +692,7 @@ auto TraceClock(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign*
     auto resolved_nets = ResolveRefNets(idb_design, target);
     seed_nets.insert(seed_nets.end(), resolved_nets.begin(), resolved_nets.end());
     if (resolved_nets.empty()) {
-      records.push_back(
-          MakeTraceRecord(clock.clock_name, target.pattern, "rejected", ObjectKindName(target.kind), 0U, 0U, target.pattern, "unresolved_sdc_object"));
+      records.push_back(MakeTraceRecord(clock.clock_name, target.name, "rejected", ObjectKindName(target.kind), 0U, 0U, target.name, "unresolved_sdc_object"));
     }
   }
   std::ranges::sort(seed_nets);

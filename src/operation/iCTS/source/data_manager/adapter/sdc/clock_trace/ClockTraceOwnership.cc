@@ -29,9 +29,9 @@
 #include <utility>
 #include <vector>
 
+#include "ClockTrace.hh"
 #include "IdbDesign.h"
 #include "IdbNet.h"
-#include "SDCClockReader.hh"
 #include "SDCClockTraceAlgorithm.hh"
 #include "TimingConstraints.hh"
 

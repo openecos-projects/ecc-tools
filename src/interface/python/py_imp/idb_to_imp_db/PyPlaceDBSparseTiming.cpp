@@ -2,8 +2,10 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "PyPlaceDB.h"
 #include "TimingData.hpp"
@@ -51,6 +53,18 @@ void PyPlaceDB::init_sparse_timing(const ista::TimingData& snapshot)
   pins.reserve(pin_names.size());
   for (std::size_t index = 0; index < pin_names.size(); ++index)
     pins.emplace(pin_names[index].cast<std::string>(), index);
+  std::unordered_map<std::string_view, std::string_view> pin_net_names;
+  pin_net_names.reserve(snapshot.pins.size());
+  for (const auto& pin : snapshot.pins)
+    pin_net_names.emplace(pin.name, pin.net_name);
+  std::unordered_set<std::string> clock_net_name_set;
+  for (std::size_t index = 0; index < clock_net_names.size(); ++index)
+    clock_net_name_set.insert(clock_net_names[index].cast<std::string>());
+  for (const std::string& clock_pin : snapshot.clock_pins) {
+    const auto it = pin_net_names.find(clock_pin);
+    if (it != pin_net_names.end() && !it->second.empty())
+      clock_net_name_set.emplace(it->second);
+  }
   // Snapshot graph IDs and runtime level-order cell IDs are different domains.
   using ArcKey = std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t>;
   std::map<ArcKey, int64_t> cells;
@@ -136,7 +150,15 @@ void PyPlaceDB::init_sparse_timing(const ista::TimingData& snapshot)
         continue;
       if (remap.at(edge.source) < 0)
         throw std::runtime_error("sparse net driver missing from placement: " + view.states[edge.source].pin);
-      net_edges.insert(net_edges.end(), {pins.at(snapshot.net_arcs.at(edge.base_arc).sink_pin), remap.at(edge.source), remap.at(edge.sink)});
+      const auto& net_arc = snapshot.net_arcs.at(edge.base_arc);
+      const auto net_it = pin_net_names.find(net_arc.source_pin);
+      if (net_it != pin_net_names.end() && clock_net_name_set.contains(std::string(net_it->second))) {
+        const auto sink_state = static_cast<std::size_t>(remap.at(edge.sink));
+        seed[sink_state * 2] = valid[sink_state * 2];
+        seed[sink_state * 2 + 1] = valid[sink_state * 2 + 1];
+        continue;
+      }
+      net_edges.insert(net_edges.end(), {pins.at(net_arc.sink_pin), remap.at(edge.source), remap.at(edge.sink)});
       net_masks.push_back(edge.transition_mask);
       const auto& adjustment = view.net_threshold_adjustments.at(index);
       net_adjustments.insert(net_adjustments.end(), adjustment.begin(), adjustment.end());

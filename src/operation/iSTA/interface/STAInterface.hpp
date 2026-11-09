@@ -5,6 +5,7 @@
 #include <map>
 #include <string>
 
+#include "ClockTreeData.hpp"
 #include "TimingData.hpp"
 
 namespace ista {
@@ -19,7 +20,10 @@ class STAInterface
   static void destroyInst();
 
   // Uses the design already loaded in iDB. runSTA() makes timing export ready.
-  void initSTA(std::map<std::string, std::any> config_map);
+  bool initSTA(std::map<std::string, std::any> config_map);
+  // Load only the native Network, shared Liberty and SDC; do not import SPEF or
+  // run timing. Exceptions become owned diagnostics. Caller owns session cleanup.
+  bool tryInitConstraints(std::map<std::string, std::any> config_map, std::string& diagnostic);
   // Build structural timing state without numeric clock/data propagation.
   void prepareTimingModel();
   void runSTA();
@@ -37,10 +41,19 @@ class STAInterface
   // Export the structural model after prepareTimingModel() without running
   // numeric clock/data/required propagation.
   TimingData exportTimingModel();
+  // Export the clock network and source-rise late physical timing from the
+  // current completed timing run. The returned graph owns all strings.
+  ClockTreeGraphData exportClockTreeGraph();
 
  private:
   static STAInterface* _sta_interface_instance;
 
+  enum class InputScope
+  {
+    kTiming,
+    kConstraints
+  };
+  bool initialize(std::map<std::string, std::any> config_map, InputScope scope);
   void readDesign(std::map<std::string, std::any>& config_map);
 
   bool _initialized = false;
