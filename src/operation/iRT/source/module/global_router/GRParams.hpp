@@ -26,9 +26,8 @@ struct GRParams
   static constexpr double kEpsilon = 1e-6;
 
   double unit_wire_cost = 1.0;
-  double initial_cost_weight = 20.0;
+  double initial_cost_weight = 10.0;
   double cost_weight = initial_cost_weight;
-  double congestion_saturation_ratio = 0.8;
   double congestion_hotspot_ratio = 0.9;
   double via_base_cost = 2.0;
   double via_demand = 0.5;

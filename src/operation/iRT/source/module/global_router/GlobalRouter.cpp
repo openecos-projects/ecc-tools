@@ -379,8 +379,21 @@ void GlobalRouter::mazeRouteFailedNets()
 
 void GlobalRouter::mazeRerouteOverflowNets()
 {
-  constexpr int32_t kMaxIteration = 6;
+  constexpr int32_t kMaxIteration = 5;
   for (int32_t iteration = 0; iteration < kMaxIteration; iteration++) {
+    bool is_layer_overflow_below_threshold = true;
+    double max_overflow = 0.0;
+    for (int32_t layer_idx = grid_graph_.getBottomLayerIdx(); layer_idx <= grid_graph_.getTopLayerIdx(); layer_idx++) {
+      GRLayerUsage layer_usage = grid_graph_.getLayerUsage(layer_idx);
+      max_overflow = std::max(max_overflow, layer_usage.max_overflow);
+      if (layer_usage.supply <= GRParams::kEpsilon || layer_usage.supply * 0.0001 <= layer_usage.overflow) {
+        is_layer_overflow_below_threshold = false;
+        break;
+      }
+    }
+    if (max_overflow <= 1.0 && is_layer_overflow_below_threshold) {
+      break;
+    }
     std::vector<size_t> net_idx_list = getOverflowNetIndexList();
     if (net_idx_list.empty()) {
       break;

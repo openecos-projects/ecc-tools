@@ -53,12 +53,6 @@ double congestionCost(const GRParams& params, double supply, double demand, doub
   double usage_ratio = total_demand / supply;
   double usage_ratio_sqr = usage_ratio * usage_ratio;
   double unit_cost = usage_ratio_sqr * usage_ratio_sqr;
-  double saturation_start_ratio = params.congestion_saturation_ratio;
-  if (usage_ratio < saturation_start_ratio) {
-    return unit_cost;
-  }
-  double saturation_ratio = (usage_ratio - saturation_start_ratio) / (1.0 - saturation_start_ratio);
-  unit_cost += saturation_ratio * saturation_ratio;
   double hotspot_start_ratio = params.congestion_hotspot_ratio;
   if (usage_ratio < hotspot_start_ratio) {
     return unit_cost;
