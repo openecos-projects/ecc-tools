@@ -40,6 +40,27 @@ namespace irt {
 
 namespace {
 
+struct CleanupCandidate
+{
+  size_t net_idx = 0;
+  bool is_clock = false;
+  double detour_ratio = 0.0;
+};
+
+struct CmpCleanupCandidate
+{
+  bool operator()(const CleanupCandidate& first, const CleanupCandidate& second) const
+  {
+    if (first.is_clock != second.is_clock) {
+      return first.is_clock;
+    }
+    if (first.detour_ratio != second.detour_ratio) {
+      return first.detour_ratio > second.detour_ratio;
+    }
+    return first.net_idx < second.net_idx;
+  }
+};
+
 void logRouteProgress(const char* label, size_t done_num, size_t total_num, size_t& next_percent)
 {
   size_t percent = (done_num * 100) / total_num;
@@ -47,6 +68,20 @@ void logRouteProgress(const char* label, size_t done_num, size_t total_num, size
     RTLOG.info(Loc::current(), label, " ", done_num, "/", total_num, "(", percent, "%)");
     next_percent += 10;
   }
+}
+
+double getRoutedLength(const GRNet& net, GridMap<PlanarRect>& gcell_map, int32_t micron_dbu)
+{
+  double routed_length = 0.0;
+  for (const GRWireSegment& wire_segment : net.get_tree().wire_list) {
+    if (wire_segment.first.get_layer_idx() != wire_segment.second.get_layer_idx()) {
+      continue;
+    }
+    PlanarRect& first_rect = gcell_map[wire_segment.first.get_x()][wire_segment.first.get_y()];
+    PlanarRect& second_rect = gcell_map[wire_segment.second.get_x()][wire_segment.second.get_y()];
+    routed_length += RTUTIL.getManhattanDistance(first_rect.getMidPoint(), second_rect.getMidPoint()) / micron_dbu;
+  }
+  return routed_length;
 }
 
 }  // namespace
@@ -97,6 +132,8 @@ void GlobalRouter::route()
   reportDetourStat("GR maze overflow");
   fallbackRoute();
   reportDetourStat("GR fallback");
+  cleanupDetourNets();
+  reportDetourStat("GR cleanup");
   // debugPlot("after_route");
   // debugExport("after_route");
 
@@ -484,6 +521,95 @@ void GlobalRouter::fallbackRoute()
   unrouted_net_idx_list_.clear();
 }
 
+void GlobalRouter::cleanupDetourNets()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  std::map<int32_t, double>& net_steiner_length_map = RTDM.getDatabase().get_net_steiner_length_map();
+  GridMap<PlanarRect>& gcell_map = RTDM.getDatabase().get_gcell_map();
+  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
+  std::vector<CleanupCandidate> candidate_list;
+  for (size_t net_idx = 0; net_idx < net_list_.size(); net_idx++) {
+    GRNet& net = net_list_[net_idx];
+    if (net.hasOverflow(grid_graph_)) {
+      continue;
+    }
+    auto steiner_iter = net_steiner_length_map.find(net.get_origin_net()->get_net_idx());
+    if (steiner_iter == net_steiner_length_map.end() || steiner_iter->second <= GRParams::kEpsilon) {
+      continue;
+    }
+    double routed_length = getRoutedLength(net, gcell_map, micron_dbu);
+    if (routed_length <= GRParams::kEpsilon) {
+      continue;
+    }
+    double steiner_length = steiner_iter->second;
+    double detour_ratio = routed_length / steiner_length;
+    if (detour_ratio <= params_.cleanup_detour_ratio || routed_length - steiner_length <= params_.cleanup_min_excess_length) {
+      continue;
+    }
+    candidate_list.push_back(CleanupCandidate{net_idx, net.isClock(), detour_ratio});
+  }
+
+  if (params_.cleanup_max_net_num <= 0 || candidate_list.empty()) {
+    RTLOG.info(Loc::current(), "Completed, cleanup candidate net num: 0", monitor.getStatsInfo());
+    return;
+  }
+  size_t candidate_num = std::min(candidate_list.size(), static_cast<size_t>(params_.cleanup_max_net_num));
+  std::partial_sort(candidate_list.begin(), candidate_list.begin() + candidate_num, candidate_list.end(), CmpCleanupCandidate());
+  candidate_list.resize(candidate_num);
+
+  GRParams cleanup_params = params_;
+  cleanup_params.cost_weight = params_.initial_cost_weight;
+  size_t accepted_num = 0;
+  size_t rejected_num = 0;
+  size_t next_percent = 10;
+  for (size_t i = 0; i < candidate_list.size(); i++) {
+    GRNet& net = net_list_[candidate_list[i].net_idx];
+    double before_overflow = treeOverflow(grid_graph_, net, net.get_tree());
+    double before_cost = treeCost(grid_graph_, net, cleanup_params, net.get_tree());
+    double before_length = getRoutedLength(net, gcell_map, micron_dbu);
+
+    GRTree old_tree = net.release_tree();
+    net.ripupUsage(grid_graph_, params_, old_tree);
+    std::vector<std::vector<PlanarCoord>> path_list;
+    GRTree new_tree;
+    bool is_built = buildMazePathList(net, grid_graph_, cleanup_params, maze_workspace_, path_list);
+    if (is_built) {
+      is_built = buildTreeFromPaths(net, grid_graph_, cleanup_params, path_list, new_tree);
+    }
+    if (!is_built) {
+      net.commitUsage(grid_graph_, params_, old_tree);
+      net.set_tree(std::move(old_tree));
+      rejected_num++;
+      logRouteProgress("Cleanup routed", i + 1, candidate_list.size(), next_percent);
+      continue;
+    }
+
+    net.commitUsage(grid_graph_, params_, new_tree);
+    double after_overflow = treeOverflow(grid_graph_, net, new_tree);
+    double after_cost = treeCost(grid_graph_, net, cleanup_params, new_tree);
+    net.set_tree(std::move(new_tree));
+    double after_length = getRoutedLength(net, gcell_map, micron_dbu);
+    bool is_accepted = after_overflow <= before_overflow + GRParams::kEpsilon
+                       && after_length <= before_length * params_.cleanup_accept_length_ratio + GRParams::kEpsilon
+                       && after_cost < before_cost - GRParams::kEpsilon;
+    if (is_accepted) {
+      accepted_num++;
+    } else {
+      GRTree rejected_tree = net.release_tree();
+      net.ripupUsage(grid_graph_, params_, rejected_tree);
+      net.commitUsage(grid_graph_, params_, old_tree);
+      net.set_tree(std::move(old_tree));
+      rejected_num++;
+    }
+    logRouteProgress("Cleanup routed", i + 1, candidate_list.size(), next_percent);
+  }
+
+  RTLOG.info(Loc::current(), "Completed, candidate net num: ", candidate_list.size(), ", accepted: ", accepted_num, ", rejected: ", rejected_num,
+             monitor.getStatsInfo());
+}
+
 void GlobalRouter::uploadGRResult()
 {
   for (GRNet& net : net_list_) {
@@ -511,15 +637,7 @@ void GlobalRouter::reportDetourStat(const std::string& stage)
   int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
   std::map<int32_t, double> routed_length_map;
   for (GRNet& net : net_list_) {
-    double routed_length = 0;
-    for (const GRWireSegment& wire_segment : net.get_tree().wire_list) {
-      if (wire_segment.first.get_layer_idx() != wire_segment.second.get_layer_idx()) {
-        continue;
-      }
-      PlanarRect& first_rect = gcell_map[wire_segment.first.get_x()][wire_segment.first.get_y()];
-      PlanarRect& second_rect = gcell_map[wire_segment.second.get_x()][wire_segment.second.get_y()];
-      routed_length += RTUTIL.getManhattanDistance(first_rect.getMidPoint(), second_rect.getMidPoint()) / micron_dbu;
-    }
+    double routed_length = getRoutedLength(net, gcell_map, micron_dbu);
     if (routed_length <= 0) {
       continue;
     }

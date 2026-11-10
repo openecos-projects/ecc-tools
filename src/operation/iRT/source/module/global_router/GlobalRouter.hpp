@@ -67,6 +67,7 @@ class GlobalRouter
   double getTotalRoutingCost() const;
   bool routeNetByMaze(GRNet& net);
   void fallbackRoute();
+  void cleanupDetourNets();
 
   // output
   void uploadGRResult();

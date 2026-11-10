@@ -726,7 +726,11 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
   checkFiniteNonNegative(params.via_base_cost, "GR via base cost");
   checkFiniteNonNegative(params.via_demand, "GR via demand");
   checkFiniteNonNegative(params.max_detour_length_ratio, "GR max detour length ratio");
-  if (params.congestion_hotspot_ratio > 1.0 || params.max_detour_offset < 0 || params.max_shift_round < 0) {
+  checkFiniteNonNegative(params.cleanup_detour_ratio, "GR cleanup detour ratio");
+  checkFiniteNonNegative(params.cleanup_min_excess_length, "GR cleanup minimum excess length");
+  checkFiniteNonNegative(params.cleanup_accept_length_ratio, "GR cleanup accept length ratio");
+  if (params.congestion_hotspot_ratio > 1.0 || params.max_detour_offset < 0 || params.max_shift_round < 0
+      || params.cleanup_accept_length_ratio > 1.0 || params.cleanup_max_net_num < 0) {
     throw std::runtime_error("Invalid GR parameters for snapshot");
   }
   nlohmann::json manifest;
@@ -782,7 +786,11 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
                            {"via_demand", params.via_demand},
                            {"max_detour_offset", params.max_detour_offset},
                            {"max_detour_length_ratio", params.max_detour_length_ratio},
-                           {"max_shift_round", params.max_shift_round}};
+                           {"max_shift_round", params.max_shift_round},
+                           {"cleanup_detour_ratio", params.cleanup_detour_ratio},
+                           {"cleanup_min_excess_length", params.cleanup_min_excess_length},
+                           {"cleanup_accept_length_ratio", params.cleanup_accept_length_ratio},
+                           {"cleanup_max_net_num", params.cleanup_max_net_num}};
   manifest["stats"] = {{"routing_layer_count", layer_list.size()},
                        {"net_count", net_count},
                        {"planar_route_edge_reference_count", stats.planar_route_edge_reference_count},

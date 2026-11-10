@@ -34,6 +34,10 @@ struct GRParams
   int32_t max_detour_offset = 8;
   double max_detour_length_ratio = 0.25;
   int32_t max_shift_round = 1;
+  double cleanup_detour_ratio = 2.0;
+  double cleanup_min_excess_length = 20.0;
+  double cleanup_accept_length_ratio = 0.9;
+  int32_t cleanup_max_net_num = 2000;
 };
 
 }  // namespace irt
