@@ -74,6 +74,7 @@ class GlobalRouter
   void printSummary() const;
   bool isLayerInRange(int32_t layer_idx) const;
   void debugPlot(const std::string& flag) const;
+  void debugExport(const std::string& flag) const;
 
   GRParams params_;
   GRGridGraph grid_graph_;

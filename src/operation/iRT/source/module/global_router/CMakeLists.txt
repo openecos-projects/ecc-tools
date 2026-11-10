@@ -5,7 +5,10 @@ add_library(irt_global_router
     ${IRT_MODULE}/global_router/GRCost.cpp
     ${IRT_MODULE}/global_router/GRTreeBuilder.cpp
     ${IRT_MODULE}/global_router/GRMaze.cpp
+    ${IRT_MODULE}/global_router/GRSnapshotWriter.cpp
 )
+
+find_package(ZLIB REQUIRED)
 
 target_link_libraries(irt_global_router
     PUBLIC
@@ -14,6 +17,7 @@ target_link_libraries(irt_global_router
     irt_toolkit
     PRIVATE
     flute
+    ZLIB::ZLIB
 )
 
 target_include_directories(irt_global_router

@@ -28,6 +28,7 @@
 #include "DetourStat.hpp"
 #include "GDSPlotter.hpp"
 #include "GRCost.hpp"
+#include "GRSnapshotWriter.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Net.hpp"
@@ -97,6 +98,7 @@ void GlobalRouter::route()
   fallbackRoute();
   reportDetourStat("GR fallback");
   // debugPlot("after_route");
+  // debugExport("after_route");
 
   uploadGRResult();
   RTDM.rebuildGlobalResultRTree();
@@ -783,6 +785,20 @@ void GlobalRouter::debugPlot(const std::string& flag) const
   std::string gds_file_path = RTUTIL.getString(gr_temp_directory_path, flag, "_gr_model.gds");
   RTGP.plot(gp_gds, gds_file_path);
   RTLOG.info(Loc::current(), "GR debug GDS: ", gds_file_path);
+}
+
+void GlobalRouter::debugExport(const std::string& flag) const
+{
+  std::string gr_temp_directory_path = RTUTIL.getString(RTDM.getConfig().temp_directory_path, "global_router/");
+  RTUTIL.createDir(gr_temp_directory_path);
+  std::string snapshot_path = RTUTIL.getString(gr_temp_directory_path, flag, "_gr_snapshot");
+  try {
+    GRSnapshotWriter writer(grid_graph_, net_list_, params_);
+    writer.write(snapshot_path, flag);
+  } catch (const std::exception& error) {
+    RTLOG.error(Loc::current(), "Failed to export GR snapshot: ", error.what());
+  }
+  RTLOG.info(Loc::current(), "GR debug snapshot: ", snapshot_path);
 }
 
 }  // namespace irt
