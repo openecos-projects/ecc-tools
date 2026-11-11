@@ -6,6 +6,7 @@ add_library(irt_global_router
     ${IRT_MODULE}/global_router/GRTreeBuilder.cpp
     ${IRT_MODULE}/global_router/GRMaze.cpp
     ${IRT_MODULE}/global_router/GRSnapshotWriter.cpp
+    ${IRT_MODULE}/global_router/GRSupplyTrial.cpp
 )
 
 find_package(ZLIB REQUIRED)

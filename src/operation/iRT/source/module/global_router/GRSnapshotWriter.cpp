@@ -88,6 +88,7 @@ struct LayerMetricRanges
   MetricRange routing_demand;
   MetricRange usable_supply;
   MetricRange overflow;
+  MetricRange reserved_supply;
 };
 
 struct ExportLayer
@@ -434,7 +435,8 @@ LayerMetricRanges exportLayerEdges(const std::filesystem::path& staging_path, co
     for (int32_t x = 0; x < layer.edge_x_size; x++) {
       const GRWireEdge& edge = edge_map[x][y];
       uint32_t supply = checkedUint32(edge.supply, "GR edge supply");
-      float fixed_demand = checkedFloat(edge.fixed_demand, "GR edge fixed demand");
+      float fixed_demand = checkedFloat(edge.getFixedDemand(), "GR edge fixed demand");
+      float reserved_supply = checkedFloat(edge.reserved_supply, "GR edge reserved supply");
       float routing_demand = checkedFloat(edge.getDemand(), "GR edge routing demand");
       double usable_supply = std::max(0.0, static_cast<double>(supply) - static_cast<double>(fixed_demand));
       double overflow = std::max(0.0, static_cast<double>(routing_demand) - usable_supply);
@@ -448,6 +450,7 @@ LayerMetricRanges exportLayerEdges(const std::filesystem::path& staging_path, co
       layer.metric_ranges.routing_demand.add(static_cast<double>(routing_demand));
       layer.metric_ranges.usable_supply.add(usable_supply);
       layer.metric_ranges.overflow.add(overflow);
+      layer.metric_ranges.reserved_supply.add(static_cast<double>(reserved_supply));
       local_index++;
     }
   }
@@ -459,6 +462,7 @@ LayerMetricRanges exportLayerEdges(const std::filesystem::path& staging_path, co
   layer.metric_ranges.routing_demand.finish();
   layer.metric_ranges.usable_supply.finish();
   layer.metric_ranges.overflow.finish();
+  layer.metric_ranges.reserved_supply.finish();
   writeSectionFile(staging_path, layer.edges_section, kSectionLayerEdges, layer.edge_count, payload);
   return layer.metric_ranges;
 }
@@ -729,8 +733,11 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
   checkFiniteNonNegative(params.cleanup_detour_ratio, "GR cleanup detour ratio");
   checkFiniteNonNegative(params.cleanup_min_excess_length, "GR cleanup minimum excess length");
   checkFiniteNonNegative(params.cleanup_accept_length_ratio, "GR cleanup accept length ratio");
+  checkFiniteNonNegative(params.trial_smooth_neighbor_ratio, "GR trial smooth neighbor ratio");
+  checkFiniteNonNegative(params.trial_reserve_start_ratio, "GR trial reserve start ratio");
   if (params.congestion_hotspot_ratio > 1.0 || params.max_detour_offset < 0 || params.max_shift_round < 0
-      || params.cleanup_accept_length_ratio > 1.0 || params.cleanup_max_net_num < 0) {
+      || params.cleanup_accept_length_ratio > 1.0 || params.cleanup_max_net_num < 0 || params.trial_smooth_radius < 0
+      || params.trial_smooth_neighbor_ratio > 1.0 || params.trial_reserve_start_ratio >= 1.0) {
     throw std::runtime_error("Invalid GR parameters for snapshot");
   }
   nlohmann::json manifest;
@@ -764,7 +771,8 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
                                    {"fixed_demand", makeMetricRangeJson(layer.metric_ranges.fixed_demand)},
                                    {"routing_demand", makeMetricRangeJson(layer.metric_ranges.routing_demand)},
                                    {"usable_supply", makeMetricRangeJson(layer.metric_ranges.usable_supply)},
-                                   {"overflow", makeMetricRangeJson(layer.metric_ranges.overflow)}};
+                                   {"overflow", makeMetricRangeJson(layer.metric_ranges.overflow)},
+                                   {"reserved_supply", makeMetricRangeJson(layer.metric_ranges.reserved_supply)}};
     manifest["routing_layers"].push_back(std::move(layer_json));
   }
   uint64_t total_edge_count = layer_list.back().edge_base + layer_list.back().edge_count;
@@ -790,7 +798,13 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
                            {"cleanup_detour_ratio", params.cleanup_detour_ratio},
                            {"cleanup_min_excess_length", params.cleanup_min_excess_length},
                            {"cleanup_accept_length_ratio", params.cleanup_accept_length_ratio},
-                           {"cleanup_max_net_num", params.cleanup_max_net_num}};
+                           {"cleanup_max_net_num", params.cleanup_max_net_num},
+                           {"enable_supply_trial", params.enable_supply_trial},
+                           {"trial_ghost_failed_net", params.trial_ghost_failed_net},
+                           {"trial_smooth_radius", params.trial_smooth_radius},
+                           {"trial_smooth_neighbor_ratio", params.trial_smooth_neighbor_ratio},
+                           {"trial_reserve_start_ratio", params.trial_reserve_start_ratio},
+                           {"trial_keep_last_track", params.trial_keep_last_track}};
   manifest["stats"] = {{"routing_layer_count", layer_list.size()},
                        {"net_count", net_count},
                        {"planar_route_edge_reference_count", stats.planar_route_edge_reference_count},

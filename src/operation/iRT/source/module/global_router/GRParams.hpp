@@ -38,6 +38,12 @@ struct GRParams
   double cleanup_min_excess_length = 20.0;
   double cleanup_accept_length_ratio = 0.9;
   int32_t cleanup_max_net_num = 2000;
+  bool enable_supply_trial = true;
+  bool trial_ghost_failed_net = true;
+  int32_t trial_smooth_radius = 2;
+  double trial_smooth_neighbor_ratio = 0.75;
+  double trial_reserve_start_ratio = 0.6;
+  bool trial_keep_last_track = true;
 };
 
 }  // namespace irt

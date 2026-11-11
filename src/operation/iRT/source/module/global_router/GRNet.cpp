@@ -136,6 +136,12 @@ GRWireEdgeId GRNet::getEscapeEdgeId(int32_t x, int32_t y, bool is_horizontal, in
   return GRWireEdgeId{x, direction > 0 ? y : y - 1, layer_idx};
 }
 
+void GRNet::refreshExemptEdgeSet(const GRGridGraph& grid)
+{
+  exempt_edge_set_.clear();
+  buildExemptEdgeSet(grid);
+}
+
 void GRNet::commitUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const
 {
   updateUsage(grid, params, tree, 1.0);
