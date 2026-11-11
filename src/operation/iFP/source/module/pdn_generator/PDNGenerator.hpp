@@ -58,7 +58,7 @@ class PDNGenerator
 
   void generatePDN(PGModel& pg_model);
   void pruneDeadEndStripes();
-  void trimStripeEnds();
+  void trimStripeEnds(bool preserve_io_core_ends = true, const std::string& report_name = "stripe_trim.rpt");
   void trimDanglingFollowPins();
 
   void buildPGNet(PGModel& pg_model);
