@@ -60,6 +60,11 @@ double WireDelayCalculator::calcParasiticSlew(Arc& arc, AnalysisType analysis_ty
 {
   Database& database = _database;
   ParasiticNet& parasitic_net = database.parasitics().nets()[arc.get_owner_name()];
+  if (_rc.hasIncompleteNetwork(parasitic_net, arc.get_source_pin())) {
+    double unused_delay = 0., slew = input_slew;
+    _threshold.adjustSignalLevel(arc.get_source_pin(), arc.get_sink_pin(), analysis_type, trans_type, unused_delay, slew);
+    return slew;
+  }
   std::string source_node_name = _rc.nodeName(parasitic_net, arc.get_source_pin());
   std::string sink_node_name = _rc.nodeName(parasitic_net, arc.get_sink_pin());
   if (source_node_name.empty() || sink_node_name.empty()) {
@@ -140,7 +145,7 @@ double WireDelayCalculator::calcParasiticDelay(Arc& arc, AnalysisType analysis_t
 {
   Database& database = _database;
   ParasiticNet& parasitic_net = database.parasitics().nets()[arc.get_owner_name()];
-  if (_rc.hasDisabledDriver(arc.get_owner_name(), arc.get_source_pin())) {
+  if (_rc.hasDisabledDriver(arc.get_owner_name(), arc.get_source_pin()) || _rc.hasIncompleteNetwork(parasitic_net, arc.get_source_pin())) {
     double delay = _rc.balancedDelay(parasitic_net, arc.get_source_pin(), arc.get_sink_pin(), analysis_type, trans_type);
     double slew = input_slew;
     _threshold.adjustSignalLevel(arc.get_source_pin(), arc.get_sink_pin(), analysis_type, trans_type, delay, slew);

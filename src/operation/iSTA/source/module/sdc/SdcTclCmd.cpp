@@ -35,6 +35,29 @@ SdcTclCmd::SdcTclCmd(const char* cmd_name, ClientData client_data) : ecc::TclCmd
 {
 }
 
+void SdcTclCmd::addOption(ecc::TclOption* option)
+{
+  ecc::TclCmd::addOption(option);
+  if (!option->is_arg())
+    _named_options.emplace(option->get_option_name(), option);
+}
+
+ecc::TclOption* SdcTclCmd::findOption(const std::string& name) const
+{
+  if (name.empty() || name.front() != '-')
+    return nullptr;
+  if (const auto exact = _named_options.find(name); exact != _named_options.end())
+    return exact->second;
+
+  ecc::TclOption* match = nullptr;
+  for (auto it = _named_options.lower_bound(name); it != _named_options.end() && it->first.starts_with(name); ++it) {
+    if (match != nullptr)
+      throw std::invalid_argument("ambiguous option '" + name + "': " + match->get_option_name() + " or " + it->first);
+    match = it->second;
+  }
+  return match;
+}
+
 int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
 {
   resetExecutionState();
@@ -53,7 +76,7 @@ int SdcTclCmd::execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
       continue;
     }
 
-    ecc::TclOption* option = getOptionOrArg(value);
+    ecc::TclOption* option = findOption(value);
     if (option != nullptr) {
       current_option = option;
       if (option->isSwitchOption()) {

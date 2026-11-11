@@ -390,6 +390,37 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
   for (const auto& arc : snapshot.timing_check_arcs)
     appendEndpointArc(arc);
 
+  std::unordered_set<std::string> clock_net_name_set;
+  for (std::size_t index = 0; index < clock_net_names.size(); ++index) {
+    clock_net_name_set.insert(clock_net_names[index].cast<std::string>());
+  }
+  auto recordClockPinNet = [&](const std::string& pin_name) {
+    const auto pin_it = timing_pins.find(pin_name);
+    if (pin_it == timing_pins.end() || pin_it->second->net_name.empty())
+      return;
+    if (clock_net_name_set.insert(pin_it->second->net_name).second) {
+      clock_net_names.append(pybind11::str(pin_it->second->net_name));
+    }
+  };
+  for (const std::string& name : snapshot.clock_pins) {
+    recordClockPinNet(name);
+  }
+  for (const TimingGraphArcData& arc : snapshot.graph_arcs) {
+    if (arc.is_clock_arc) {
+      recordClockPinNet(arc.source_pin);
+    }
+  }
+  for (const auto& arc : snapshot.constraint_arcs) {
+    recordClockPinNet(arc.source_pin);
+  }
+  std::unordered_set<int32_t> clock_net_id_set;
+  for (const std::string& net_name : clock_net_name_set) {
+    const int32_t net_id = mapId(net_ids, net_name);
+    if (net_id >= 0) {
+      clock_net_id_set.insert(net_id);
+    }
+  }
+
   std::vector<std::vector<std::pair<int32_t, int32_t>>> net_rows(net_names.size());
   for (const TimingNetArcData& arc : snapshot.net_arcs) {
     const int32_t source = mapId(pin_ids, arc.source_pin);
@@ -398,7 +429,9 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
       continue;
     const auto pin_it = timing_pins.find(arc.source_pin);
     const int32_t net_id = pin_it == timing_pins.end() ? -1 : mapId(net_ids, pin_it->second->net_name);
-    if (net_id >= 0 && static_cast<std::size_t>(net_id) < net_rows.size())
+    if (net_id < 0 || clock_net_id_set.contains(net_id))
+      continue;
+    if (static_cast<std::size_t>(net_id) < net_rows.size())
       net_rows[net_id].emplace_back(source, sink);
   }
   int32_t net_arc_count = 0;

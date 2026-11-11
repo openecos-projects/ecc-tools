@@ -39,6 +39,6 @@ target_include_directories(ista_path_checker
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-add_library(ista_clock_checker ClockChecker.cpp)
+add_library(ista_clock_checker ClockChecker.cpp ClockGatingChecker.cpp)
 target_include_directories(ista_clock_checker PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(ista_clock_checker PUBLIC ista_model PRIVATE ista_clock_reconvergence_calculator ista_graph_query)

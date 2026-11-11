@@ -43,6 +43,7 @@ private:
     LibGroup* _result;
     std::stack<LibGroup*> _group_stack;
     std::vector<std::string> _strings;
+    int _missing_terminators = 0;
 
     void clearParseState() noexcept;
     bool parseScanner(LibertyScanner& scanner);

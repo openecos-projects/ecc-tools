@@ -97,7 +97,9 @@ auto CharacterizationLibrary::ensure(const CharBuilder::Input& input, const Char
   _char_builder.init(input, config);
   _char_builder.build();
   if (_char_builder.get_segment_chars().empty() || _char_builder.get_wirelength_unit_um() <= 0.0) {
-    CTSLOG.warn(Loc::current(), "CharacterizationLibrary: characterization did not produce reusable segment chars.");
+    CTSLOG.warn(Loc::current(), "CharacterizationLibrary: characterization did not produce reusable segment chars (segment_chars=",
+                _char_builder.get_segment_chars().size(), ", wirelength_unit_um=", _char_builder.get_wirelength_unit_um(), ", reason=",
+                _char_builder.get_build_failure_reason().empty() ? std::string{"unreported"} : _char_builder.get_build_failure_reason(), ").");
     _ready = false;
     _characterization_cache_key = {};
     return EnsureSummary{.success = false, .reused = false, .failure_reason = "no_reusable_segment_chars"};
