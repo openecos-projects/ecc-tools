@@ -1,0 +1,9 @@
+# n1 sticks 500 out of the die on the right; n2 is inside.
+case out_of_die
+die 0 0 2000 2000
+routing M1 dir=H pitch=200
+cut V1
+rule out_of_die
+result n1 M1 1500 0 2500 100
+result n2 M1 0 500 1000 600
+expect out_of_die M1 2000 0 2500 100 nets=n1 required=0

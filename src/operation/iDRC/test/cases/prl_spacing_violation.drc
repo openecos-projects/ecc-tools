@@ -1,0 +1,12 @@
+# Two M1 nets whose facing edges are 60 apart; M1 requires 90.
+# The violation is the gap between the facing edges, over their parallel run.
+case prl_spacing_violation
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 spacing=90
+cut V1
+result n1 M1 0 0 1980 500
+result n2 M1 2040 0 3000 500
+expect parallel_run_length_spacing M1 1980 0 2040 500 nets=n1,n2 required=90
+# cluster size 100*pitch = 2000 puts a cluster boundary inside the gap;
+# 5*pitch = 100 still covers the 90 spacing, so the result must not change
+vary pitch=20

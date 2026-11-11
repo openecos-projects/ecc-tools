@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -82,10 +83,44 @@ void ReadLiberty::read()
   STALOG.info(Loc::current(), "Liberty conversion starting: libraries=", lib_list.size(), ", configured_workers=", configured_workers,
               ", active_workers=", active_workers, ".");
   readCells(lib_list);
+  checkCellReferences();
   readLibraryInfo(lib_list);
   const double conversion_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - conversion_start).count();
   STALOG.info(Loc::current(), "Liberty conversion completed: libraries=", lib_list.size(), ", configured_workers=", configured_workers,
               ", active_workers=", active_workers, ", conversion_seconds=", conversion_seconds, monitor.getStatsInfo());
+}
+
+void ReadLiberty::checkCellReferences() const
+{
+  std::map<std::string, std::set<std::string>> missing;
+  // ReadNetwork has already removed PG terminals. Instance pin lists are
+  // linked later by DataManager, so inspect the imported signal pins here.
+  // Filler/tap cells with no signal terminals do not need a timing model.
+  for (const auto& [name, pin] : _network.pins()) {
+    if (pin.get_is_port())
+      continue;
+    const auto& instance = _network.instances().at(pin.get_instance_name());
+    if (!_liberty.get_cell_map().contains(instance.get_cell_name()))
+      missing[instance.get_cell_name()].insert(pin.get_instance_name());
+  }
+  if (missing.empty())
+    return;
+
+  // Continuing would turn an unlinked SRAM into the graph builder's generic
+  // input/output connectivity, propagating clocks through its data pins and
+  // potentially disabling path-state pruning across the entire design.
+  std::ostringstream message;
+  message << "Missing Liberty models for " << missing.size() << " signal cell type(s):";
+  std::size_t shown = 0;
+  for (const auto& [cell, instances] : missing) {
+    if (shown++ == 8) {
+      message << " ...";
+      break;
+    }
+    message << " '" << cell << "' (" << instances.size() << " instance(s), e.g. '" << *instances.begin() << "');";
+  }
+  message << " load the matching libraries for the selected timing corner, including macro libraries, before initializing STA.";
+  throw std::runtime_error(message.str());
 }
 
 void ReadLiberty::readCells(const std::vector<idb::LibLibrary*>& lib_list)
