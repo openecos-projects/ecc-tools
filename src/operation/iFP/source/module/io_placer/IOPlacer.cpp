@@ -17,6 +17,7 @@
 #include "IOPlacer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -463,33 +464,62 @@ void IOPlacer::placeIOPinsFromFile(const std::string& file_path)
 void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
 {
   Database& database = FPDM.getDatabase();
-  std::string horizontal_layer_name;
-  std::string vertical_layer_name;
+
+  struct AutoPinLayer
+  {
+    std::string name;
+    std::string access_name;
+    int32_t width = 0;
+    int32_t pitch = 0;
+    int32_t offset = 0;
+  };
+
+  std::vector<AutoPinLayer> horizontal_layers;
+  std::vector<AutoPinLayer> vertical_layers;
+  std::set<std::string> seen_layer_name_set;
   for (std::string& layer_name : layer_name_list) {
     std::map<std::string, int32_t>::iterator routing_layer_iter = database.get_routing_layer_name_to_idx_map().find(layer_name);
     if (routing_layer_iter == database.get_routing_layer_name_to_idx_map().end()) {
+      FPLOG.warn(Loc::current(), "IO layer '", layer_name, "' is not a routing layer; ignored.");
+      continue;
+    }
+    if (!seen_layer_name_set.insert(layer_name).second) {
       continue;
     }
 
     RoutingLayer& routing_layer = database.get_routing_layer_list()[routing_layer_iter->second];
-    if (routing_layer.get_prefer_direction() == Direction::kHorizontal && horizontal_layer_name.empty()) {
-      horizontal_layer_name = routing_layer.get_name();
+    const int32_t width = routing_layer.get_min_width();
+    const int32_t pitch = getTrackPitch(layer_name);
+    if (width <= 0 || pitch <= 0) {
+      FPLOG.warn(Loc::current(), "IO layer '", layer_name, "' has invalid width ", width, " or track pitch ", pitch, "; ignored.");
+      continue;
     }
-    if (routing_layer.get_prefer_direction() == Direction::kVertical && vertical_layer_name.empty()) {
-      vertical_layer_name = routing_layer.get_name();
+
+    AutoPinLayer auto_pin_layer;
+    auto_pin_layer.name = routing_layer.get_name();
+    auto_pin_layer.width = width;
+    auto_pin_layer.pitch = pitch;
+    auto_pin_layer.offset = getTrackOffset(layer_name);
+    if (routing_layer.get_prefer_direction() == Direction::kHorizontal) {
+      horizontal_layers.push_back(auto_pin_layer);
+    } else if (routing_layer.get_prefer_direction() == Direction::kVertical) {
+      vertical_layers.push_back(auto_pin_layer);
+    } else {
+      FPLOG.warn(Loc::current(), "IO layer '", layer_name, "' has no preferred routing direction; ignored.");
     }
-  }
-  if (horizontal_layer_name.empty() || vertical_layer_name.empty()) {
-    return;
   }
 
-  int32_t horizontal_width = getLayerMinWidth(horizontal_layer_name);
-  int32_t vertical_width = getLayerMinWidth(vertical_layer_name);
-  int32_t horizontal_pitch = getTrackPitch(horizontal_layer_name);
-  int32_t vertical_pitch = getTrackPitch(vertical_layer_name);
-  if (horizontal_width <= 0 || vertical_width <= 0 || horizontal_pitch <= 0 || vertical_pitch <= 0) {
-    FPLOG.error(Loc::current(), "IO pin widths and track pitches must be positive!");
+  if (horizontal_layers.empty() || vertical_layers.empty()) {
+    FPLOG.warn(Loc::current(), "Auto IO pin placement requires at least one horizontal and one vertical routing layer.");
     return;
+  }
+  // The access layer only determines the pin depth; use the first perpendicular
+  // layer so every configured pin layer keeps a legal, track-aligned geometry.
+  for (AutoPinLayer& layer : horizontal_layers) {
+    layer.access_name = vertical_layers.front().name;
+  }
+  for (AutoPinLayer& layer : vertical_layers) {
+    layer.access_name = horizontal_layers.front().name;
   }
 
   std::vector<IOPin>& io_pin_list = database.get_io_pin_list();
@@ -498,8 +528,6 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     return;
   }
 
-  int32_t horizontal_offset = getTrackOffset(horizontal_layer_name);
-  int32_t vertical_offset = getTrackOffset(vertical_layer_name);
   Die& die = database.get_die();
   Core& core = database.get_core();
 
@@ -520,15 +548,6 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     return EdgeRange{first, last};
   };
 
-  EdgeRange left = get_edge_range(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), horizontal_width, vertical_pitch,
-                                  horizontal_offset, horizontal_pitch);
-  EdgeRange right = get_edge_range(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), horizontal_width, vertical_pitch,
-                                   horizontal_offset, horizontal_pitch);
-  EdgeRange bottom = get_edge_range(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), vertical_width, horizontal_pitch,
-                                    vertical_offset, vertical_pitch);
-  EdgeRange top = get_edge_range(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), vertical_width, horizontal_pitch,
-                                 vertical_offset, vertical_pitch);
-
   auto build_edge_slots = [](const EdgeRange& range, int32_t track_pitch) {
     std::vector<int32_t> slots;
     for (int64_t coord = range.first; coord <= range.last; coord += track_pitch) {
@@ -537,15 +556,41 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     return slots;
   };
 
-  std::vector<int32_t> left_slots = build_edge_slots(left, horizontal_pitch);
-  std::vector<int32_t> right_slots = build_edge_slots(right, horizontal_pitch);
-  std::vector<int32_t> bottom_slots = build_edge_slots(bottom, vertical_pitch);
-  std::vector<int32_t> top_slots = build_edge_slots(top, vertical_pitch);
+  auto get_candidate_layers = [&](bool vertical_edge) -> const std::vector<AutoPinLayer>& {
+    if (vertical_edge) {
+      return horizontal_layers;
+    }
+    return vertical_layers;
+  };
 
-  int32_t slot_counts[4] = {static_cast<int32_t>(left_slots.size()), static_cast<int32_t>(right_slots.size()),
-                            static_cast<int32_t>(bottom_slots.size()), static_cast<int32_t>(top_slots.size())};
+  const std::array<IOEdgeType, 4> edge_type_list{IOEdgeType::kLeft, IOEdgeType::kRight, IOEdgeType::kBottom, IOEdgeType::kTop};
+  std::array<std::vector<std::vector<int32_t>>, 4> edge_slots;
+  std::array<int32_t, 4> slot_counts{};
+  for (int32_t edge_idx = 0; edge_idx < static_cast<int32_t>(edge_type_list.size()); ++edge_idx) {
+    const IOEdgeType edge_type = edge_type_list[edge_idx];
+    const bool vertical_edge = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kRight;
+    const std::vector<AutoPinLayer>& candidate_layers = get_candidate_layers(vertical_edge);
+    const int32_t access_pitch = vertical_edge ? vertical_layers.front().pitch : horizontal_layers.front().pitch;
+    for (const AutoPinLayer& layer : candidate_layers) {
+      EdgeRange range;
+      if (vertical_edge) {
+        range = get_edge_range(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), layer.width, access_pitch, layer.offset,
+                               layer.pitch);
+      } else {
+        range = get_edge_range(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), layer.width, access_pitch, layer.offset,
+                               layer.pitch);
+      }
+      edge_slots[edge_idx].push_back(build_edge_slots(range, layer.pitch));
+      slot_counts[edge_idx] += static_cast<int32_t>(edge_slots[edge_idx].back().size());
+    }
+  }
+
   int32_t total_slots = slot_counts[0] + slot_counts[1] + slot_counts[2] + slot_counts[3];
   if (total_slots <= 0) {
+    return;
+  }
+  if (total_slots < io_pin_num) {
+    FPLOG.error(Loc::current(), "IO pins exceed the total legal track capacity (", io_pin_num, " pins, ", total_slots, " slots).");
     return;
   }
 
@@ -556,8 +601,33 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     remaining -= counts[idx];
   }
   counts[3] = remaining;
+  // The proportional split can leave more pins on the last edge than its
+  // tracks can host when the edge lengths differ. Move that excess to edges
+  // with free capacity without changing the normal distribution.
+  if (counts[3] > slot_counts[3]) {
+    int32_t excess = counts[3] - slot_counts[3];
+    counts[3] = slot_counts[3];
+    int32_t edge_cursor = 0;
+    while (excess > 0) {
+      bool moved = false;
+      for (int32_t offset = 0; offset < 4 && excess > 0; ++offset) {
+        const int32_t edge_idx = (edge_cursor + offset) % 4;
+        if (counts[edge_idx] < slot_counts[edge_idx]) {
+          ++counts[edge_idx];
+          --excess;
+          edge_cursor = (edge_idx + 1) % 4;
+          moved = true;
+          break;
+        }
+      }
+      if (!moved) {
+        FPLOG.error(Loc::current(), "IO pins exceed the legal track capacity on the edges.");
+        return;
+      }
+    }
+  }
 
-  constexpr int32_t max_gap_tracks = 30;
+  constexpr int32_t max_gap_tracks = 10;
   int32_t pin_idx = 0;
   auto place_edge = [&](IOEdgeType edge_type, const std::vector<int32_t>& slots, int32_t count, int32_t width,
                         const std::string& pin_layer, const std::string& access_layer) {
@@ -597,10 +667,40 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     }
   };
 
-  place_edge(IOEdgeType::kLeft, left_slots, counts[0], horizontal_width, horizontal_layer_name, vertical_layer_name);
-  place_edge(IOEdgeType::kRight, right_slots, counts[1], horizontal_width, horizontal_layer_name, vertical_layer_name);
-  place_edge(IOEdgeType::kBottom, bottom_slots, counts[2], vertical_width, vertical_layer_name, horizontal_layer_name);
-  place_edge(IOEdgeType::kTop, top_slots, counts[3], vertical_width, vertical_layer_name, horizontal_layer_name);
+  for (int32_t edge_idx = 0; edge_idx < static_cast<int32_t>(edge_type_list.size()); ++edge_idx) {
+    const IOEdgeType edge_type = edge_type_list[edge_idx];
+    const bool vertical_edge = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kRight;
+    const std::vector<AutoPinLayer>& candidate_layers = get_candidate_layers(vertical_edge);
+
+    std::vector<int32_t> layer_counts(candidate_layers.size(), 0);
+    int32_t remaining_count = counts[edge_idx];
+    int32_t layer_cursor = 0;
+    while (remaining_count > 0) {
+      bool progress = false;
+      for (size_t offset = 0; offset < candidate_layers.size() && remaining_count > 0; ++offset) {
+        const size_t layer_idx = (static_cast<size_t>(layer_cursor) + offset) % candidate_layers.size();
+        if (layer_counts[layer_idx] < static_cast<int32_t>(edge_slots[edge_idx][layer_idx].size())) {
+          ++layer_counts[layer_idx];
+          --remaining_count;
+          layer_cursor = static_cast<int32_t>((layer_idx + 1) % candidate_layers.size());
+          progress = true;
+          break;
+        }
+      }
+      if (!progress) {
+        FPLOG.error(Loc::current(), "IO pins exceed the legal track capacity on an edge.");
+        return;
+      }
+    }
+
+    for (size_t layer_idx = 0; layer_idx < candidate_layers.size(); ++layer_idx) {
+      if (layer_counts[layer_idx] == 0) {
+        continue;
+      }
+      const AutoPinLayer& layer = candidate_layers[layer_idx];
+      place_edge(edge_type, edge_slots[edge_idx][layer_idx], layer_counts[layer_idx], layer.width, layer.name, layer.access_name);
+    }
+  }
 }
 
 int32_t IOPlacer::getLayerMinWidth(std::string layer_name)
