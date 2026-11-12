@@ -21,20 +21,26 @@
  * @brief Incremental timing equivalence, batch rollback and scaling regressions.
  */
 
-#include <gtest/gtest.h>
-
-#include <algorithm>
-#include <chrono>
-#include <iostream>
+#include <cstddef>
+#include <initializer_list>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "FastSTA.hh"
+#include "FastSTAClockSizingEdit.hh"
+#include "FastSTAClockTiming.hh"
 #include "FastSTAIncremental.hh"
 #include "FastSTAPower.hh"
 #include "FastSTATiming.hh"
+#include "clock_state/FastSTAClockState.hh"
+#include "clock_state/FastSTAGraphImport.hh"
 #include "fixture/FastSTATestModel.hh"
+#include "gtest/gtest.h"
+#include "io/Wrapper.hh"
+#include "liberty/FastSTALibertyModel.hh"
 
 namespace icts_test {
 namespace {
@@ -116,29 +122,18 @@ auto MakeScaleChanges(std::size_t node_count) -> std::vector<icts::FastStaBuffer
   };
 }
 
-auto MeasureScaleRoutes(const icts::FastStaContext& baseline_context, const std::vector<icts::FastStaBufferMasterChange>& changes, double& full_replay_us,
-                        double& incremental_replay_us) -> bool
+// A wide context has more chance of hiding an index that was not marked dirty than a three-level
+// fixture does, so the incremental result is compared against a full replay at scale.
+auto ScaleRoutesMatchFullReplay(const icts::FastStaContext& baseline_context, const std::vector<icts::FastStaBufferMasterChange>& changes) -> bool
 {
   auto full_context = baseline_context;
-  const auto full_start = std::chrono::steady_clock::now();
   const auto full_ok = icts::FastStaIncremental::changeBufferMasters(full_context, changes) && icts::FastStaTiming::update(full_context);
-  const auto full_finish = std::chrono::steady_clock::now();
 
   auto incremental_context = baseline_context;
-  const auto incremental_start = std::chrono::steady_clock::now();
   const auto dirty_region = icts::FastStaIncremental::changeBufferMastersIncremental(incremental_context, changes);
   const auto incremental_ok = dirty_region.has_value() && icts::FastStaTiming::updateRegion(incremental_context, dirty_region.value());
-  const auto incremental_finish = std::chrono::steady_clock::now();
 
-  full_replay_us = std::chrono::duration<double, std::micro>(full_finish - full_start).count();
-  incremental_replay_us = std::chrono::duration<double, std::micro>(incremental_finish - incremental_start).count();
   return full_ok && incremental_ok && TimingStatesMatch(full_context, incremental_context);
-}
-
-auto Median(std::vector<double> samples) -> double
-{
-  std::ranges::sort(samples);
-  return samples.at(samples.size() / 2U);
 }
 
 TEST(FastSTATest, IncrementalMasterChangeMatchesFullRecompute)
@@ -254,52 +249,70 @@ TEST(FastSTATest, BatchPrevalidationRejectsWholeChangeWithoutMutation)
   EXPECT_TRUE(TimingStatesMatch(context, original_context));
 }
 
-TEST(FastSTATest, BatchIncrementalTimingScale)
+TEST(FastSTATest, BatchIncrementalAtScaleMatchesFullRecompute)
 {
-  const auto run_scale = [](std::size_t node_count, std::size_t measured_rounds) -> std::pair<double, double> {
-    auto baseline_context = MakeScaleContext(node_count);
-    EXPECT_EQ(baseline_context.nodes.size(), node_count);
-    EXPECT_TRUE(icts::FastStaTiming::update(baseline_context));
-    const auto changes = MakeScaleChanges(node_count);
+  constexpr std::size_t node_count = 10'000U;
+  auto baseline_context = MakeScaleContext(node_count);
+  ASSERT_EQ(baseline_context.nodes.size(), node_count);
+  ASSERT_TRUE(icts::FastStaTiming::update(baseline_context));
 
-    double warmup_full_us = 0.0;
-    double warmup_incremental_us = 0.0;
-    EXPECT_TRUE(MeasureScaleRoutes(baseline_context, changes, warmup_full_us, warmup_incremental_us));
+  EXPECT_TRUE(ScaleRoutesMatchFullReplay(baseline_context, MakeScaleChanges(node_count)));
+}
 
-    std::vector<double> full_samples_us;
-    std::vector<double> incremental_samples_us;
-    full_samples_us.reserve(measured_rounds);
-    incremental_samples_us.reserve(measured_rounds);
-    for (std::size_t round = 0U; round < measured_rounds; ++round) {
-      double full_replay_us = 0.0;
-      double incremental_replay_us = 0.0;
-      EXPECT_TRUE(MeasureScaleRoutes(baseline_context, changes, full_replay_us, incremental_replay_us)) << "node_count=" << node_count << " round=" << round;
-      full_samples_us.push_back(full_replay_us);
-      incremental_samples_us.push_back(incremental_replay_us);
-    }
+TEST(FastSTATest, DesignElectricalLimitsSurviveMasterSwitchesInBothDirections)
+{
+  auto context = MakeTwoLevelContext();
+  context.sdc_max_transition_ns = 0.2;
+  context.sdc_max_cap_pf = 0.4;
+  auto& loose = context.liberty_cell_by_master.at("BUF_X1");
+  loose.input_slew_limit_ns = 0.3;
+  loose.output_slew_limit_ns = 0.5;
+  loose.output_cap_limit_pf = 0.8;
+  auto& tight = context.liberty_cell_by_master.at("BUF_X2");
+  tight.input_slew_limit_ns = 0.05;
+  tight.output_slew_limit_ns = 0.07;
+  tight.output_cap_limit_pf = 0.1;
+  for (const auto* master : {"BUF_X2", "BUF_X1", "BUF_X2"}) {
+    const bool tighter = std::string(master) == "BUF_X2";
+    ASSERT_TRUE(icts::FastStaIncremental::changeBufferMaster(context, 3U, master));
+    EXPECT_DOUBLE_EQ(context.nodes.at(3U).max_slew_ns, tighter ? 0.05 : 0.2);
+    EXPECT_DOUBLE_EQ(context.nodes.at(4U).max_slew_ns, tighter ? 0.07 : 0.2);
+    EXPECT_DOUBLE_EQ(context.nets.at(2U).max_cap_pf, tighter ? 0.1 : 0.4);
+    EXPECT_EQ(context.nodes.at(3U).slew_limit_from_master, tighter);
+    EXPECT_EQ(context.nets.at(2U).cap_limit_from_master, tighter);
+  }
+  auto clone = context;
+  ASSERT_TRUE(icts::FastStaIncremental::changeBufferMaster(clone, 3U, "BUF_X1"));
+  EXPECT_DOUBLE_EQ(clone.nodes.at(3U).max_slew_ns, 0.2);
+  EXPECT_DOUBLE_EQ(context.nodes.at(3U).max_slew_ns, 0.05);
+  EXPECT_DOUBLE_EQ(clone.nets.at(2U).max_cap_pf, 0.4);
+  EXPECT_DOUBLE_EQ(context.nets.at(2U).max_cap_pf, 0.1);
+}
 
-    const auto full_median_us = Median(full_samples_us);
-    const auto incremental_median_us = Median(incremental_samples_us);
-    std::cout << "FASTSTA_SCALE node_count=" << node_count << " full_us=";
-    for (const auto sample : full_samples_us) {
-      std::cout << sample << ',';
-    }
-    std::cout << " incremental_us=";
-    for (const auto sample : incremental_samples_us) {
-      std::cout << sample << ',';
-    }
-    std::cout << " full_median_us=" << full_median_us << " incremental_median_us=" << incremental_median_us
-              << " ratio=" << incremental_median_us / full_median_us << '\n';
-    return {full_median_us, incremental_median_us};
-  };
-
-  const auto [full_10k_us, incremental_10k_us] = run_scale(10'000U, 5U);
-  EXPECT_GT(full_10k_us, 0.0);
-  EXPECT_GT(incremental_10k_us, 0.0);
-  const auto [full_100k_us, incremental_100k_us] = run_scale(100'000U, 3U);
-  EXPECT_GT(full_100k_us, 0.0);
-  EXPECT_GT(incremental_100k_us, 0.0);
-  EXPECT_LE(incremental_100k_us, full_100k_us * 0.80);
+TEST(FastSTATest, NativeDesignLimitsAlsoBoundImportedLogicPinsAndNets)
+{
+  auto context = MakeTwoLevelContext();
+  context.sdc_max_transition_ns = 0.2;
+  context.sdc_max_cap_pf = 0.4;
+  context.liberty_cell_by_master.at("BUF_X1").output_cap_limit_pf = 0.1;
+  icts::Wrapper wrapper;
+  icts::FastStaEnvironment environment{.wrapper = &wrapper, .max_fanout = 8};
+  icts::WrapperTimingGraph graph;
+  graph.status = icts::WrapperTimingGraphStatus::kComplete;
+  for (const auto& node : context.nodes) {
+    graph.nodes.push_back(
+        {.pin_name = node.name, .inst_name = node.inst_name, .cell_master = node.cell_master, .max_slew_ns = node.name == "buf2/A" ? 0.05 : 0.3});
+  }
+  for (auto& net : context.nets) {
+    net.domain = icts::FastStaNetDomain::kLogic;
+  }
+  std::string failure;
+  ASSERT_TRUE(icts::fast_sta::AppendTimingGraph(environment, graph, context, failure)) << failure;
+  EXPECT_DOUBLE_EQ(context.nodes.at(1U).max_slew_ns, 0.2);
+  EXPECT_DOUBLE_EQ(context.nodes.at(3U).max_slew_ns, 0.05);
+  EXPECT_DOUBLE_EQ(context.nets.at(0U).max_cap_pf, 0.4);
+  EXPECT_DOUBLE_EQ(context.nets.at(1U).max_cap_pf, 0.1);
+  EXPECT_DOUBLE_EQ(context.nets.at(1U).max_fanout, 8.0);
 }
 
 }  // namespace

@@ -17,6 +17,7 @@
 #pragma once
 
 #include "PWHeader.hpp"
+#include "LogicExpression.hpp"
 #include "TimingArcSense.hpp"
 #include "TimingTable.hpp"
 #include "TransType.hpp"
@@ -29,6 +30,7 @@ class TimingArc
   TimingArc() = default;
   ~TimingArc() = default;
   // getter
+  LogicExpression& get_when_expression() { return _when_expression; }
   TimingArcSense get_sense() const { return _sense; }
   TransType get_trigger_trans_type() const { return _trigger_trans_type; }
   std::string& get_library_name() { return _library_name; }
@@ -46,23 +48,49 @@ class TimingArc
   std::map<TransType, TimingTable>& get_delay_table_map() { return _delay_table_map; }
   std::map<TransType, TimingTable>& get_slew_table_map() { return _slew_table_map; }
   // setter
+  void set_when_expression(const LogicExpression& expression) { _when_expression = expression; }
   void set_sense(const TimingArcSense& sense) { _sense = sense; }
   void set_trigger_trans_type(const TransType& trigger_trans_type) { _trigger_trans_type = trigger_trans_type; }
   void set_library_name(const std::string& library_name) { _library_name = library_name; }
   void set_time_unit_scale(const double time_unit_scale) { _time_unit_scale = time_unit_scale; }
   void set_cap_unit_scale(const double cap_unit_scale) { _cap_unit_scale = cap_unit_scale; }
   void set_slew_derate(const double slew_derate) { _slew_derate = slew_derate; }
-  void set_slew_lower_threshold_pct_rise(const double slew_lower_threshold_pct_rise) { _slew_lower_threshold_pct_rise = slew_lower_threshold_pct_rise; }
-  void set_slew_upper_threshold_pct_rise(const double slew_upper_threshold_pct_rise) { _slew_upper_threshold_pct_rise = slew_upper_threshold_pct_rise; }
-  void set_slew_lower_threshold_pct_fall(const double slew_lower_threshold_pct_fall) { _slew_lower_threshold_pct_fall = slew_lower_threshold_pct_fall; }
-  void set_slew_upper_threshold_pct_fall(const double slew_upper_threshold_pct_fall) { _slew_upper_threshold_pct_fall = slew_upper_threshold_pct_fall; }
-  void set_input_threshold_pct_rise(const double input_threshold_pct_rise) { _input_threshold_pct_rise = input_threshold_pct_rise; }
-  void set_output_threshold_pct_rise(const double output_threshold_pct_rise) { _output_threshold_pct_rise = output_threshold_pct_rise; }
-  void set_input_threshold_pct_fall(const double input_threshold_pct_fall) { _input_threshold_pct_fall = input_threshold_pct_fall; }
-  void set_output_threshold_pct_fall(const double output_threshold_pct_fall) { _output_threshold_pct_fall = output_threshold_pct_fall; }
+  void set_slew_lower_threshold_pct_rise(const double slew_lower_threshold_pct_rise)
+  {
+    _slew_lower_threshold_pct_rise = slew_lower_threshold_pct_rise;
+  }
+  void set_slew_upper_threshold_pct_rise(const double slew_upper_threshold_pct_rise)
+  {
+    _slew_upper_threshold_pct_rise = slew_upper_threshold_pct_rise;
+  }
+  void set_slew_lower_threshold_pct_fall(const double slew_lower_threshold_pct_fall)
+  {
+    _slew_lower_threshold_pct_fall = slew_lower_threshold_pct_fall;
+  }
+  void set_slew_upper_threshold_pct_fall(const double slew_upper_threshold_pct_fall)
+  {
+    _slew_upper_threshold_pct_fall = slew_upper_threshold_pct_fall;
+  }
+  void set_input_threshold_pct_rise(const double input_threshold_pct_rise)
+  {
+    _input_threshold_pct_rise = input_threshold_pct_rise;
+  }
+  void set_output_threshold_pct_rise(const double output_threshold_pct_rise)
+  {
+    _output_threshold_pct_rise = output_threshold_pct_rise;
+  }
+  void set_input_threshold_pct_fall(const double input_threshold_pct_fall)
+  {
+    _input_threshold_pct_fall = input_threshold_pct_fall;
+  }
+  void set_output_threshold_pct_fall(const double output_threshold_pct_fall)
+  {
+    _output_threshold_pct_fall = output_threshold_pct_fall;
+  }
   // function
 
  private:
+  LogicExpression _when_expression;
   TimingArcSense _sense = TimingArcSense::kNone;
   TransType _trigger_trans_type = TransType::kNone;
   std::string _library_name;

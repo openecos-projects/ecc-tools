@@ -232,6 +232,10 @@ std::vector<Violation> DRCEngine::getExpandedViolationList(DETask& de_task, Viol
         new_real_rect = enlargeRect(new_real_rect, violation.get_required_size());
         layer_routing_list = expandLayer(violation, {-1, 0, +1});
         break;
+      case ViolationType::kMacroObsSpacing:
+        new_real_rect = enlargeRect(new_real_rect, violation.get_required_size());
+        layer_routing_list = expandLayer(violation, {-1, 0, +1});
+        break;
       case ViolationType::kMaximumWidth:
         break;
       case ViolationType::kMaxViaStack:
@@ -321,6 +325,10 @@ std::vector<Violation> DRCEngine::getExpandedViolationList(DETask& de_task, Viol
       case ViolationType::kFloatingPatch:
         break;
       case ViolationType::kJogToJogSpacing:
+        new_real_rect = enlargeRect(new_real_rect, 0);
+        layer_routing_list = expandLayer(violation, {0});
+        break;
+      case ViolationType::kMacroObsSpacing:
         new_real_rect = enlargeRect(new_real_rect, 0);
         layer_routing_list = expandLayer(violation, {0});
         break;

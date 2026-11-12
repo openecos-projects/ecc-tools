@@ -1,7 +1,9 @@
 #include "GeometrySnapshotExporter.h"
 
+#include "ClockTreeCollector.h"
 #include "GeometryBuilder.h"
 #include "GeometryStore.h"
+#include "GeometryThumbnail.h"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
 #include "IdbUnits.h"
@@ -23,9 +25,10 @@ void populate_design_metadata(SnapshotWriteOptions& options, idb::IdbDesign& des
 
 }  // namespace
 
-SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout,
-                                             const std::filesystem::path& output_dir,
-                                             std::optional<GeometryDrcDistribution> drc)
+SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLayout& layout, const std::filesystem::path& output_dir,
+                                             std::optional<GeometryDrcDistribution> drc, const std::filesystem::path& thumbnail_path,
+                                             std::optional<ClockTreeCollectOptions> clock_tree_options,
+                                             std::optional<ClockTreeSnapshot> clock_tree_snapshot)
 {
   if (output_dir.empty()) {
     return {};
@@ -46,10 +49,19 @@ SnapshotWriteResult export_geometry_snapshot(idb::IdbDesign& design, idb::IdbLay
   options.nets = builder.collect_net_metadata(design);
   options.buses = builder.collect_bus_metadata(design);
   options.groups = builder.collect_group_metadata(design);
+  if (clock_tree_snapshot) {
+    options.clock_tree = std::move(clock_tree_snapshot);
+  } else if (clock_tree_options) {
+    options.clock_tree = collect_clock_tree_snapshot(design, layout, store, *clock_tree_options);
+  }
   populate_design_metadata(options, design, layout);
 
   GeometrySnapshotWriter writer;
-  return writer.write(store, options);
+  SnapshotWriteResult result = writer.write(store, options);
+  if (result.ok && !thumbnail_path.empty()) {
+    render_thumbnail_png(store, options.layers, thumbnail_path, 1024, 1024);
+  }
+  return result;
 }
 
 }  // namespace ecc::geometry

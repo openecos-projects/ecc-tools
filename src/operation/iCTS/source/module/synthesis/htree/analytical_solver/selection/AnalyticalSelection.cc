@@ -29,7 +29,7 @@
 #include <iterator>
 #include <limits>
 #include <optional>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>

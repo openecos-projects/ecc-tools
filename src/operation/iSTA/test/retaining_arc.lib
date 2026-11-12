@@ -1,0 +1,40 @@
+library (retaining_tables) {
+  delay_model : table_lookup;
+  time_unit : "1ps";
+  capacitive_load_unit (1,pf);
+  voltage_unit : "1V"; nom_voltage : 1.2;
+  lu_table_template (waveform) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1 ("100, 300"); index_2 ("0.01, 0.03");
+  }
+  cell (memory) {
+    pin (CLK) { direction : input; clock : true; }
+    pin (EN) { direction : input; }
+    pin (Q) { direction : output;
+      timing () {
+        related_pin : "CLK"; timing_type : rising_edge; timing_sense : non_unate;
+        when : "EN"; sdf_cond : "EN";
+        cell_rise (waveform) { values("800,800", "800,800"); }
+        cell_fall (scalar) { values("1200"); }
+        rise_transition (scalar) { values("40"); }
+        fall_transition (scalar) { values("60"); }
+        retaining_rise (waveform) { values("500,500", "500,500"); }
+        retaining_fall (scalar) { values("2000"); }
+        retain_rise_slew (scalar) { values("20"); }
+        retain_fall_slew (scalar) { values("80"); }
+      }
+    }
+    pin (R) { direction : output;
+      timing () {
+        related_pin : "CLK"; timing_type : falling_edge; timing_sense : non_unate;
+        cell_rise (scalar) { values("800"); }
+        cell_fall (scalar) { values("1200"); }
+        rise_transition (scalar) { values("40"); }
+        fall_transition (scalar) { values("60"); }
+        retaining_rise (scalar) { values("500"); }
+        retain_rise_slew (scalar) { values("20"); }
+      }
+    }
+  }
+}

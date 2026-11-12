@@ -21,9 +21,13 @@
  * @brief Tests for CTS process-memory sampling and allocator release evidence.
  */
 
-#include <gtest/gtest.h>
+#include <features.h>
+
+#include <optional>
+#include <string>
 
 #include "Utility.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

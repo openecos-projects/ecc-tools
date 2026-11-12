@@ -59,7 +59,7 @@ bool ShapeTable::replace_snapshot(std::vector<ShapeRecord> records, std::vector<
     }
 
     const uint64_t payload_end = record.payload_offset + record.payload_size;
-    if (payload_end > payloads.size()) {
+    if (payload_end < record.payload_offset || payload_end > payloads.size()) {
       return false;
     }
 

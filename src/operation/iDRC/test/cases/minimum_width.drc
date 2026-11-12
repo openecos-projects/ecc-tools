@@ -1,0 +1,10 @@
+# n1 is 60 tall on a 100 min-width layer; n2 is exactly 100 and legal.
+# n1 and n2 are also too close for spacing, but `check` restricts the run to width.
+case minimum_width
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 spacing=90 min_width=100
+cut V1
+result n1 M1 0 0 1000 60
+result n2 M1 0 100 1000 200
+check minimum_width
+expect minimum_width M1 0 0 1000 60 nets=n1 required=100

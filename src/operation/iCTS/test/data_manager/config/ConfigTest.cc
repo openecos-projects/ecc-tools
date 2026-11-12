@@ -21,7 +21,6 @@
  * @brief CTS runtime configuration parser contract tests.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <filesystem>
@@ -30,6 +29,7 @@
 #include <vector>
 
 #include "data_manager/config/Config.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

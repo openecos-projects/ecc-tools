@@ -1,4 +1,4 @@
-add_library(icts_source_data_manager_config ${ICTS_DATA_MANAGER_CONFIG}/Config.cc)
+add_library(icts_source_data_manager_config ${ICTS_DATA_MANAGER_CONFIG}/Config.cc ${ICTS_DATA_MANAGER_CONFIG}/ConstraintBudgets.cc)
 
 target_link_libraries(
   icts_source_data_manager_config

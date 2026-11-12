@@ -21,7 +21,6 @@ target_link_libraries(
   PRIVATE
   icts_source_module_synthesis_htree_compensation
   icts_source_module_synthesis_htree_plan
-  icts_source_module_synthesis_htree_region
   icts_source_module_analytical_characterization
   highs
 )

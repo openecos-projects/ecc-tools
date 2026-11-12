@@ -43,6 +43,7 @@ int LibertyScanner::getChar()
         if (c == '\n') {
             _line_no++;
             _column = 1;
+            _pending_newline = true;
         } else {
             _column++;
         }
@@ -57,6 +58,7 @@ int LibertyScanner::getChar()
     if (c == '\n') {
         _line_no++;
         _column = 1;
+        _pending_newline = true;
     } else if (c != EOF) {
         _column++;
     }
@@ -434,14 +436,21 @@ int LibertyScanner::yylex(YYSTYPE* yylval, YYLTYPE* yylloc)
         yylloc->first_column = _column - 1;
         yylloc->last_line = _line_no;
         yylloc->last_column = _column;
+        _crossed_newline = _pending_newline;
+        _pending_newline = false;
         
         if (c == '\\') {
             int next = getChar();
             if (next == '\n') {
+                // The newline belongs to a line continuation, so the token that
+                // follows it is still on the same logical line and must not be
+                // taken for a statement boundary.
+                _pending_newline = false;
                 continue;
             }
             if (next == '\r' && peekChar() == '\n') {
                 getChar();
+                _pending_newline = false;
                 continue;
             }
             ungetChar(next);

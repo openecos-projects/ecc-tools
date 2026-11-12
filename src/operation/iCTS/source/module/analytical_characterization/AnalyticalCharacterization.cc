@@ -27,6 +27,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <utility>

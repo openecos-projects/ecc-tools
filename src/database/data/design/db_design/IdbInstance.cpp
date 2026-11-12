@@ -459,6 +459,22 @@ IdbInstance* IdbInstanceList::find_instance(size_t index)
   return nullptr;
 }
 
+bool IdbInstanceList::rename_instance(string old_name, string new_name)
+{
+  if (old_name == new_name) {
+    return true;
+  }
+  auto old_iter = _instance_map.find(old_name);
+  if (old_iter == _instance_map.end() || _instance_map.find(new_name) != _instance_map.end()) {
+    return false;
+  }
+  IdbInstance* instance = old_iter->second;
+  _instance_map.erase(old_iter);
+  instance->set_name(new_name);
+  _instance_map.emplace(new_name, instance);
+  return true;
+}
+
 bool IdbInstanceList::contains(IdbInstance* instance)
 {
   if (instance == nullptr) {

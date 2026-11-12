@@ -58,6 +58,7 @@ test/**
 !test/native_scenarios.py
 !test/support.py
 !test/data/
+!test/data/buffer_port_mutation.py
 !test/data/test_python_io.py
 !test/data/timing_defaults.py
 !test/data/timing_qualification.py

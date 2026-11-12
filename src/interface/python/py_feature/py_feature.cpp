@@ -20,44 +20,44 @@
 
 namespace python_interface {
 
-bool feature_summary(const std::string& path)
+bool feature_summary(const std::filesystem::path& path)
 {
-  return featureInst->save_summary(path);
+  return featureInst->save_summary(path.string());
 }
 
-bool feature_tool(const std::string& path, const std::string& step)
+bool feature_tool(const std::filesystem::path& path, const std::string& step)
 {
-  return featureInst->save_tools(path, step);
+  return featureInst->save_tools(path.string(), step);
 }
 
-bool feature_eval_map(const std::string& path, const int& bin_cnt_x, const int& bin_cnt_y)
+bool feature_eval_map(const std::filesystem::path& path, const int& bin_cnt_x, const int& bin_cnt_y)
 {
-  return featureInst->save_eval_map(path, bin_cnt_x, bin_cnt_y);
+  return featureInst->save_eval_map(path.string(), bin_cnt_x, bin_cnt_y);
 }
 
-bool feature_net_eval(const std::string& path)
+bool feature_net_eval(const std::filesystem::path& path)
 {
-  return featureInst->save_net_eval(path);
+  return featureInst->save_net_eval(path.string());
 }
 
-bool feature_route(const std::string& path)
+bool feature_route(const std::filesystem::path& path)
 {
-  return featureInst->save_route_data(path);
+  return featureInst->save_route_data(path.string());
 }
 
-bool feature_route_read(const std::string& path)
+bool feature_route_read(const std::filesystem::path& path)
 {
-  return featureInst->read_route_data(path);
+  return featureInst->read_route_data(path.string());
 }
 
-bool feature_macro_drc(const std::string& path, const std::string& drc_path)
+bool feature_macro_drc(const std::filesystem::path& path, const std::filesystem::path& drc_path)
 {
-  return featureInst->feature_macro_drc(path, drc_path);
+  return featureInst->feature_macro_drc(path.string(), drc_path.string());
 }
 
-bool feature_eval_summary(const std::string& path, int32_t grid_size)
+bool feature_eval_summary(const std::filesystem::path& path, int32_t grid_size)
 {
-  return featureInst->save_eval_summary(path, grid_size);
+  return featureInst->save_eval_summary(path.string(), grid_size);
 }
 
 bool feature_eval_union(const std::string& jsonl_path, const std::string& csv_path, int32_t grid_size)
@@ -65,24 +65,24 @@ bool feature_eval_union(const std::string& jsonl_path, const std::string& csv_pa
   return featureInst->save_eval_union(jsonl_path, csv_path, grid_size);
 }
 
-bool feature_pl_eval(const std::string& json_path, int32_t grid_size)
+bool feature_pl_eval(const std::filesystem::path& json_path, int32_t grid_size)
 {
-  return featureInst->save_pl_eval(json_path, grid_size);
+  return featureInst->save_pl_eval(json_path.string(), grid_size);
 }
 
-bool feature_cts_eval(const std::string& json_path, int32_t grid_size)
+bool feature_cts_eval(const std::filesystem::path& json_path, int32_t grid_size)
 {
-  return featureInst->save_cts_eval(json_path, grid_size);
+  return featureInst->save_cts_eval(json_path.string(), grid_size);
 }
 
-bool feature_timing_eval_summary(const std::string& path)
+bool feature_timing_eval_summary(const std::filesystem::path& path)
 {
-  return featureInst->save_timing_eval_summary(path);
+  return featureInst->save_timing_eval_summary(path.string());
 }
 
-bool feature_cong_map(const std::string& step, const std::string& dir)
+bool feature_cong_map(const std::string& step, const std::filesystem::path& dir)
 {
-  return featureInst->save_cong_map(step, dir);
+  return featureInst->save_cong_map(step, dir.string());
 }
 
 }  // namespace python_interface

@@ -21,7 +21,6 @@
  * @brief Representative real-tech pin capacitance probe discovery for tests.
  */
 
-#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>

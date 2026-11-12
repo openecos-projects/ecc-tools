@@ -26,7 +26,13 @@
 #include <filesystem>
 #include <string>
 
-#include "toolkit/io/InfoReport.hh"
+namespace icts_test {
+namespace toolkit {
+namespace io {
+struct InfoReport;
+}
+}  // namespace toolkit
+}  // namespace icts_test
 
 namespace icts_test::toolkit::io {
 

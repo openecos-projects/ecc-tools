@@ -1,0 +1,6 @@
+# Negative test for the case format: a case must state what it expects.
+case bad_no_expectation
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 spacing=90
+cut V1
+result n1 M1 0 0 1000 500

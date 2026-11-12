@@ -19,11 +19,11 @@
 #include "AccessPoint.hpp"
 #include "DRBoxId.hpp"
 #include "DRBoxResult.hpp"
+#include "DRFixedGeometry.hpp"
 #include "DRIterParam.hpp"
 #include "DRNode.hpp"
 #include "DRPatchState.hpp"
 #include "DRRouteState.hpp"
-#include "DRShadow.hpp"
 #include "DRShapeIndex.hpp"
 #include "DRTask.hpp"
 #include "LayerCoord.hpp"
@@ -32,35 +32,6 @@
 #include "Violation.hpp"
 
 namespace irt {
-
-struct DRFixedShape
-{
-  int32_t net_idx = -1;
-  EXTLayerRect* rect = nullptr;
-  bool is_routing = false;
-};
-
-class DRFixedGeometry
-{
- public:
-  using RectRTree = bgi::rtree<std::pair<BGRectInt, size_t>, bgi::quadratic<16>>;
-
-  bool get_built() const { return _built; }
-  const std::vector<DRFixedShape>& get_shape_list() const
-  {
-    if (!_built) {
-      RTLOG.error(Loc::current(), "The fixed DR geometry has not been built!");
-    }
-    return _shape_list;
-  }
-  void build(const std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>>& fixed_rect_map);
-  std::vector<size_t> query(const std::vector<LayerRect>& region_list) const;
-
- private:
-  bool _built = false;
-  std::vector<DRFixedShape> _shape_list;
-  std::map<int32_t, RectRTree> _layer_rect_rtree_map;
-};
 
 class DRBox
 {
@@ -85,7 +56,6 @@ class DRBox
   std::vector<int32_t>& get_task_order_list() { return _task_order_list; }
   ScaleAxis& get_box_track_axis() { return _box_track_axis; }
   std::vector<GridMap<DRNode>>& get_layer_node_map() { return _layer_node_map; }
-  std::vector<DRShadow>& get_layer_shadow_map() { return _layer_shadow_map; }
   DRShapeIndex& get_env_shape_index() { return _env_shape_index; }
   DRShapeIndex& get_routed_shape_index() { return _routed_shape_index; }
   std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>>& get_layer_axis_map() { return _layer_axis_map; }
@@ -104,7 +74,6 @@ class DRBox
   void set_net_env_patch_map(const std::map<int32_t, std::vector<EXTLayerRect*>>& net_env_patch_map) { _net_env_patch_map = net_env_patch_map; }
   void set_box_track_axis(const ScaleAxis& box_track_axis) { _box_track_axis = box_track_axis; }
   void set_layer_node_map(const std::vector<GridMap<DRNode>>& layer_node_map) { _layer_node_map = layer_node_map; }
-  void set_layer_shadow_map(const std::vector<DRShadow>& layer_shadow_map) { _layer_shadow_map = layer_shadow_map; }
   void set_layer_axis_map(const std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>>& layer_axis_map) { _layer_axis_map = layer_axis_map; }
   // function
   DRRouteState& get_route_state() { return _route_state; }
@@ -130,7 +99,6 @@ class DRBox
   std::vector<int32_t> _task_order_list;
   ScaleAxis _box_track_axis;
   std::vector<GridMap<DRNode>> _layer_node_map;
-  std::vector<DRShadow> _layer_shadow_map;
   DRShapeIndex _env_shape_index;
   DRShapeIndex _routed_shape_index;
   std::map<int32_t, std::pair<std::set<int32_t>, std::set<int32_t>>> _layer_axis_map;

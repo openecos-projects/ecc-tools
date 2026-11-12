@@ -31,6 +31,7 @@ class PowerReporter
   void report();
   void reportCellPower(const std::string& directory_path, const int32_t top_num, const bool is_all);
   void reportNetPower(const std::string& directory_path, const int32_t top_num, const bool is_all);
+  void reportPeakPowerWaveform(const std::string& file_path);
 
  private:
   // self
@@ -44,6 +45,7 @@ class PowerReporter
   PowerReporter& operator=(PowerReporter&& other) = delete;
   // function
   void outputPowerReport();
+  void outputPeakPower(std::ofstream* power_report_file);
   void outputPowerDesignInfo(std::ofstream* power_report_file);
   void outputPowerUnitInfo(std::ofstream* power_report_file);
   void outputPowerSummary(std::ofstream* power_report_file);
@@ -51,10 +53,25 @@ class PowerReporter
   void outputPowerGroup(std::ofstream* power_report_file, PowerGroupType power_group_type);
   void outputPowerAttribute(std::ofstream* power_report_file);
   void outputInstancePower();
-  void outputCellPowerReport(const std::string& directory_path, std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,
-                             const int32_t top_num, const bool is_all);
-  void outputNetPowerReport(const std::string& directory_path, std::vector<std::pair<std::string, NetPower*>>& net_power_list,
-                            const int32_t top_num, const bool is_all);
+  void outputPeakInstancePower(std::ofstream* instance_power_file);
+  void outputInstancePowerRow(
+      std::ofstream* instance_power_file,
+      const std::string& instance_name,
+      const double voltage,
+      PowerValue& power_value
+  );
+  void outputCellPowerReport(
+      const std::string& directory_path,
+      std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,
+      const int32_t top_num,
+      const bool is_all
+  );
+  void outputNetPowerReport(
+      const std::string& directory_path,
+      std::vector<std::pair<std::string, NetPower*>>& net_power_list,
+      const int32_t top_num,
+      const bool is_all
+  );
   PowerValue getPowerGroupPowerValue(PowerGroupType power_group_type);
   double getDynamicPower();
   double getPercentage(double numerator, double denominator);

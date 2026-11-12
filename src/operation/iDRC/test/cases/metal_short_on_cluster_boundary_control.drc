@@ -1,0 +1,10 @@
+# Control for metal_short_on_cluster_boundary: the same pair without n0.
+# The cluster origin is (19000,0), so x=20000 is not a cluster boundary.
+case metal_short_on_cluster_boundary_control
+die 0 0 100000 100000
+routing M1 dir=H pitch=200
+cut V1
+rule metal_short
+result n1 M1 19000 0 20000 100
+result n2 M1 20000 0 21000 100
+expect metal_short M1 20000 0 20000 100 nets=n1,n2 required=0

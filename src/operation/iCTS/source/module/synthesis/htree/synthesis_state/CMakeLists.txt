@@ -9,7 +9,6 @@ target_link_libraries(
   icts_source_module_synthesis_htree_characterization_library
   icts_source_module_synthesis_htree_characterization
   icts_source_module_synthesis_htree_compensation
-  icts_source_module_synthesis_htree_region
   icts_source_module_synthesis_htree_topology_pruning
   PRIVATE
   icts_source_module_synthesis_htree_plan

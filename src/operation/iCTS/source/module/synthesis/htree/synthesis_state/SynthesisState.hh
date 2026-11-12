@@ -84,6 +84,7 @@ struct HTreeSynthesisStateBuild
 };
 
 auto AssembleHTreeSynthesisState(const HTree::Input& input, const HTree::Config& config) -> HTreeSynthesisStateBuild;
+auto AssembleHTreeSynthesisState(const HTree::Input& input, const HTree::Config& config, std::optional<unsigned> topology_depth) -> HTreeSynthesisStateBuild;
 
 }  // namespace htree
 }  // namespace icts

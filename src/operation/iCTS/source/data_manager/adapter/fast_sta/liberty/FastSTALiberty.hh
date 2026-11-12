@@ -31,6 +31,14 @@
 #include "FastSTALibertyModel.hh"
 
 namespace icts {
+enum class FastStaTransition;
+}
+
+namespace icts {
+enum class FastStaTimingCheckKind;
+}
+
+namespace icts {
 
 class Wrapper;
 

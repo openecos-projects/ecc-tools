@@ -26,7 +26,7 @@ destroy_emir
 
 | Input | Contract |
 | --- | --- |
-| `-instance_power_file_path` | Required. TSV with the `# iEMIR_INSTANCE_POWER_V1` marker and the seven columns below. |
+| `-instance_power_file_path` | Required. TSV with the seven columns below; `#` comment lines are ignored. |
 | `-pad_files` | List of pre-generated absolute PLOC files. Mutually exclusive with `-ploc_file_path` and enabled `-add_ploc_from_top_def`. |
 | `-ploc_file_path` | Legacy single PLOC input. Mutually exclusive with `-pad_files` and enabled `-add_ploc_from_top_def`. |
 | `-add_ploc_from_top_def` | Optional `0` or `1`, default `0`. Set to `1` to use top-level DEF P/G IO pins as sources. Mutually exclusive with either supply-file option. Connected physical pin geometry is required. |
@@ -37,7 +37,9 @@ destroy_emir
 | `-temp_directory_path` | Per-run output directory, recreated during initialization. Use a separate directory for each run. |
 | `-thread_number` | OpenMP thread count. |
 
-The power TSV header is:
+The `# iEMIR_INSTANCE_POWER_V1` line emitted by iPW is an optional comment,
+not a required format marker. Blank lines and lines whose first non-whitespace
+character is `#` are ignored. The seven-column TSV header is required:
 
 ```text
 instance_name	voltage_v	internal_power_w	switching_power_w	leakage_power_w	total_power_w	average_current_a
@@ -248,3 +250,36 @@ prepared backend, including a reusable SparseLU control. It checks voltages and
 residuals, and reports setup separately from solve time. These are solver-only
 measurements; they do not predict full-flow or dynamic-analysis speedup.
 Recorded local results and limitations: [validation report](../../../docs/ir-acceleration-validation.md).
+
+## Static EM evaluation and diagnostics
+
+EM uses solved DC branch currents (`abs(V1-V2)/R`) and scalar wire/via rules.
+When a via has a physical cut-layer name, that layer selects its EM rule; a
+missing layer rule is reported as `NO_RULE`. Via-master name fallback is used
+only when cut-layer metadata is unavailable. For `PowerNet` API inputs marked
+with `has_explicit_parasitics`, supplied via resistance is preserved; internally
+extracted vias use technology resistance per cut divided by the cut count.
+Finite positive resistance and current limits are accepted even below `1e-6`;
+invalid node references, electrical values, geometry and limits have distinct
+error statuses. A via requires a positive cut count. Nonphysical connectors
+are excluded from EM coverage. The violation comparison is strictly greater
+than `-em_violation_threshold_percent`; equality is not a violation.
+
+Missing rules and invalid evaluations display `N/A` in EM and resistance-network
+reports. They must not be interpreted as passing EM. `emir_reporter/` also contains:
+
+- `em_evaluation.csv`: per-edge status, PASS/FAIL/NOT_EVALUATED/ERROR, rule name,
+  exact/normalized/alias/fallback match, resistance, signed voltage difference,
+  current, valid limit/percentage, effective wire width and cut count.
+- `em_summary.csv`: applicable/evaluated/no-rule/invalid/excluded counts,
+  violations and evaluated/applicable coverage (N/A for an empty denominator).
+
+Rule names are resolved once per unique wire-layer, cut-layer or legacy via name on each analysis;
+repeated analyses rebuild bindings so rule replacement is reflected. The three
+text EM outputs share one constructed row list. Logs expose rule-resolution,
+edge-evaluation, report-build and report-write/sort times; no full-flow speedup
+is assumed without a design benchmark.
+
+This remains static AVG analysis: it does not infer RMS/PEAK from average power,
+apply guessed temperature/lifetime factors, or establish individual-cut safety
+from an aggregate via capacity.

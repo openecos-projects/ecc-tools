@@ -14,8 +14,12 @@
 //
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-#include "utility/logger/Logger.hpp"
 #include "py_db.h"
+
+#include <idm.h>
+
+#include <optional>
+#include <utility>
 
 #include "GeometryEditSession.h"
 #include "GeometrySnapshotExporter.h"
@@ -23,10 +27,8 @@
 #include "IdbNet.h"
 #include "IdbSpecialNet.h"
 #include "feature_manager.h"
-#include <idm.h>
-
-#include <optional>
-#include <utility>
+#include "py_clock_tree.h"
+#include "utility/logger/Logger.hpp"
 
 namespace python_interface {
 namespace {
@@ -100,98 +102,122 @@ pybind11::dict delta_to_dict(const ecc::geometry::GeometryDeltaShape& delta)
 
 }  // namespace
 
-bool initIdb(const std::string& config_path)
+bool initIdb(const std::filesystem::path& config_path)
 {
-  return dmInst->init(config_path);
+  return dmInst->init(config_path.string());
 }
 
-bool initTechLef(const std::string& techlef_path)
+bool initTechLef(const std::filesystem::path& techlef_path)
 {
-  dmInst->get_config().set_tech_lef_path(techlef_path);
-  return dmInst->readLef(vector<string>{techlef_path}, true);
+  const std::string techlef_path_ = techlef_path.string();
+  dmInst->get_config().set_tech_lef_path(techlef_path_);
+  return dmInst->readLef(vector<string>{techlef_path_}, true);
 }
 
-bool initLef(const std::vector<std::string>& lef_paths)
+bool initLef(const std::vector<std::filesystem::path>& lef_paths)
 {
-  dmInst->get_config().set_lef_paths(lef_paths);
-  return dmInst->readLef(lef_paths);
+  std::vector<std::string> lef_paths_;
+  lef_paths_.reserve(lef_paths.size());
+  for (const auto& lef_path : lef_paths) {
+    lef_paths_.push_back(lef_path.string());
+  }
+  dmInst->get_config().set_lef_paths(lef_paths_);
+  return dmInst->readLef(lef_paths_);
 }
 
-bool initDef(const std::string& def_path)
+bool initDef(const std::filesystem::path& def_path)
 {
-  dmInst->get_config().set_def_path(def_path);
-  return dmInst->readDef(def_path);
+  const std::string def_path_ = def_path.string();
+  dmInst->get_config().set_def_path(def_path_);
+  return dmInst->readDef(def_path_);
 }
 
-bool initVerilog(const std::string& verilog_path, const std::string& top_module)
+bool initVerilog(const std::filesystem::path& verilog_path, const std::string& top_module)
 {
-  dmInst->get_config().set_verilog_path(verilog_path);
-  return dmInst->readVerilog(verilog_path, top_module);
+  const std::string verilog_path_ = verilog_path.string();
+  dmInst->get_config().set_verilog_path(verilog_path_);
+  return dmInst->readVerilog(verilog_path_, top_module);
 }
 
-bool initLvsVerilog(const std::string& verilog_path, const std::string& top_module)
+bool initLvsVerilog(const std::filesystem::path& verilog_path, const std::string& top_module)
 {
-  dmInst->get_config().set_verilog_path(verilog_path);
-  return dmInst->addVerilog(verilog_path, top_module);
+  const std::string verilog_path_ = verilog_path.string();
+  dmInst->get_config().set_verilog_path(verilog_path_);
+  return dmInst->addVerilog(verilog_path_, top_module);
 }
 
-bool initLib(const std::vector<std::string>& lib_paths, std::optional<int32_t> thread_number)
+bool initLib(const std::vector<std::filesystem::path>& lib_paths, std::optional<int32_t> thread_number)
 {
-  dmInst->get_config().set_lib_paths(lib_paths);
+  std::vector<std::string> lib_paths_;
+  lib_paths_.reserve(lib_paths.size());
+  for (const auto& lib_path : lib_paths) {
+    lib_paths_.push_back(lib_path.string());
+  }
+  dmInst->get_config().set_lib_paths(lib_paths_);
   if (thread_number.has_value()) {
     dmInst->get_config().set_thread_number(*thread_number);
   }
-  return dmInst->readLib(lib_paths);
+  return dmInst->readLib(lib_paths_);
 }
 
-bool initSdc(const std::string& sdc_path)
+bool initSdc(const std::filesystem::path& sdc_path)
 {
-  dmInst->get_config().set_sdc_path(sdc_path);
+  dmInst->get_config().set_sdc_path(sdc_path.string());
   return true;
 }
 
-bool initSpef(const std::string& spef_path)
+bool initSpef(const std::filesystem::path& spef_path)
 {
-  dmInst->get_config().set_spef_path(spef_path);
-  return dmInst->readSpef(spef_path);
+  const std::string spef_path_ = spef_path.string();
+  dmInst->get_config().set_spef_path(spef_path_);
+  return dmInst->readSpef(spef_path_);
 }
 
-bool initVcd(const std::string& vcd_path)
+bool initVcd(const std::filesystem::path& vcd_path)
 {
-  dmInst->get_config().set_vcd_path(vcd_path);
-  return dmInst->readVcd(vcd_path);
+  const std::string vcd_path_ = vcd_path.string();
+  dmInst->get_config().set_vcd_path(vcd_path_);
+  return dmInst->readVcd(vcd_path_);
 }
 
-bool saveDef(const std::string& def_name)
+bool saveDef(const std::filesystem::path& def_name)
 {
-  return dmInst->saveDef(def_name);
+  return dmInst->saveDef(def_name.string());
 }
 
-bool saveMacroTCL(const std::string& def_name)
+bool saveMacroTCL(const std::filesystem::path& tcl_name)
 {
-  return dmInst->saveMacroTCL(def_name);
+  return dmInst->saveMacroTCL(tcl_name.string());
 }
 
-bool saveNetList(const std::string& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
+std::size_t canonicalizeNetNames()
+{
+  auto* design = dmInst->get_idb_design();
+  return design == nullptr ? 0 : design->canonicalizeNetNames();
+}
+
+bool saveNetList(const std::filesystem::path& netlist_path, std::set<std::string> exclude_cell_names /* = {} */,
                  bool is_add_space_for_escape_name /* = false*/)
 {
-  dmInst->saveVerilog(netlist_path, std::move(exclude_cell_names), is_add_space_for_escape_name);
+  dmInst->saveVerilog(netlist_path.string(), std::move(exclude_cell_names), is_add_space_for_escape_name);
   return true;
 }
 
-bool saveGDSII(const std::string& gds_name, const std::string& layer_map_path)
+bool saveGDSII(const std::filesystem::path& gds_name, const std::filesystem::path& layer_map_path)
 {
-  return dmInst->saveGDSII(gds_name, layer_map_path);
+  return dmInst->saveGDSII(gds_name.string(), layer_map_path.string());
 }
 
-bool saveJson(const std::string& path)
+bool saveJson(const std::filesystem::path& path)
 {
   std::string options = "";
 
-  return dmInst->saveJSON(path, options);
+  return dmInst->saveJSON(path.string(), options);
 }
 
-bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
+bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_drc,
+                          const std::optional<std::filesystem::path>& thumbnail_path, const std::optional<std::string>& clock_tree_stage,
+                          const pybind11::object& clock_tree_graph)
 {
   idb::IdbDesign* design = dmInst->get_idb_design();
   idb::IdbLayout* layout = dmInst->get_idb_layout();
@@ -228,7 +254,51 @@ bool saveGeometrySnapshot(const std::string& output_dir, bool include_drc)
     }
   }
 
-  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc)).ok;
+  std::optional<ecc::geometry::ClockTreeCollectOptions> clock_tree_options;
+  std::optional<ecc::geometry::ClockTreeSnapshot> clock_tree_snapshot;
+  if (clock_tree_stage) {
+    ecc::geometry::ClockTreeCollectOptions options;
+    if (*clock_tree_stage == "postFloorplan") {
+      options.stage = ecc::geometry::ClockTreeStage::kPostFloorplan;
+      options.timing_unavailable_reason = "postFloorplan clock network has topology only; insertion delay was not requested";
+    } else if (*clock_tree_stage == "CTS") {
+      options.stage = ecc::geometry::ClockTreeStage::kCts;
+      options.analysis_source = ecc::geometry::ClockTreeAnalysisSource::kCtsFastSta;
+      options.timing_unavailable_reason = "CTS clock topology is available; committed FastSTA edge-level timing was unavailable";
+      if (!clock_tree_graph.is_none()) {
+        std::uint32_t dbu_per_micron = 0;
+        if (design->get_units() != nullptr) {
+          dbu_per_micron = static_cast<std::uint32_t>(design->get_units()->get_micron_dbu());
+        } else if (layout->get_units() != nullptr) {
+          dbu_per_micron = static_cast<std::uint32_t>(layout->get_units()->get_micron_dbu());
+        }
+        clock_tree_snapshot = python_interface::clockTreeSnapshotFromPython(clock_tree_graph, dbu_per_micron);
+      }
+    } else if (*clock_tree_stage == "filler") {
+      options.stage = ecc::geometry::ClockTreeStage::kFiller;
+      options.analysis_source = ecc::geometry::ClockTreeAnalysisSource::kIstaTypical;
+      options.rc_corner = "TYPICAL";
+      options.liberty_corner = "TYP";
+      options.temperature_c = 25.0;
+      options.timing_unavailable_reason = "filler clock topology is available; TYPICAL RC/iSTA timing capture was unavailable";
+      if (!clock_tree_graph.is_none()) {
+        std::uint32_t dbu_per_micron = 0;
+        if (design->get_units() != nullptr) {
+          dbu_per_micron = static_cast<std::uint32_t>(design->get_units()->get_micron_dbu());
+        } else if (layout->get_units() != nullptr) {
+          dbu_per_micron = static_cast<std::uint32_t>(layout->get_units()->get_micron_dbu());
+        }
+        clock_tree_snapshot = python_interface::clockTreeSnapshotFromPython(clock_tree_graph, dbu_per_micron);
+      }
+    } else {
+      return false;
+    }
+    clock_tree_options = std::move(options);
+  }
+  return ecc::geometry::export_geometry_snapshot(*design, *layout, output_dir, std::move(drc),
+                                                 thumbnail_path.value_or(std::filesystem::path{}), std::move(clock_tree_options),
+                                                 std::move(clock_tree_snapshot))
+      .ok;
 }
 
 bool placeInstance(const std::string& inst_name, int llx, int lly, const std::string& orient, const std::string& cellmaster,
@@ -290,7 +360,7 @@ pybind11::dict syncInstanceGeometry(const std::string& inst_name)
   return result;
 }
 
-bool saveGeometrySessionSnapshot(const std::string& output_dir)
+bool saveGeometrySessionSnapshot(const std::filesystem::path& output_dir)
 {
   return geometry_edit_session().write_snapshot(output_dir).ok;
 }
@@ -301,9 +371,9 @@ bool resetGeometrySession()
   return true;
 }
 
-bool saveData(const std::string& path)
+bool saveData(const std::filesystem::path& path)
 {
-  return dmInst->saveData(path);
+  return dmInst->saveData(path.string());
 }
 
 bool resetData()
@@ -315,21 +385,21 @@ bool resetData()
   return true;
 }
 
-bool loadData(const std::string& path)
+bool loadData(const std::filesystem::path& path)
 {
   // DataManager::loadData begins by resetting its current IdbBuilder, so the
   // session must be cleared before it can invalidate its design/layout
   // pointers. Callers initialize a new geometry session after a successful
   // load.
   geometry_edit_session().reset();
-  return dmInst->loadData(path);
+  return dmInst->loadData(path.string());
 }
 
-bool writeAbstractLef(const std::string& output_lef_path)
+bool writeAbstractLef(const std::filesystem::path& output_lef_path)
 {
   namespace fs = std::filesystem;
 
-  return dmInst->saveLef(output_lef_path);
+  return dmInst->saveLef(output_lef_path.string());
 }
 
 }  // namespace python_interface

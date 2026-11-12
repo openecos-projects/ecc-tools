@@ -1,0 +1,10 @@
+# Corner to corner: 40 in x and 40 in y gives a Euclidean distance of 56.6 < 90.
+# n3 is 64/64 away from n1 (90.5 >= 90) and must stay clean.
+case prl_spacing_corner
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 spacing=90
+cut V1
+result n1 M1 0 0 1000 500
+result n2 M1 1040 540 2000 1000
+result n3 M1 -1064 -564 -64 -64
+expect parallel_run_length_spacing M1 1000 500 1040 540 nets=n1,n2 required=90

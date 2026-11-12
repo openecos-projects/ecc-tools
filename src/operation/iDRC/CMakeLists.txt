@@ -34,11 +34,15 @@ set(HOME_IDRC ${HOME_OPERATION}/iDRC)
 
 set(IDRC_INTERFACE ${HOME_IDRC}/interface)
 set(IDRC_SOURCE ${HOME_IDRC}/source)
+set(IDRC_TEST ${HOME_IDRC}/test)
 
 ############################ cmake subdirectory ############################
 
 add_subdirectory(${IDRC_INTERFACE})
 add_subdirectory(${IDRC_SOURCE})
+if(BUILD_TESTING)
+    add_subdirectory(${IDRC_TEST})
+endif()
 
 ########################################################
 

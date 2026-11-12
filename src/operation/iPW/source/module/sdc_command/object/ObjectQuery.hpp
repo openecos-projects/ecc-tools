@@ -18,6 +18,7 @@
 
 #include "Database.hpp"
 #include "PWHeader.hpp"
+#include "sdc_data_manager/SdcObject.hpp"
 namespace ipw::sdc {
 
 class SdcTclCmd;
@@ -29,6 +30,9 @@ enum class QueryObjectType
   kCell,
   kNet,
   kClock,
+  kLibrary,
+  kLibCell,
+  kLibPin,
   kAny
 };
 
@@ -39,17 +43,36 @@ struct ObjectQueryOptions
   bool exact = false;
   bool hierarchical = false;
   std::string filter;
-  std::vector<std::string> of_objects;
+  bool has_of_objects = false;
+  std::vector<Tcl_Obj*> of_objects;
 };
 
 std::vector<std::string> parseObjectPatterns(const std::string& text, bool regexp);
-std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, bool regexp = false);
-std::vector<std::string> findObjects(Database& database, const std::vector<std::string>& patterns, QueryObjectType type, const ObjectQueryOptions& options);
+std::vector<std::string> findObjects(
+    Database& database,
+    const std::vector<std::string>& patterns,
+    QueryObjectType type,
+    bool regexp = false
+);
+std::vector<std::string> findObjects(
+    Database& database,
+    const std::vector<std::string>& patterns,
+    QueryObjectType type,
+    const ObjectQueryOptions& options
+);
+std::vector<std::pair<QueryObjectType, std::string>> resolveClockTargets(
+    Database& database,
+    const std::vector<Tcl_Obj*>& objects,
+    bool clocks_only = false
+);
+std::set<std::string> findClocks(Database& database, const std::vector<Tcl_Obj*>& objects);
+std::set<std::string> findClocksFromObjects(Database& database, const std::vector<std::string>& objects);
+std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects);
 std::set<std::string> findClocks(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findClockSources(Database& database, const std::vector<std::string>& objects);
 
 std::vector<std::string> getPortPinNames(Database& database, const std::vector<std::string>& object_list);
-std::vector<std::string> getObjectNames(Database& database, const std::string& object_list);
+std::vector<std::string> getObjectNames(Database& database, const std::string& object_list, bool name_only = false);
 TimingPortConstraint& getOrCreatePortConstraint(Database& database, const std::string& port_name);
 void addObjectQueryOptions(SdcTclCmd& command, bool hierarchical, bool exact, bool of_objects);
 ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command);

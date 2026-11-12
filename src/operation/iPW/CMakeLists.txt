@@ -29,6 +29,10 @@ set(IPW_SOURCE ${HOME_IPW}/source)
 add_subdirectory(${IPW_INTERFACE})
 add_subdirectory(${IPW_SOURCE})
 
+if (BUILD_TESTING)
+    add_subdirectory(${HOME_IPW}/test)
+endif ()
+
 ########################################################
 
 message(STATUS "############## iPW: END CMAKE ##############\n")

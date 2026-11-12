@@ -21,31 +21,82 @@
  * @brief Parsed Liberty and SDC facts must retain their meaning through timing evaluation.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <iterator>
+#include <map>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <system_error>
+#include <unordered_map>
 #include <utility>
+#include <vector>
+
+#include "DataManager.hpp"
+#include "Database.hpp"
+#if __has_include(<tcl8.6/tcl.h>)
+#include <tcl8.6/tcl.h>
+#else
+#include <tcl.h>
+#endif
 
 #include "FastSTA.hh"
 #include "FastSTAConstraints.hh"
-#include "FastSTAEvents.hh"
+#include "FastSTAPower.hh"
+#include "IdbCellMaster.h"
 #include "IdbLayout.h"
-#include "SDCClockReader.hh"
+#include "IdbUnits.h"
+#include "IstaConstraintReader.hh"
+#include "SdcCommand.hpp"
+#include "TimingConstraints.hh"
 #include "clock_state/FastSTAClockState.hh"
+#include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 #include "liberty/FastSTALiberty.hh"
+#include "liberty/FastSTALibertyModel.hh"
 #include "liberty/Lib.hh"
+#include "network/Network.hpp"
+#include "network/Pin.hpp"
 
 namespace icts_test {
 namespace {
+
+// Set up native Network objects for value-consumer tests. Parsing is exclusively
+// iSTA's frontend; the production loaded-iDB lifecycle has its own adapter tests.
+auto NativeConstraintFacts(const std::string& path) -> icts::SdcClockData
+{
+  EXPECT_FALSE(ista::DataManager::isInitialized());
+  ista::DataManager::initInst();
+  struct OwnedDatabase
+  {
+    ~OwnedDatabase() { ista::DataManager::destroyInst(); }
+  } owned;
+  auto& database = ista::DataManager::getInst().getDatabase();
+  database.network().setName("input_facts");
+  for (const std::string name : {"clk", "clkA", "clkB", "out", "branch", "nested", "inst/A", "buf/A", "buf/Y"}) {
+    auto& pin = database.network().pins()[name];
+    pin.set_full_name(name);
+    pin.set_pin_name(name);
+    pin.set_is_port(name.find('/') == std::string::npos);
+    if (!pin.get_is_port()) {
+      pin.set_instance_name(name == "inst/A" ? "inst" : "buf");
+      pin.set_pin_name(name == "buf/Y" ? "Y" : "A");
+    }
+  }
+  ista::SdcCommand interpreter;
+  ista::sdc::registerSdcCommands(interpreter);
+  EXPECT_EQ(interpreter.evalScriptFile(path), TCL_OK);
+  return icts::IstaConstraintReader::snapshot(database);
+}
 
 class ScopedTimingInput
 {
@@ -120,6 +171,42 @@ class FastSTAInputFactsTestInterface : public ::testing::Test
   icts::Wrapper _wrapper;
 };
 
+TEST_F(FastSTAInputFactsTestInterface, SourceToSequentialPinsUsesTheirLibraryWithUnrelatedIoLoaded)
+{
+  const ScopedTimingInput standard_cells(ReplaceInput(_library, "nom_voltage : 1;", "nom_voltage : 1.08;"));
+  const ScopedTimingInput io_cells("library(IO) { nom_voltage : 2.97; cell(IOPAD) { area : 1; } }");
+  ASSERT_TRUE(standard_cells.ready());
+  ASSERT_TRUE(io_cells.ready());
+  icts::FastStaContext context;
+  context.wrapper = &_wrapper;
+  context.clock_period_ns = 10.0;
+  context.clock_timing_valid = true;
+  icts::FastStaNode clock_source;
+  clock_source.kind = icts::FastStaNodeKind::kSource;
+  clock_source.name = "clk";
+  icts::FastStaNode clock_sink;
+  clock_sink.kind = icts::FastStaNodeKind::kSink;
+  clock_sink.name = "ff/CLK";
+  clock_sink.cell_master = "SEQ";
+  context.nodes = {std::move(clock_source), std::move(clock_sink)};
+  icts::FastStaNet clock_net;
+  clock_net.name = "clk";
+  clock_net.driver_node_id = 0U;
+  clock_net.load_node_ids = {1U};
+  clock_net.load_cap_pf = 0.01;
+  context.nets = {std::move(clock_net)};
+  ASSERT_TRUE(context.liberty_cell_by_master.empty());
+
+  // Loading order must not select a different supply for the same clock net.
+  for (const auto& paths :
+       {std::vector<std::string>{standard_cells.path(), io_cells.path()}, std::vector<std::string>{io_cells.path(), standard_cells.path()}}) {
+    dmInst->get_config().set_lib_paths(paths);
+    ASSERT_TRUE(dmInst->readLib(paths));
+    ASSERT_TRUE(icts::FastStaPower::update(context));
+    EXPECT_NEAR(context.power.switching_power_w, 0.01e-12 * 1.08 * 1.08 / 10e-9, 1e-18);
+  }
+}
+
 TEST_F(FastSTAInputFactsTestInterface, ParsedLeakageDistinguishesMissingZeroPositiveAndInvalid)
 {
   const auto zero = loadModel(_library);
@@ -185,13 +272,31 @@ TEST_F(FastSTAInputFactsTestInterface, ExplicitSdcUnitsCannotSupplyMissingLibert
 {
   const ScopedTimingInput sdc("set_units -time ns -capacitance pf\ncreate_clock -name clk -period 10\n");
   ASSERT_TRUE(sdc.ready());
-  const auto constraints = icts::SdcClockReader(sdc.path(), {.time_unit_ns = 0.0, .capacitance_unit_pf = 0.0}).readClockData();
+  const auto constraints = NativeConstraintFacts(sdc.path());
   ASSERT_EQ(constraints.clocks.size(), 1U);
   EXPECT_DOUBLE_EQ(constraints.clocks.front().period_ns, 10.0);
   EXPECT_FALSE(loadModel(ReplaceInput(_library, "time_unit : \"1ns\";", "")).has_value());
   EXPECT_FALSE(loadModel(ReplaceInput(_library, "capacitive_load_unit(1, pf);", "")).has_value());
-  EXPECT_FALSE(loadModel(ReplaceInput(_library, "capacitive_load_unit(1, pf);", "capacitive_load_unit(1.5, pf);")).has_value());
+  // Unsupported multipliers are rejected by the shared parser before model extraction.
+  const ScopedTimingInput unsupported_units(ReplaceInput(_library, "capacitive_load_unit(1, pf);", "capacitive_load_unit(1.5, pf);"));
+  ASSERT_TRUE(unsupported_units.ready());
+  EXPECT_FALSE(dmInst->readLib({unsupported_units.path()}));
   EXPECT_TRUE(loadModel(_library).has_value());
+}
+
+TEST(FastSTAParsedInputTest, NativeBoundNamesAreExactIdentitiesNotPatterns)
+{
+  icts::FastStaContext context;
+  context.nodes.resize(2U);
+  context.nodes.at(0U).name = "bus[0]";
+  context.nodes.at(0U).top_level = true;
+  context.nodes.at(1U).name = "bus0";
+  context.nodes.at(1U).top_level = true;
+  const icts::SdcObjectRef bound{.kind = icts::SdcObjectKind::kPort, .name = "bus[0]"};
+  EXPECT_TRUE(icts::FastStaConstraints::matches(context, bound, 0U));
+  EXPECT_FALSE(icts::FastStaConstraints::matches(context, bound, 1U));
+  const icts::SdcObjectRef literal_star{.kind = icts::SdcObjectKind::kClock, .name = "*"};
+  EXPECT_FALSE(icts::FastStaConstraints::matches(context, literal_star, 0U, "C"));
 }
 
 auto ParsedClockGraph(const std::string& commands) -> icts::FastStaContext
@@ -199,7 +304,7 @@ auto ParsedClockGraph(const std::string& commands) -> icts::FastStaContext
   const ScopedTimingInput sdc("create_clock -name A -period 10 [get_ports clkA]\ncreate_clock -name B -period 20 [get_ports clkB]\n" + commands);
   EXPECT_TRUE(sdc.ready());
   icts::FastStaContext context;
-  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
+  context.constraints = NativeConstraintFacts(sdc.path());
   EXPECT_TRUE(context.constraints.ok());
   for (const auto* name : {"clkA", "clkB", "out", "branch", "nested", "inst/A"}) {
     icts::FastStaNode node;
@@ -242,12 +347,14 @@ TEST(FastSTAParsedInputTest, GeneratedClockRequiresItsActualMasterAndSourcePath)
   }
   EXPECT_EQ(*master_error, "generated_clock_source_master_mismatch:G");
 
+  // A target the clock graph cannot reach from the source is a warning, not an error:
+  // a black-box boundary (e.g. a PLL output) sits in between, and the waveform is
+  // resolved from the declaration itself.
   auto wrong_branch = ParsedClockGraph(ReplaceInput(correct, "[get_ports clkB]", "[get_ports branch]"));
   const auto path_error = icts::FastStaConstraints::prepare(wrong_branch);
-  if (!path_error.has_value()) {
-    FAIL() << "Expected path_error to have a value.";
-  }
-  EXPECT_EQ(*path_error, "generated_clock_target_not_reached_from_source:G:out");
+  ASSERT_FALSE(path_error.has_value()) << path_error.value_or("");
+  ASSERT_NE(icts::FastStaConstraints::clock(wrong_branch, "G"), nullptr);
+  EXPECT_DOUBLE_EQ(icts::FastStaConstraints::clock(wrong_branch, "G")->period_ns, 40.0);
 
   auto no_clock = ParsedClockGraph(ReplaceInput(correct, "[get_ports clkB]", "[get_pins inst/A]"));
   const auto missing_error = icts::FastStaConstraints::prepare(no_clock);
@@ -266,6 +373,61 @@ TEST(FastSTAParsedInputTest, GeneratedClockRequiresItsActualMasterAndSourcePath)
   ASSERT_FALSE(nested_error.has_value()) << nested_error.value_or("");
   EXPECT_DOUBLE_EQ(icts::FastStaConstraints::clock(nested, "H")->period_ns, 80.0);
   EXPECT_EQ(nested.nodes.at(4U).clock_name, "H");
+}
+
+TEST(FastSTAParsedInputTest, GeneratedClockSeedsBlackBoxTargetAndDownstreamClockTree)
+{
+  const ScopedTimingInput sdc(
+      "create_clock -name REF -period 10 [get_ports ref]\n"
+      "create_generated_clock -name PLL -source [get_ports ref] -master_clock REF -divide_by 2 [get_pins PLL/CKOUT]\n");
+  ASSERT_TRUE(sdc.ready());
+  icts::FastStaContext context;
+  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
+  ASSERT_TRUE(context.constraints.ok());
+  context.nodes = {
+      {.kind = icts::FastStaNodeKind::kSource, .name = "ref", .top_level = true, .domain = icts::FastStaNodeDomain::kLogic, .input = true},
+      {.kind = icts::FastStaNodeKind::kSink, .name = "PLL/CKOUT", .domain = icts::FastStaNodeDomain::kLogic, .output = true},
+      {.kind = icts::FastStaNodeKind::kBufferInput,
+       .name = "buf/A",
+       .inst_name = "buf",
+       .pin_name = "A",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+      {.kind = icts::FastStaNodeKind::kBufferOutput,
+       .name = "buf/Y",
+       .inst_name = "buf",
+       .pin_name = "Y",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .output = true},
+      {.kind = icts::FastStaNodeKind::kSink,
+       .name = "sink/CLK",
+       .inst_name = "sink",
+       .pin_name = "CLK",
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+  };
+  context.nodes.at(0U).output_net_ids = {};
+  context.nodes.at(1U).output_net_ids = {0U};
+  context.nodes.at(2U).incoming_net_id = 0U;
+  context.nodes.at(3U).output_net_ids = {1U};
+  context.nodes.at(4U).incoming_net_id = 1U;
+  context.nets = {
+      {.name = "pll_clock", .driver_node_id = 1U, .load_node_ids = {2U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+      {.name = "leaf_clock", .driver_node_id = 3U, .load_node_ids = {4U}, .load_rc_node_ids = {}, .ignore_terminals = {}, .driver_timing_by_state = {}},
+  };
+  context.buffer_input_node_id_by_inst = {{"buf", 2U}};
+  context.buffer_output_node_id_by_inst = {{"buf", 3U}};
+
+  const auto error = icts::FastStaConstraints::prepare(context);
+  ASSERT_FALSE(error.has_value()) << error.value_or("");
+  EXPECT_EQ(context.nodes.at(1U).kind, icts::FastStaNodeKind::kSource);
+  EXPECT_EQ(context.nodes.at(1U).domain, icts::FastStaNodeDomain::kClock);
+  EXPECT_EQ(context.nodes.at(1U).clock_name, "PLL");
+  for (const auto node_id : {2U, 3U, 4U}) {
+    EXPECT_EQ(context.nodes.at(node_id).domain, icts::FastStaNodeDomain::kClock);
+    EXPECT_EQ(context.nodes.at(node_id).clock_name, "PLL");
+  }
+  EXPECT_NE(std::ranges::find(context.clock_source_node_ids, 1U), context.clock_source_node_ids.end());
 }
 
 TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUpstreamMasterEdits)
@@ -345,7 +507,7 @@ TEST_F(FastSTAInputFactsTestInterface, PrimaryClockSourcesKeepTheirSeedsAcrossUp
     const ScopedTimingInput sdc(std::string("create_clock -name ROOT -period 10 [get_ports clk]\n") + "create_clock -name SECOND -period 20 [get_pins "
                                 + source_pin + "]\n" + "set_clock_transition 0.12 [get_clocks SECOND]\n" + "set_propagated_clock [get_clocks {ROOT SECOND}]\n");
     ASSERT_TRUE(sdc.ready());
-    const auto constraints = icts::SdcClockReader(sdc.path()).readClockData();
+    const auto constraints = NativeConstraintFacts(sdc.path());
     ASSERT_TRUE(constraints.ok());
     ASSERT_EQ(constraints.clocks.size(), 2U);
     const auto primary_clock = std::ranges::find(constraints.clocks, std::string{"SECOND"}, &icts::SdcClockDecl::clock_name);

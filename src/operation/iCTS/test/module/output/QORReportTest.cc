@@ -21,16 +21,20 @@
  * @brief Verifies that canonical QoR report tables are mirrored exactly to cts.log.
  */
 
-#include <gtest/gtest.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
+#include <ranges>
 #include <string>
 #include <vector>
 
 #include "Logger.hh"
+#include "QOR.hh"
+#include "gtest/gtest.h"
 #include "output/qor/QORReport.hh"
 #include "stage/StageSummary.hh"
 

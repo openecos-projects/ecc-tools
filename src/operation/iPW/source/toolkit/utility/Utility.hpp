@@ -90,7 +90,11 @@ class Utility
     return digit_string;
   }
   template <typename T>
-  static T getConfigValue(std::map<std::string, std::any>& config_map, const std::string& config_name, const T& default_value)
+  static T getConfigValue(
+      std::map<std::string, std::any>& config_map,
+      const std::string& config_name,
+      const T& default_value
+  )
   {
     T value;
     if (exist(config_map, config_name)) {
@@ -144,7 +148,13 @@ class Utility
     if (!std::filesystem::exists(dir_path)) {
       std::error_code system_error;
       if (!std::filesystem::create_directories(dir_path, system_error)) {
-        PWLOG.error(Loc::current(), "Failed to create directory '", dir_path, "', system_error:", system_error.message());
+        PWLOG.error(
+            Loc::current(),
+            "Failed to create directory '",
+            dir_path,
+            "', system_error:",
+            system_error.message()
+        );
       }
     }
   }
@@ -170,9 +180,15 @@ class Utility
     return all;
   }
 
-  static std::ifstream* getInputFileStream(const std::string_view file_path) { return getFileStream<std::ifstream>(std::string{file_path}); }
+  static std::ifstream* getInputFileStream(const std::string_view file_path)
+  {
+    return getFileStream<std::ifstream>(std::string{file_path});
+  }
 
-  static std::ofstream* getOutputFileStream(const std::string_view file_path) { return getFileStream<std::ofstream>(std::string{file_path}); }
+  static std::ofstream* getOutputFileStream(const std::string_view file_path)
+  {
+    return getFileStream<std::ofstream>(std::string{file_path});
+  }
 
   template <typename T>
   static T* getFileStream(const std::string_view file_path)

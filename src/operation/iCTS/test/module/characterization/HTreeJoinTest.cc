@@ -21,14 +21,13 @@
  * @brief H-tree characterization join tests.
  */
 
-#include <gtest/gtest.h>
-
 #include <string>
 #include <vector>
 
 #include "characterization/Characterization.hh"
 #include "data_manager/characterization/HTreeTopologyChar.hh"
 #include "data_manager/characterization/PatternId.hh"
+#include "gtest/gtest.h"
 #include "module/characterization/fixture/CharacterizationUnitCaseData.hh"
 
 namespace icts_test {

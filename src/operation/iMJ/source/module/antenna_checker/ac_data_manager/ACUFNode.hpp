@@ -5,6 +5,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include "MJHeader.hpp"
+
 namespace imj {
 
 class ACUFNode
@@ -12,6 +14,7 @@ class ACUFNode
  public:
   int parent = -1;
   int rank = 0;
+  int32_t gate_node_idx = -1;
   double gate_area = 0.0;
   double diff_area = 0.0;
   bool diff_connected = false;

@@ -21,12 +21,10 @@
  * @brief Thin topology generation test entry.
  */
 
-#include <gtest/gtest-param-test.h>
-#include <gtest/gtest.h>
-
 #include <string>
 #include <vector>
 
+#include "gtest/gtest.h"
 #include "module/topology/topology_gen/fixture/TopologyGenScenario.hh"
 
 namespace icts_test::topology_gen {

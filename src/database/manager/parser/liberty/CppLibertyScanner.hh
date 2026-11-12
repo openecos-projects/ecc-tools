@@ -19,6 +19,11 @@ public:
     
     void ungetToken(int token, YYSTYPE& yylval);
     
+    /// True when the token just returned by yylex() began on a line of its own,
+    /// i.e. at least one newline was skipped between it and the previous token.
+    /// A pushed-back token keeps the answer it had when it was first lexed.
+    bool crossed_newline_before_token() const { return _crossed_newline; }
+    
     void setInput(std::istream* in) {
         _in = in;
         _buffer_cursor = nullptr;
@@ -36,6 +41,8 @@ private:
     int _column;
     int _last_char;
     bool _has_last_char;
+    bool _pending_newline = false;
+    bool _crossed_newline = false;
     
     bool _has_unget_token;
     int _unget_token;

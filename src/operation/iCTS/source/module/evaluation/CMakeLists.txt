@@ -7,9 +7,9 @@ add_library(icts_source_module_evaluation ${ICTS_MODULE_EVALUATION}/Evaluation.c
 target_link_libraries(
   icts_source_module_evaluation
   PUBLIC
-  icts_source_module_evaluation_qor
-  PRIVATE
   icts_source_data_manager
+  PRIVATE
+  icts_source_module_evaluation_qor
   icts_source_toolkit_logger
   icts_source_toolkit_monitor
 )

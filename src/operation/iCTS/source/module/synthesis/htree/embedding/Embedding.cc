@@ -32,7 +32,7 @@
 #include <memory>
 #include <numeric>
 #include <optional>
-#include <ostream>
+#include <ranges>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -40,6 +40,7 @@
 #include <vector>
 
 #include "BufferingPattern.hh"
+#include "Clock.hh"
 #include "Design.hh"
 #include "HTreeTopologyPattern.hh"
 #include "Inst.hh"

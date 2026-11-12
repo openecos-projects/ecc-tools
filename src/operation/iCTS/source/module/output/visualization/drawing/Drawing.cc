@@ -26,7 +26,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
-#include <ostream>
 #include <unordered_set>
 #include <utility>
 #include <vector>

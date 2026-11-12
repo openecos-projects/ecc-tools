@@ -21,8 +21,6 @@
  * @brief Unit tests for standalone local legalization.
  */
 
-#include <gtest/gtest.h>
-
 #include <set>
 #include <string>
 #include <vector>
@@ -30,6 +28,7 @@
 #include "data_manager/spatial/Point.hh"
 #include "data_manager/spatial/Rect.hh"
 #include "data_manager/spatial/Region.hh"
+#include "gtest/gtest.h"
 #include "module/routing/local_legalization/LocalLegalization.hh"
 
 namespace icts_test {

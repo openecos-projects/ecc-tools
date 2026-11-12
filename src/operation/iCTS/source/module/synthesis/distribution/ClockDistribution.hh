@@ -63,6 +63,12 @@ struct ClockDistributionContext
   Pin* root_input = nullptr;
   Pin* root_output = nullptr;
   Net* downstream_net = nullptr;
+
+  // The net the domain's sinks were read from, recorded before the downstream move.
+  // The source-to-root trunk reconnects this frontier net rather than the declared
+  // clock source net, so a traced chain between source and sinks (a pad or mux plus
+  // pre-existing buffers) stays connected. Null when the sinks span more than one net.
+  Net* previous_sink_net = nullptr;
 };
 
 struct ClockDistributionInput

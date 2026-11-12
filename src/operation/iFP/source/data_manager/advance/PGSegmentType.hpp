@@ -23,6 +23,9 @@ enum class PGSegmentType
   kNone,
   kFollowPin,
   kStripe,
+  kRing,
+  kBlockWire,
+  kIoWire,
   kVia
 };
 

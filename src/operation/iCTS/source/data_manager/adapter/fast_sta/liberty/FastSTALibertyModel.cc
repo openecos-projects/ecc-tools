@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iterator>
+#include <ranges>
 #include <utility>
 
 namespace icts {

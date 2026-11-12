@@ -23,9 +23,7 @@
 
 #include "synthesis/topology/sink/SinkBranch.hh"
 
-#include <algorithm>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <string>
 #include <utility>

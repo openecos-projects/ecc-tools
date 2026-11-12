@@ -21,8 +21,6 @@
  * @brief Unit tests for the mathematical analytical H-tree solver.
  */
 
-#include <gtest/gtest.h>
-
 #include <optional>
 #include <string>
 #include <vector>
@@ -33,6 +31,7 @@
 #include "data_manager/characterization/HTreeTopologyChar.hh"
 #include "data_manager/characterization/PatternId.hh"
 #include "data_manager/characterization/ValueLattice.hh"
+#include "gtest/gtest.h"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/analytical_solver/AnalyticalSolver.hh"
 #include "synthesis/htree/analytical_solver/candidate/AnalyticalCandidate.hh"

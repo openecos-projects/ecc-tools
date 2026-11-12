@@ -1,0 +1,12 @@
+# Arrival consumes stored arc values; it must remain independent of the slew/delay pass.
+add_library(ista_data_arrival_propagator DataArrivalPropagator.cpp)
+target_link_libraries(ista_data_arrival_propagator PUBLIC ista_delay_data ista_graph_query PRIVATE ista_sdc ista_toolkit)
+target_include_directories(ista_data_arrival_propagator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(ista_data_slew_propagator DataSlewPropagator.cpp)
+target_link_libraries(ista_data_slew_propagator PUBLIC ista_delay_data ista_delay_calculator ista_graph_query PRIVATE ista_sdc ista_toolkit)
+target_include_directories(ista_data_slew_propagator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_library(ista_data_propagator DataPropagator.cpp StartpointInitializer.cpp)
+target_link_libraries(ista_data_propagator PUBLIC ista_data_arrival_propagator ista_data_slew_propagator PRIVATE ista_toolkit)
+target_include_directories(ista_data_propagator PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

@@ -28,6 +28,7 @@
 
 #include "synthesis/htree/compensation/RootDriverCompensation.hh"
 #include "synthesis/htree/plan/DepthPlan.hh"
+#include "synthesis/htree/region/SinkLoadRegion.hh"
 #include "synthesis/htree/topology_pruning/TopologyPruning.hh"
 
 namespace icts::htree {
@@ -60,8 +61,16 @@ struct HTreeSelectionBuild
 {
   bool selected = false;
   std::string failure_reason;
+  SinkLoadRegionViolation failure_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
   HTreeSelectionEngine engine = HTreeSelectionEngine::kDiscrete;
   HTreeSelectedSolution selected_solution;
+
+  auto hasRecoverableCapacitanceFailure() const -> bool
+  {
+    return !selected && recovery_failure != SinkLoadRegionRecoveryFailure::kSingleLoadCapacitance
+           && (failure_violation == SinkLoadRegionViolation::kCapacitance || failure_violation == SinkLoadRegionViolation::kBoundaryLoadCoverage);
+  }
 };
 
 auto FinalizeSelectedHTreeSolution(HTreeSynthesisState& state, const HTreeSelectedSolution& selected_solution) -> bool;

@@ -33,6 +33,7 @@ struct Shape
     kInstancePin = 3,
     kInstanceObs = 4,
     kIOPin = 5,
+    kPatch = 6,
   };
 
   int32_t net_idx = -1;

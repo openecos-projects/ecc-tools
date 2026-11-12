@@ -26,8 +26,10 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <string>
 #include <utility>
 
+#include "FastSTA.hh"
 #include "FastSTADmpCeffSolver.hh"
 #include "FastSTALibertyModel.hh"
 #include "timing/FastSTAClockTiming.hh"

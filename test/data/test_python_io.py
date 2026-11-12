@@ -40,6 +40,18 @@ def test_iemir_python_api_matches_tcl_commands():
         assert hasattr(ecc_py, command), f"missing Python iEMIR binding: {command}"
 
 
+def test_clock_tree_graph_bindings_are_exposed():
+    assert callable(ecc_py.sta_clock_graph)
+    assert callable(ecc_py.cts_clock_graph)
+
+
+def test_geometry_snapshot_accepts_clock_tree_payload():
+    signature = ecc_py.geometry_snapshot_save.__doc__.splitlines()[0]
+
+    assert "clock_tree_stage" in signature
+    assert "clock_tree_graph" in signature
+
+
 def test_def_round_trip(test_roots):
     result = run_scenario(test_roots, "def_round_trip", timeout=120)
     output = result.output_path("def")

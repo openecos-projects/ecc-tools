@@ -211,6 +211,10 @@ struct FastStaContext
   int32_t dbu_per_um = 0;
   int routing_layer = 0;
   std::optional<double> wire_width_um = std::nullopt;
+  // Design-wide SDC capacitance limit, empty when no SDC rule governs the nets. It
+  // survives incremental resizing because a new master may only tighten it.
+  std::optional<double> sdc_max_cap_pf = std::nullopt;
+  std::optional<double> sdc_max_transition_ns = std::nullopt;
   FastStaNodeId source_node_id = kInvalidFastStaNodeId;
   std::vector<FastStaNode> nodes;
   std::vector<FastStaNet> nets;

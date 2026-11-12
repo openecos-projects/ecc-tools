@@ -139,12 +139,19 @@ void DataManager::buildIOPinNameToIdxMap()
 
 void DataManager::buildIOPinSpecialNet()
 {
-  std::vector<IOPin>& io_pin_list = _database.get_io_pin_list();
-  std::map<std::string, int32_t>& io_pin_name_to_idx_map = _database.get_io_pin_name_to_idx_map();
-  for (PGGlobalConnect& pg_connect : _config.pg_connect_list) {
-    std::map<std::string, int32_t>::iterator io_pin_iter = io_pin_name_to_idx_map.find(pg_connect.get_pin_name());
-    if (io_pin_iter != io_pin_name_to_idx_map.end()) {
-      io_pin_list[io_pin_iter->second].set_special_net(true);
+  std::set<std::string> pg_names;
+  for (const PGGlobalConnect& rule : _config.pg_connect_list) {
+    pg_names.insert(rule.get_net_name());
+  }
+  for (Net& net : _database.get_net_list()) {
+    if (!pg_names.contains(net.get_name())) {
+      continue;
+    }
+    for (const NetPin& pin : net.get_net_pin_list()) {
+      auto iter = _database.get_io_pin_name_to_idx_map().find(pin.get_pin_name());
+      if (pin.get_io() && iter != _database.get_io_pin_name_to_idx_map().end()) {
+        _database.get_io_pin_list()[iter->second].set_special_net(true);
+      }
     }
   }
 }
@@ -186,6 +193,12 @@ void DataManager::printConfig()
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "io_pin");
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "mode: ", GetPlacementModeName()(_config.io_pin_placement_mode), ", layer: ", io_layer_name_string);
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "input_path: ", _config.input_io_pin_path);
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "io_placer");
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "mode: ", GetIOPlacerModeName()(_config.io_placer_mode));
+  FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "io_cell_mode: ", GetPlacementModeName()(_config.io_cell_mode),
+             ", placement_file: ", _config.io_cell_file, ", definition_file: ", _config.io_cell_definition_file,
+             ", power_spacing: ", _config.io_cell_power_spacing_micron,
+             ", auto_resize: ", _config.io_cell_auto_resize ? "true" : "false");
 
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "pg_connect_list");
   std::vector<std::string> pg_net_name_list;
@@ -211,6 +224,32 @@ void DataManager::printConfig()
     pin_name_string += "}";
     FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "pg_net: ", pg_net_name, ", connect_pin: ", pin_name_string,
                ", type: ", pg_net_to_type_map[pg_net_name] == PGNetType::kPower ? "power" : "ground");
+  }
+  if (_config.pg_io_core_connect.enabled) {
+    auto join_names = [](const std::vector<std::string>& names) {
+      if (names.empty()) {
+        return std::string("<auto>");
+      }
+      std::string result = "{";
+      for (size_t i = 0; i < names.size(); ++i) {
+        if (i != 0) result += " ";
+        result += names[i];
+      }
+      return result + "}";
+    };
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "io_core_connect: nets=", join_names(_config.pg_io_core_connect.nets),
+               ", pin_layers=", join_names(_config.pg_io_core_connect.pin_layers),
+               ", min_contacts=", _config.pg_io_core_connect.min_contacts_per_port,
+               ", bridge_min_spacing_micron=", _config.pg_io_core_connect.bridge_min_spacing_micron,
+               ", fail_on_unresolved=", _config.pg_io_core_connect.fail_on_unresolved);
+  }
+  if (!_config.pg_required_net_list.empty()) {
+    std::string required_names = "{";
+    for (size_t i = 0; i < _config.pg_required_net_list.size(); ++i) {
+      if (i != 0) required_names += " ";
+      required_names += _config.pg_required_net_list[i];
+    }
+    FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(2), "required_nets: ", required_names, "}");
   }
   FPLOG.info(Loc::current(), FPUTIL.getSpaceByTabNum(1), "pdn_mesh");
   for (PGRail& pg_rail : _config.pg_rail_list) {

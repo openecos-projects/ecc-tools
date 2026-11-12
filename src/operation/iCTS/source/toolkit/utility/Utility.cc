@@ -31,6 +31,7 @@
 #endif
 
 #ifdef __linux__
+#include <features.h>
 #include <unistd.h>
 #endif
 

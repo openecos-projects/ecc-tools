@@ -21,8 +21,6 @@
  * @brief Unit tests for analytical characterization least-squares fitting.
  */
 
-#include <gtest/gtest.h>
-
 #include <initializer_list>
 #include <optional>
 #include <string>
@@ -30,6 +28,7 @@
 
 #include "analytical_characterization/AnalyticalFit.hh"
 #include "analytical_characterization/AnalyticalModel.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

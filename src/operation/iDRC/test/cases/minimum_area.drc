@@ -1,0 +1,8 @@
+# n1 covers 200x200 = 40000 < 100000; n2 covers 400x300 = 120000.
+case minimum_area
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 min_area=100000
+cut V1
+result n1 M1 0 0 200 200
+result n2 M1 1000 0 1400 300
+expect minimum_area M1 0 0 200 200 nets=n1 required=100000

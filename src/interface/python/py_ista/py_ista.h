@@ -16,13 +16,24 @@
 // ***************************************************************************************
 #pragma once
 
+#include <pybind11/pybind11.h>
 #include <tcl_util.h>
+
+#include <filesystem>
+#include <map>
+#include <optional>
 
 namespace python_interface {
 
-bool initSTA(std::string& config, std::map<std::string, std::string>& config_dict);
+bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool prepareTimingModel();
+bool exportTimingModel();
 bool runSTA();
 bool extractLib();
 bool destroySTA();
+bool isModelReady();
+bool isTimingReady();
+
+pybind11::dict staClockGraph();
 
 }  // namespace python_interface

@@ -25,7 +25,7 @@
 
 #include <algorithm>
 #include <limits>
-#include <ostream>
+#include <ranges>
 
 #include "Logger.hh"
 #include "output/visualization/drawing/Drawing.hh"

@@ -16,11 +16,14 @@
 // ***************************************************************************************
 #include "PWInterface.hpp"
 #include "tcl_pw.h"
+#include "tcl_util.h"
 
 namespace tcl {
 
 TclRunPW::TclRunPW(const char* cmd_name) : TclCmd(cmd_name)
 {
+  addOption(new TclSwitchOption("-avg"));
+  addOption(new TclSwitchOption("-peak"));
 }
 
 unsigned TclRunPW::exec()
@@ -28,7 +31,10 @@ unsigned TclRunPW::exec()
   if (!check()) {
     return 0;
   }
-  PWI.runPW();
+  TclOption* avg_option = getOptionOrArg("-avg");
+  TclOption* peak_option = getOptionOrArg("-peak");
+
+  PWI.runPW(peak_option->is_set_val() != 0, avg_option->is_set_val() != 0);
   return 1;
 }
 

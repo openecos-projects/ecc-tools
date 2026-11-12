@@ -16,11 +16,11 @@
 // ***************************************************************************************
 #pragma once
 
-#include <string>
+#include <filesystem>
 
 namespace python_interface {
 
-bool init_fp(const std::string& config);
+bool init_fp(const std::filesystem::path& config);
 bool run_simple_fp();
 bool run_fp();
 bool destroy_fp();

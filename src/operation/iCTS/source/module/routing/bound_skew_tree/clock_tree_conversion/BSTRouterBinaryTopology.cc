@@ -26,7 +26,6 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <ostream>
 #include <ranges>
 #include <string>
 #include <utility>

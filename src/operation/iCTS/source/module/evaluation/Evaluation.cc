@@ -23,13 +23,18 @@
 
 #include "evaluation/Evaluation.hh"
 
+#include <map>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
+#include "QOR.hh"
 #include "data_manager/DataManager.hh"
+#include "evaluation/qor/QOREvaluation.hh"
 
 namespace icts {
 

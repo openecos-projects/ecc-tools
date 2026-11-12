@@ -1,0 +1,18 @@
+add_executable(test_ipw_io_boundary EXCLUDE_FROM_ALL io_boundary_test.cpp)
+target_link_libraries(test_ipw_io_boundary PRIVATE ipw_interface ipw_data_manager ipw_power_propagator idb)
+add_test(NAME ipw_io_boundary COMMAND test_ipw_io_boundary)
+set_tests_properties(ipw_io_boundary PROPERTIES TIMEOUT 30)
+add_executable(test_ipw_bidirectional_graph EXCLUDE_FROM_ALL bidirectional_graph_test.cpp)
+target_link_libraries(test_ipw_bidirectional_graph PRIVATE ipw_interface ipw_source)
+add_test(NAME ipw_bidirectional_graph COMMAND test_ipw_bidirectional_graph)
+set_tests_properties(ipw_bidirectional_graph PROPERTIES TIMEOUT 60)
+
+add_executable(test_ipw_sdc_compatibility EXCLUDE_FROM_ALL sdc_compatibility_test.cpp)
+target_link_libraries(test_ipw_sdc_compatibility PRIVATE ipw_sdc_command ipw_data_manager)
+add_test(NAME ipw_sdc_compatibility COMMAND test_ipw_sdc_compatibility)
+set_tests_properties(ipw_sdc_compatibility PROPERTIES TIMEOUT 30)
+
+add_executable(test_ipw_sdc_parity EXCLUDE_FROM_ALL sdc_parity_test.cpp)
+target_link_libraries(test_ipw_sdc_parity PRIVATE ipw_sdc_command ipw_data_manager)
+add_test(NAME ipw_sdc_parity COMMAND test_ipw_sdc_parity)
+set_tests_properties(ipw_sdc_parity PROPERTIES TIMEOUT 30)

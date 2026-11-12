@@ -27,6 +27,7 @@ class EMMetalRule
   ~EMMetalRule() = default;
   // getter
   std::string& get_name() { return _name; }
+  bool get_has_em_rule() const { return _has_em_rule; }
   double get_em_limit_ma_per_um() { return _em_limit_ma_per_um; }
   double get_em_adjust_um() { return _em_adjust_um; }
   double get_resistance_per_square() { return _resistance_per_square; }
@@ -35,7 +36,7 @@ class EMMetalRule
   double get_coeff_rt2() { return _coeff_rt2; }
   // setter
   void set_name(const std::string& name) { _name = name; }
-  void set_em_limit_ma_per_um(double em_limit_ma_per_um) { _em_limit_ma_per_um = em_limit_ma_per_um; }
+  void set_em_limit_ma_per_um(double em_limit_ma_per_um) { _em_limit_ma_per_um = em_limit_ma_per_um; _has_em_rule = true; }
   void set_em_adjust_um(double em_adjust_um) { _em_adjust_um = em_adjust_um; }
   void set_resistance_per_square(double resistance_per_square) { _resistance_per_square = resistance_per_square; }
   void set_tnom_c(double tnom_c) { _tnom_c = tnom_c; }
@@ -50,6 +51,7 @@ class EMMetalRule
 
  private:
   std::string _name;
+  bool _has_em_rule = false;
   double _em_limit_ma_per_um = 0.0;
   double _em_adjust_um = 0.0;
   double _resistance_per_square = 0.0;
@@ -65,6 +67,7 @@ class EMViaRule
   ~EMViaRule() = default;
   // getter
   std::string& get_name() { return _name; }
+  bool get_has_em_rule() const { return _has_em_rule; }
   double get_em_limit_ma() { return _em_limit_ma; }
   double get_reference_area_um2() { return _reference_area_um2; }
   double get_resistance_per_cut() { return _resistance_per_cut; }
@@ -72,7 +75,7 @@ class EMViaRule
   std::string& get_upper_layer_name() { return _upper_layer_name; }
   // setter
   void set_name(const std::string& name) { _name = name; }
-  void set_em_limit_ma(double em_limit_ma) { _em_limit_ma = em_limit_ma; }
+  void set_em_limit_ma(double em_limit_ma) { _em_limit_ma = em_limit_ma; _has_em_rule = true; }
   void set_reference_area_um2(double reference_area_um2) { _reference_area_um2 = reference_area_um2; }
   void set_resistance_per_cut(double resistance_per_cut) { _resistance_per_cut = resistance_per_cut; }
   void set_lower_layer_name(const std::string& name) { _lower_layer_name = name; }
@@ -81,6 +84,7 @@ class EMViaRule
 
  private:
   std::string _name;
+  bool _has_em_rule = false;
   double _em_limit_ma = 0.0;
   double _reference_area_um2 = 0.0;
   double _resistance_per_cut = 0.0;

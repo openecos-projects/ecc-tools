@@ -9,6 +9,7 @@ endif()
 add_library(irt_planar_router
     ## module planar_router
     ${IRT_MODULE}/planar_router/PlanarRouter.cpp
+    ${IRT_MODULE}/planar_router/pr_data_manager/PRGridGraph.cpp
 )
 
 target_link_libraries(irt_planar_router

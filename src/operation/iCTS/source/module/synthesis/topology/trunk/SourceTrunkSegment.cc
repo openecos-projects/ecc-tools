@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -86,6 +87,21 @@ auto ConnectNet(Net& net, Pin* driver, const std::vector<Pin*>& loads) -> void
     net.add_load(load);
     load->set_net(&net);
   }
+}
+
+// The source net may already carry non-sink loads (e.g. a traced stage input); they
+// must survive the reconnection, so only the sinks being taken over are replaced.
+auto ConnectSourceNet(Net& net, Pin* driver, const std::vector<Pin*>& new_loads, Pin* replaced_sink = nullptr) -> void
+{
+  std::vector<Pin*> loads;
+  loads.reserve(net.get_loads().size() + new_loads.size());
+  for (auto* load : net.get_loads()) {
+    if (load != nullptr && load != replaced_sink && load->get_net() == &net) {
+      loads.push_back(load);
+    }
+  }
+  loads.insert(loads.end(), new_loads.begin(), new_loads.end());
+  ConnectNet(net, driver, loads);
 }
 
 auto ConnectOwnedNet(Net& net, Pin* driver, const std::vector<Pin*>& loads) -> void
@@ -265,7 +281,7 @@ auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::Build& result, Net& sour
   const auto& positions = pattern.get_buffer_positions();
   const std::size_t buffer_count = std::min(cell_masters.size(), positions.size());
   if (buffer_count == 0U) {
-    ConnectNet(source_net, source, {sink});
+    ConnectSourceNet(source_net, source, {sink});
     return true;
   }
 
@@ -287,7 +303,7 @@ auto BuildSourceTrunkSegmentObjects(SourceTrunkSegment::Build& result, Net& sour
     segment_buffers.push_back(created_buffer);
   }
 
-  ConnectNet(source_net, source, {segment_buffers.front().first});
+  ConnectSourceNet(source_net, source, {segment_buffers.front().first}, sink);
   for (std::size_t buffer_index = 0; buffer_index + 1U < segment_buffers.size(); ++buffer_index) {
     CreateNet(result, MakeObjectName(input.object_name_prefix, "top_segment_net_" + std::to_string(buffer_index)), segment_buffers.at(buffer_index).second,
               {segment_buffers.at(buffer_index + 1U).first}, static_cast<int>(buffer_index), buffer_index);
@@ -342,7 +358,7 @@ auto SourceTrunkSegment::build(const Input& input, const Config& config) -> Buil
 
   const int distance_dbu = geometry::Manhattan(source->get_location(), sink->get_location());
   if (distance_dbu <= 0) {
-    ConnectNet(source_net, source, {sink});
+    ConnectSourceNet(source_net, source, {sink});
     result.summary.success = true;
     return result;
   }

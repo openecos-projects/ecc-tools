@@ -19,6 +19,8 @@
 #include "LogLevel.hpp"
 #include "PWHeader.hpp"
 
+#include <mutex>
+
 namespace ipw {
 
 using Loc = std::experimental::source_location;
@@ -87,6 +89,7 @@ class Logger
   std::string _log_file_path;
   std::ofstream* _log_file = nullptr;
   std::vector<std::string> _temp_log_list;
+  std::mutex _log_mutex;
 
   Logger() = default;
   Logger(const Logger& other) = delete;
@@ -127,13 +130,23 @@ class Logger
       std::string::size_type pos = file_name.find_last_of('/') + 1;
       file_name = file_name.substr(pos, file_name.length() - pos);
     }
-    std::string prefix = getString("[PW ", getTimestamp(), " ", getCompressedBase62(std::stoul(getString(std::this_thread::get_id()))), " ", file_name, " ");
+    std::string prefix = getString(
+        "[PW ",
+        getTimestamp(),
+        " ",
+        getCompressedBase62(std::stoul(getString(std::this_thread::get_id()))),
+        " ",
+        file_name,
+        " "
+    );
     std::string suffix = getString(" ", location.function_name());
     std::string message = getString(value, args...);
 
     std::string origin_log = getString(prefix, log_level_char, suffix, "] ", message, "\n");
-    std::string color_log = getString(prefix, log_color_start, log_level_char, log_color_end, suffix, "] ", message, "\n");
+    std::string color_log
+        = getString(prefix, log_color_start, log_level_char, log_color_end, suffix, "] ", message, "\n");
 
+    std::lock_guard<std::mutex> log_lock(_log_mutex);
     if (_log_file != nullptr) {
       if (!_temp_log_list.empty()) {
         for (std::string& temp_log : _temp_log_list) {

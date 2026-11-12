@@ -25,7 +25,6 @@
 
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "HTreeTopologyChar.hh"
@@ -34,6 +33,7 @@
 #include "synthesis/htree/compensation/RootDriverCompensation.hh"
 #include "synthesis/htree/diagnostic/HTreeDiagnostic.hh"
 #include "synthesis/htree/plan/DepthPlan.hh"
+#include "synthesis/htree/region/SinkLoadRegion.hh"
 #include "synthesis/htree/solution/finalization/SolutionFinalizer.hh"
 #include "synthesis/htree/synthesis_state/SynthesisState.hh"
 #include "synthesis/htree/topology_pruning/TopologyPruning.hh"

@@ -218,6 +218,7 @@ class IdbInstanceList
 
   IdbInstance* find_instance(string name);
   IdbInstance* find_instance(size_t index);
+  bool rename_instance(string old_name, string new_name);
   vector<IdbInstance*> find_instance_by_master(string master_name);
   bool contains(IdbInstance* instance);
   bool contains(string name) { return find_instance(name) != nullptr; }

@@ -21,14 +21,13 @@
  * @brief Unit tests for clock routing tree specialization.
  */
 
-#include <gtest/gtest.h>
-
 #include <string>
 #include <vector>
 
 #include "ClockRouteSegmentRC.hh"
 #include "SteinerTree.hh"
 #include "data_manager/spatial/Point.hh"
+#include "gtest/gtest.h"
 #include "module/routing/router/Router.hh"
 
 namespace icts_test {

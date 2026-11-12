@@ -1,0 +1,9 @@
+# Control for minimum_area_split_polygon: A ends at 19000, so A enlarged by the
+# 1000 margin reaches the cluster at x >= 20000 and that cluster sees the whole polygon.
+case minimum_area_split_polygon_control
+die 0 0 100000 100000
+routing M1 dir=H pitch=200 min_area=300000
+cut V1
+result n1 M1 0 0 19000 100
+result n1 M1 19000 0 20500 100
+expect none

@@ -31,8 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "ClockTraceResolver.hh"
-#include "SDCClockReader.hh"
+#include "ClockTrace.hh"
 
 struct LibertyExpr;
 

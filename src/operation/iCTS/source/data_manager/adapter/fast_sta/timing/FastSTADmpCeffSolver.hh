@@ -30,8 +30,20 @@
 #include <tuple>
 #include <utility>
 
-#include "liberty/FastSTALibertyModel.hh"
+#include "FastSTA.hh"
 #include "timing/FastSTAClockTiming.hh"
+
+namespace icts {
+struct FastStaLibertyTable;
+}
+
+namespace icts {
+struct FastStaLibertyCell;
+}
+
+namespace icts {
+struct FastStaLibertyArc;
+}
 
 namespace icts {
 

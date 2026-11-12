@@ -20,6 +20,5 @@ target_link_libraries(irt_supply_analyzer
 
 target_include_directories(irt_supply_analyzer
     PUBLIC
-    ${IRT_MODULE}/supply_analyzer/sa_data_manager
     ${IRT_MODULE}/supply_analyzer
 )

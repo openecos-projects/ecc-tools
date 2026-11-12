@@ -23,14 +23,19 @@
 
 #include "synthesis/htree/characterization/Characterization.hh"
 
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "ClockRouteSegmentRC.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
+#include "SegmentChar.hh"
+#include "Tree.hh"
 #include "characterization/Characterization.hh"
 #include "synthesis/htree/HTree.hh"
 #include "synthesis/htree/characterization/library/CharacterizationLibrary.hh"
@@ -38,7 +43,6 @@
 #include "synthesis/htree/diagnostic/HTreeDiagnostic.hh"
 
 namespace icts {
-class Tree;
 }  // namespace icts
 
 namespace icts::htree {

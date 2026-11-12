@@ -21,17 +21,21 @@
  * @brief Characterization preparation, sample dependencies and handle invalidation.
  */
 
-#include <gtest/gtest.h>
-
 #include <array>
 #include <filesystem>
 #include <limits>
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "FastSTA.hh"
+#include "IdbCellMaster.h"
+#include "IdbLayer.h"
 #include "IdbLayout.h"
+#include "IdbUnits.h"
+#include "dm_config.h"
+#include "gtest/gtest.h"
 #include "idm.h"
 #include "io/Wrapper.hh"
 

@@ -39,7 +39,7 @@
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "QOR.hh"
-#include "evaluation/qor/QOREvaluation.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts {
 namespace {

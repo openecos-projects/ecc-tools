@@ -122,6 +122,17 @@ void DataManager::updateViolationToRTree(ChangeType change_type, const Violation
   }
 }
 
+void DataManager::replaceViolationRTree(const std::vector<Violation>& violation_list)
+{
+  std::set<Violation, CmpViolation> unique_violation_set(violation_list.begin(), violation_list.end());
+  std::vector<Database::ViolationRTree::value_type> value_list;
+  value_list.reserve(unique_violation_set.size());
+  for (const Violation& violation : unique_violation_set) {
+    value_list.emplace_back(RTUTIL.convertToBGRectInt(violation.get_violation_shape().get_real_rect()), violation);
+  }
+  _database.get_violation_rtree() = Database::ViolationRTree(value_list.begin(), value_list.end());
+}
+
 std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> DataManager::getTypeLayerNetFixedRectMap(EXTPlanarRect& region)
 {
   std::map<bool, std::map<int32_t, std::map<int32_t, std::set<EXTLayerRect*>>>> type_layer_net_fixed_rect_map;
@@ -780,14 +791,13 @@ void DataManager::makeGCellAxis()
 std::vector<ScaleGrid> DataManager::makeGCellGridList(Direction direction)
 {
   Die& die = _database.get_die();
-  Row& row = _database.get_row();
-  int32_t row_height = row.get_height();
   int32_t only_offset = getOnlyOffset(direction);
   int32_t only_pitch = getOnlyPitch();
 
+  constexpr int32_t kGCellPitchNum = 15;
   int32_t die_start_scale = (direction == Direction::kVertical ? die.get_real_ll_x() : die.get_real_ll_y());
   int32_t die_end_scale = (direction == Direction::kVertical ? die.get_real_ur_x() : die.get_real_ur_y());
-  int32_t step_length = (row_height / only_pitch) * only_pitch + ((row_height % only_pitch) >= (only_pitch / 2) ? only_pitch : 0);
+  int32_t step_length = kGCellPitchNum * only_pitch;
 
   std::vector<int32_t> gcell_scale_list;
   gcell_scale_list.push_back(die_start_scale);

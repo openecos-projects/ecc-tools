@@ -21,8 +21,6 @@
  * @brief Unit tests for analytical characterization catalog construction.
  */
 
-#include <gtest/gtest.h>
-
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -36,6 +34,7 @@
 #include "data_manager/characterization/PatternId.hh"
 #include "data_manager/characterization/SegmentChar.hh"
 #include "data_manager/characterization/ValueLattice.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

@@ -28,7 +28,8 @@ namespace py = pybind11;
 void register_imp(pybind11::module& m)
 {
   pybind11::class_<PyPlaceDB>(m, "PyPlaceDB")
-      .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr3D", py::arg("resolve_congestion") = "low")
+      .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr3D",
+           py::arg("resolve_congestion") = "low")
       .def("write_macro_placement_back", &PyPlaceDB::writeMacroPlacementBack, py::arg("node_x"), py::arg("node_y"))
       .def("apply_sizing", &PyPlaceDB::applySizing, py::arg("cell_ids"), py::arg("target_master_names"))
       .def("apply_buffer_actions", &PyPlaceDB::applyBufferActions, py::arg("actions"), py::arg("action_digest"))
@@ -73,6 +74,11 @@ void register_imp(pybind11::module& m)
       .def_readwrite("pin2node_map", &PyPlaceDB::pin2node_map)
       .def_readwrite("pin2net_map", &PyPlaceDB::pin2net_map)
       .def_readwrite("timing_schema_version", &PyPlaceDB::timing_schema_version)
+      .def_readwrite("hold_schema_version", &PyPlaceDB::hold_schema_version)
+      .def_readwrite("timing_preparation_mode", &PyPlaceDB::timing_preparation_mode)
+      .def_readwrite("timing_sparse", &PyPlaceDB::timing_sparse)
+      .def_readwrite("timing_min_sparse", &PyPlaceDB::timing_min_sparse)
+      .def_readwrite("timing_preparation", &PyPlaceDB::timing_preparation)
       .def_readwrite("timing_diagnostics", &PyPlaceDB::timing_diagnostics)
       .def_readwrite("timing_clock_names", &PyPlaceDB::timing_clock_names)
       .def_readwrite("timing_clock_info", &PyPlaceDB::timing_clock_info)
@@ -91,6 +97,19 @@ void register_imp(pybind11::module& m)
       .def_readwrite("endpoints_constraint_max_reason", &PyPlaceDB::endpoints_constraint_max_reason)
       .def_readwrite("endpoints_timing_check_max_valid", &PyPlaceDB::endpoints_timing_check_max_valid)
       .def_readwrite("endpoints_timing_check_max_reason", &PyPlaceDB::endpoints_timing_check_max_reason)
+      .def_readwrite("endpoints_min_valid", &PyPlaceDB::endpoints_min_valid)
+      .def_readwrite("endpoints_min_reason", &PyPlaceDB::endpoints_min_reason)
+      .def_readwrite("endpoints_timing_check_min_valid", &PyPlaceDB::endpoints_timing_check_min_valid)
+      .def_readwrite("endpoints_timing_check_min_reason", &PyPlaceDB::endpoints_timing_check_min_reason)
+      .def_readwrite("startpoints_min_valid", &PyPlaceDB::startpoints_min_valid)
+      .def_readwrite("min_inrdelays", &PyPlaceDB::min_inrdelays)
+      .def_readwrite("min_infdelays", &PyPlaceDB::min_infdelays)
+      .def_readwrite("min_inrtrans", &PyPlaceDB::min_inrtrans)
+      .def_readwrite("min_inftrans", &PyPlaceDB::min_inftrans)
+      .def_readwrite("min_outcaps_rise", &PyPlaceDB::min_outcaps_rise)
+      .def_readwrite("min_outcaps_fall", &PyPlaceDB::min_outcaps_fall)
+      .def_readwrite("hold_launches", &PyPlaceDB::hold_launches)
+      .def_readwrite("hold_contexts", &PyPlaceDB::hold_contexts)
       .def_readwrite("clock_pins", &PyPlaceDB::clock_pins)
       .def_readwrite("FF_ids", &PyPlaceDB::FF_ids)
       .def_readwrite("clk_pin_r_aat", &PyPlaceDB::clk_pin_r_aat)
@@ -111,6 +130,8 @@ void register_imp(pybind11::module& m)
       .def_readwrite("backend_endpoint_fRAT", &PyPlaceDB::backend_endpoint_fRAT)
       .def_readwrite("backend_endpoint_rSlew", &PyPlaceDB::backend_endpoint_rSlew)
       .def_readwrite("backend_endpoint_fSlew", &PyPlaceDB::backend_endpoint_fSlew)
+      .def_readwrite("backend_endpoint_min_rSlew", &PyPlaceDB::backend_endpoint_min_rSlew)
+      .def_readwrite("backend_endpoint_min_fSlew", &PyPlaceDB::backend_endpoint_min_fSlew)
       .def_readwrite("backend_endpoint_min_rAAT", &PyPlaceDB::backend_endpoint_min_rAAT)
       .def_readwrite("backend_endpoint_min_fAAT", &PyPlaceDB::backend_endpoint_min_fAAT)
       .def_readwrite("backend_endpoint_min_rRAT", &PyPlaceDB::backend_endpoint_min_rRAT)
@@ -170,12 +191,17 @@ void register_imp(pybind11::module& m)
       .def_readwrite("pin_2_libpin_offset", &PyPlaceDB::pin_2_libpin_offset)
       .def_readwrite("flat_lib_pin_offset_x", &PyPlaceDB::flat_lib_pin_offset_x)
       .def_readwrite("flat_lib_pin_offset_y", &PyPlaceDB::flat_lib_pin_offset_y)
+      .def_readwrite("flat_lib_pin_names", &PyPlaceDB::flat_lib_pin_names)
       .def_readwrite("flat_lib_pin_cap", &PyPlaceDB::flat_lib_pin_cap)
       .def_readwrite("flat_lib_pin_rcap", &PyPlaceDB::flat_lib_pin_rcap)
       .def_readwrite("flat_lib_pin_fcap", &PyPlaceDB::flat_lib_pin_fcap)
+      .def_readwrite("flat_lib_pin_min_rcap", &PyPlaceDB::flat_lib_pin_min_rcap)
+      .def_readwrite("flat_lib_pin_min_fcap", &PyPlaceDB::flat_lib_pin_min_fcap)
       .def_readwrite("flat_lib_pin_cap_limit", &PyPlaceDB::flat_lib_pin_cap_limit)
       .def_readwrite("flat_lib_pin_slew_limit", &PyPlaceDB::flat_lib_pin_slew_limit)
       .def_readwrite("flat_libarc_info", &PyPlaceDB::flat_libarc_info)
+      .def_readwrite("flat_libarc_check_types", &PyPlaceDB::flat_libarc_check_types)
+      .def_readwrite("flat_libarc_is_latch_data", &PyPlaceDB::flat_libarc_is_latch_data)
       .def_readwrite("f_delay_flat_luts_values", &PyPlaceDB::f_delay_flat_luts_values)
       .def_readwrite("f_delay_flat_luts_trans_table", &PyPlaceDB::f_delay_flat_luts_trans_table)
       .def_readwrite("f_delay_flat_luts_cap_table", &PyPlaceDB::f_delay_flat_luts_cap_table)
@@ -231,12 +257,12 @@ void register_imp(pybind11::module& m)
   m.def(
       "pydb",
       [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-         bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density) {
+         bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only) {
         return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
-                         include_m2_pg_rail_density);
+                         include_m2_pg_rail_density, timing_model_only);
       },
       py::arg("db"), py::arg("numRoutingGridsX"), py::arg("numRoutingGridsY"), py::arg("with_routability"), py::arg("with_sta"),
-      py::arg("include_m2_pg_rail_blockage") = false, py::arg("include_m2_pg_rail_density") = true,
+      py::arg("include_m2_pg_rail_blockage") = false, py::arg("include_m2_pg_rail_density") = true, py::arg("timing_model_only") = false,
       "Convert PlaceDB to PyPlaceDB");
 }
 

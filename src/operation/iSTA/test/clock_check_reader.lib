@@ -1,0 +1,19 @@
+library (pulse_attributes) {
+  delay_model : table_lookup;
+  time_unit : "1ps"; capacitive_load_unit (1,pf);
+  voltage_unit : "100mV"; nom_voltage : 33;
+  type (two_bits) { base_type : array; data_type : bit; bit_width : 2; bit_from : 1; bit_to : 0; downto : true; }
+  cell (clock_cell) {
+    pin (CK) { direction : input; clock : true; min_period : 1200; min_pulse_width_high : 600; min_pulse_width_low : 700; }
+    pin (Y) { direction : output; function : "CK";
+      timing () { related_pin : "CK"; timing_sense : positive_unate;
+        cell_rise(scalar) { values("100"); }
+        rise_transition(scalar) { values("100"); }
+      }
+    }
+    bus (BUS) { bus_type : two_bits; direction : input; clock : true;
+      min_period : 1200; min_pulse_width_high : 600; min_pulse_width_low : 700;
+      pin (BUS[1:0]) { direction : input; }
+    }
+  }
+}

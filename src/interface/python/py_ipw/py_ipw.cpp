@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "py_ipw.h"
 
+#include "py_path_utils.h"
 #include "PWInterface.hpp"
 
 namespace python_interface {
@@ -23,11 +24,12 @@ namespace python_interface {
 bool initPwConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initPwConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
-bool initPW(std::string& config, std::map<std::string, std::string>& config_dict)
+bool initPW(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
 {
+  const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
 
-  bool pass = config.empty() ? true : initPwConfigMapByJSON(config, config_map);
+  bool pass = config_.empty() ? true : initPwConfigMapByJSON(config_, config_map);
   if (!pass) {
     return false;
   }
@@ -36,9 +38,9 @@ bool initPW(std::string& config, std::map<std::string, std::string>& config_dict
   return true;
 }
 
-bool runPW()
+bool runPW(const bool is_peak, const bool is_avg)
 {
-  PWI.runPW();
+  PWI.runPW(is_peak, is_avg);
   return true;
 }
 

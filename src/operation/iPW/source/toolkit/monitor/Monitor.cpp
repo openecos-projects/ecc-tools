@@ -26,7 +26,9 @@ namespace ipw {
 std::string Monitor::getStatsInfo()
 {
   std::string stats_info;
-  stats_info = PWUTIL.getString(" (elapsed = ", getElapsedTime(), ", cpu = ", getCPUTime(), ", mem = ", getUsageMemory(), ") ");
+  stats_info
+      = PWUTIL
+            .getString(" (elapsed = ", getElapsedTime(), ", cpu = ", getCPUTime(), ", mem = ", getUsageMemory(), ") ");
   updateStats();
   return stats_info;
 }
@@ -74,8 +76,8 @@ double Monitor::getCurrCPUTime()
   if (0 != getrusage(RUSAGE_SELF, &usage)) {
     PWLOG.error(Loc::current(), "Unable to get rusage!");
   }
-  return static_cast<double>(usage.ru_utime.tv_sec) + static_cast<double>(usage.ru_utime.tv_usec) / 1000000.0 + static_cast<double>(usage.ru_stime.tv_sec)
-         + static_cast<double>(usage.ru_stime.tv_usec) / 1000000.0;
+  return static_cast<double>(usage.ru_utime.tv_sec) + static_cast<double>(usage.ru_utime.tv_usec) / 1000000.0
+         + static_cast<double>(usage.ru_stime.tv_sec) + static_cast<double>(usage.ru_stime.tv_usec) / 1000000.0;
 }
 
 double Monitor::getCurrUsageMemory()

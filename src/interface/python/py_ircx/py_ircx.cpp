@@ -55,8 +55,9 @@ bool destroy_rcx()
   return true;
 }
 
-bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
+bool init_rcx(const std::filesystem::path& config, const std::optional<std::string>& pdk)
 {
+  const std::string config_ = config.string();
   active_backend = RCXBackendType::kNone;
 
   if (!validate_pdk(pdk)) {
@@ -64,13 +65,13 @@ bool init_rcx(const std::string& config, const std::optional<std::string>& pdk)
   }
 
   if (is_ics55_pdk(pdk)) {
-    ircx_ics55_init(config.c_str(), dmInst->get_idb_design());
+    ircx_ics55_init(config_.c_str(), dmInst->get_idb_design());
     active_backend = RCXBackendType::kIcs55;
     return true;
   }
 
   std::map<std::string, std::any> config_map;
-  config_map["-config"] = config;
+  config_map["-config"] = config_;
   RCXI.initRCX(config_map);
   active_backend = RCXBackendType::kNative;
   return true;

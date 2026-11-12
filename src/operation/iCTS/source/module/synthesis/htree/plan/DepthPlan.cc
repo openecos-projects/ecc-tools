@@ -27,6 +27,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -66,6 +67,9 @@ auto RecordTopologyDepthCandidateBuild(unsigned depth, bool used_explicit_target
       .selected = false,
       .used_explicit_target_depth = used_explicit_target_depth,
       .failure_reason = evaluation.failure_reason,
+      .failure_violation = evaluation.failure_violation,
+      .recovery_failure = evaluation.recovery_failure,
+      .coverage_rejected_count = evaluation.coverage_rejected_count,
       .final_frontier_count = evaluation.final_frontier_count,
       .candidate_solution_count = evaluation.candidate_solution_count,
       .candidate_frontier_entry_count = evaluation.candidate_frontier_entries.size(),
@@ -77,6 +81,8 @@ auto RecordTopologyDepthCandidateBuild(unsigned depth, bool used_explicit_target
       .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
       .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
       .used_boundary_relaxation = evaluation.used_boundary_relaxation,
+      .used_cap_fallback = evaluation.used_cap_fallback,
+      .cap_overrun_pf = evaluation.cap_overrun_pf,
       .selected_power_w = evaluation.best_char.has_value() ? evaluation.best_char->get_power() : 0.0,
       .selected_delay_ns = evaluation.best_char.has_value() ? evaluation.best_char->get_delay() : 0.0,
   });
@@ -94,6 +100,8 @@ auto AppendGlobalCandidateRefs(std::size_t candidate_index, const CandidateBuild
         .split_local_depth = evaluation.split_local_depth,
         .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
         .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
+        .used_cap_fallback = evaluation.used_cap_fallback,
+        .cap_overrun_pf = evaluation.cap_overrun_pf,
     });
   }
   for (const auto& entry : evaluation.candidate_frontier_entries) {
@@ -105,6 +113,8 @@ auto AppendGlobalCandidateRefs(std::size_t candidate_index, const CandidateBuild
         .split_local_depth = evaluation.split_local_depth,
         .split_triggered_by_fanout = evaluation.split_triggered_by_fanout,
         .split_triggered_by_capacitance = evaluation.split_triggered_by_capacitance,
+        .used_cap_fallback = evaluation.used_cap_fallback,
+        .cap_overrun_pf = evaluation.cap_overrun_pf,
     });
   }
 }
@@ -131,9 +141,9 @@ auto SearchTopologyDepthCandidates(const Tree& topology, const std::vector<HTree
     auto candidate_result
         = EvaluateTopologyDepthCandidate(topology, full_level_plans, depth, segment_frontier_catalog, segment_pattern_library, base_boundary_constraints,
                                          exploration.output.sink_load_region_legality_context, char_slew_steps, compensation_pass, fanout_config);
-    RecordTopologyDepthCandidateBuild(depth, used_explicit_target_depth, candidate_result, exploration.summary.depth_summaries);
     ReduceCandidateBuildEvaluationForGlobalSelection(candidate_result.evaluation, topology, segment_pattern_library,
                                                      exploration.output.sink_load_region_legality_context, fanout_config.allow_boundary_relaxation);
+    RecordTopologyDepthCandidateBuild(depth, used_explicit_target_depth, candidate_result, exploration.summary.depth_summaries);
     exploration.output.candidate_evaluations.push_back(std::move(candidate_result.evaluation));
     const auto candidate_index = exploration.output.candidate_evaluations.size() - 1U;
     AppendGlobalCandidateRefs(candidate_index, exploration.output.candidate_evaluations.back(), exploration.output.global_feasible_pool,

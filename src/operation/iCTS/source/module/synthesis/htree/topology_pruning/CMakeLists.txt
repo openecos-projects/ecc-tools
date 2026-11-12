@@ -8,10 +8,10 @@ target_link_libraries(
   icts_source_module_synthesis_htree_topology_pruning
   PUBLIC
   icts_source_module_synthesis_htree_constraint
+  icts_source_module_synthesis_htree_region
   icts_source_module_synthesis_htree_segment_pruning
   PRIVATE
   icts_source_module_synthesis_htree_compensation
-  icts_source_module_synthesis_htree_region
 )
 
 target_include_directories(

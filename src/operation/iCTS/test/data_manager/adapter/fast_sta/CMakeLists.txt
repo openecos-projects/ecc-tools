@@ -2,6 +2,7 @@ icts_add_test_executable(
   icts_test_data_manager_adapter_fast_sta
   SOURCES
     ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTATest.cc
+    ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTAPowerTest.cc
     ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTAIncrementalTest.cc
     ${ICTS_TEST}/data_manager/adapter/fast_sta/FastSTALifecycleTest.cc
     ${ICTS_TEST}/data_manager/adapter/fast_sta/fixture/FastSTATestModel.cc
@@ -11,6 +12,8 @@ icts_add_test_executable(
   LIBS
     icts_source_data_manager_adapter_fast_sta
     icts_source_data_manager_adapter_sdc
+    ista_sdc_frontend
+    ista_data_manager
     icts_source_data_manager_adapter_fast_sta_clock_net_parasitic
     icts_source_data_manager_adapter_fast_sta_clock_sizing
     icts_source_data_manager_adapter_fast_sta_power

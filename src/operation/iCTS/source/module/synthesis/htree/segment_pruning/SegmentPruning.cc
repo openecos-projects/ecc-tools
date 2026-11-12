@@ -29,12 +29,14 @@
 #include <cstddef>
 #include <limits>
 #include <ranges>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "BufferingPattern.hh"
 #include "LogTable.hh"
+#include "Logger.hh"
 #include "PatternId.hh"
 #include "SegmentChar.hh"
 #include "characterization/Characterization.hh"

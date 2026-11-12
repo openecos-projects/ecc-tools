@@ -1,0 +1,13 @@
+# Production cluster parameters: pitch 200 -> cluster size 20000, expand margin 1000.
+# n1 and n2 abut along x=20000, which is a short (reported as the zero-area overlap).
+# n0 touches neither; it only moves the cluster origin to (0,0), which puts a
+# cluster boundary exactly on x=20000. The short must still be reported.
+case metal_short_on_cluster_boundary
+die 0 0 100000 100000
+routing M1 dir=H pitch=200
+cut V1
+rule metal_short
+result n0 M1 0 0 100 100
+result n1 M1 19000 0 20000 100
+result n2 M1 20000 0 21000 100
+expect metal_short M1 20000 0 20000 100 nets=n1,n2 required=0

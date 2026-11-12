@@ -190,7 +190,13 @@ auto TopologyGen::buildWithConfig(const std::vector<Pin*>& loads, const Input& i
   const unsigned max_depth = calcMaxDepth(loads.size(), branching_factor);
   unsigned height = max_depth;
   if (config.target_depth.has_value()) {
-    height = std::min(*config.target_depth, max_depth);
+    // A requested depth past the fanout-derived maximum keeps growing the tree
+    // until every non-empty leaf holds a single load. Clamping to max_depth
+    // made capacitance-driven deepening a no-op.
+    const unsigned single_load_depth
+        = loads.size() <= 1U ? 0U
+                             : static_cast<unsigned>(std::ceil(std::log(static_cast<double>(loads.size())) / std::log(static_cast<double>(branching_factor))));
+    height = std::min(*config.target_depth, std::max(max_depth, single_load_depth));
     leaf_count = 1U;
     for (unsigned level = 0U; level < height; ++level) {
       if (leaf_count > std::numeric_limits<std::size_t>::max() / branching_factor) {
@@ -354,6 +360,9 @@ auto TopologyGen::balanceTopology(Tree& tree, int min_x, int min_y, int max_x, i
       if (parent == nullptr) {
         continue;
       }
+      if (node->get_loads().empty()) {
+        continue;
+      }
       sum_dist += geometry::Manhattan(node->get_position(), parent->get_position());
       ++count;
     }
@@ -370,6 +379,11 @@ auto TopologyGen::balanceTopology(Tree& tree, int min_x, int min_y, int max_x, i
       }
       auto* parent = tree.get_node(node->get_parent());
       if (parent == nullptr) {
+        continue;
+      }
+      if (node->get_loads().empty()) {
+        // An empty leaf has no physical anchor; balancing it from (0, 0) would
+        // drag sibling geometry. Skip it the same way embedding does.
         continue;
       }
       const auto current_dist = static_cast<double>(geometry::Manhattan(node->get_position(), parent->get_position()));

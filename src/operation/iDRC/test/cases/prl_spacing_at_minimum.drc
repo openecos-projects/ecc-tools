@@ -1,0 +1,9 @@
+# Legal twin of prl_spacing_violation: the gap is exactly the required 90.
+case prl_spacing_at_minimum
+die 0 0 10000 10000
+routing M1 dir=H pitch=200 spacing=90
+cut V1
+result n1 M1 0 0 1980 500
+result n2 M1 2070 0 3000 500
+expect none
+vary pitch=20

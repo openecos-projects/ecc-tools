@@ -1,0 +1,3 @@
+add_executable(test_imj_design_tools ${IMJ_TEST}/test_design_tools/test_design_tools.cpp)
+target_link_libraries(test_imj_design_tools PRIVATE imj_interface imj_driver_analyzer imj_def_cutter idm)
+add_test(NAME test_imj_design_tools COMMAND test_imj_design_tools)

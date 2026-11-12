@@ -15,7 +15,9 @@
 // ***************************************************************************************
 #pragma once
 
+#include "AnalysisType.hpp"
 #include "PWHeader.hpp"
+#include "TransType.hpp"
 
 namespace ipw {
 
@@ -29,7 +31,10 @@ class TimingPoint
   std::map<AnalysisType, std::map<TransType, double>>& get_data_slew_map() { return _data_slew_map; }
   bool get_is_clock_point() const { return _is_clock_point; }
   // setter
-  void set_clock_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& clock_slew_map) { _clock_slew_map = clock_slew_map; }
+  void set_clock_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& clock_slew_map)
+  {
+    _clock_slew_map = clock_slew_map;
+  }
   void set_is_clock_point(const bool is_clock_point) { _is_clock_point = is_clock_point; }
   // function
 

@@ -49,6 +49,7 @@ class Database
   std::vector<Row>& get_new_row_list() { return _new_row_list; }
   std::vector<Instance>& get_instance_list() { return _instance_list; }
   std::map<std::string, int32_t>& get_instance_name_to_idx_map() { return _instance_name_to_idx_map; }
+  std::map<std::string, std::string>& get_instance_rename_map() { return _instance_rename_map; }
   std::map<std::string, CellMaster>& get_cell_master_map() { return _cell_master_map; }
   std::vector<RoutingLayer>& get_routing_layer_list() { return _routing_layer_list; }
   std::map<std::string, int32_t>& get_routing_layer_name_to_idx_map() { return _routing_layer_name_to_idx_map; }
@@ -72,6 +73,7 @@ class Database
   const std::vector<Row>& get_new_row_list() const { return _new_row_list; }
   const std::vector<Instance>& get_instance_list() const { return _instance_list; }
   const std::map<std::string, int32_t>& get_instance_name_to_idx_map() const { return _instance_name_to_idx_map; }
+  const std::map<std::string, std::string>& get_instance_rename_map() const { return _instance_rename_map; }
   const std::map<std::string, CellMaster>& get_cell_master_map() const { return _cell_master_map; }
   const std::vector<RoutingLayer>& get_routing_layer_list() const { return _routing_layer_list; }
   const std::map<std::string, int32_t>& get_routing_layer_name_to_idx_map() const { return _routing_layer_name_to_idx_map; }
@@ -94,6 +96,7 @@ class Database
   void set_new_row_list(const std::vector<Row>& new_row_list) { _new_row_list = new_row_list; }
   void set_instance_list(const std::vector<Instance>& instance_list) { _instance_list = instance_list; }
   void set_instance_name_to_idx_map(const std::map<std::string, int32_t>& instance_name_to_idx_map) { _instance_name_to_idx_map = instance_name_to_idx_map; }
+  void set_instance_rename_map(const std::map<std::string, std::string>& instance_rename_map) { _instance_rename_map = instance_rename_map; }
   void set_cell_master_map(const std::map<std::string, CellMaster>& cell_master_map) { _cell_master_map = cell_master_map; }
   void set_routing_layer_list(const std::vector<RoutingLayer>& routing_layer_list) { _routing_layer_list = routing_layer_list; }
   void set_routing_layer_name_to_idx_map(const std::map<std::string, int32_t>& routing_layer_name_to_idx_map)
@@ -125,6 +128,10 @@ class Database
   std::vector<Row> _new_row_list;
   std::vector<Instance> _instance_list;
   std::map<std::string, int32_t> _instance_name_to_idx_map;
+  // Names changed by IOCellPlacer are applied to the IDB only when output is
+  // emitted.  Keeping the original-to-final map avoids changing the IDB while
+  // the placer is still resolving net and IO-pin bindings.
+  std::map<std::string, std::string> _instance_rename_map;
   std::map<std::string, CellMaster> _cell_master_map;
   std::vector<RoutingLayer> _routing_layer_list;
   std::map<std::string, int32_t> _routing_layer_name_to_idx_map;

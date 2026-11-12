@@ -154,6 +154,7 @@ class PinAccessor
   void buildPANodeNeighbor(PABox& pa_box);
   void buildBoxEnvironment(PABox& pa_box);
   void exemptPinShape(PAModel& pa_model, PABox& pa_box);
+  std::vector<Orientation> getExemptOrientationList(PAPin& pa_pin, bool prefer_horizontal);
   std::vector<int32_t> initTaskSchedule(PABox& pa_box);
   void removeTaskResult(PABox& pa_box, PATask* pa_task);
   void initSingleRouteTask(PABox& pa_box, PATask* pa_task);

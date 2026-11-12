@@ -21,8 +21,6 @@
  * @brief Segment characterization join tests.
  */
 
-#include <gtest/gtest.h>
-
 #include <algorithm>
 #include <string>
 #include <unordered_map>
@@ -33,6 +31,7 @@
 #include "data_manager/characterization/BufferingPattern.hh"
 #include "data_manager/characterization/PatternId.hh"
 #include "data_manager/characterization/SegmentChar.hh"
+#include "gtest/gtest.h"
 #include "module/characterization/fixture/CharacterizationUnitCaseData.hh"
 
 namespace icts_test {

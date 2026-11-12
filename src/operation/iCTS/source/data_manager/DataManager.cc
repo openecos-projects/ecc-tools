@@ -34,15 +34,23 @@
 #include <system_error>
 #include <utility>
 
+#include "ClockLayout.hh"
+#include "Config.hh"
+#include "ConstraintBudgets.hh"
+#include "Design.hh"
+#include "FastSTA.hh"
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
-#include "adapter/sdc/SDCClockReader.hh"
-#include "builder.h"
+#include "QOR.hh"
+#include "Wrapper.hh"
+#include "adapter/sdc/ClockTrace.hh"
+#include "adapter/sdc/IstaConstraintReader.hh"
 #include "design/Clock.hh"
 #include "design/Inst.hh"
 #include "design/Net.hh"
 #include "design/Pin.hh"
+#include "dm_config.h"
 #include "idm.h"
 #include "routing/ClockRouteSegmentRC.hh"
 
@@ -73,6 +81,74 @@ auto hasTimingConstraints(const SdcClockData& constraints) -> bool
 auto countTraceStatus(const ClockTraceSummary& summary, std::string_view status) -> std::size_t
 {
   return static_cast<std::size_t>(std::ranges::count_if(summary.records, [status](const ClockTraceRecord& record) -> bool { return record.status == status; }));
+}
+
+auto electricalScopeName(SdcElectricalScope scope) -> const char*
+{
+  switch (scope) {
+    case SdcElectricalScope::kDesign:
+      return "design";
+    case SdcElectricalScope::kPort:
+      return "port";
+    case SdcElectricalScope::kPin:
+      return "pin";
+    case SdcElectricalScope::kLibPin:
+      return "lib-pin";
+    case SdcElectricalScope::kClock:
+      return "clock";
+  }
+  return "unknown";
+}
+
+auto electricalRuleName(SdcElectricalRule rule) -> const char*
+{
+  switch (rule) {
+    case SdcElectricalRule::kFanout:
+      return "max_fanout";
+    case SdcElectricalRule::kTransition:
+      return "max_transition (ns)";
+    case SdcElectricalRule::kCapacitance:
+      return "max_capacitance (pF)";
+  }
+  return "unknown";
+}
+
+auto designRuleSourceName(const ConstraintBudget& row) -> std::string
+{
+  if (row.rejected) {
+    return "sdc rejected; " + std::string(row.configured ? "config" : "config default");
+  }
+  if (row.from_sdc) {
+    return "sdc";
+  }
+  return row.configured ? "config" : "config default";
+}
+
+// SDC owns the electrical budgets: a design-scoped limit replaces the configured one
+// and the loss is reported once per rule. The resolved values are written into the
+// session configuration because that is the single object every consumer reads.
+auto applyDesignRules(const std::vector<SdcElectricalLimit>& rules, Config& config) -> void
+{
+  LogTableRows rows;
+  for (const auto& row : ApplyConstraintBudgets(rules, config)) {
+    if (row.from_sdc) {
+      CTSLOG.warn(Loc::current(), "CTS design rule ", row.rule, ": SDC ", row.value, " replaces the configured value.");
+    } else if (row.rejected) {
+      CTSLOG.warn(Loc::current(), "CTS design rule ", row.rule, ": the SDC limit is unusable; keeping ", row.value, ".");
+    }
+    rows.push_back({row.rule, ToLogTableCell(row.value), designRuleSourceName(row)});
+  }
+  EmitLogTable(Loc::current(), "CTS Design Rules", {"Rule", "Value", "Source"}, rows);
+  LogTableRows scoped_rows;
+  for (const auto& limit : rules) {
+    if (limit.scope != SdcElectricalScope::kDesign) {
+      scoped_rows.push_back({electricalRuleName(limit.rule), electricalScopeName(limit.scope), limit.object_name, ToLogTableCell(limit.value),
+                             "not applied to global CTS budget"});
+    }
+  }
+  if (!scoped_rows.empty()) {
+    EmitLogTable(Loc::current(), "CTS Scoped Native Constraints", {"Rule", "Scope", "Object", "Value", "Application"}, scoped_rows);
+  }
 }
 
 auto logRuntimeConfiguration(const Config& config, const Wrapper& wrapper, const std::string& config_file) -> void
@@ -352,20 +428,27 @@ auto DataManager::input(const DataManagerInput& input_data) -> DataManagerStatus
 
 auto DataManager::readClockData() -> DataManagerStatus
 {
-  const auto sdc_units = _wrapper.querySdcUnits().value_or(SdcUnits{.time_unit_ns = 0.0, .capacitance_unit_pf = 0.0});
   SdcClockData sdc_clock_data;
   const auto sdc_path = dmInst->get_config().get_sdc_path();
   if (!sdc_path.empty()) {
-    sdc_clock_data = SdcClockReader(sdc_path, sdc_units).readClockData();
+    // Populate the shared raw Liberty generation once; native STA reuses it.
+    static_cast<void>(_wrapper.queryLibertyRevision());
+    sdc_clock_data = IstaConstraintReader::read(_config.get_work_dir());
     if (!sdc_clock_data.ok()) {
       auto status = failureStatus(DataManagerStatusCode::kExternalDataError, "sdc_constraints_rejected");
       status.diagnostics = std::move(sdc_clock_data.diagnostics);
-      if (!status.diagnostics.empty()) {
-        status.message += ": " + status.diagnostics.front();
+      bool first_diagnostic = true;
+      for (const auto& diagnostic : status.diagnostics) {
+        status.message += first_diagnostic ? ": " : "; ";
+        status.message += diagnostic;
+        first_diagnostic = false;
       }
       return status;
     }
   }
+  // The design rules are settled before anything downstream reads a budget, because
+  // SDC is their authority and the configuration is only the fallback.
+  applyDesignRules(sdc_clock_data.electrical_limits, _config);
   std::set<std::string> traceable_clock_names;
   std::map<std::string, double> period_by_clock;
   std::map<std::string, bool> period_resolved_by_clock;
@@ -387,6 +470,41 @@ auto DataManager::readClockData() -> DataManagerStatus
         .clock_data = &sdc_clock_data,
         .max_fanout = _config.get_max_fanout(),
     });
+    // A stage whose select is not pinned can be driven by more than one declared clock.
+    // Ownership stays with the primary clock, but the tree downstream of that stage must
+    // satisfy the tightest clock that can reach it, so its budget is taken from the
+    // candidates the trace recorded stopping there.
+    for (const auto& record : trace.summary.records) {
+      // The transition's own reason lands in `target_kind`; `reason` carries the reader's
+      // classification of the stop.
+      if (record.status != "trace_stop" || record.target_kind != "clock_mux_select_undecidable_generated_clock" || record.net_name.empty()) {
+        continue;
+      }
+      const auto candidate = period_by_clock.find(record.clock_name);
+      if (candidate == period_by_clock.end() || candidate->second <= 0.0) {
+        continue;
+      }
+      // The owner of a net is the clock that accepted it; a clock target's `clock_net_name`
+      // is the clock's own source net, which is a different net.
+      for (const auto& accepted : trace.summary.records) {
+        if (accepted.status != "accepted" || accepted.net_name != record.net_name || accepted.clock_name == record.clock_name) {
+          continue;
+        }
+        auto& owner_period = period_by_clock[accepted.clock_name];
+        if (owner_period > 0.0 && candidate->second < owner_period) {
+          // fast_sta reads the declaration's period, synthesis reads the Clock's: tighten
+          // both, or the two models disagree about the same clock.
+          for (auto& declaration : sdc_clock_data.clocks) {
+            if (declaration.clock_name == accepted.clock_name) {
+              declaration.period_ns = candidate->second;
+            }
+          }
+          CTSLOG.warn(Loc::current(), "CTS data input: clock \"", accepted.clock_name, "\" budget tightened to ", candidate->second, " ns by \"",
+                      record.clock_name, "\" reaching \"", record.net_name, "\".");
+          owner_period = candidate->second;
+        }
+      }
+    }
     logClockTraceSummary(sdc_clock_data, trace);
     if (!trace.ok()) {
       CTSLOG.warn(Loc::current(), "CTS data input rejected SDC clock ownership: ", trace.message);
@@ -399,9 +517,23 @@ auto DataManager::readClockData() -> DataManagerStatus
     }
     for (const auto& clock_name : traceable_clock_names) {
       if (!accepted_clock_names.contains(clock_name)) {
-        CTSLOG.warn(Loc::current(), "CTS data input found no target net for SDC clock \"", clock_name, "\".");
-        return failureStatus(DataManagerStatusCode::kExternalDataError, "clock_trace_no_targets");
+        // Name what the trace actually saw, so an unreachable clock is diagnosable from
+        // the log instead of only from its count.
+        for (const auto& record : trace.summary.records) {
+          if (record.clock_name == clock_name) {
+            CTSLOG.warn(Loc::current(), "  ", clock_name, " trace record: status=", record.status, " net=", record.net_name, " kind=", record.target_kind,
+                        " reason=", record.reason);
+          }
+        }
+        // A declared clock with no reachable clock sink needs no tree: it may be a
+        // reference or generated clock whose only load is a macro. Report what the trace
+        // saw and keep going, as long as some clock is still traceable.
+        CTSLOG.warn(Loc::current(), "CTS data input found no target net for SDC clock \"", clock_name, "\"; it will not be synthesized.");
       }
+    }
+    if (accepted_clock_names.empty()) {
+      CTSLOG.warn(Loc::current(), "CTS data input found no traceable SDC clock with a target net.");
+      return failureStatus(DataManagerStatusCode::kExternalDataError, "clock_trace_no_targets");
     }
   } else {
     logClockTraceSummary(sdc_clock_data, trace);
@@ -455,7 +587,10 @@ auto DataManager::initializeTiming() -> DataManagerStatus
       .wire_width_um = _config.get_wire_width() > 0.0 ? std::optional<double>{_config.get_wire_width()} : std::nullopt,
       .root_input_slew_ns = root_slew_ns,
       .max_cap_pf = _config.has_max_cap() ? std::optional<double>{_config.get_max_cap()} : std::nullopt,
+      .sdc_max_cap_pf = _config.has_sdc_max_cap() ? std::optional<double>{_config.get_sdc_max_cap_pf()} : std::nullopt,
       .max_sink_tran_ns = max_sink_tran_ns,
+      .sdc_max_transition_ns = _config.has_sdc_max_transition() ? std::optional<double>{_config.get_sdc_max_transition_ns()} : std::nullopt,
+      .max_fanout = static_cast<double>(_config.get_max_fanout()),
       .worker_count = Wrapper::queryParallelWorkerCount(),
   });
   Monitor graph_monitor;
@@ -539,9 +674,13 @@ auto DataManager::buildTimingContexts(const Design& design, const ClockLayout& c
   }
   for (const auto& declaration : _timing_constraints.clocks) {
     if (!std::ranges::any_of(candidate.clocks, [&](const auto& entry) -> bool { return entry.first.first == declaration.clock_name; })) {
+      // A declaration with no materialized clock has no tree of its own: it is virtual,
+      // or it is a reference clock whose only load is a macro, which the trace reports and
+      // leaves untraced. Its constraints still apply, so it takes the same
+      // declaration-scoped context a virtual clock takes. A clock that should have been
+      // materialized and was not has already failed the materialization step.
       if (!declaration.is_virtual) {
-        releaseTimingContexts(candidate);
-        return failureStatus(DataManagerStatusCode::kCommitError, "fast_sta_clock_missing:" + declaration.clock_name);
+        CTSLOG.warn(Loc::current(), "FastSTA: clock \"", declaration.clock_name, "\" has no materialized tree; building a declaration-scoped context.");
       }
       auto status = build_one(nullptr, nullptr, declaration.clock_name);
       if (!status.ok()) {
@@ -588,7 +727,9 @@ auto DataManager::synchronizeTimingContexts(const Design& design, const ClockLay
     }
     return result;
   };
-  for (const auto& [identity, id] : _timing_contexts.clocks) {
+  for (const auto& clock_context : _timing_contexts.clocks) {
+    const auto& identity = clock_context.first;
+    const auto id = clock_context.second;
     const Clock* owner = nullptr;
     for (const auto* clock : design.get_clocks()) {
       if (identity == std::pair{clock->get_clock_name(), clock->get_clock_net_name()}) {
@@ -596,8 +737,12 @@ auto DataManager::synchronizeTimingContexts(const Design& design, const ClockLay
         break;
       }
     }
+    // A declaration-scoped context has no owning clock in the design and no net name: it
+    // belongs to a virtual clock, or to a declared clock with no materialized tree (a
+    // reference clock whose only load is a macro). Both are declaration-scoped by
+    // construction, so the empty net name is the property to test, not virtuality.
     if (owner == nullptr && !std::ranges::any_of(_timing_constraints.clocks, [&](const auto& declaration) -> bool {
-          return declaration.is_virtual && declaration.clock_name == identity.first && identity.second.empty();
+          return declaration.clock_name == identity.first && identity.second.empty();
         })) {
       releaseTimingContexts(candidate);
       return failureStatus(DataManagerStatusCode::kCommitError, "fast_sta_synthesis_clock_missing:" + identity.first);
@@ -654,7 +799,9 @@ auto DataManager::timingContextsMatchDesign(const TimingContextSet& contexts, co
       return false;
     }
   }
-  for (const auto& [identity, id] : contexts.clocks) {
+  for (const auto& clock_context : contexts.clocks) {
+    const auto& identity = clock_context.first;
+    const auto id = clock_context.second;
     const Clock* owner = nullptr;
     for (const auto* clock : design.get_clocks()) {
       if (identity == std::pair{clock->get_clock_name(), clock->get_clock_net_name()}) {
@@ -662,8 +809,11 @@ auto DataManager::timingContextsMatchDesign(const TimingContextSet& contexts, co
         break;
       }
     }
+    // Same property as the synthesis commit check: a declaration-scoped context has no
+    // owning clock and no net name, whether the declaration is virtual or is a declared
+    // clock with no materialized tree.
     if (owner == nullptr && !std::ranges::any_of(_timing_constraints.clocks, [&](const auto& declaration) -> bool {
-          return declaration.is_virtual && identity.first == declaration.clock_name && identity.second.empty();
+          return declaration.clock_name == identity.first && identity.second.empty();
         })) {
       return false;
     }

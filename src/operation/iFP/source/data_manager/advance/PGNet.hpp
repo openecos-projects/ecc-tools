@@ -32,6 +32,7 @@ class PGNet
   PGNetType get_type() const { return _type; }
   std::map<std::string, IOPinDirection>& get_io_pin_name_to_direction_map() { return _io_pin_name_to_direction_map; }
   std::vector<std::string>& get_instance_pin_name_list() { return _instance_pin_name_list; }
+  const std::vector<std::pair<std::string, std::string>>& get_instance_pins() const { return _instance_pins; }
 
   // const getter
   const std::string& get_name() const { return _name; }
@@ -50,12 +51,14 @@ class PGNet
   // function
   void add_io_pin(std::string pin_name, IOPinDirection direction) { _io_pin_name_to_direction_map[pin_name] = direction; }
   void add_instance_pin(std::string pin_name) { _instance_pin_name_list.push_back(pin_name); }
+  void add_instance_pin(const std::string& instance_name, const std::string& pin_name) { _instance_pins.emplace_back(instance_name, pin_name); }
 
  private:
   std::string _name;
   PGNetType _type = PGNetType::kNone;
   std::map<std::string, IOPinDirection> _io_pin_name_to_direction_map;
   std::vector<std::string> _instance_pin_name_list;
+  std::vector<std::pair<std::string, std::string>> _instance_pins;
 };
 
 }  // namespace ifp

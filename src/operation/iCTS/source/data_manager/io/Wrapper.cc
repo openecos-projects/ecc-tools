@@ -24,7 +24,6 @@
 
 #include <cstdint>
 #include <optional>
-#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,13 +36,12 @@
 #include "IdbLayout.h"
 #include "IdbUnits.h"
 #include "Logger.hh"
-#include "adapter/sdc/SDCClockReader.hh"
+#include "adapter/sdc/ClockTrace.hh"
 #include "builder.h"
 #include "def_service.h"
 #include "design/Clock.hh"
 #include "design/Design.hh"
 #include "lef_service.h"
-#include "liberty/Lib.hh"
 #include "spatial/Point.hh"
 
 namespace icts {
@@ -170,7 +168,7 @@ auto Wrapper::traceSdcClocks(const SdcClockTraceInput& input) const -> ClockTrac
     idb_design = _idb->get_def_service()->get_design();
   }
   const SdcLibertyCellLookup liberty_cell_lookup = [this](const std::string& cell_master) -> idb::LibCell* { return findLibertyCell(cell_master); };
-  return SdcClockReader::traceClockTargets(*input.clock_data, idb_design, liberty_cell_lookup, input.max_fanout);
+  return ClockTraceResolver::resolve(*input.clock_data, idb_design, liberty_cell_lookup, input.max_fanout);
 }
 
 auto Wrapper::collectLogicCellGeometries() const -> std::vector<WrapperCellGeometry>

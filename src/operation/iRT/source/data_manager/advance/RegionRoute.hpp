@@ -27,17 +27,14 @@ class RegionRoute
   ~RegionRoute() = default;
   // getter
   bool get_enable() const { return _enable; }
-  bool get_is_regional_stage() const { return _is_regional_stage; }
   std::set<int32_t>& get_net_idx_set() { return _net_idx_set; }
   // setter
   void set_enable(const bool enable) { _enable = enable; }
-  void set_is_regional_stage(const bool is_regional_stage) { _is_regional_stage = is_regional_stage; }
   // function
-  bool isActiveNet(int32_t net_idx) const { return !_enable || !_is_regional_stage || _net_idx_set.contains(net_idx); }
+  bool isActiveNet(int32_t net_idx) const { return !_enable || _net_idx_set.contains(net_idx); }
 
  private:
   bool _enable = false;
-  bool _is_regional_stage = false;
   std::set<int32_t> _net_idx_set;
 };
 

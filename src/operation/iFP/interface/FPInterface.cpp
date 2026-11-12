@@ -49,6 +49,25 @@ struct MacroPlacement
   PlacementOrientation orient = PlacementOrientation::kNone;
 };
 
+void checkKeys(const nlohmann::json& json, std::initializer_list<const char*> allowed, const std::string& path)
+{
+  if (!json.is_object()) {
+    return;
+  }
+  for (const auto& item : json.items()) {
+    bool known = false;
+    for (const char* key : allowed) {
+      if (item.key() == key) {
+        known = true;
+        break;
+      }
+    }
+    if (!known) {
+      FPLOG.error(Loc::current(), "Unknown config key '", path, ".", item.key(), "'.");
+    }
+  }
+}
+
 }  // namespace
 
 FPInterface* FPInterface::_fp_interface_instance = nullptr;
@@ -77,6 +96,10 @@ void FPInterface::destroyInst()
 
 void FPInterface::initFP(std::map<std::string, std::any> config_map)
 {
+  _run_failed = false;
+  _pg_via_min_size_cache.clear();
+  _pg_via_stack_cache.clear();
+  _adjusted_via_count = 0;
   Logger::initInst();
   // clang-format off
   FPLOG.info(Loc::current(), ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
@@ -102,6 +125,7 @@ void FPInterface::initFP(std::map<std::string, std::any> config_map)
 
 void FPInterface::runFP()
 {
+  _run_failed = true;
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
@@ -110,6 +134,12 @@ void FPInterface::runFP()
   DieBuilder::destroyInst();
 
   IOPlacer::initInst();
+  if (FPDM.getConfig().io_placer_mode == IOPlacerMode::kIOCell && !FPIP.planDieForIO()) {
+    FPLOG.error(Loc::current(), "IO cell capacity check failed; stopping floorplan.");
+    _run_failed = true;
+    IOPlacer::destroyInst();
+    return;
+  }
   FPIP.place();
   IOPlacer::destroyInst();
 
@@ -117,14 +147,15 @@ void FPInterface::runFP()
   FPMP.place();
   MacroPlacer::destroyInst();
 
-  PDNGenerator::initInst();
-  FPPG.generate();
-  PDNGenerator::destroyInst();
-
   PhyPlacer::initInst();
   FPPP.place();
   PhyPlacer::destroyInst();
 
+  PDNGenerator::initInst();
+  FPPG.generate();
+  PDNGenerator::destroyInst();
+
+  _run_failed = false;
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
@@ -138,6 +169,12 @@ void FPInterface::runSimpleFP()
   DieBuilder::destroyInst();
 
   IOPlacer::initInst();
+  if (FPDM.getConfig().io_placer_mode == IOPlacerMode::kIOCell && !FPIP.planDieForIO()) {
+    FPLOG.error(Loc::current(), "IO cell capacity check failed; stopping simple floorplan.");
+    _run_failed = true;
+    IOPlacer::destroyInst();
+    return;
+  }
   FPIP.placeAuto();
   IOPlacer::destroyInst();
 
@@ -152,7 +189,16 @@ void FPInterface::destroyFP()
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
-  FPDM.output();
+  if (_run_failed) {
+    FPLOG.warn(Loc::current(), "Skipping floorplan output because the run failed.");
+    DieBuilder::destroyInst();
+    IOPlacer::destroyInst();
+    MacroPlacer::destroyInst();
+    PhyPlacer::destroyInst();
+    PDNGenerator::destroyInst();
+  } else {
+    FPDM.output();
+  }
   DataManager::destroyInst();
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -401,10 +447,19 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.die_margin_right_micron = -1.0;
   config.die_margin_top_micron = -1.0;
   config.die_margin_bottom_micron = -1.0;
+  config.io_placer_mode = IOPlacerMode::kIOPin;
   config.io_pin_placement_mode = PlacementMode::kAuto;
   config.io_pin_layer_name_list.clear();
   config.input_io_pin_path.clear();
   config.pg_connect_list.clear();
+  config.core_power_net.clear();
+  config.core_ground_net.clear();
+  config.pg_ring = {};
+  config.pg_io_core_connect = {};
+  config.pg_required_net_list.clear();
+  config.pg_connect_pads = false;
+  config.pg_require_connected_pins = true;
+  config.pg_access_layer_list.clear();
   config.pg_rail_list.clear();
   config.pg_stripe_list.clear();
   config.pg_layer_pair_list.clear();
@@ -417,6 +472,8 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.top_boundary_tap_name_list.clear();
   config.bottom_boundary_tap_name_list.clear();
   config.boundary_tap_rule_micron = -1.0;
+  config.phy_orientations.clear();
+  config.corner_cell_names.clear();
 
   std::filesystem::path config_file_path = std::filesystem::absolute(FPUTIL.getConfigValue<std::string>(config_map, "-config", ""));
   std::ifstream config_file_stream(config_file_path);
@@ -429,49 +486,115 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
   nlohmann::json& ifp_json = config_json["ifp"];
+  checkKeys(ifp_json, {"temp_directory_path", "thread_number"}, "ifp");
   config.temp_directory_path = FPUTIL.getAbsolutePath(config_directory_path, ifp_json["temp_directory_path"].get<std::string>());
   config.thread_number = std::max(ifp_json["thread_number"].get<int32_t>(), 1);
 
   nlohmann::json& macro_placer_json = config_json["macro_placer"];
+  checkKeys(macro_placer_json, {"mode", "file_path", "macro_placement_halo", "macro_routing_halo"}, "macro_placer");
+  // Older ECC configurations write mode; placement is now selected by file_path.
+  if (macro_placer_json.contains("mode")) {
+    std::string mode = macro_placer_json["mode"].get<std::string>();
+    if (mode != "auto" && mode != "file") {
+      FPLOG.error(Loc::current(), "Unknown macro_placer.mode '", mode, "'. Expected auto or file.");
+    }
+  }
   std::string macro_file_path = macro_placer_json.value("file_path", "");
   config.input_macro_path = macro_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, macro_file_path);
   config.macro_placement_halo = macro_placer_json["macro_placement_halo"].get<double>();
   config.macro_routing_halo = macro_placer_json["macro_routing_halo"].get<double>();
+  if (config.macro_placement_halo < 0.0) {
+    FPLOG.error(Loc::current(), "The macro placement halo must not be negative!");
+  }
 
   nlohmann::json& die_builder_json = config_json["die_builder"];
+  checkKeys(die_builder_json, {"mode", "site_name", "margin", "die_util", "die_size"}, "die_builder");
   config.die_mode = GetDieModeByName()(die_builder_json["mode"].get<std::string>());
   config.die_site_name = die_builder_json["site_name"].get<std::string>();
   nlohmann::json& die_margin_json = die_builder_json["margin"];
+  checkKeys(die_margin_json, {"left_micron", "right_micron", "top_micron", "bottom_micron"}, "die_builder.margin");
   config.die_margin_left_micron = die_margin_json["left_micron"].get<double>();
   config.die_margin_right_micron = die_margin_json["right_micron"].get<double>();
   config.die_margin_top_micron = die_margin_json["top_micron"].get<double>();
   config.die_margin_bottom_micron = die_margin_json["bottom_micron"].get<double>();
   if (config.die_mode == DieMode::kDieUtil) {
     nlohmann::json& die_util_json = die_builder_json["die_util"];
+    checkKeys(die_util_json, {"aspect_ratio", "utilization"}, "die_builder.die_util");
     config.die_aspect_ratio = die_util_json["aspect_ratio"].get<double>();
     config.die_utilization = die_util_json["utilization"].get<double>();
   } else if (config.die_mode == DieMode::kDieSize) {
     nlohmann::json& die_size_json = die_builder_json["die_size"];
+    checkKeys(die_size_json, {"width_micron", "height_micron"}, "die_builder.die_size");
     config.die_width_micron = die_size_json["width_micron"].get<double>();
     config.die_height_micron = die_size_json["height_micron"].get<double>();
   }
 
   nlohmann::json& io_placer_json = config_json["io_placer"];
-  config.io_pin_placement_mode = GetPlacementModeByName()(io_placer_json["mode"].get<std::string>());
-  std::string io_pin_file_path = io_placer_json.value("file_path", "");
+  checkKeys(io_placer_json, {"mode", "file_path", "io_layer_list", "io_pin", "io_cell"}, "io_placer");
+  if (io_placer_json.contains("io_pin")) {
+    checkKeys(io_placer_json["io_pin"], {"mode", "file_path", "io_layer_list"}, "io_placer.io_pin");
+  }
+  const std::string io_mode = io_placer_json.value("mode", "io_pin");
+  const bool legacy_io_pin_schema = io_mode == "auto" || io_mode == "file";
+  config.io_placer_mode = legacy_io_pin_schema ? IOPlacerMode::kIOPin : GetIOPlacerModeByName()(io_mode);
+
+  // Keep the old flat schema working while accepting the independent io_pin/io_cell schema.
+  nlohmann::json io_pin_json = io_placer_json.contains("io_pin")
+                                   ? io_placer_json["io_pin"]
+                                   : (legacy_io_pin_schema ? io_placer_json : nlohmann::json::object());
+  config.io_pin_placement_mode = GetPlacementModeByName()(io_pin_json.value("mode", "auto"));
+  std::string io_pin_file_path = io_pin_json.value("file_path", "");
   config.input_io_pin_path = io_pin_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, io_pin_file_path);
-  for (nlohmann::json& layer_name_json : io_placer_json["io_layer_list"]) {
-    config.io_pin_layer_name_list.push_back(layer_name_json.get<std::string>());
+  if (io_pin_json.contains("io_layer_list")) {
+    for (const nlohmann::json& layer_name_json : io_pin_json["io_layer_list"]) {
+      config.io_pin_layer_name_list.push_back(layer_name_json.get<std::string>());
+    }
+  }
+
+  if (io_placer_json.contains("io_cell")) {
+    nlohmann::json& io_cell_json = io_placer_json["io_cell"];
+    checkKeys(io_cell_json, {"mode", "file_path", "definition_file_path", "power", "auto_resize"}, "io_placer.io_cell");
+    if (io_cell_json.contains("power")) {
+      checkKeys(io_cell_json["power"], {"target_group_spacing"}, "io_placer.io_cell.power");
+    }
+    if (io_cell_json.contains("auto_resize")) {
+      checkKeys(io_cell_json["auto_resize"], {"enable"}, "io_placer.io_cell.auto_resize");
+    }
+    config.io_cell_mode = GetPlacementModeByName()(io_cell_json.value("mode", "auto"));
+    std::string io_cell_file_path = io_cell_json.value("file_path", "");
+    std::string definition_file_path = io_cell_json.value("definition_file_path", "");
+    config.io_cell_file = io_cell_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, io_cell_file_path);
+    config.io_cell_definition_file = definition_file_path.empty() ? "" : FPUTIL.getAbsolutePath(config_directory_path, definition_file_path);
+    nlohmann::json power_json = io_cell_json.value("power", nlohmann::json::object());
+    config.io_cell_power_spacing_micron = power_json.value("target_group_spacing", 1000.0);
+    nlohmann::json auto_resize_json = io_cell_json.value("auto_resize", nlohmann::json::object());
+    config.io_cell_auto_resize = auto_resize_json.value("enable", true);
   }
 
   nlohmann::json& phy_placer_json = config_json["phy_placer"];
+  checkKeys(phy_placer_json, {"orientations", "corner_cells", "well_tap", "side_endcap", "edge_endcap", "boundary_tap"}, "phy_placer");
+  const auto orientations = phy_placer_json.value("orientations", nlohmann::json::object());
+  for (const auto& [role, mappings] : orientations.items()) {
+    for (const auto& [row, orient] : mappings.items()) {
+      const auto row_orient = GetPlacementOrientationByName()(row);
+      const auto cell_orient = GetPlacementOrientationByName()(orient.get<std::string>());
+      if (row_orient == PlacementOrientation::kNone || cell_orient == PlacementOrientation::kNone) {
+        FPLOG.error(Loc::current(), "Invalid physical-cell orientation for role '", role, "'.");
+      }
+      config.phy_orientations[role][row_orient] = cell_orient;
+    }
+  }
+  config.corner_cell_names = phy_placer_json.value("corner_cells", std::map<std::string, std::string>{});
   nlohmann::json& well_tap_json = phy_placer_json["well_tap"];
+  checkKeys(well_tap_json, {"cell_name", "distance_micron"}, "phy_placer.well_tap");
   config.tapcell_name = well_tap_json["cell_name"].get<std::string>();
   config.tap_distance_micron = well_tap_json["distance_micron"].get<double>();
   nlohmann::json& side_endcap_json = phy_placer_json["side_endcap"];
+  checkKeys(side_endcap_json, {"left_cell_name", "right_cell_name"}, "phy_placer.side_endcap");
   config.left_endcap_name = side_endcap_json["left_cell_name"].get<std::string>();
   config.right_endcap_name = side_endcap_json["right_cell_name"].get<std::string>();
   nlohmann::json& edge_endcap_json = phy_placer_json["edge_endcap"];
+  checkKeys(edge_endcap_json, {"top_cell_name_list", "bottom_cell_name_list"}, "phy_placer.edge_endcap");
   for (nlohmann::json& cell_name_json : edge_endcap_json["top_cell_name_list"]) {
     config.top_endcap_name_list.push_back(cell_name_json.get<std::string>());
   }
@@ -479,6 +602,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.bottom_endcap_name_list.push_back(cell_name_json.get<std::string>());
   }
   nlohmann::json& boundary_tap_json = phy_placer_json["boundary_tap"];
+  checkKeys(boundary_tap_json, {"top_cell_name_list", "bottom_cell_name_list", "rule_micron"}, "phy_placer.boundary_tap");
   for (nlohmann::json& cell_name_json : boundary_tap_json["top_cell_name_list"]) {
     config.top_boundary_tap_name_list.push_back(cell_name_json.get<std::string>());
   }
@@ -488,20 +612,70 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.boundary_tap_rule_micron = boundary_tap_json["rule_micron"].get<double>();
 
   nlohmann::json& pdn_generator_json = config_json["pdn_generator"];
+  checkKeys(pdn_generator_json,
+            {"global_connect", "rail", "stripe", "connect_layers", "core_power_net", "core_ground_net", "ring",
+             "io_core_connect", "required_nets", "connect_pads", "require_connected_pins", "access_layers"},
+            "pdn_generator");
+  config.core_power_net = pdn_generator_json.value("core_power_net", "");
+  config.core_ground_net = pdn_generator_json.value("core_ground_net", "");
+  config.pg_required_net_list = pdn_generator_json.value("required_nets", std::vector<std::string>{});
+  config.pg_connect_pads = pdn_generator_json.value("connect_pads", false);
+  config.pg_require_connected_pins = pdn_generator_json.value("require_connected_pins", true);
+  config.pg_access_layer_list = pdn_generator_json.value("access_layers", std::vector<std::string>{});
+  if (pdn_generator_json.contains("ring")) {
+    const auto& ring = pdn_generator_json["ring"];
+    checkKeys(ring, {"nets", "horizontal_layer", "vertical_layer", "width_micron", "spacing_micron", "offset_micron"}, "pdn_generator.ring");
+    config.pg_ring.nets = ring.at("nets").get<std::vector<std::string>>();
+    config.pg_ring.horizontal_layer = ring.at("horizontal_layer").get<std::string>();
+    config.pg_ring.vertical_layer = ring.at("vertical_layer").get<std::string>();
+    config.pg_ring.width_micron = ring.at("width_micron").get<double>();
+    config.pg_ring.spacing_micron = ring.at("spacing_micron").get<double>();
+    config.pg_ring.offset_micron = ring.at("offset_micron").get<double>();
+  }
+  if (pdn_generator_json.contains("io_core_connect")) {
+    const auto& io_core = pdn_generator_json["io_core_connect"];
+    checkKeys(io_core, {"enable", "nets", "pin_layers", "min_contacts_per_port", "bridge_min_spacing_micron", "fail_on_unresolved"},
+              "pdn_generator.io_core_connect");
+    config.pg_io_core_connect.enabled = io_core.value("enable", true);
+    config.pg_io_core_connect.nets = io_core.value("nets", std::vector<std::string>{});
+    config.pg_io_core_connect.pin_layers = io_core.value("pin_layers", std::vector<std::string>{});
+    config.pg_io_core_connect.fail_on_unresolved = io_core.value("fail_on_unresolved", false);
+    config.pg_io_core_connect.min_contacts_per_port = io_core.value("min_contacts_per_port", 1);
+    config.pg_io_core_connect.bridge_min_spacing_micron = io_core.value("bridge_min_spacing_micron", 0.0);
+  }
+  if (config.pg_io_core_connect.enabled) {
+    if (config.pg_io_core_connect.min_contacts_per_port < 1) {
+      FPLOG.error(Loc::current(), "io_core_connect.min_contacts_per_port must be at least 1.");
+    }
+    if (!std::isfinite(config.pg_io_core_connect.bridge_min_spacing_micron)
+        || config.pg_io_core_connect.bridge_min_spacing_micron < 0.0) {
+      FPLOG.error(Loc::current(), "io_core_connect.bridge_min_spacing_micron must be finite and non-negative.");
+    }
+    std::set<std::string> unique_nets(config.pg_io_core_connect.nets.begin(), config.pg_io_core_connect.nets.end());
+    if (!config.pg_io_core_connect.nets.empty() && unique_nets.size() != config.pg_io_core_connect.nets.size()) {
+      FPLOG.error(Loc::current(), "io_core_connect.nets contains duplicate networks.");
+    }
+  }
   for (nlohmann::json& pg_connect_json : pdn_generator_json["global_connect"]) {
+    checkKeys(pg_connect_json, {"net_name", "instance_pin_name", "is_power", "instance_pattern", "master_pattern"},
+              "pdn_generator.global_connect[]");
     PGGlobalConnect pg_connect;
     pg_connect.set_net_name(pg_connect_json["net_name"].get<std::string>());
     pg_connect.set_pin_name(pg_connect_json["instance_pin_name"].get<std::string>());
     pg_connect.set_net_type(pg_connect_json["is_power"].get<bool>() ? PGNetType::kPower : PGNetType::kGround);
+    pg_connect.set_instance_pattern(pg_connect_json.value("instance_pattern", "*"));
+    pg_connect.set_master_pattern(pg_connect_json.value("master_pattern", "*"));
     config.pg_connect_list.push_back(pg_connect);
   }
   for (nlohmann::json& pg_rail_json : pdn_generator_json["rail"]) {
+    checkKeys(pg_rail_json, {"routing_layer_name", "width_micron"}, "pdn_generator.rail[]");
     PGRail pg_rail;
     pg_rail.set_layer_name(pg_rail_json["routing_layer_name"].get<std::string>());
     pg_rail.set_width_micron(pg_rail_json["width_micron"].get<double>());
     config.pg_rail_list.push_back(pg_rail);
   }
   for (nlohmann::json& pg_stripe_json : pdn_generator_json["stripe"]) {
+    checkKeys(pg_stripe_json, {"routing_layer_name", "width_micron", "pitch_micron", "offset_micron"}, "pdn_generator.stripe[]");
     PGStripe pg_stripe;
     pg_stripe.set_layer_name(pg_stripe_json["routing_layer_name"].get<std::string>());
     pg_stripe.set_width_micron(pg_stripe_json["width_micron"].get<double>());
@@ -510,6 +684,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     config.pg_stripe_list.push_back(pg_stripe);
   }
   for (nlohmann::json& layer_connect_json : pdn_generator_json["connect_layers"]) {
+    checkKeys(layer_connect_json, {"bottom_routing_layer_name", "top_routing_layer_name"}, "pdn_generator.connect_layers[]");
     PGLayerPair pg_layer_pair;
     pg_layer_pair.set_first_layer_name(layer_connect_json["bottom_routing_layer_name"].get<std::string>());
     pg_layer_pair.set_second_layer_name(layer_connect_json["top_routing_layer_name"].get<std::string>());
@@ -521,6 +696,7 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
 void FPInterface::wrapDatabase()
 {
+  FPDM.getDatabase().get_instance_rename_map().clear();
   wrapDBInfo();
   wrapMicronDBU();
   wrapManufactureGrid();
@@ -555,6 +731,14 @@ void FPInterface::wrapCellArea()
   int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
   for (idb::IdbInstance* idb_instance : dmInst->get_idb_design()->get_instance_list()->get_instance_list()) {
     idb::IdbCellMaster* idb_cell_master = idb_instance->get_cell_master();
+    // The die utilization target describes core logic, not the IO ring.  IO
+    // pads, fillers and corners are placed around the die edge and would
+    // otherwise inflate the area used by die_util, especially across repeated
+    // runs where the generated ring cells are already present in the IDB.
+    const bool corner_master = idb_cell_master->get_site() != nullptr && idb_cell_master->get_site()->is_corner_site();
+    if (idb_cell_master->is_pad() || idb_cell_master->is_pad_filler() || idb_cell_master->is_spacer() || corner_master) {
+      continue;
+    }
     double width_micron = idb_cell_master->get_width() / 1.0 / micron_dbu;
     double height_micron = idb_cell_master->get_height() / 1.0 / micron_dbu;
     cell_area += width_micron * height_micron;
@@ -584,11 +768,68 @@ void FPInterface::wrapCellMasterMap()
     cell_master.set_width(idb_cell_master->get_width());
     cell_master.set_height(idb_cell_master->get_height());
     cell_master.set_pad(idb_cell_master->is_pad());
+    cell_master.set_symmetry_x(idb_cell_master->is_symmetry_x());
+    cell_master.set_symmetry_y(idb_cell_master->is_symmetry_y());
     cell_master.set_pad_filler(idb_cell_master->is_pad_filler());
     cell_master.set_spacer(idb_cell_master->is_spacer());
     cell_master.set_corner(idb_cell_master->get_site() != nullptr && idb_cell_master->get_site()->is_corner_site());
+    for (idb::IdbTerm* term : idb_cell_master->get_term_list()) {
+      const bool pg = term->is_power() || term->is_ground();
+      if (pg) {
+        cell_master.get_pg_pin_types()[term->get_name()] = term->is_power() ? PGNetType::kPower : PGNetType::kGround;
+      }
+      int32_t port_idx = 0;
+      for (idb::IdbPort* port : term->get_port_list()) {
+        for (idb::IdbLayerShape* shape : port->get_layer_shape()) {
+          if (!shape->get_layer()->is_routing()) {
+            continue;
+          }
+          for (idb::IdbRect* rect : shape->get_rect_list()) {
+            InstancePinShape pin_shape;
+            pin_shape.set_pin_name(term->get_name());
+            pin_shape.set_layer_name(shape->get_layer()->get_name());
+            pin_shape.set_port_idx(port_idx);
+            pin_shape.set_core_port(port->get_port_class() == idb::IdbPortClass::kCore);
+            pin_shape.set_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+            (pg ? cell_master.get_pg_pin_shapes() : cell_master.get_obstruction_shapes()).push_back(pin_shape);
+          }
+        }
+        ++port_idx;
+      }
+    }
+    // IDB stores OBS rectangles in the same normalized frame as the pin
+    // shapes (ORIGIN already applied); adding it again would shift the
+    // obstruction by another ORIGIN.
+    for (auto* obs : idb_cell_master->get_obs_list()) {
+      for (auto* obs_layer : obs->get_obs_layer_list()) {
+        auto* shape = obs_layer->get_shape();
+        if (shape->get_layer() == nullptr || !shape->get_layer()->is_routing()) {
+          continue;
+        }
+        for (auto* rect : shape->get_rect_list()) {
+          InstancePinShape obstruction;
+          obstruction.set_layer_name(shape->get_layer()->get_name());
+          obstruction.set_rect(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+          cell_master.get_obstruction_shapes().push_back(obstruction);
+        }
+      }
+    }
     cell_master_map[cell_master.get_name()] = cell_master;
   }
+}
+
+std::vector<InstancePinShape> FPInterface::getPlacedShapes(const Instance& instance, const std::vector<InstancePinShape>& shapes)
+{
+  auto placed = shapes;
+  idb::IdbCoordinate<int32_t> origin(instance.get_x(), instance.get_y());
+  idb::IdbOrientTransform transform(unwrapPlacementOrientation(instance.get_orient()), &origin, instance.get_width(), instance.get_height());
+  for (auto& shape : placed) {
+    idb::IdbRect rect(shape.get_ll_x() + instance.get_x(), shape.get_ll_y() + instance.get_y(),
+                      shape.get_ur_x() + instance.get_x(), shape.get_ur_y() + instance.get_y());
+    transform.transformRect(&rect);
+    shape.set_rect(rect.get_low_x(), rect.get_low_y(), rect.get_high_x(), rect.get_high_y());
+  }
+  return placed;
 }
 
 void FPInterface::wrapRoutingLayerList()
@@ -604,9 +845,32 @@ void FPInterface::wrapRoutingLayerList()
     routing_layer.set_pitch_x(idb_routing_layer->get_pitch_x());
     routing_layer.set_pitch_y(idb_routing_layer->get_pitch_y());
     routing_layer.set_min_width(idb_routing_layer->get_min_width());
+    routing_layer.set_max_width(idb_routing_layer->get_max_width());
     routing_layer.set_min_area(std::max(idb_routing_layer->get_area(), 0));
     routing_layer.set_prefer_track_offset(idb_routing_layer->get_offset_prefer());
     routing_layer.set_spacing(idb_routing_layer->get_spacing(0));
+    int32_t io_spacing = std::max(0, routing_layer.get_spacing());
+    for (const auto* rule : idb_routing_layer->get_spacing_list()->get_spacing_list()) {
+      io_spacing = std::max(io_spacing, rule->get_min_spacing());
+      if (rule->get_has_parallel_edge()) io_spacing = std::max(io_spacing, rule->get_par_space());
+    }
+    const auto table = idb_routing_layer->get_spacing_table();
+    if (table && table->is_parallel()) {
+      for (const auto& row : table->get_parallel()->get_spacing_table()) {
+        for (const int32_t value : row) io_spacing = std::max(io_spacing, value);
+      }
+    }
+    for (const auto& rule : idb_routing_layer->get_lef58_spacing_eol_list()) {
+      io_spacing = std::max(io_spacing, rule->get_eol_space());
+      if (const auto edge = rule->get_parallel_edge()) io_spacing = std::max(io_spacing, edge->get_par_space());
+      if (const auto ends = rule->get_end_to_end()) io_spacing = std::max(io_spacing, ends->get_end_to_end_space());
+    }
+    routing_layer.set_io_spacing(io_spacing);
+    int32_t enclosed_area = 0;
+    for (const auto& rule : idb_routing_layer->get_min_enclose_area_list()->get_min_area_list()) {
+      enclosed_area = std::max(enclosed_area, rule._area);
+    }
+    routing_layer.set_min_enclosed_area(enclosed_area);
     routing_layer.set_prefer_direction(idb_routing_layer->is_horizontal() ? Direction::kHorizontal : Direction::kVertical);
 
     idb::IdbTrackGrid* prefer_track_grid = idb_routing_layer->get_prefer_track_grid();
@@ -629,6 +893,7 @@ void FPInterface::wrapInstanceList()
     Instance instance;
     instance.set_name(idb_instance->get_name());
     instance.set_master_name(idb_instance->get_cell_master()->get_name());
+    instance.set_from_netlist(true);
     instance.set_width(idb_instance->get_cell_master()->get_width());
     instance.set_height(idb_instance->get_cell_master()->get_height());
     instance.set_macro(idb_instance->get_cell_master()->is_block());
@@ -643,7 +908,11 @@ void FPInterface::wrapInstanceList()
                                  idb_instance->get_bounding_box()->get_high_x(), idb_instance->get_bounding_box()->get_high_y());
     }
 
-    if (instance.get_macro()) {
+    if (idb_instance->get_cell_master()->is_io_cell()) {
+      // IO Cell placement is regenerated by IOCellPlacer. Keep pin shapes in
+      // master-local coordinates even when the input DEF already placed it.
+      wrapUnplacedMacroPinShapeList(idb_instance, instance);
+    } else if (instance.get_macro()) {
       // An external placement file transforms master-local pin shapes after this
       // function. Without one, IDB already owns the absolute placed pin shapes.
       if (FPDM.getConfig().input_macro_path.empty() && idb_instance->has_placed()) {
@@ -798,7 +1067,9 @@ void FPInterface::wrapIOPinList()
       }
     }
 
-    if (idb_pin->get_net() != nullptr) {
+    // IOCellPlacer resolves full (instance, terminal) bindings from the net.
+    // The legacy helper can return a PLL/SRAM on a shared supply net.
+    if (FPDM.getConfig().io_placer_mode != IOPlacerMode::kIOCell && idb_pin->get_net() != nullptr) {
       idb::IdbInstance* idb_instance = dmInst->getIoCellByIoPin(idb_pin);
       if (idb_instance != nullptr) {
         io_pin.set_instance_name(idb_instance->get_name());
@@ -814,15 +1085,46 @@ void FPInterface::wrapIOPinList()
 
 void FPInterface::output()
 {
+  outputInstanceNameChanges();
   outputFloorplan();
-  outputPGNetList();
   outputIOPinList();
   outputIOInstancePlacement();
   outputMacroPlacement();
   outputMacroHalo();
   outputMacroRouteHalo();
   outputNewInstanceList();
+  outputPGNetList();
   outputPGSegmentList();
+}
+
+void FPInterface::outputInstanceNameChanges()
+{
+  const auto& rename_map = FPDM.getDatabase().get_instance_rename_map();
+  if (rename_map.empty()) {
+    return;
+  }
+  idb::IdbInstanceList* instance_list = dmInst->get_idb_design()->get_instance_list();
+  std::vector<std::pair<std::string, std::string>> renames(rename_map.begin(), rename_map.end());
+  std::vector<std::string> temporary_names;
+  temporary_names.reserve(renames.size());
+  for (size_t index = 0; index < renames.size(); ++index) {
+    std::string temporary = "__IFP_IO_POWER_RENAME_TMP_" + std::to_string(index);
+    while (instance_list->contains(temporary)) {
+      temporary += "_";
+    }
+    temporary_names.push_back(temporary);
+    if (!instance_list->rename_instance(renames[index].first, temporary)) {
+      FPLOG.error(Loc::current(), "Failed to rename IDB instance '", renames[index].first, "'.");
+      return;
+    }
+  }
+  for (size_t index = 0; index < renames.size(); ++index) {
+    if (!instance_list->rename_instance(temporary_names[index], renames[index].second)) {
+      FPLOG.error(Loc::current(), "Failed to rename IDB instance '", renames[index].first, "' to '", renames[index].second, "'.");
+      return;
+    }
+  }
+  FPDM.getDatabase().get_instance_rename_map().clear();
 }
 
 void FPInterface::outputFloorplan()
@@ -950,6 +1252,21 @@ void FPInterface::outputPGNetList()
 {
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
   for (PGNet& pg_net : FPDM.getDatabase().get_pg_net_list()) {
+    idb::IdbNet* shadow_net = idb_design->get_net_list()->find_net(pg_net.get_name());
+    if (shadow_net != nullptr) {
+      if (shadow_net->get_pin_number() != 0 || shadow_net->get_segment_num() != 0) {
+        FPLOG.error(Loc::current(), "NETS entry '", pg_net.get_name(),
+                    "' duplicates SPECIALNETS and is not empty; refusing to export ambiguous DEF.");
+        _run_failed = true;
+        continue;
+      }
+      if (!idb_design->removeNetSafe(pg_net.get_name())) {
+        FPLOG.error(Loc::current(), "Failed to remove empty shadow NETS entry '", pg_net.get_name(), "'.");
+        _run_failed = true;
+        continue;
+      }
+      FPLOG.info(Loc::current(), "Removed empty shadow NETS entry '", pg_net.get_name(), "'.");
+    }
     idb::IdbConnectType connect_type = idb::IdbConnectType::kNone;
     if (pg_net.get_type() == PGNetType::kPower) {
       connect_type = idb::IdbConnectType::kPower;
@@ -957,27 +1274,40 @@ void FPInterface::outputPGNetList()
       connect_type = idb::IdbConnectType::kGround;
     }
     idb::IdbSpecialNet* idb_special_net = idb_design->createOrFindSpecialNet(pg_net.get_name(), connect_type);
+    if (idb_special_net == nullptr) {
+      FPLOG.error(Loc::current(), "Cannot create PG net '", pg_net.get_name(), "'.");
+    }
+    // Only rules proven to apply to every instance may be exported as wildcards.
+    idb_special_net->get_pin_string_list().clear();
     for (std::string& instance_pin_name : pg_net.get_instance_pin_name_list()) {
       if (std::find(idb_special_net->get_pin_string_list().begin(), idb_special_net->get_pin_string_list().end(), instance_pin_name)
           == idb_special_net->get_pin_string_list().end()) {
         idb_special_net->add_pin_string(instance_pin_name);
       }
     }
-    for (std::pair<const std::string, IOPinDirection>& pair : pg_net.get_io_pin_name_to_direction_map()) {
-      idb::IdbPin* idb_pin = idb_design->get_io_pin_list()->find_pin(pair.first);
-      if (idb_pin == nullptr) {
-        idb_pin = idb_design->createOrFindIoPin(pair.first);
+    std::vector<idb::IdbPin*> instance_pins;
+    instance_pins.reserve(pg_net.get_instance_pins().size());
+    for (const auto& [instance_name, pin_name] : pg_net.get_instance_pins()) {
+      idb::IdbInstance* instance = idb_design->get_instance_list()->find_instance(instance_name);
+      idb::IdbPin* pin = instance == nullptr ? nullptr : instance->get_pin_by_term(pin_name);
+      if (pin == nullptr) {
+        FPLOG.error(Loc::current(), "Missing PG terminal '", instance_name, "/", pin_name, "' while exporting '", pg_net.get_name(), "'.");
       }
-      idb_pin->set_as_io();
-      idb::IdbTerm* idb_term = idb_pin->get_term();
-      if (idb_term == nullptr) {
-        idb_term = idb_pin->set_term();
+      if (pin->get_net() != nullptr && pin->get_net()->get_net_name() != pg_net.get_name()) {
+        FPLOG.error(Loc::current(), "PG terminal '", instance_name, "/", pin_name, "' already belongs to '", pin->get_net()->get_net_name(), "'.");
       }
-      if (pair.second != IOPinDirection::kNone) {
-        idb_term->set_direction(unwrapIOPinDirection(pair.second));
-      }
-      idb_term->set_type(connect_type);
-      idb_design->connectPinToSpecialNet(idb_pin, idb_special_net);
+      instance_pins.push_back(pin);
+    }
+    if (!idb_design->connectPinsToSpecialNet(instance_pins, idb_special_net)) {
+      FPLOG.error(Loc::current(), "Cannot bind instance pins to PG net '", pg_net.get_name(), "'.");
+    }
+    // Power/ground is exported through SPECIALNETS and IO-cell terminals only;
+    // do not recreate top-level PINS for it.
+  }
+  for (idb::IdbSpecialNet* idb_special_net : idb_design->get_special_net_list()->get_net_list()) {
+    if (idb_special_net != nullptr && idb_design->get_net_list()->find_net(idb_special_net->get_net_name()) != nullptr) {
+      FPLOG.error(Loc::current(), "SPECIALNETS/NETS name conflict: '", idb_special_net->get_net_name(), "'.");
+      _run_failed = true;
     }
   }
 }
@@ -1004,12 +1334,32 @@ void FPInterface::outputIOPinList()
 {
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
   idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
+  const Config& config = FPDM.getConfig();
+  auto is_pg_pin_name = [&](const std::string& name) {
+    if ((!config.core_power_net.empty() && name == config.core_power_net)
+        || (!config.core_ground_net.empty() && name == config.core_ground_net)) {
+      return true;
+    }
+    for (const PGGlobalConnect& rule : config.pg_connect_list) {
+      if (rule.get_net_name() == name) {
+        return true;
+      }
+    }
+    return false;
+  };
   for (IOPin& io_pin : FPDM.getDatabase().get_io_pin_list()) {
-    if (!io_pin.is_updated()) {
+    idb::IdbPin* idb_pin = idb_design->get_io_pin_list()->find_pin(io_pin.get_name());
+    // Power/ground is represented by SPECIALNETS and the IO-cell terminals;
+    // it must not appear as a top-level PINS entry.
+    if (io_pin.get_special_net() || is_pg_pin_name(io_pin.get_name())
+        || (idb_pin != nullptr && idb_pin->is_special_net_pin())) {
+      idb_design->removeIoPinSafe(idb_pin);
+      continue;
+    }
+    if (!io_pin.is_updated() || idb_pin == nullptr) {
       continue;
     }
 
-    idb::IdbPin* idb_pin = idb_design->get_io_pin_list()->find_pin(io_pin.get_name());
     idb::IdbTerm* idb_term = idb_pin->get_term();
     idb_pin->clear_port_layer_shape();
     idb_term->clear_port_list();
@@ -1030,16 +1380,22 @@ void FPInterface::outputIOPinList()
     idb_pin->set_average_coordinate(io_pin.get_x(), io_pin.get_y());
     idb_pin->set_orient(unwrapPlacementOrientation(io_pin.get_orient()));
 
-    for (IOPort& io_port : io_pin.get_new_port_list()) {
-      idb::IdbPort* idb_port = idb_term->add_port();
-      idb_port->set_coordinate(io_port.get_x(), io_port.get_y());
-      if (io_port.get_placed()) {
-        idb_port->set_placement_status_place();
+    // IO-cell mode: the placed PAD already carries the physical access shape,
+    // and the reference flow keeps PINS logical-only. Emitting a port here
+    // would duplicate the cell's pin metal at the top level.
+    if (config.io_placer_mode != IOPlacerMode::kIOCell) {
+      for (IOPort& io_port : io_pin.get_new_port_list()) {
+        idb::IdbPort* idb_port = idb_term->add_port();
+        idb_port->set_coordinate(io_port.get_x(), io_port.get_y());
+        idb_port->set_orient(idb::IdbOrient::kN_R0);
+        if (io_port.get_placed()) {
+          idb_port->set_placement_status_place();
+        }
+        idb::IdbLayerShape* idb_layer_shape = idb_port->add_layer_shape();
+        idb_layer_shape->set_type_rect();
+        idb_layer_shape->set_layer(idb_layout->get_layers()->find_layer(io_port.get_layer_name()));
+        idb_layer_shape->add_rect(io_port.get_ll_x(), io_port.get_ll_y(), io_port.get_ur_x(), io_port.get_ur_y());
       }
-      idb::IdbLayerShape* idb_layer_shape = idb_port->add_layer_shape();
-      idb_layer_shape->set_type_rect();
-      idb_layer_shape->set_layer(idb_layout->get_layers()->find_layer(io_port.get_layer_name()));
-      idb_layer_shape->add_rect(io_port.get_ll_x(), io_port.get_ll_y(), io_port.get_ur_x(), io_port.get_ur_y());
     }
     idb_pin->set_bounding_box();
     io_pin.get_new_port_list().clear();
@@ -1050,15 +1406,42 @@ void FPInterface::outputIOPinList()
 void FPInterface::outputIOInstancePlacement()
 {
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
+  idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
   for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
+    if (instance.is_delete_instance()) {
+      idb_design->removeInstanceSafe(instance.get_name());
+      continue;
+    }
     if (!instance.is_placement_updated() || instance.get_macro()) {
       continue;
+    }
+    // Reused ring cells may have been re-mastered in the local model (for
+    // example a filler index that now resolves to a narrower master).  The
+    // IDB instance still holds the previous master, which would make the DEF
+    // footprint disagree with the computed coordinates.
+    // Fillers are generated by iFP and never connected to nets, so it is safe
+    // to rebuild their pin list when the master changes.  Other instances are
+    // synced only when they have no pins at all.
+    const bool filler = instance.get_name().rfind("IO_FILL_", 0) == 0;
+    idb::IdbInstance* idb_instance = idb_design->get_instance_list()->find_instance(instance.get_name());
+    if (idb_instance != nullptr && (filler || idb_instance->get_pin_list()->get_pin_list().empty())
+        && (idb_instance->get_cell_master() == nullptr
+            || idb_instance->get_cell_master()->get_name() != instance.get_master_name())) {
+      idb::IdbCellMaster* master = idb_layout->get_cell_master_list()->find_cell_master(instance.get_master_name());
+      if (master == nullptr) {
+        FPLOG.error(Loc::current(), "Cannot find cell master '", instance.get_master_name(), "' for IO instance '",
+                    instance.get_name(), "'.");
+        continue;
+      }
+      idb_instance->get_pin_list()->reset();
+      idb_instance->set_cell_master(master);
     }
     idb::IdbOrient orient = unwrapPlacementOrientation(instance.get_orient());
     if (orient == idb::IdbOrient::kNone) {
       orient = idb::IdbOrient::kN_R0;
     }
-    idb_design->placeInstance(instance.get_name(), instance.get_x(), instance.get_y(), orient, idb::IdbPlacementStatus::kPlaced);
+    idb_design->placeInstance(instance.get_name(), instance.get_x(), instance.get_y(), orient,
+                              instance.get_fixed() ? idb::IdbPlacementStatus::kFixed : idb::IdbPlacementStatus::kPlaced);
     instance.set_placement_updated(false);
   }
 }
@@ -1184,15 +1567,24 @@ void FPInterface::outputMacroRouteHalo()
 void FPInterface::outputNewInstanceList()
 {
   for (Instance& instance : FPDM.getDatabase().get_instance_list()) {
-    if (!instance.is_new_instance()) {
+    if (!instance.is_new_instance() || instance.is_delete_instance()) {
       continue;
     }
     idb::IdbOrient orient = unwrapPlacementOrientation(instance.get_orient());
     if (orient == idb::IdbOrient::kNone) {
       orient = idb::IdbOrient::kN_R0;
     }
-    dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient, idb::IdbInstanceType::kDist,
-                           idb::IdbPlacementStatus::kFixed);
+    idb::IdbInstance* idb_instance = dmInst->createInstance(instance.get_name(), instance.get_master_name(), instance.get_x(), instance.get_y(), orient,
+                                                            idb::IdbInstanceType::kDist, idb::IdbPlacementStatus::kFixed);
+    if (idb_instance == nullptr) {
+      FPLOG.error(Loc::current(), "Cannot create floorplan instance '", instance.get_name(), "'.");
+    }
+    if (!instance.get_io_cell_net_name().empty() && !instance.get_io_cell_pin_name().empty()) {
+      if (!dmInst->get_idb_design()->connectInstancePinToNet(instance.get_name(), instance.get_io_cell_pin_name(), instance.get_io_cell_net_name())) {
+        FPLOG.error(Loc::current(), "Failed to connect generated IO power Cell '", instance.get_name(), "' pin '", instance.get_io_cell_pin_name(),
+                    "' to net '", instance.get_io_cell_net_name(), "'.");
+      }
+    }
     instance.set_new_instance(false);
   }
 }
@@ -1210,7 +1602,7 @@ void FPInterface::outputPGSegmentList()
     }
     idb::IdbSpecialNet* idb_special_net = idb_design->get_special_net_list()->find_net(pg_segment.get_net_name());
     if (idb_special_net == nullptr) {
-      continue;
+      FPLOG.error(Loc::current(), "PG geometry references undeclared net '", pg_segment.get_net_name(), "'.");
     }
     idb::IdbSpecialWire* idb_special_wire = nullptr;
     std::map<std::string, idb::IdbSpecialWire*>::iterator wire_iter = pg_net_name_to_wire_map.find(pg_segment.get_net_name());
@@ -1221,7 +1613,10 @@ void FPInterface::outputPGSegmentList()
       idb_special_wire = wire_iter->second;
     }
     if (pg_segment.get_type() == PGSegmentType::kVia) {
-      outputPGVia(idb_special_wire, pg_segment);
+      if (!outputPGVia(idb_special_wire, pg_segment)) {
+        FPLOG.error(Loc::current(), "Incomplete PG via stack on '", pg_segment.get_net_name(), "' from '", pg_segment.get_bottom_layer_name(),
+                    "' to '", pg_segment.get_top_layer_name(), "' at (", pg_segment.get_start_x(), ",", pg_segment.get_start_y(), ").");
+      }
       pg_segment.set_generated(false);
       continue;
     }
@@ -1233,7 +1628,15 @@ void FPInterface::outputPGSegmentList()
     idb_segment->set_layer_as_new();
     idb_segment->set_layer(idb_layer);
     idb_segment->set_route_width(pg_segment.get_width());
-    idb_segment->set_shape_type(pg_segment.get_type() == PGSegmentType::kFollowPin ? idb::IdbWireShapeType::kFollowPin : idb::IdbWireShapeType::kStripe);
+    idb::IdbWireShapeType shape = idb::IdbWireShapeType::kStripe;
+    switch (pg_segment.get_type()) {
+      case PGSegmentType::kFollowPin: shape = idb::IdbWireShapeType::kFollowPin; break;
+      case PGSegmentType::kRing: shape = idb::IdbWireShapeType::kRing; break;
+      case PGSegmentType::kBlockWire: shape = idb::IdbWireShapeType::kBlockWire; break;
+      case PGSegmentType::kIoWire: shape = idb::IdbWireShapeType::kIoWire; break;
+      default: break;
+    }
+    idb_segment->set_shape_type(shape);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());
     idb_segment->add_point(pg_segment.get_end_x(), pg_segment.get_end_y());
     idb_segment->set_bounding_box();
@@ -1241,13 +1644,48 @@ void FPInterface::outputPGSegmentList()
   }
 }
 
+std::vector<InstancePinShape> FPInterface::getPGViaShapes(PGSegment& pg_segment)
+{
+  std::vector<InstancePinShape> shapes;
+  for (auto* via : getPGViaStack(pg_segment)) {
+    for (auto layer_shape : {via->get_bottom_layer_shape(), via->get_top_layer_shape()}) {
+      for (auto* rect : layer_shape.get_rect_list()) {
+        InstancePinShape shape;
+        shape.set_layer_name(layer_shape.get_layer()->get_name());
+        shape.set_rect(pg_segment.get_start_x() + rect->get_low_x(), pg_segment.get_start_y() + rect->get_low_y(),
+                       pg_segment.get_start_x() + rect->get_high_x(), pg_segment.get_start_y() + rect->get_high_y());
+        shapes.push_back(shape);
+      }
+    }
+  }
+  return shapes;
+}
+
+void FPInterface::resetPGViaAdjustment()
+{
+  _adjusted_via_count = 0;
+}
+
 void FPInterface::adjustPGLineSegmentListByViaEnclosure()
 {
   idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
+  if (idb_layout == nullptr || idb_layout->get_layers() == nullptr) {
+    return;
+  }
   std::vector<PGSegment>& pg_segment_list = FPDM.getDatabase().get_pg_segment_list();
+  size_t via_count = 0;
+  for (const PGSegment& pg_segment : pg_segment_list) {
+    if (pg_segment.get_type() == PGSegmentType::kVia) {
+      ++via_count;
+    }
+  }
+  if (via_count <= _adjusted_via_count) {
+    return;
+  }
+
   std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>> pg_net_layer_coord_to_stripe_segment_list_map;
   for (PGSegment& pg_segment : pg_segment_list) {
-    if (pg_segment.get_type() != PGSegmentType::kStripe) {
+    if (!pg_segment.is_line() || pg_segment.get_type() == PGSegmentType::kFollowPin) {
       continue;
     }
     std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", pg_segment.get_layer_name());
@@ -1255,8 +1693,12 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
     pg_net_layer_coord_to_stripe_segment_list_map[pg_net_layer_key][line_coord].push_back(&pg_segment);
   }
 
+  size_t via_ordinal = 0;
   for (PGSegment& pg_segment : pg_segment_list) {
     if (pg_segment.get_type() != PGSegmentType::kVia) {
+      continue;
+    }
+    if (via_ordinal++ < _adjusted_via_count) {
       continue;
     }
 
@@ -1290,6 +1732,7 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
                                           pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
     }
   }
+  _adjusted_via_count = via_count;
 }
 
 idb::IdbVia* FPInterface::getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
@@ -1302,6 +1745,124 @@ idb::IdbVia* FPInterface::getIDBVia(idb::IdbLayerCut* idb_cut_layer, PGSegment& 
   return idb_via;
 }
 
+std::vector<idb::IdbVia*> FPInterface::getPGViaStack(PGSegment& pg_segment)
+{
+  const std::string cache_key = FPUTIL.getString(pg_segment.get_bottom_layer_name(), "|", pg_segment.get_top_layer_name(), "|",
+                                                 pg_segment.get_cut_layer_name(), "|", pg_segment.get_via_width(), "|", pg_segment.get_via_height());
+  auto cache_iter = _pg_via_stack_cache.find(cache_key);
+  if (cache_iter != _pg_via_stack_cache.end()) {
+    return cache_iter->second;
+  }
+
+  auto* idb_layout = dmInst->get_idb_layout();
+  if (idb_layout == nullptr || idb_layout->get_layers() == nullptr) {
+    return {};
+  }
+  auto* layers = idb_layout->get_layers();
+  auto* bottom = layers->find_layer(pg_segment.get_bottom_layer_name());
+  auto* top = layers->find_layer(pg_segment.get_top_layer_name());
+  if (bottom == nullptr || top == nullptr || !bottom->is_routing() || !top->is_routing() || bottom == top) {
+    return {};
+  }
+  if (bottom->get_order() > top->get_order()) {
+    std::swap(bottom, top);
+  }
+  auto cuts = layers->find_cut_layer_list(bottom->get_name(), top->get_name());
+  if (!pg_segment.get_cut_layer_name().empty()
+      && (cuts.size() != 1 || cuts.front()->get_name() != pg_segment.get_cut_layer_name())) {
+    return {};
+  }
+  std::vector<idb::IdbVia*> stack;
+  idb::IdbLayer* current = bottom;
+  for (auto* cut : cuts) {
+    auto* rule = cut->get_via_rule();
+    if (rule == nullptr || rule->get_layer_bottom() != current || rule->get_layer_top() == nullptr) {
+      return {};
+    }
+    auto* via = getIDBVia(cut, pg_segment);
+    if (via == nullptr) {
+      return {};
+    }
+    stack.push_back(via);
+    current = rule->get_layer_top();
+  }
+  if (current != top) {
+    return {};
+  }
+  _pg_via_stack_cache[cache_key] = stack;
+  return stack;
+}
+
+std::pair<int32_t, int32_t> FPInterface::getPGViaMinSize(const std::string& bottom_layer_name, const std::string& top_layer_name)
+{
+  const auto cache_key = std::make_pair(bottom_layer_name, top_layer_name);
+  auto cache_iter = _pg_via_min_size_cache.find(cache_key);
+  if (cache_iter != _pg_via_min_size_cache.end()) {
+    return cache_iter->second;
+  }
+
+  auto* idb_layout = dmInst->get_idb_layout();
+  if (idb_layout == nullptr || idb_layout->get_layers() == nullptr) {
+    return {0, 0};
+  }
+  auto* layers = idb_layout->get_layers();
+  auto* bottom = layers->find_layer(bottom_layer_name);
+  auto* top = layers->find_layer(top_layer_name);
+  if (bottom == nullptr || top == nullptr || !bottom->is_routing() || !top->is_routing() || bottom == top) {
+    return {0, 0};
+  }
+  if (bottom->get_order() > top->get_order()) {
+    std::swap(bottom, top);
+  }
+  int32_t required_width = 0;
+  int32_t required_height = 0;
+  for (auto* cut : layers->find_cut_layer_list(bottom->get_name(), top->get_name())) {
+    auto* rule = cut->get_via_rule();
+    if (rule == nullptr || rule->get_cut_rect() == nullptr || rule->get_enclosure_bottom() == nullptr
+        || rule->get_enclosure_top() == nullptr) {
+      return {0, 0};
+    }
+    const int32_t cut_x = rule->get_cut_rect()->get_width();
+    const int32_t cut_y = rule->get_cut_rect()->get_height();
+    const int32_t b1 = std::max(rule->get_enclosure_bottom()->get_overhang_1(), 0);
+    const int32_t b2 = std::max(rule->get_enclosure_bottom()->get_overhang_2(), 0);
+    const int32_t t1 = std::max(rule->get_enclosure_top()->get_overhang_1(), 0);
+    const int32_t t2 = std::max(rule->get_enclosure_top()->get_overhang_2(), 0);
+    // Pick the orientation that needs the smallest square; the layer's pair
+    // must be feasible in one orientation, not two independently.
+    int32_t layer_width = 0;
+    int32_t layer_height = 0;
+    int64_t best_span = INT64_MAX;
+    for (int32_t bottom_swap = 0; bottom_swap < 2; ++bottom_swap) {
+      const int32_t bottom_x = bottom_swap == 0 ? b1 : b2;
+      const int32_t bottom_y = bottom_swap == 0 ? b2 : b1;
+      for (int32_t top_swap = 0; top_swap < 2; ++top_swap) {
+        const int32_t top_x = top_swap == 0 ? t1 : t2;
+        const int32_t top_y = top_swap == 0 ? t2 : t1;
+        const int32_t width = cut_x + 2 * std::max(bottom_x, top_x);
+        const int32_t height = cut_y + 2 * std::max(bottom_y, top_y);
+        const int64_t span = std::max(width, height);
+        if (span < best_span) {
+          best_span = span;
+          layer_width = width;
+          layer_height = height;
+        }
+      }
+    }
+    required_width = std::max(required_width, layer_width);
+    required_height = std::max(required_height, layer_height);
+  }
+  const std::pair<int32_t, int32_t> result{required_width, required_height};
+  _pg_via_min_size_cache[cache_key] = result;
+  return result;
+}
+
+int32_t FPInterface::getPGViaMinSpan(const std::string& bottom_layer_name, const std::string& top_layer_name)
+{
+  const auto [width, height] = getPGViaMinSize(bottom_layer_name, top_layer_name);
+  return std::max(width, height);
+}
+
 idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
 {
   idb::IdbViaRuleGenerate* idb_via_rule = idb_cut_layer->get_via_rule();
@@ -1309,9 +1870,9 @@ idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* id
     return nullptr;
   }
 
-  std::pair<int32_t, int32_t> row_col_pair = getIDBViaRowCol(idb_cut_layer, pg_segment);
-  int32_t cut_row_num = row_col_pair.first;
-  int32_t cut_col_num = row_col_pair.second;
+  PGViaGeometry geometry = getIDBViaGeometry(idb_cut_layer, pg_segment);
+  int32_t cut_row_num = geometry.cut_row_num;
+  int32_t cut_col_num = geometry.cut_col_num;
   if (cut_row_num == 0 || cut_col_num == 0) {
     return nullptr;
   }
@@ -1331,8 +1892,6 @@ idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* id
 
   int32_t cut_width = cut_col_num * cut_size_x + (cut_col_num - 1) * cut_spacing_x;
   int32_t cut_height = cut_row_num * cut_size_y + (cut_row_num - 1) * cut_spacing_y;
-  int32_t enclosure_x = (pg_segment.get_via_width() - cut_width) / 2;
-  int32_t enclosure_y = (pg_segment.get_via_height() - cut_height) / 2;
 
   idb::IdbVias* idb_via_list = dmInst->get_idb_design()->get_via_list();
   idb::IdbVia* idb_via = idb_via_list->add_via(via_name);
@@ -1352,8 +1911,8 @@ idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* id
   if (!pattern_string.empty()) {
     idb_via_master_generate->set_patttern(pattern_string);
   }
-  idb_via_master_generate->set_enclosure_bottom(enclosure_x, enclosure_y);
-  idb_via_master_generate->set_enclosure_top(enclosure_x, enclosure_y);
+  idb_via_master_generate->set_enclosure_bottom(geometry.bottom_enclosure_x, geometry.bottom_enclosure_y);
+  idb_via_master_generate->set_enclosure_top(geometry.top_enclosure_x, geometry.top_enclosure_y);
 
   int32_t cut_ll_x = -cut_width / 2 + idb_via_master_generate->get_original_offset_x();
   int32_t cut_ll_y = -cut_height / 2 + idb_via_master_generate->get_original_offset_y();
@@ -1372,17 +1931,22 @@ idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* id
   return idb_via;
 }
 
-std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
+PGViaGeometry FPInterface::getIDBViaGeometry(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment)
 {
+  PGViaGeometry result;
   idb::IdbViaRuleGenerate* idb_via_rule = idb_cut_layer->get_via_rule();
-  if (idb_via_rule == nullptr) {
-    return std::make_pair(0, 0);
+  if (idb_via_rule == nullptr || idb_via_rule->get_cut_rect() == nullptr || idb_via_rule->get_enclosure_bottom() == nullptr
+      || idb_via_rule->get_enclosure_top() == nullptr) {
+    return result;
   }
 
   int32_t cut_size_x = idb_via_rule->get_cut_rect()->get_width();
   int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
   int32_t cut_pitch_x = idb_via_rule->get_spacing_x();
   int32_t cut_pitch_y = idb_via_rule->get_spacing_y();
+  if (cut_size_x <= 0 || cut_size_y <= 0 || cut_pitch_x <= 0 || cut_pitch_y <= 0) {
+    return result;
+  }
   std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
   if (!idb_cut_spacing_list.empty()) {
     int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
@@ -1394,8 +1958,6 @@ std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_c
   int32_t bottom_overhang_2 = std::max(idb_via_rule->get_enclosure_bottom()->get_overhang_2(), 0);
   int32_t top_overhang_1 = std::max(idb_via_rule->get_enclosure_top()->get_overhang_1(), 0);
   int32_t top_overhang_2 = std::max(idb_via_rule->get_enclosure_top()->get_overhang_2(), 0);
-  int32_t cut_row_num = 0;
-  int32_t cut_col_num = 0;
   int64_t max_cut_num = 0;
 
   // LEF generated VIA 的 ENCLOSURE 使用长边和短边约束，X/Y 可以交换。
@@ -1412,15 +1974,83 @@ std::pair<int32_t, int32_t> FPInterface::getIDBViaRowCol(idb::IdbLayerCut* idb_c
       }
       int32_t candidate_row_num = 1 + (pg_segment.get_via_height() - min_height) / cut_pitch_y;
       int32_t candidate_col_num = 1 + (pg_segment.get_via_width() - min_width) / cut_pitch_x;
+      int32_t cut_width = cut_size_x + (candidate_col_num - 1) * cut_pitch_x;
+      int32_t cut_height = cut_size_y + (candidate_row_num - 1) * cut_pitch_y;
+      int32_t candidate_bottom_x = bottom_enclosure_x;
+      int32_t candidate_bottom_y = bottom_enclosure_y;
+      int32_t candidate_top_x = top_enclosure_x;
+      int32_t candidate_top_y = top_enclosure_y;
+      if (!adjustIDBViaEnclosureArea(idb_via_rule->get_layer_bottom(), cut_width, cut_height, pg_segment, candidate_bottom_x, candidate_bottom_y)
+          || !adjustIDBViaEnclosureArea(idb_via_rule->get_layer_top(), cut_width, cut_height, pg_segment, candidate_top_x, candidate_top_y)) {
+        continue;
+      }
       int64_t candidate_cut_num = static_cast<int64_t>(candidate_row_num) * candidate_col_num;
       if (max_cut_num < candidate_cut_num) {
-        cut_row_num = candidate_row_num;
-        cut_col_num = candidate_col_num;
         max_cut_num = candidate_cut_num;
+        result.cut_row_num = candidate_row_num;
+        result.cut_col_num = candidate_col_num;
+        result.bottom_enclosure_x = candidate_bottom_x;
+        result.bottom_enclosure_y = candidate_bottom_y;
+        result.top_enclosure_x = candidate_top_x;
+        result.top_enclosure_y = candidate_top_y;
       }
     }
   }
-  return std::make_pair(cut_row_num, cut_col_num);
+  return result;
+}
+
+bool FPInterface::adjustIDBViaEnclosureArea(idb::IdbLayerRouting* idb_layer, int32_t cut_width, int32_t cut_height, PGSegment& pg_segment,
+                                          int32_t& enclosure_x, int32_t& enclosure_y)
+{
+  int32_t min_area = idb_layer->get_area();
+  if (min_area <= 0 || (cut_width + 2.0 * enclosure_x) * (cut_height + 2.0 * enclosure_y) >= min_area) {
+    return true;
+  }
+
+  int32_t grid = std::max(dmInst->get_idb_layout()->get_munufacture_grid(), 1);
+  int32_t max_enclosure_x = FPUTIL.alignDown((pg_segment.get_via_width() - cut_width) / 2, grid);
+  int32_t max_enclosure_y = FPUTIL.alignDown((pg_segment.get_via_height() - cut_height) / 2, grid);
+  if (max_enclosure_x < enclosure_x || max_enclosure_y < enclosure_y) {
+    return false;
+  }
+
+  // 中间层可能没有同网导线补足面积，仅在原 via 范围内沿两轴尝试扩展，不加宽 rail。
+  double best_area = 0.0;
+  int32_t best_growth = 0;
+  int32_t best_x = enclosure_x;
+  int32_t best_y = enclosure_y;
+  for (int32_t swap_axis = 0; swap_axis < 2; swap_axis++) {
+    int32_t first_cut = swap_axis == 0 ? cut_width : cut_height;
+    int32_t second_cut = swap_axis == 0 ? cut_height : cut_width;
+    int32_t first_enclosure = swap_axis == 0 ? enclosure_x : enclosure_y;
+    int32_t second_enclosure = swap_axis == 0 ? enclosure_y : enclosure_x;
+    int32_t first_limit = swap_axis == 0 ? max_enclosure_x : max_enclosure_y;
+    int32_t second_limit = swap_axis == 0 ? max_enclosure_y : max_enclosure_x;
+    int32_t second_span = second_cut + 2 * second_enclosure;
+    int32_t required_first = min_area / second_span + (min_area % second_span != 0);
+    first_enclosure = std::min(first_limit, std::max(first_enclosure, FPUTIL.alignUp((required_first - first_cut + 1) / 2, grid)));
+    int32_t first_span = first_cut + 2 * first_enclosure;
+    int32_t required_second = min_area / first_span + (min_area % first_span != 0);
+    second_enclosure = std::max(second_enclosure, FPUTIL.alignUp((required_second - second_cut + 1) / 2, grid));
+    if (second_limit < second_enclosure) {
+      continue;
+    }
+    double area = first_span * (second_cut + 2.0 * second_enclosure);
+    int32_t growth = first_enclosure + second_enclosure - enclosure_x - enclosure_y;
+    if (area < min_area || (best_area > 0.0 && (best_growth < growth || (best_growth == growth && best_area <= area)))) {
+      continue;
+    }
+    best_area = area;
+    best_growth = growth;
+    best_x = swap_axis == 0 ? first_enclosure : second_enclosure;
+    best_y = swap_axis == 0 ? second_enclosure : first_enclosure;
+  }
+  if (best_area == 0.0) {
+    return false;
+  }
+  enclosure_x = best_x;
+  enclosure_y = best_y;
+  return true;
 }
 
 void FPInterface::adjustLineSegmentListByViaEnclosure(
@@ -1460,7 +2090,6 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
 {
   bool covered = false;
   for (PGSegment* line_segment : line_segment_list) {
-    int32_t half_width = line_segment->get_width() / 2;
     if (line_segment->is_vertical()) {
       if (enclosure_ll_x < line_segment->get_ll_x() || line_segment->get_ur_x() < enclosure_ur_x || line_segment->get_ur_y() < enclosure_ll_y
           || enclosure_ur_y < line_segment->get_ll_y()) {
@@ -1468,17 +2097,17 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
       }
       if (line_segment->get_start_y() <= line_segment->get_end_y()) {
         if (enclosure_ll_y < line_segment->get_ll_y()) {
-          line_segment->set_start_y(enclosure_ll_y + half_width);
+          line_segment->set_start_y(enclosure_ll_y);
         }
         if (line_segment->get_ur_y() < enclosure_ur_y) {
-          line_segment->set_end_y(enclosure_ur_y - half_width);
+          line_segment->set_end_y(enclosure_ur_y);
         }
       } else {
         if (enclosure_ll_y < line_segment->get_ll_y()) {
-          line_segment->set_end_y(enclosure_ll_y + half_width);
+          line_segment->set_end_y(enclosure_ll_y);
         }
         if (line_segment->get_ur_y() < enclosure_ur_y) {
-          line_segment->set_start_y(enclosure_ur_y - half_width);
+          line_segment->set_start_y(enclosure_ur_y);
         }
       }
       covered = (enclosure_ll_y >= line_segment->get_ll_y() && line_segment->get_ur_y() >= enclosure_ur_y) || covered;
@@ -1489,17 +2118,17 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
       }
       if (line_segment->get_start_x() <= line_segment->get_end_x()) {
         if (enclosure_ll_x < line_segment->get_ll_x()) {
-          line_segment->set_start_x(enclosure_ll_x + half_width);
+          line_segment->set_start_x(enclosure_ll_x);
         }
         if (line_segment->get_ur_x() < enclosure_ur_x) {
-          line_segment->set_end_x(enclosure_ur_x - half_width);
+          line_segment->set_end_x(enclosure_ur_x);
         }
       } else {
         if (enclosure_ll_x < line_segment->get_ll_x()) {
-          line_segment->set_end_x(enclosure_ll_x + half_width);
+          line_segment->set_end_x(enclosure_ll_x);
         }
         if (line_segment->get_ur_x() < enclosure_ur_x) {
-          line_segment->set_start_x(enclosure_ur_x - half_width);
+          line_segment->set_start_x(enclosure_ur_x);
         }
       }
       covered = (enclosure_ll_x >= line_segment->get_ll_x() && line_segment->get_ur_x() >= enclosure_ur_x) || covered;
@@ -1508,24 +2137,13 @@ bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_
   return covered;
 }
 
-void FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment)
+bool FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment)
 {
-  idb::IdbLayout* idb_layout = dmInst->get_idb_layout();
-  std::vector<idb::IdbLayerCut*> idb_cut_layer_list;
-  if (!pg_segment.get_cut_layer_name().empty()) {
-    idb::IdbLayer* idb_layer = idb_layout->get_layers()->find_layer(pg_segment.get_cut_layer_name());
-    idb::IdbLayerCut* idb_cut_layer = dynamic_cast<idb::IdbLayerCut*>(idb_layer);
-    if (idb_cut_layer != nullptr) {
-      idb_cut_layer_list.push_back(idb_cut_layer);
-    }
-  } else {
-    idb_cut_layer_list = idb_layout->get_layers()->find_cut_layer_list(pg_segment.get_bottom_layer_name(), pg_segment.get_top_layer_name());
+  const auto stack = getPGViaStack(pg_segment);
+  if (stack.empty()) {
+    return false;
   }
-  for (idb::IdbLayerCut* idb_cut_layer : idb_cut_layer_list) {
-    idb::IdbVia* idb_via = getIDBVia(idb_cut_layer, pg_segment);
-    if (idb_via == nullptr) {
-      continue;
-    }
+  for (idb::IdbVia* idb_via : stack) {
     idb::IdbSpecialWireSegment* idb_segment = idb_special_wire->add_segment();
     idb_segment->set_is_via(true);
     idb_segment->add_point(pg_segment.get_start_x(), pg_segment.get_start_y());
@@ -1537,6 +2155,7 @@ void FPInterface::outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& 
     idb_via_copy->set_coordinate(pg_segment.get_start_x(), pg_segment.get_start_y());
     idb_segment->set_bounding_box();
   }
+  return true;
 }
 
 #endif

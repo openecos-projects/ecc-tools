@@ -38,6 +38,10 @@ class Config
   std::string ac_temp_directory_path;  // building
   // **********   DefFlattener    ********** //
   std::string df_temp_directory_path;  // building
+  // **********  DriverAnalyzer  ********** //
+  std::string da_temp_directory_path;  // building
+  // **********    DEFCutter      ********** //
+  std::string dc_temp_directory_path;  // building
   // **********  FillerInserter   ********** //
   std::string fi_temp_directory_path;  // building
   // **********  MetalInserter    ********** //

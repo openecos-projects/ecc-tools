@@ -16,6 +16,8 @@
 #pragma once
 
 #include "FPHeader.hpp"
+#include "InstancePinShape.hpp"
+#include "PGNetType.hpp"
 
 namespace ifp {
 
@@ -32,6 +34,14 @@ class CellMaster
   bool get_pad_filler() const { return _pad_filler; }
   bool get_spacer() const { return _spacer; }
   bool get_corner() const { return _corner; }
+  std::map<std::string, PGNetType>& get_pg_pin_types() { return _pg_pin_types; }
+  const std::map<std::string, PGNetType>& get_pg_pin_types() const { return _pg_pin_types; }
+  std::vector<InstancePinShape>& get_pg_pin_shapes() { return _pg_pin_shapes; }
+  const std::vector<InstancePinShape>& get_pg_pin_shapes() const { return _pg_pin_shapes; }
+  std::vector<InstancePinShape>& get_obstruction_shapes() { return _obstruction_shapes; }
+  const std::vector<InstancePinShape>& get_obstruction_shapes() const { return _obstruction_shapes; }
+  bool get_symmetry_x() const { return _symmetry_x; }
+  bool get_symmetry_y() const { return _symmetry_y; }
 
   // const getter
   const std::string& get_name() const { return _name; }
@@ -44,6 +54,8 @@ class CellMaster
   void set_pad_filler(bool pad_filler) { _pad_filler = pad_filler; }
   void set_spacer(bool spacer) { _spacer = spacer; }
   void set_corner(bool corner) { _corner = corner; }
+  void set_symmetry_x(bool value) { _symmetry_x = value; }
+  void set_symmetry_y(bool value) { _symmetry_y = value; }
 
   // function
 
@@ -55,6 +67,11 @@ class CellMaster
   bool _pad_filler = false;
   bool _spacer = false;
   bool _corner = false;
+  std::map<std::string, PGNetType> _pg_pin_types;
+  std::vector<InstancePinShape> _pg_pin_shapes;
+  std::vector<InstancePinShape> _obstruction_shapes;
+  bool _symmetry_x = false;
+  bool _symmetry_y = false;
 };
 
 }  // namespace ifp

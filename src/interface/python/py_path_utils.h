@@ -1,0 +1,38 @@
+// ***************************************************************************************
+// Copyright (c) 2023-2025 Peng Cheng Laboratory
+// Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
+// Copyright (c) 2023-2025 Beijing Institute of Open Source Chip
+//
+// iEDA is licensed under Mulan PSL v2.
+// You can use this software according to the terms and conditions of the Mulan PSL v2.
+// You may obtain a copy of Mulan PSL v2 at:
+// http://license.coscl.org.cn/MulanPSL2
+//
+// THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+// EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+//
+// See the Mulan PSL v2 for more details.
+// ***************************************************************************************
+#pragma once
+
+#include <filesystem>
+#include <optional>
+#include <string>
+
+namespace python_interface {
+
+// Canonicalize an optional path parameter: std::nullopt and an empty path
+// both map to "", a non-empty path maps to its .string(). This preserves the
+// empty-string unset sentinel the interface internals check with .empty(),
+// so an omitted/None argument and an explicitly passed "" stay
+// indistinguishable after canonicalization.
+inline std::string path_or_empty(const std::optional<std::filesystem::path>& path)
+{
+  if (not path.has_value() || path->empty()) {
+    return "";
+  }
+  return path->string();
+}
+
+}  // namespace python_interface

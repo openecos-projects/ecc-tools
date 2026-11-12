@@ -150,7 +150,7 @@ void LayerAssigner::initLATaskList(LAModel& la_model)
   std::vector<LANet>& la_net_list = la_model.get_la_net_list();
   std::vector<LANet*>& la_task_list = la_model.get_la_task_list();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
+  bool regional_stage = region_route.get_enable();
   la_task_list.reserve(la_net_list.size());
   for (LANet& la_net : la_net_list) {
     if (regional_stage && la_net.get_la_pin_list().size() < 2) {
@@ -195,7 +195,7 @@ void LayerAssigner::buildPlaneTree(LAModel& la_model)
   std::vector<LANet>& la_net_list = la_model.get_la_net_list();
   std::map<int32_t, std::vector<Segment<LayerCoord>>>& net_global_result_map = la_model.get_net_global_result_map();
   RegionRoute& region_route = RTDM.getDatabase().get_region_route();
-  bool regional_stage = region_route.get_enable() && region_route.get_is_regional_stage();
+  bool regional_stage = region_route.get_enable();
 
 #pragma omp parallel for schedule(dynamic, 1)
   for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(la_net_list.size()); net_idx++) {

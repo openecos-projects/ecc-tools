@@ -20,7 +20,6 @@
 #include "DataManager.hpp"
 #include "Database.hpp"
 #include "Net.hpp"
-#include "SAModel.hpp"
 
 namespace irt {
 
@@ -36,6 +35,8 @@ class SupplyAnalyzer
   void analyze();
 
  private:
+  using ShapeRTree = bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>>;
+
   // self
   static SupplyAnalyzer* _sa_instance;
 
@@ -46,23 +47,22 @@ class SupplyAnalyzer
   SupplyAnalyzer& operator=(const SupplyAnalyzer& other) = delete;
   SupplyAnalyzer& operator=(SupplyAnalyzer&& other) = delete;
   // function
-  SAModel initSAModel();
   void initRoutingEdgeMap();
-  void buildSupplySchedule(SAModel& sa_model);
-  void analyzeSupply(SAModel& sa_model);
-  EXTLayerRect getSearchRect(LayerCoord& first_coord, LayerCoord& second_coord);
-  std::vector<LayerRect> getCrossingWireList(EXTLayerRect& search_rect);
-  bool isAccess(LayerRect& wire, std::vector<PlanarRect>& obs_rect_list);
+  std::vector<ShapeRTree> buildShapeRTreeList();
+  void analyzeSupply();
+  EXTLayerRect getSearchRect(const LayerCoord& first_coord, const LayerCoord& second_coord);
+  std::vector<LayerRect> getCrossingWireList(const EXTLayerRect& search_rect);
+  bool isAccess(const LayerRect& wire, const std::vector<PlanarRect>& enlarged_obs_rect_list);
 
 #if 1  // exhibit
-  void updateSummary(SAModel& sa_model);
-  void printSummary(SAModel& sa_model);
-  void outputPlanarSupplyCSV(SAModel& sa_model);
-  void outputLayerSupplyCSV(SAModel& sa_model);
+  void updateSummary();
+  void printSummary();
+  void outputPlanarSupplyCSV();
+  void outputLayerSupplyCSV();
 #endif
 
 #if 1  // debug
-  void debugPlotSAModel(SAModel& sa_model);
+  void debugPlotSAModel();
 #endif
 };
 

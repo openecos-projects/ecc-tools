@@ -17,6 +17,7 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_idrc.h"
 
@@ -25,7 +26,7 @@ namespace py = pybind11;
 
 void register_idrc(py::module& m)
 {
-  m.def("init_drc", init_drc, py::arg("temp_directory_path") = "", py::arg("thread_number") = 128);
+  m.def("init_drc", init_drc, py::arg("temp_directory_path") = py::none(), py::arg("thread_number") = 128);
   m.def("run_drc", run_drc);
   m.def("destroy_drc", destroy_drc);
 }

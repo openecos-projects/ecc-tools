@@ -16,15 +16,17 @@
 // ***************************************************************************************
 #include "py_idrc.h"
 
+#include "py_path_utils.h"
 #include "DRCInterface.hpp"
 
 namespace python_interface {
 
-bool init_drc(const std::string& temp_directory_path, const int& thread_number)
+bool init_drc(const std::optional<std::filesystem::path>& temp_directory_path, const int& thread_number)
 {
+  const std::string temp_directory_path_ = path_or_empty(temp_directory_path);
   std::map<std::string, std::any> config_map;
-  if (temp_directory_path != "") {
-    config_map.insert(std::make_pair("-temp_directory_path", temp_directory_path));
+  if (temp_directory_path_ != "") {
+    config_map.insert(std::make_pair("-temp_directory_path", temp_directory_path_));
   }
 
   config_map.insert(std::make_pair("-thread_number", thread_number));

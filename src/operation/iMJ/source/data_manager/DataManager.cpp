@@ -16,8 +16,8 @@
 // ***************************************************************************************
 #include "DataManager.hpp"
 
-#include "Utility.hpp"
 #include "MJInterface.hpp"
+#include "Utility.hpp"
 
 namespace imj {
 
@@ -89,6 +89,10 @@ void DataManager::buildConfig()
   _config.ac_temp_directory_path = _config.temp_directory_path + "antenna_checker/";
   // **********   DefFlattener    ********** //
   _config.df_temp_directory_path = _config.temp_directory_path + "def_flattener/";
+  // **********  DriverAnalyzer  ********** //
+  _config.da_temp_directory_path = _config.temp_directory_path + "driver_analyzer/";
+  // **********    DEFCutter      ********** //
+  _config.dc_temp_directory_path = _config.temp_directory_path + "def_cutter/";
   // **********  FillerInserter   ********** //
   _config.fi_temp_directory_path = _config.temp_directory_path + "filler_inserter/";
   // **********  MetalInserter    ********** //
@@ -105,6 +109,10 @@ void DataManager::buildConfig()
   MJUTIL.createDir(_config.ac_temp_directory_path);
   // **********   DefFlattener    ********** //
   MJUTIL.createDir(_config.df_temp_directory_path);
+  // **********  DriverAnalyzer  ********** //
+  MJUTIL.createDir(_config.da_temp_directory_path);
+  // **********    DEFCutter      ********** //
+  MJUTIL.createDir(_config.dc_temp_directory_path);
   // **********  FillerInserter   ********** //
   MJUTIL.createDir(_config.fi_temp_directory_path);
   // **********  MetalInserter    ********** //
@@ -138,6 +146,12 @@ void DataManager::printConfig()
   // **********   DefFlattener    ********** //
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "DefFlattener");
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.df_temp_directory_path);
+  // **********  DriverAnalyzer  ********** //
+  MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "DriverAnalyzer");
+  MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.da_temp_directory_path);
+  // **********    DEFCutter      ********** //
+  MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "DEFCutter");
+  MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.dc_temp_directory_path);
   // **********  FillerInserter   ********** //
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "FillerInserter");
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.fi_temp_directory_path);

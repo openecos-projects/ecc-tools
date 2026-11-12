@@ -1,6 +1,7 @@
 #include "GeometryTilePyramid.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace ecc::geometry {
 namespace {
@@ -253,6 +254,12 @@ std::vector<GeometryTileSummary> GeometryTilePyramid::query(uint8_t lod_level, L
       if (iter != _summaries.end()) {
         result.push_back(iter->second);
       }
+      if (y == max_y) {
+        break;
+      }
+    }
+    if (x == max_x) {
+      break;
     }
   }
   for (const LargeShapeSummary& large_summary : _large_shape_summaries) {
@@ -291,6 +298,12 @@ std::vector<GeometryTileKey> GeometryTilePyramid::keys_for(uint8_t lod_level, La
   for (int32_t x = min_x; x <= max_x; ++x) {
     for (int32_t y = min_y; y <= max_y; ++y) {
       keys.push_back(GeometryTileKey{lod_level, layer_id, x, y});
+      if (y == max_y) {
+        break;
+      }
+    }
+    if (x == max_x) {
+      break;
     }
   }
 
@@ -310,7 +323,12 @@ uint64_t GeometryTilePyramid::tile_span_count(uint8_t lod_level, Rect32 bbox) co
   const int32_t min_y = floor_div(bbox.ly, size);
   const int32_t max_x = floor_div(bbox.hx, size);
   const int32_t max_y = floor_div(bbox.hy, size);
-  return static_cast<uint64_t>(max_x - min_x + 1) * static_cast<uint64_t>(max_y - min_y + 1);
+  const uint64_t x_count = static_cast<uint64_t>(max_x) - static_cast<uint64_t>(min_x) + 1;
+  const uint64_t y_count = static_cast<uint64_t>(max_y) - static_cast<uint64_t>(min_y) + 1;
+  if (x_count > std::numeric_limits<uint64_t>::max() / y_count) {
+    return std::numeric_limits<uint64_t>::max();
+  }
+  return x_count * y_count;
 }
 
 void GeometryTilePyramid::add_dirty_keys(uint8_t lod_level, LayerId layer_id, Rect32 bbox)

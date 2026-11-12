@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -40,6 +41,8 @@ enum class ClockPropagationKind
   kBuffer,
   kInverter,
   kClockGate,
+  kIoPad,
+  kClockMux,
 };
 
 enum class ClockPropagationOrigin

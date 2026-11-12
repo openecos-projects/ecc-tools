@@ -24,6 +24,7 @@
 #pragma once
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,12 @@ class Config
   auto operator=(const Config& rhs) -> Config& = default;
   auto operator=(Config&& rhs) -> Config& = default;
 
+  // The fanout budget sizes a cluster, so a value outside this range describes
+  // nothing iCTS can build. The bound is a configuration contract and is shared with
+  // any other source of a fanout budget, which must stay inside the same range.
+  static constexpr unsigned kMinFanout = 1U;
+  static constexpr unsigned kMaxFanout = 1024U;
+
   // Initialize from config file
   auto init(const std::string& config_file) -> bool;
 
@@ -53,6 +60,9 @@ class Config
     _max_cap = 1.5;
     _has_max_buf_tran = false;
     _has_max_cap = false;
+    _has_max_fanout = false;
+    _sdc_max_transition_ns = std::nullopt;
+    _sdc_max_cap_pf = std::nullopt;
     _max_fanout = 32;
     _wirelength_unit_um = 0.0;
     _wirelength_iterations = 3;
@@ -82,6 +92,15 @@ class Config
   auto get_max_cap() const -> double { return _max_cap; }
   auto has_max_buf_tran() const -> bool { return _has_max_buf_tran; }
   auto has_max_cap() const -> bool { return _has_max_cap; }
+  auto has_max_fanout() const -> bool { return _has_max_fanout; }
+  // An SDC-declared electrical limit is a design rule, not a tuning knob: the cell's own
+  // Liberty rule can still be tighter, so consumers take the smaller of the two. The
+  // flag keeps that provenance, which a bare number in `_max_buf_tran` or `_max_cap`
+  // loses.
+  auto has_sdc_max_transition() const -> bool { return _sdc_max_transition_ns.has_value(); }
+  auto get_sdc_max_transition_ns() const -> double { return _sdc_max_transition_ns.value_or(0.0); }
+  auto has_sdc_max_cap() const -> bool { return _sdc_max_cap_pf.has_value(); }
+  auto get_sdc_max_cap_pf() const -> double { return _sdc_max_cap_pf.value_or(0.0); }
   auto get_wirelength_unit_um() const -> double { return _wirelength_unit_um; }
   auto get_wirelength_iterations() const -> unsigned { return _wirelength_iterations; }
   auto get_slew_steps() const -> unsigned { return _slew_steps; }
@@ -119,12 +138,18 @@ class Config
     _max_cap = max_cap;
     _has_max_cap = true;
   }
+  auto set_sdc_max_transition_ns(double max_transition_ns) -> void { _sdc_max_transition_ns = max_transition_ns; }
+  auto set_sdc_max_cap_pf(double max_cap_pf) -> void { _sdc_max_cap_pf = max_cap_pf; }
   auto set_wirelength_unit_um(double wirelength_unit_um) -> void { _wirelength_unit_um = wirelength_unit_um; }
   auto set_wirelength_iterations(unsigned wirelength_iterations) -> void { _wirelength_iterations = wirelength_iterations; }
   auto set_slew_steps(unsigned steps) -> void { _slew_steps = steps; }
   auto set_cap_steps(unsigned steps) -> void { _cap_steps = steps; }
   auto set_wire_width(double wire_width) -> void { _wire_width = wire_width; }
-  auto set_max_fanout(unsigned max_fanout) -> void { _max_fanout = max_fanout; }
+  auto set_max_fanout(unsigned max_fanout) -> void
+  {
+    _max_fanout = max_fanout;
+    _has_max_fanout = true;
+  }
   auto set_routing_layers(const std::vector<unsigned>& routing_layers) -> void { _routing_layers = routing_layers; }
   auto set_buffer_types(const std::vector<std::string>& types) -> void { _buffer_types = types; }
   auto set_char_buf_redundancy_pct(double pct) -> void { _char_buf_redundancy_pct = pct; }
@@ -153,9 +178,14 @@ class Config
   double _max_buf_tran = 0.0;
   double _root_input_slew = 0.0;
   double _max_sink_tran = 0.0;
+  std::optional<double> _sdc_max_transition_ns = std::nullopt;
+  std::optional<double> _sdc_max_cap_pf = std::nullopt;
   double _max_cap = 0.0;
   bool _has_max_buf_tran = false;
   bool _has_max_cap = false;
+  // Set whenever a fanout budget was supplied, by the configuration or by SDC, so
+  // the built-in default stays distinguishable from a deliberate 32.
+  bool _has_max_fanout = false;
   double _wirelength_unit_um = 0.0;
   unsigned _wirelength_iterations = 3;
   unsigned _slew_steps = 15;

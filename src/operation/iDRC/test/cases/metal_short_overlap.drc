@@ -1,0 +1,10 @@
+# Two nets overlap on M1; the short is the overlap.
+case metal_short_overlap
+die 0 0 10000 10000
+routing M1 dir=H pitch=200
+cut V1
+rule metal_short
+result n1 M1 0 0 1000 100
+result n2 M1 500 0 1500 100
+expect metal_short M1 500 0 1000 100 nets=n1,n2 required=0
+vary pitch=10

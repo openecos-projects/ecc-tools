@@ -29,6 +29,8 @@ int registerCmdMJ()
   registerTclCmd(TclCheckAntenna, "check_antenna");
   registerTclCmd(TclInsertMetal, "insert_metal");
   registerTclCmd(TclFlattenDef, "flatten_def");
+  registerTclCmd(TclAnalyzeDriver, "analyze_driver");
+  registerTclCmd(TclCutDEF, "cut_def");
   registerTclCmd(TclDestroyMJ, "destroy_mj");
   return EXIT_SUCCESS;
 }

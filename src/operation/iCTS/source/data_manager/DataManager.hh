@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <optional>
@@ -31,6 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include "ClockDAG.hh"
+#include "TimingConstraints.hh"
 #include "adapter/fast_sta/FastSTA.hh"
 #include "config/Config.hh"
 #include "design/ClockLayout.hh"

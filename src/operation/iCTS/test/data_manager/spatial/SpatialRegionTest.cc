@@ -21,8 +21,6 @@
  * @brief Unit tests for spatial Rect and Region helpers.
  */
 
-#include <gtest/gtest.h>
-
 #include <optional>
 #include <string>
 #include <vector>
@@ -30,6 +28,7 @@
 #include "data_manager/spatial/Point.hh"
 #include "data_manager/spatial/Rect.hh"
 #include "data_manager/spatial/Region.hh"
+#include "gtest/gtest.h"
 
 namespace icts_test {
 namespace {

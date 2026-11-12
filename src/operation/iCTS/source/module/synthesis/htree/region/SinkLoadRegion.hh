@@ -47,7 +47,6 @@ namespace htree {
 
 struct BufferPatternLibrary;
 struct TopologyPatternLibrary;
-struct SinkLoadRegionSplitPlan;
 
 struct CapDistributionStats
 {
@@ -96,71 +95,7 @@ enum class SinkLoadRegionViolation
   kFanout,
   kRoutingFailed,
   kCapacitance,
-};
-
-struct SinkLoadRegionLegalitySummary
-{
-  bool legal = false;
-  bool monotone_hard_fail = false;
-  SinkLoadRegionViolation violation = SinkLoadRegionViolation::kMissingTopologyRoot;
-  std::string failure_reason;
-  CapDistributionStats cap_distribution;
-  double required_leaf_load_cap_pf = 0.0;
-  std::optional<unsigned> required_leaf_load_cap_covering_idx = std::nullopt;
-  int bottom_most_buffered_level = -1;
-  PatternId segment_pattern_id = PatternId::segment(0);
-  std::size_t split_group_count = 0U;
-  std::size_t split_extra_buffer_count = 0U;
-  unsigned split_local_depth = 0U;
-  bool split_triggered_by_fanout = false;
-  bool split_triggered_by_capacitance = false;
-  std::vector<SinkLoadRegionSplitPlan> split_plans;
-};
-
-struct SinkLoadRegionLegalityInput
-{
-  Wrapper* wrapper = nullptr;
-  std::size_t max_fanout = 0U;
-  bool has_max_cap = false;
-  double max_cap_pf = std::numeric_limits<double>::infinity();
-  ClockRouteSegmentRc clock_route_segment_rc;
-  // Smallest characterization buffer; drives split remediation cost estimates.
-  double split_buffer_input_cap_pf = 0.0;
-  bool split_buffer_available = false;
-  unsigned max_split_depth = 16U;
-  std::size_t max_split_buffer_count = 4096U;
-  std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
-};
-
-struct SinkLoadRegionLegalityContext
-{
-  std::unordered_map<SinkLoadRegionLegalitySignature, SinkLoadRegionLegalitySummary, SinkLoadRegionLegalitySignatureHash> result_by_signature;
-  int max_monotone_failed_level = std::numeric_limits<int>::min();
-  std::string first_monotone_hard_fail_reason;
-  UniformValueLattice cap_lattice;
-  SinkLoadRegionLegalityInput input;
-  SinkLoadRegionLegalitySummary monotone_pruned_result{};
-};
-
-struct SinkLoadRegionEntryFilterOutput
-{
-  std::vector<HTreeTopologyChar> entries;
-};
-
-struct SinkLoadRegionEntryFilterSummary
-{
-  std::string first_failure_reason;
-  std::size_t max_split_group_count = 0U;
-  std::size_t max_split_extra_buffer_count = 0U;
-  unsigned max_split_local_depth = 0U;
-  bool any_split_triggered_by_fanout = false;
-  bool any_split_triggered_by_capacitance = false;
-};
-
-struct SinkLoadRegionEntryFilterBuild
-{
-  SinkLoadRegionEntryFilterOutput output;
-  SinkLoadRegionEntryFilterSummary summary;
+  kBoundaryLoadCoverage,
 };
 
 // Local split remediation for a boundary group that exceeds fanout or
@@ -197,6 +132,9 @@ struct SinkLoadRegionSplitPlan
   bool required = false;
   bool triggered_by_fanout = false;
   bool triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double cap_overrun_pf = 0.0;
+  std::string warning_detail;
   SinkLoadRegionRecoveryFailure failure = SinkLoadRegionRecoveryFailure::kNone;
   std::string failure_reason;
   double root_cap_pf = 0.0;
@@ -208,6 +146,84 @@ struct SinkLoadRegionSplitPlan
   // split tree above is the source of truth for materialization.
   std::vector<std::vector<Pin*>> subgroups;
   std::vector<Point<int>> centers;
+};
+
+struct SinkLoadRegionLegalitySummary
+{
+  bool legal = false;
+  bool monotone_hard_fail = false;
+  SinkLoadRegionViolation violation = SinkLoadRegionViolation::kMissingTopologyRoot;
+  SinkLoadRegionRecoveryFailure recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::string failure_reason;
+  CapDistributionStats cap_distribution;
+  double required_leaf_load_cap_pf = 0.0;
+  std::optional<unsigned> required_leaf_load_cap_covering_idx = std::nullopt;
+  int bottom_most_buffered_level = -1;
+  PatternId segment_pattern_id = PatternId::segment(0);
+  std::size_t split_group_count = 0U;
+  std::size_t split_extra_buffer_count = 0U;
+  unsigned split_local_depth = 0U;
+  bool split_triggered_by_fanout = false;
+  bool split_triggered_by_capacitance = false;
+  bool used_cap_fallback = false;
+  double total_cap_overrun_pf = 0.0;
+  std::string cap_fallback_detail;
+  std::vector<SinkLoadRegionSplitPlan> split_plans;
+};
+
+struct SinkLoadRegionLegalityInput
+{
+  Wrapper* wrapper = nullptr;
+  std::size_t max_fanout = 0U;
+  bool has_max_cap = false;
+  double max_cap_pf = std::numeric_limits<double>::infinity();
+  ClockRouteSegmentRc clock_route_segment_rc;
+  // Smallest characterization buffer; drives split remediation cost estimates.
+  double split_buffer_input_cap_pf = 0.0;
+  bool split_buffer_available = false;
+  unsigned max_split_depth = 16U;
+  std::size_t max_split_buffer_count = 4096U;
+  // Enabled only by the last-resort discrete selection pass. A capacitance-only
+  // miss then keeps the least-over-budget plan instead of failing the clock.
+  bool allow_cap_fallback = false;
+  std::unordered_map<const Pin*, double> sink_pin_cap_pf_by_pin;
+};
+
+struct SinkLoadRegionLegalityContext
+{
+  std::unordered_map<SinkLoadRegionLegalitySignature, SinkLoadRegionLegalitySummary, SinkLoadRegionLegalitySignatureHash> result_by_signature;
+  int max_monotone_failed_level = std::numeric_limits<int>::min();
+  std::string first_monotone_hard_fail_reason;
+  UniformValueLattice cap_lattice;
+  SinkLoadRegionLegalityInput input;
+  SinkLoadRegionLegalitySummary monotone_pruned_result{};
+};
+
+struct SinkLoadRegionEntryFilterOutput
+{
+  std::vector<HTreeTopologyChar> entries;
+};
+
+struct SinkLoadRegionEntryFilterSummary
+{
+  std::string first_failure_reason;
+  SinkLoadRegionViolation first_violation = SinkLoadRegionViolation::kNone;
+  SinkLoadRegionRecoveryFailure first_recovery_failure = SinkLoadRegionRecoveryFailure::kNone;
+  std::size_t coverage_rejected_count = 0U;
+  std::size_t max_split_group_count = 0U;
+  std::size_t max_split_extra_buffer_count = 0U;
+  unsigned max_split_local_depth = 0U;
+  bool any_split_triggered_by_fanout = false;
+  bool any_split_triggered_by_capacitance = false;
+  bool any_used_cap_fallback = false;
+  double max_cap_overrun_pf = 0.0;
+  std::string first_cap_fallback_detail;
+};
+
+struct SinkLoadRegionEntryFilterBuild
+{
+  SinkLoadRegionEntryFilterOutput output;
+  SinkLoadRegionEntryFilterSummary summary;
 };
 
 auto SplitSinkLoadRegionGroup(const std::vector<Pin*>& loads, std::size_t max_fanout) -> SinkLoadRegionSplitPlan;

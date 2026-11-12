@@ -21,8 +21,6 @@
  * @brief Unit tests for Router pin legalization API.
  */
 
-#include <gtest/gtest.h>
-
 #include <memory>
 #include <string>
 #include <vector>
@@ -32,6 +30,7 @@
 #include "data_manager/spatial/Point.hh"
 #include "data_manager/spatial/Rect.hh"
 #include "data_manager/spatial/Region.hh"
+#include "gtest/gtest.h"
 #include "module/routing/router/Router.hh"
 
 namespace icts_test {

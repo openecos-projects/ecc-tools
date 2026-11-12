@@ -11,6 +11,9 @@ target_link_libraries(
   icts_source_module_topology_clustering
   icts_source_module_topology_config
   icts_source_module_topology_fast_clustering
+  icts_source_module_routing
+  icts_source_module_timing
+  icts_source_toolkit_geometry
   icts_source_toolkit_logger
 )
 
@@ -19,4 +22,6 @@ target_include_directories(
   PUBLIC
   ${ICTS_SOURCE}
   ${ICTS_MODULE}
+  ${ICTS_MODULE_TIMING}
 )
+

@@ -21,26 +21,34 @@
  * @brief Native ownership tests for explicit SDC clock propagation evidence.
  */
 
-#include <gtest/gtest.h>
+#include <stdint.h>
 
+#include <cstddef>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ClockTrace.hh"
 #include "IdbCellMaster.h"
 #include "IdbDesign.h"
 #include "IdbEnum.h"
 #include "IdbInstance.h"
 #include "IdbLayout.h"
-#include "IdbNet.h"
-#include "IdbPins.h"
 #include "IdbTerm.h"
 #include "LibParserCpp.hh"
-#include "SDCClockReader.hh"
-#include "clock_trace/SDCClockTraceAlgorithm.hh"
+#include "TimingConstraints.hh"
+#include "gtest/gtest.h"
 #include "liberty/Lib.hh"
+
+namespace idb {
+class IdbPin;
+}
+
+namespace idb {
+class IdbNet;
+}
 
 namespace icts_test {
 namespace {
@@ -138,7 +146,7 @@ class ClockTraceFixtureInterface : public testing::Test
     return icts::SdcClockDecl{
         .kind = icts::SdcClockDecl::Kind::kPrimary,
         .clock_name = clock_name,
-        .targets = {{.kind = icts::SdcObjectKind::kNet, .pattern = net_name}},
+        .targets = {{.kind = icts::SdcObjectKind::kNet, .name = net_name}},
         .generated_sources = {},
         .master_clock_name = {},
         .period_ns = 10.0,
@@ -158,7 +166,7 @@ class ClockTraceFixtureInterface : public testing::Test
     return icts::SdcClockDecl{
         .kind = icts::SdcClockDecl::Kind::kGenerated,
         .clock_name = clock_name,
-        .targets = {{.kind = icts::SdcObjectKind::kNet, .pattern = net_name}},
+        .targets = {{.kind = icts::SdcObjectKind::kNet, .name = net_name}},
         .generated_sources = {},
         .master_clock_name = master_name,
         .period_ns = 10.0,
@@ -186,7 +194,7 @@ class ClockTraceFixtureInterface : public testing::Test
       const auto iter = _lib_cells.find(master_name);
       return iter == _lib_cells.end() ? nullptr : iter->second;
     };
-    return icts::SdcClockReader::traceClockTargets(data, &_design, lookup, max_fanout);
+    return icts::ClockTraceResolver::resolve(data, &_design, lookup, max_fanout);
   }
 
   static auto findRecord(const icts::ClockTraceBuild& build, const std::string& clock_name, const std::string& net_name, const std::string& status)
@@ -351,7 +359,7 @@ TEST_F(ClockTraceFixtureInterface, AmbiguousOwnershipRejectsTheWholeTraceInputDe
   }
 }
 
-TEST_F(ClockTraceFixtureInterface, ClockGateMuxLatchAndMacroAreTerminalBoundaries)
+TEST_F(ClockTraceFixtureInterface, ClockGateLatchAndMacroAreTerminalWhileAnUnpinnedStagePassesThePrimaryClock)
 {
   auto* source_master = addMaster("CLK_SOURCE", {{"Y", idb::IdbConnectDirection::kOutput}});
   auto* icg_master
@@ -380,16 +388,18 @@ TEST_F(ClockTraceFixtureInterface, ClockGateMuxLatchAndMacroAreTerminalBoundarie
   EXPECT_EQ(accepted->macro_clock_sinks, 1U);
   EXPECT_TRUE(accepted->propagation_steps.empty());
   const auto* icg_stop = findRecord(build, "clk", "icg_leaf", "trace_stop");
-  const auto* mux_stop = findRecord(build, "clk", "mux_leaf", "trace_stop");
   ASSERT_NE(icg_stop, nullptr);
-  ASSERT_NE(mux_stop, nullptr);
   EXPECT_EQ(icg_stop->reason, "non_propagation_clock_boundary");
-  EXPECT_EQ(mux_stop->reason, "non_propagation_clock_boundary");
   EXPECT_EQ(findRecord(build, "clk", "icg_leaf", "accepted"), nullptr);
-  EXPECT_EQ(findRecord(build, "clk", "mux_leaf", "accepted"), nullptr);
-  for (const auto& record : build.summary.records) {
-    EXPECT_TRUE(record.propagation_steps.empty());
-  }
+
+  // The mux's select is not pinned by SDC, so which clock reaches its output is
+  // undecidable. Ownership stays with the declared primary clock, which claims the
+  // downstream net as its own stage rather than stopping at the boundary.
+  const auto* mux_accept = findRecord(build, "clk", "mux_leaf", "accepted");
+  ASSERT_NE(mux_accept, nullptr);
+  ASSERT_EQ(mux_accept->propagation_steps.size(), 1U);
+  EXPECT_EQ(mux_accept->propagation_steps.front().kind, icts::ClockTracePropagationKind::kClockMux);
+  EXPECT_EQ(findRecord(build, "clk", "mux_leaf", "trace_stop"), nullptr);
 }
 
 TEST_F(ClockTraceFixtureInterface, LibertyClockGateArcCrossesMisdeclaredLefOutput)
@@ -466,6 +476,30 @@ TEST_F(ClockTraceFixtureInterface, GeneratedClockTargetStopsMasterClockOwnership
   EXPECT_TRUE(generated_accept->propagation_steps.empty());
 }
 
+TEST_F(ClockTraceFixtureInterface, AnUnpinnedStageStopsAGeneratedClock)
+{
+  auto* source_master = addMaster("CLK_SOURCE", {{"Y", idb::IdbConnectDirection::kOutput}});
+  auto* buffer_master = addMaster("BUF_X1", {{"A"}, {"Y", idb::IdbConnectDirection::kOutput}}, LogicKind::kBuffer);
+  auto* mux_master = addMaster("MUX_X1", {{"A"}, {"B"}, {"Y", idb::IdbConnectDirection::kOutput}});
+  auto* sink_master = addMaster("DFF_X1", {{"CLK", idb::IdbConnectDirection::kInput, idb::IdbConnectType::kClock, true}});
+  auto* source = addInst("source", source_master);
+  auto* buffer = addInst("gen_driver", buffer_master);
+  auto* mux = addInst("mux", mux_master);
+  auto* sink = addInst("mux_sink", sink_master, true);
+  connect("root", {pin(source, "Y"), pin(buffer, "A"), pin(mux, "B")});
+  connect("gen_clk", {pin(buffer, "Y"), pin(mux, "A")});
+  connect("mux_leaf", {pin(mux, "Y"), pin(sink, "CLK")});
+  auto primary = primaryClock("master", "root");
+  auto generated = generatedClock("generated", "gen_clk", "master");
+
+  const auto build = trace(clockData({primary, generated}));
+
+  const auto* generated_stop = findRecord(build, "generated", "mux_leaf", "trace_stop");
+  ASSERT_NE(generated_stop, nullptr);
+  EXPECT_EQ(generated_stop->target_kind, "clock_mux_select_undecidable_generated_clock");
+  EXPECT_EQ(findRecord(build, "generated", "mux_leaf", "accepted"), nullptr);
+}
+
 TEST_F(ClockTraceFixtureInterface, PreclusterReuseTreatsLeafDriversAsAnchorsNotPropagationArcs)
 {
   auto* source_master = addMaster("CLK_SOURCE", {{"Y", idb::IdbConnectDirection::kOutput}});
@@ -503,7 +537,7 @@ TEST_F(ClockTraceFixtureInterface, MultipleResolvedSeedsDoNotCreateCompatibility
   connect("left", {pin(left_source, "Y"), pin(left_sink, "CLK")});
   connect("right", {pin(right_source, "Y"), pin(right_sink, "CLK")});
   auto clock = primaryClock("clk", "left");
-  clock.targets.push_back({.kind = icts::SdcObjectKind::kNet, .pattern = "right"});
+  clock.targets.push_back({.kind = icts::SdcObjectKind::kNet, .name = "right"});
 
   const auto build = trace(clockData({clock}));
 

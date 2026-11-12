@@ -32,6 +32,9 @@ class ACUnionFind
     for (int node_idx = 0; node_idx < node_num; ++node_idx) {
       d[node_idx].parent = node_idx;
       d[node_idx].rank = 0;
+      if (!nodes[node_idx].is_conductor && nodes[node_idx].gate_area > 0.0) {
+        d[node_idx].gate_node_idx = node_idx;
+      }
       d[node_idx].gate_area = nodes[node_idx].gate_area;
       d[node_idx].diff_area = nodes[node_idx].diff_area;
       d[node_idx].diff_connected = nodes[node_idx].provides_diff ||
@@ -72,6 +75,10 @@ class ACUnionFind
     }
 
     d[first_root].gate_area += d[second_root].gate_area;
+    // Keep a representative gate without rescanning the net at each layer event.
+    if (d[second_root].gate_node_idx >= 0 && (d[first_root].gate_node_idx < 0 || d[second_root].gate_node_idx < d[first_root].gate_node_idx)) {
+      d[first_root].gate_node_idx = d[second_root].gate_node_idx;
+    }
     d[first_root].diff_area += d[second_root].diff_area;
     d[first_root].diff_connected = d[first_root].diff_connected || d[second_root].diff_connected;
     d[first_root].cum_area_num += d[second_root].cum_area_num;

@@ -28,6 +28,7 @@
 
 #include "ClockLayout.hh"
 #include "design/Clock.hh"
+#include "stage/StageSummary.hh"
 
 namespace icts {
 namespace {

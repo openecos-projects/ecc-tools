@@ -16,6 +16,10 @@
 // ***************************************************************************************
 #pragma once
 
+#include <any>
+#include <map>
+#include <string>
+
 #include "Config.hpp"
 #include "Database.hpp"
 
@@ -27,12 +31,13 @@ class DataManager
 {
  public:
   static void initInst();
+  static bool isInitialized() { return _dm_instance != nullptr; }
   static DataManager& getInst();
   static void destroyInst();
-  // function
-  void input(std::map<std::string, std::any>& config_map);
-  void output();
-  void readConstraint();
+  // Read run options into the owned Config; buildDesign prepares directories.
+  void readConfig(std::map<std::string, std::any>& config_map);
+  // Build derived database data after readers have populated the model.
+  void buildDesign();
 
   Config& getConfig() { return _config; }
   Database& getDatabase() { return _database; }
@@ -53,20 +58,6 @@ class DataManager
 
 #if 1  // build
   void buildConfig();
-  void buildDatabase();
-  void buildInstanceList();
-  void makeInstanceList();
-  void buildInstanceTimingInfo();
-  void makeInstanceTimingInfo(Instance& instance);
-  TimingCheckArc makeInstanceTimingCheckArc(Instance& instance, TimingCheckArc& timing_check_arc);
-  TimingCellArc* findClockToQArc(TimingCell& timing_cell);
-  std::string getInstancePinName(Instance& instance, std::string& port_name);
-  std::string findOutputPinName(Instance& instance, TimingCell& timing_cell);
-  bool isInstancePin(Pin& pin);
-  void makeUniqueName(std::vector<std::string>& list, const std::string& value);
-  void buildNetList();
-  void makeNetList();
-  void makeNet(const std::string& net_name, Net& net);
   void printConfig();
   void printDatabase();
 #endif

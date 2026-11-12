@@ -17,6 +17,7 @@
 #pragma once
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl/filesystem.h>
 
 #include "py_icts.h"
 
@@ -28,6 +29,7 @@ void register_icts(pybind11::module& m)
   m.def("cts_report", CtsReport, py::arg("path"));
   m.def("destroy_cts", CtsDestroy);
   m.def("cts_timing_feature", CtsTimingFeature);
+  m.def("cts_clock_graph", CtsClockGraph);
 }
 
 }  // namespace python_interface
