@@ -25,6 +25,12 @@
 
 #include "graph/TimingStateQuery.hpp"
 namespace ista {
+struct ClockPathPointInfo
+{
+  std::string pin_name;
+  TransType transition = TransType::kNone;
+};
+
 // Compares already selected launch/capture clocks. Does not choose checks or path winners.
 class ClockReconvergenceCalculator
 {
@@ -37,6 +43,10 @@ class ClockReconvergenceCalculator
   double correction(const std::string& launch_pin, TransType launch_trans_type, std::string_view launch_clock, const std::string& capture_pin,
                     TransType capture_trans_type, std::string_view capture_clock, AnalysisType analysis_type, std::string& common_pin_name,
                     std::optional<TransType> launch_source = std::nullopt, std::optional<TransType> capture_source = std::nullopt);
+  // Returns the physical clock path from source to endpoint in propagation order.
+  // Virtual clocks and pins without clock propagation return an empty list.
+  std::vector<ClockPathPointInfo> getClockPathPins(const std::string& clock_pin_name, std::string_view clock_name, AnalysisType analysis_type,
+                                                   TransType trans_type, std::optional<TransType> source = std::nullopt);
 
  private:
   struct ClockPathPoint

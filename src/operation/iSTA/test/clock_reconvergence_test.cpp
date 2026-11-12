@@ -135,6 +135,9 @@ int main()
   require(crpr.correction("launch", TransType::kRise, "launch_clock", "capture", TransType::kRise, "capture_clock", AnalysisType::kMax, common) == 3.0
               && common == "root",
           "common root min/max correction changed");
+  const auto clock_path = crpr.getClockPathPins("launch", "launch_clock", AnalysisType::kMax, TransType::kRise);
+  require(clock_path.size() == 3 && clock_path[0].pin_name == "source" && clock_path[1].pin_name == "root" && clock_path[2].pin_name == "launch",
+          "public clock path query lost source-to-endpoint order");
   // The leaf can have equal early/late arrival while its common prefix still
   // carries variation. A leaf-only bound would erase a CPPR-critical launch.
   auto& launch = graph.points()["launch"].get_clock_state("launch_clock");
