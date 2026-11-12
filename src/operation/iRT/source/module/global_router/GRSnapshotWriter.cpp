@@ -726,6 +726,7 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
   checkFiniteNonNegative(params.unit_wire_cost, "GR unit wire cost");
   checkFiniteNonNegative(params.initial_cost_weight, "GR initial cost weight");
   checkFiniteNonNegative(params.cost_weight, "GR cost weight");
+  checkFiniteNonNegative(params.max_cost_weight, "GR max cost weight");
   checkFiniteNonNegative(params.congestion_hotspot_ratio, "GR congestion hotspot ratio");
   checkFiniteNonNegative(params.via_base_cost, "GR via base cost");
   checkFiniteNonNegative(params.via_demand, "GR via demand");
@@ -789,6 +790,7 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
   manifest["gr_params"] = {{"unit_wire_cost", params.unit_wire_cost},
                            {"initial_cost_weight", params.initial_cost_weight},
                            {"cost_weight", params.cost_weight},
+                           {"max_cost_weight", params.max_cost_weight},
                            {"congestion_hotspot_ratio", params.congestion_hotspot_ratio},
                            {"via_base_cost", params.via_base_cost},
                            {"via_demand", params.via_demand},

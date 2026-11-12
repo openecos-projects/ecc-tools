@@ -545,7 +545,9 @@ void GlobalRouter::mazeRerouteOverflowNets()
       }
       break;
     }
-    params_.cost_weight *= 2.0;
+    if (params_.cost_weight < params_.max_cost_weight) {
+      params_.cost_weight = std::min(params_.cost_weight * 2.0, params_.max_cost_weight);
+    }
   }
 }
 
