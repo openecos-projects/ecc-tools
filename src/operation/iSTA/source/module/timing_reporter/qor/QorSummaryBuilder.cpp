@@ -79,7 +79,21 @@ int32_t QorSummaryBuilder::getQorCellArea()
 
 int32_t QorSummaryBuilder::getQorLeafCellK()
 {
-  return static_cast<int32_t>(_database.network().instances().size() / 1000);
+  std::size_t leaf_count = 0;
+  const auto& cells = _database.liberty().get_cell_map();
+  const auto& pins = _database.network().pins();
+  for (const auto& [name, instance] : _database.network().instances()) {
+    const bool connected = std::any_of(instance.get_pin_name_list().begin(), instance.get_pin_name_list().end(),
+                                       [&](const std::string& pin_name) {
+                                         const auto pin = pins.find(pin_name);
+                                         return pin != pins.end() && !pin->second.get_net_name().empty();
+                                       });
+    // Exclude empty unresolved physical fillers without altering the design.
+    // Keep modeled instances and connected black boxes in the leaf inventory.
+    if (cells.count(instance.get_cell_name()) > 0 || connected)
+      ++leaf_count;
+  }
+  return static_cast<int32_t>(leaf_count / 1000);
 }
 QorSummary QorSummaryBuilder::build(ReportPathSelector& selector)
 {
@@ -148,6 +162,14 @@ QorSummary QorSummaryBuilder::build(ReportPathSelector& selector)
       else
         ++summary.transition_violations;
     }
+  for (const auto& check : database.clockChecks()) {
+    if (check.slack() < -kTimingTolerance) {
+      if (check.type == TimingCheckType::kPeriod)
+        ++summary.min_period_violations;
+      else if (check.type == TimingCheckType::kWidth)
+        ++summary.min_pulse_width_violations;
+    }
+  }
   summary.cell_area = getQorCellArea();
   summary.leaf_cell_k = getQorLeafCellK();
   return summary;
