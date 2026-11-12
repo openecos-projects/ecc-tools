@@ -32,8 +32,11 @@ struct GRParams
   double congestion_hotspot_ratio = 0.9;
   double via_base_cost = 2.0;
   double via_demand = 0.5;
-  int32_t max_detour_offset = 8;
+  int32_t max_detour_offset = 4;
   double max_detour_length_ratio = 0.25;
+  bool enable_u_pattern = true;
+  bool enable_inner_3bend = true;
+  int32_t max_inner_3bend_point = 64;
   int32_t max_shift_round = 1;
   double cleanup_detour_ratio = 2.0;
   double cleanup_min_excess_length = 20.0;

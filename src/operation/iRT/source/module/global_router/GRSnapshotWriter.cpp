@@ -738,7 +738,7 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
   checkFiniteNonNegative(params.trial_reserve_start_ratio, "GR trial reserve start ratio");
   if (params.congestion_hotspot_ratio > 1.0 || params.max_detour_offset < 0 || params.max_shift_round < 0
       || params.cleanup_accept_length_ratio > 1.0 || params.cleanup_max_net_num < 0 || params.trial_smooth_radius < 0
-      || params.trial_smooth_neighbor_ratio > 1.0 || params.trial_reserve_start_ratio >= 1.0) {
+      || params.trial_smooth_neighbor_ratio > 1.0 || params.trial_reserve_start_ratio >= 1.0 || params.max_inner_3bend_point < 0) {
     throw std::runtime_error("Invalid GR parameters for snapshot");
   }
   nlohmann::json manifest;
@@ -796,6 +796,9 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
                            {"via_demand", params.via_demand},
                            {"max_detour_offset", params.max_detour_offset},
                            {"max_detour_length_ratio", params.max_detour_length_ratio},
+                           {"enable_u_pattern", params.enable_u_pattern},
+                           {"enable_inner_3bend", params.enable_inner_3bend},
+                           {"max_inner_3bend_point", params.max_inner_3bend_point},
                            {"max_shift_round", params.max_shift_round},
                            {"cleanup_detour_ratio", params.cleanup_detour_ratio},
                            {"cleanup_min_excess_length", params.cleanup_min_excess_length},

@@ -319,8 +319,8 @@ void buildPatternPathList(const GRGridGraph& grid, const PlanarCoord& parent_coo
   }
 }
 
-void addUDetourPathList(const GRGridGraph& grid, const GRParams& params, const PlanarCoord& parent_coord, const PlanarCoord& child_coord,
-                        std::vector<std::vector<PlanarCoord>>& path_list)
+void addUPatternPathList(const GRGridGraph& grid, const GRParams& params, const PlanarCoord& parent_coord, const PlanarCoord& child_coord,
+                         std::vector<std::vector<PlanarCoord>>& path_list)
 {
   int32_t x_min = std::min(parent_coord.get_x(), child_coord.get_x());
   int32_t x_max = std::max(parent_coord.get_x(), child_coord.get_x());
@@ -353,31 +353,37 @@ void addUDetourPathList(const GRGridGraph& grid, const GRParams& params, const P
   }
 }
 
-void buildDetourPathList(const GRGridGraph& grid, const GRParams& params, const GRDetourGrid& detour_grid, const PlanarCoord& parent_coord,
-                         const PlanarCoord& child_coord, std::vector<std::vector<PlanarCoord>>& path_list)
+void addInner3BendPathList(const GRGridGraph& grid, const GRParams& params, const PlanarCoord& parent_coord, const PlanarCoord& child_coord,
+                           std::vector<std::vector<PlanarCoord>>& path_list)
+{
+  if (parent_coord.get_x() == child_coord.get_x() || parent_coord.get_y() == child_coord.get_y()) {
+    return;
+  }
+  int32_t first_x = std::min(parent_coord.get_x(), child_coord.get_x());
+  int32_t second_x = std::max(parent_coord.get_x(), child_coord.get_x());
+  int32_t first_y = std::min(parent_coord.get_y(), child_coord.get_y());
+  int32_t second_y = std::max(parent_coord.get_y(), child_coord.get_y());
+  int64_t inner_point_num = static_cast<int64_t>(second_x - first_x - 1) * (second_y - first_y - 1);
+  if (inner_point_num <= 0 || inner_point_num > params.max_inner_3bend_point) {
+    return;
+  }
+  for (int32_t x = first_x + 1; x < second_x; x++) {
+    for (int32_t y = first_y + 1; y < second_y; y++) {
+      addPathCandidate(grid, path_list, {PlanarCoord(x, parent_coord.get_y()), PlanarCoord(x, y), PlanarCoord(child_coord.get_x(), y)});
+      addPathCandidate(grid, path_list, {PlanarCoord(parent_coord.get_x(), y), PlanarCoord(x, y), PlanarCoord(x, child_coord.get_y())});
+    }
+  }
+}
+
+void buildAllPatternPathList(const GRGridGraph& grid, const GRParams& params, const PlanarCoord& parent_coord, const PlanarCoord& child_coord,
+                             std::vector<std::vector<PlanarCoord>>& path_list)
 {
   buildPatternPathList(grid, parent_coord, child_coord, path_list);
-  bool is_collinear = parent_coord.get_x() == child_coord.get_x() || parent_coord.get_y() == child_coord.get_y();
-  if (is_collinear) {
-    for (int32_t offset = 1; offset <= params.max_detour_offset; offset++) {
-      for (int32_t sign : {1, -1}) {
-        if (parent_coord.get_y() == child_coord.get_y()) {
-          int32_t y = parent_coord.get_y() + sign * offset;
-          if (y < 0 || y >= grid.getYSize()) {
-            continue;
-          }
-          addPathCandidate(grid, path_list, {PlanarCoord(parent_coord.get_x(), y), PlanarCoord(child_coord.get_x(), y)});
-        } else {
-          int32_t x = parent_coord.get_x() + sign * offset;
-          if (x < 0 || x >= grid.getXSize()) {
-            continue;
-          }
-          addPathCandidate(grid, path_list, {PlanarCoord(x, parent_coord.get_y()), PlanarCoord(x, child_coord.get_y())});
-        }
-      }
-    }
-  } else if (detour_grid.getSegmentCongestionNum(parent_coord, child_coord) > 0) {
-    addUDetourPathList(grid, params, parent_coord, child_coord, path_list);
+  if (params.enable_inner_3bend) {
+    addInner3BendPathList(grid, params, parent_coord, child_coord, path_list);
+  }
+  if (params.enable_u_pattern) {
+    addUPatternPathList(grid, params, parent_coord, child_coord, path_list);
   }
 }
 
@@ -483,7 +489,7 @@ bool buildPathTree(const GRNet& net, const GRGridGraph& grid, const GRParams& pa
       if (detour_grid == nullptr) {
         buildPatternPathList(grid, parent_coord, child_coord, path_list);
       } else {
-        buildDetourPathList(grid, params, *detour_grid, parent_coord, child_coord, path_list);
+        buildAllPatternPathList(grid, params, parent_coord, child_coord, path_list);
       }
 
       // child bend list
