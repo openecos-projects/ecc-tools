@@ -377,4 +377,20 @@ AnalysisType SdfValueExtractor::captureAnalysis(AnalysisType analysis_type)
   return AnalysisType::kNone;
 }
 
+
+void SdfValueExtractor::dumpPinSlew(const char* path)
+{
+  FILE* fp = std::fopen(path, "w");
+  if (fp == nullptr)
+    return;
+  std::fprintf(fp, "pin,min_rise,min_fall,max_rise,max_fall\n");
+  for (auto& entry : _database.network().pins()) {
+    std::string pin_name = entry.first;
+    std::fprintf(fp, "%s,%.13g,%.13g,%.13g,%.13g\n", pin_name.c_str(), slew(pin_name, AnalysisType::kMin, TransType::kRise),
+                 slew(pin_name, AnalysisType::kMin, TransType::kFall), slew(pin_name, AnalysisType::kMax, TransType::kRise),
+                 slew(pin_name, AnalysisType::kMax, TransType::kFall));
+  }
+  std::fclose(fp);
+}
+
 }  // namespace ista

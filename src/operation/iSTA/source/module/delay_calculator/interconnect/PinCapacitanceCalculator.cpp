@@ -16,6 +16,9 @@
 // ***************************************************************************************
 #include "PinCapacitanceCalculator.hpp"
 
+#include <cstdlib>
+#include <algorithm>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -54,9 +57,40 @@ double PinCapacitanceCalculator::pinCapacitance(std::string& pin_name, AnalysisT
     return 0.0;
   }
   LibertyPort& timing_cell_port = timing_cell.get_port_map()[pin.get_pin_name()];
+  // Replacing the per-edge pin capacitance with the plain `capacitance` was tried and
+  // refuted at suite level: gcd 88.1% -> 13.9%, ip2 60.0% -> 11.7%. The per-edge
+  // `rise_capacitance`/`fall_capacitance` are required; REF's `Total capacitance` report
+  // is a separate bookkeeping quantity, not the load used for table lookup.
+  {
+    static const char* pc = std::getenv("ISTA_DUMP_PIN_CAP2");
+    if (pc != nullptr) {
+      if (FILE* f = std::fopen(pc, "a"); f != nullptr) {
+        const bool has = timing_cell_port.get_trans_capacitance_map().count(analysis_type) > 0
+                         && timing_cell_port.get_trans_capacitance_map()[analysis_type].count(trans_type) > 0;
+        std::fprintf(f, "%s,%s,%s,%d,has=%d,plain=%.12g,trans=%.12g\n", instance.get_cell_name().c_str(), pin.get_pin_name().c_str(),
+                     pin.get_instance_name().c_str(), static_cast<int>(trans_type), has ? 1 : 0, timing_cell_port.get_capacitance(),
+                     has ? timing_cell_port.get_trans_capacitance_map()[analysis_type][trans_type] : -1.0);
+        std::fclose(f);
+      }
+    }
+  }
   if (timing_cell_port.get_trans_capacitance_map().count(analysis_type) > 0
       && timing_cell_port.get_trans_capacitance_map()[analysis_type].count(trans_type) > 0) {
     return timing_cell_port.get_trans_capacitance_map()[analysis_type][trans_type];
+  }
+  {
+    static const char* pc = std::getenv("ISTA_DUMP_PIN_CAP");
+    if (pc != nullptr) {
+      if (FILE* f = std::fopen(pc, "a"); f != nullptr) {
+        std::fprintf(f, "%s,%s,%s,%d,plain=%.12g,trans=%.12g\n", pin.get_instance_name().c_str(), pin.get_pin_name().c_str(),
+                     instance.get_cell_name().c_str(), static_cast<int>(trans_type), timing_cell_port.get_capacitance(),
+                     timing_cell_port.get_trans_capacitance_map().count(analysis_type) > 0
+                             && timing_cell_port.get_trans_capacitance_map()[analysis_type].count(trans_type) > 0
+                         ? timing_cell_port.get_trans_capacitance_map()[analysis_type][trans_type]
+                         : -1.0);
+        std::fclose(f);
+      }
+    }
   }
   return timing_cell_port.get_capacitance();
 }
