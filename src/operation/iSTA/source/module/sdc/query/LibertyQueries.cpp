@@ -2,7 +2,7 @@
 #include <utility>
 
 #include "DataManager.hpp"
-#include "ObjectQueryOptions.hpp"
+#include "query/ObjectQueryOptions.hpp"
 #include "query/ObjectCommands.hpp"
 #include "query/ObjectQuery.hpp"
 
