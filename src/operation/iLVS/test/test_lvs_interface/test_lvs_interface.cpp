@@ -38,6 +38,10 @@ int main()
   idb::IdbPin* io_pin = design.createOrFindIoPin("IN");
   assert(io_pin != nullptr);
   io_pin->set_term()->set_name("IN");
+  idb::IdbPin* power_io_pin = design.createOrFindIoPin("VDD");
+  assert(power_io_pin != nullptr);
+  power_io_pin->set_term()->set_name("VDD");
+  power_io_pin->set_term()->set_type(idb::IdbConnectType::kPower);
 
   idb::IdbInstance* instance = design.get_instance_list()->add_instance("u0");
   assert(instance != nullptr);
@@ -65,7 +69,8 @@ int main()
 
   ilvs::NetlistData netlist_data = LVSI.wrapNetlistData(&design);
   assert(netlist_data.get_design_name() == "top");
-  assert(netlist_data.get_io_terminal_name_list() == std::vector<std::string>({"PIN/IN"}));
+  assert(netlist_data.get_io_terminal_name_list() == std::vector<std::string>({"PIN/IN", "PIN/VDD"}));
+  assert(netlist_data.get_terminal_connect_type_map().at("PIN/VDD") == ilvs::ConnectType::kPower);
   assert(LVSUTIL.exist(netlist_data.get_instance_name_set(), std::string("u0")));
   assert(LVSUTIL.exist(netlist_data.get_net_map(), std::string("n1")));
   assert(netlist_data.get_net_map().at("n1").get_terminal_name_list() == std::vector<std::string>({"PIN/IN", "u0/A"}));
@@ -81,6 +86,7 @@ int main()
   assert(def_data.get_die().get_real_ur_x() == 1000);
   assert(def_data.get_die().get_real_ur_y() == 2000);
   assert(LVSUTIL.exist(def_data.get_net_map(), std::string("n1")));
+  assert(def_data.get_terminal_connect_type_map().at("PIN/VDD") == ilvs::ConnectType::kPower);
   assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("PIN/IN")));
   assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("u0/A")));
   ilvs::PhysicalGraph& physical_graph = def_data.get_physical_graph();

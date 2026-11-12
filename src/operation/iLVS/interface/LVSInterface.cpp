@@ -268,8 +268,16 @@ void LVSInterface::wrapIOPinList(idb::IdbDesign* design, DesignData& design_data
   if (idb::IdbPins* io_pin_list = design->get_io_pin_list(); io_pin_list != nullptr) {
     for (idb::IdbPin* pin : io_pin_list->get_pin_list()) {
       std::string terminal_name = wrapDesignTerminal(pin);
-      if (!terminal_name.empty()) {
-        design_data.get_io_terminal_name_list().push_back(terminal_name);
+      if (terminal_name.empty()) {
+        continue;
+      }
+      design_data.get_io_terminal_name_list().push_back(terminal_name);
+      if (pin->get_term() != nullptr) {
+        if (pin->get_term()->get_type() == idb::IdbConnectType::kPower) {
+          design_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kPower;
+        } else if (pin->get_term()->get_type() == idb::IdbConnectType::kGround) {
+          design_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kGround;
+        }
       }
     }
   }
