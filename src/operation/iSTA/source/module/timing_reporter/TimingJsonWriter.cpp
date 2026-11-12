@@ -20,10 +20,12 @@
 #include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "ClockReconvergenceCalculator.hpp"
 #include "ReportFormatter.hpp"
 #include "ReportPathFilter.hpp"
 #include "ReportPathSelector.hpp"
@@ -32,6 +34,59 @@
 #include "network/Network.hpp"
 
 namespace ista {
+namespace {
+AnalysisType captureAnalysisType(AnalysisType analysis_type)
+{
+  return analysis_type == AnalysisType::kMax ? AnalysisType::kMin : AnalysisType::kMax;
+}
+
+std::string clockSourcePin(const std::vector<ClockPathPointInfo>& clock_path)
+{
+  return clock_path.empty() ? std::string{} : clock_path.front().pin_name;
+}
+
+std::string clockEndpointPin(const std::vector<ClockPathPointInfo>& clock_path)
+{
+  return clock_path.empty() ? std::string{} : clock_path.back().pin_name;
+}
+
+bool isVirtualClock(Database& database, const std::string& clock_name)
+{
+  const auto clock = database.sdc().get_clock_map().find(clock_name);
+  return clock != database.sdc().get_clock_map().end() && clock->second.get_source_list().empty();
+}
+
+TransType localClockTransition(TransType transition)
+{
+  return transition == TransType::kNone ? TransType::kRise : transition;
+}
+
+std::optional<TransType> clockSourceTransition(TransType transition)
+{
+  return transition == TransType::kNone ? std::nullopt : std::optional<TransType>{transition};
+}
+
+void outputClockPathJson(std::ostream& json_file, Database& database, const std::vector<ClockPathPointInfo>& clock_path)
+{
+  json_file << "[";
+  bool first = true;
+  for (const auto& point : clock_path) {
+    if (!first)
+      json_file << ",";
+    const auto pin = database.network().pins().find(point.pin_name);
+    const bool is_port = pin != database.network().pins().end() && pin->second.get_is_port();
+    const std::string instance_name = pin == database.network().pins().end() ? std::string{} : pin->second.get_instance_name();
+    const auto instance = database.network().instances().find(instance_name);
+    const std::string cell_name = instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
+    json_file << "{\"kind\":\"" << (is_port ? "point" : "clock_arc") << "\",\"pin\":\"" << escapeJsonString(point.pin_name) << "\",\"instance\":\""
+              << escapeJsonString(instance_name) << "\",\"cell\":\"" << escapeJsonString(cell_name) << "\",\"transition\":\""
+              << GetTransTypeName()(point.transition) << "\"}";
+    first = false;
+  }
+  json_file << "]";
+}
+}  // namespace
+
 void TimingJsonWriter::write()
 {
   Database& database = _database;
@@ -99,6 +154,26 @@ void TimingJsonWriter::outputTimingPathJson(std::ostream& json_file, TimingPath&
   outputJsonNumber(json_file, timing_path.get_capture_clock_source_latency());
   json_file << ",\"capture_clock_network_delay_ns\":";
   outputJsonNumber(json_file, timing_path.get_capture_clock_network_delay());
+  ClockReconvergenceCalculator reconvergence(_database);
+  const auto launch_clock_path = timing_path.get_launch_clock_pin().empty()
+                                     ? std::vector<ClockPathPointInfo>{}
+                                     : reconvergence.getClockPathPins(timing_path.get_launch_clock_pin(), clock_name, timing_path.get_analysis_type(),
+                                                                      localClockTransition(timing_path.get_launch_clock_pin_transition()),
+                                                                      clockSourceTransition(timing_path.get_launch_clock_transition()));
+  const auto capture_clock_path = timing_path.get_capture_clock_pin().empty()
+                                      ? std::vector<ClockPathPointInfo>{}
+                                      : reconvergence.getClockPathPins(timing_path.get_capture_clock_pin(), timing_path.get_capture_clock_name(),
+                                                                       captureAnalysisType(timing_path.get_analysis_type()),
+                                                                       localClockTransition(timing_path.get_capture_clock_pin_transition()),
+                                                                       clockSourceTransition(timing_path.get_capture_clock_transition()));
+  json_file << ",\"launch_clock_virtual\":" << (isVirtualClock(_database, clock_name) ? "true" : "false");
+  json_file << ",\"launch_clock_source_pin\":\"" << escapeJsonString(clockSourcePin(launch_clock_path)) << "\",\"launch_clock_endpoint_pin\":\""
+            << escapeJsonString(clockEndpointPin(launch_clock_path)) << "\",\"launch_clock_path\":";
+  outputClockPathJson(json_file, _database, launch_clock_path);
+  json_file << ",\"capture_clock_virtual\":" << (isVirtualClock(_database, timing_path.get_capture_clock_name()) ? "true" : "false");
+  json_file << ",\"capture_clock_source_pin\":\"" << escapeJsonString(clockSourcePin(capture_clock_path)) << "\",\"capture_clock_endpoint_pin\":\""
+            << escapeJsonString(clockEndpointPin(capture_clock_path)) << "\",\"capture_clock_path\":";
+  outputClockPathJson(json_file, _database, capture_clock_path);
   if (std::any_of(timing_path.get_point_list().begin(), timing_path.get_point_list().end(), [](const TimingPathPoint& point) { return point.rcNonbounding(); }))
     json_file << ",\"rc_nonbounding\":true";
   json_file << ",\"stages\":[";
