@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "DataManager.hpp"
+#include "Macro.hpp"
 #include "Net.hpp"
 #include "Pin.hpp"
 #include "json.hpp"
@@ -54,12 +55,15 @@ constexpr uint32_t kSectionLayerEdges = 2;
 constexpr uint32_t kSectionNetIndex = 3;
 constexpr uint32_t kSectionNetNames = 4;
 constexpr uint32_t kSectionNetRouteChunk = 5;
+constexpr uint32_t kSectionMacroBBox = 6;
+constexpr uint32_t kSectionMacroNames = 7;
 constexpr uint32_t kCodecRaw = 0;
 constexpr uint32_t kCodecZlib = 1;
 constexpr size_t kCompressionThreshold = 4 * 1024;
 constexpr size_t kRouteChunkTargetSize = 1024 * 1024;
 constexpr size_t kRouteChunkNetLimit = 1024;
 constexpr size_t kNetIndexRecordSize = 56;
+constexpr size_t kMacroRecordSize = 24;
 
 struct MetricRange
 {
@@ -142,6 +146,7 @@ struct SnapshotStats
   uint64_t planar_route_edge_reference_count = 0;
   uint64_t via_stack_count = 0;
   uint64_t pin_count = 0;
+  uint32_t macro_count = 0;
 };
 
 uint32_t checkedUint32(size_t value, const char* field)
@@ -703,6 +708,65 @@ void writeNetIndex(const std::filesystem::path& staging_path, const std::vector<
   writeSectionFile(staging_path, "sections/net_index.grs", kSectionNetIndex, net_record_list.size(), payload);
 }
 
+void validateMacroName(const std::string& name)
+{
+  try {
+    static_cast<void>(nlohmann::json(name).dump());
+  } catch (const nlohmann::json::type_error& error) {
+    throw std::runtime_error(std::string("GR macro name is not valid UTF-8: ") + error.what());
+  }
+}
+
+uint32_t exportMacros(const std::filesystem::path& staging_path)
+{
+  Database& database = RTDM.getDatabase();
+  const PlanarRect& die_rect = database.get_die().get_real_rect();
+  std::vector<uint8_t> bbox_payload;
+  std::vector<uint8_t> name_payload;
+  size_t macro_count = 0;
+  for (Macro& macro : database.get_macro_list()) {
+    if (!macro.get_is_placed()) {
+      continue;
+    }
+    const PlanarRect& body_rect = macro.get_placement_body_rect();
+    if (body_rect.isIncorrect()) {
+      throw std::runtime_error("GR macro has an inverted body bbox: " + macro.get_inst_name());
+    }
+    if (body_rect.get_ll_x() == body_rect.get_ur_x() || body_rect.get_ll_y() == body_rect.get_ur_y()) {
+      continue;
+    }
+    if (body_rect.get_ll_x() < die_rect.get_ll_x() || body_rect.get_ll_y() < die_rect.get_ll_y() || body_rect.get_ur_x() > die_rect.get_ur_x()
+        || body_rect.get_ur_y() > die_rect.get_ur_y()) {
+      throw std::runtime_error("GR macro body bbox is outside the die: " + macro.get_inst_name());
+    }
+    const std::string& name = macro.get_inst_name();
+    validateMacroName(name);
+    uint32_t name_offset = checkedUint32(name_payload.size(), "GR macro name offset");
+    uint32_t name_length = checkedUint32(name.size(), "GR macro name length");
+    if (name_length > std::numeric_limits<uint32_t>::max() - name_offset) {
+      throw std::runtime_error("GR macro name table exceeds uint32 offset range");
+    }
+    appendI32(bbox_payload, body_rect.get_ll_x());
+    appendI32(bbox_payload, body_rect.get_ll_y());
+    appendI32(bbox_payload, body_rect.get_ur_x());
+    appendI32(bbox_payload, body_rect.get_ur_y());
+    appendU32(bbox_payload, name_offset);
+    appendU32(bbox_payload, name_length);
+    name_payload.insert(name_payload.end(), name.begin(), name.end());
+    macro_count++;
+  }
+  uint32_t count = checkedUint32(macro_count, "GR macro count");
+  if (count == 0) {
+    return 0;
+  }
+  if (bbox_payload.size() != macro_count * kMacroRecordSize) {
+    throw std::runtime_error("GR macro bbox record size mismatch");
+  }
+  writeSectionFile(staging_path, "sections/macros.grs", kSectionMacroBBox, count, bbox_payload);
+  writeSectionFile(staging_path, "sections/macro_names.grs", kSectionMacroNames, name_payload.size(), name_payload);
+  return count;
+}
+
 nlohmann::json makeMetricRangeJson(const MetricRange& range)
 {
   return nlohmann::json::array({range.min, range.max});
@@ -792,6 +856,9 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
     manifest["nets"]["route_chunks"].push_back(
         {{"ordinal", chunk.ordinal}, {"path", chunk.path}, {"net_ordinal_begin", chunk.net_ordinal_begin}, {"net_ordinal_end", chunk.net_ordinal_end}});
   }
+  if (stats.macro_count > 0) {
+    manifest["macros"] = {{"count", stats.macro_count}, {"section", "sections/macros.grs"}, {"name_table_section", "sections/macro_names.grs"}};
+  }
   manifest["gr_params"] = {{"unit_wire_cost", params.unit_wire_cost},
                            {"initial_cost_weight", params.initial_cost_weight},
                            {"cost_weight", params.cost_weight},
@@ -824,7 +891,8 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
                        {"net_count", net_count},
                        {"planar_route_edge_reference_count", stats.planar_route_edge_reference_count},
                        {"via_stack_count", stats.via_stack_count},
-                       {"pin_count", stats.pin_count}};
+                       {"pin_count", stats.pin_count},
+                       {"macro_count", stats.macro_count}};
 
   std::filesystem::path manifest_path = staging_path / "manifest.json";
   std::ofstream output(manifest_path, std::ios::binary | std::ios::trunc);
@@ -884,6 +952,7 @@ void GRSnapshotWriter::write(const std::string& snapshot_path, const std::string
     exportNetRoutes(staging_path, grid_graph_, layer_list, net_list_, net_record_list, route_chunk_list, stats);
     writeNetNames(staging_path, name_payload);
     writeNetIndex(staging_path, net_record_list);
+    stats.macro_count = exportMacros(staging_path);
     writeManifest(staging_path, stage, grid_graph_, params_, layer_list, route_chunk_list, net_record_list.size(), stats);
     std::filesystem::rename(staging_path, final_path);
   } catch (...) {

@@ -1024,6 +1024,8 @@ void RTInterface::wrapMacroList()
     Macro macro;
     macro.set_inst_name(idb_instance->get_name());
     macro.set_body_rect(body_rect);
+    macro.set_is_placed(idb_instance->is_fixed() || idb_instance->is_cover() || idb_instance->is_placed());
+    macro.set_placement_body_rect(body_rect);
     macro_list.push_back(std::move(macro));
   }
 
