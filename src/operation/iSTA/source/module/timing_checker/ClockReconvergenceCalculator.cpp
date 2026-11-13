@@ -140,6 +140,23 @@ double ClockReconvergenceCalculator::getClockCommonPathDelayDelta(const ClockPat
   return early && late && std::isfinite(*early) && std::isfinite(*late) ? std::fabs(*late - *early) : 0.;
 }
 
+std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(const std::string& clock_pin_name, std::string_view clock_name,
+                                                                               AnalysisType analysis_type, TransType trans_type,
+                                                                               std::optional<TransType> source)
+{
+  if (clock_pin_name.empty() || clockPoint(_database, clock_pin_name, clock_name) == nullptr)
+    return {};
+  const auto points = getClockPathPinList(clock_pin_name, clock_name, analysis_type, trans_type, source);
+  std::vector<ClockPathPointInfo> result;
+  result.reserve(points.size());
+  for (const auto& point : points) {
+    if (point.vertex < 0 || static_cast<std::size_t>(point.vertex) >= _database.graph().vertices().size())
+      continue;
+    result.push_back({_database.graph().vertices()[point.vertex].get_pin_name(), point.transition});
+  }
+  return result;
+}
+
 std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalculator::getClockPathPinList(const std::string& clock_pin_name,
                                                                                                             std::string_view clock_name,
                                                                                                             AnalysisType analysis_type, TransType trans_type,

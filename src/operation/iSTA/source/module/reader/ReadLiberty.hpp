@@ -61,6 +61,7 @@ class ReadLiberty
   LibertyLibrary& _liberty;
   const Network& _network;
   void readCells(const std::vector<idb::LibLibrary*>& lib_list);
+  void checkCellReferences() const;
   void readLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list);
   idb::LibLibrary* findReferenceLibrary(const std::vector<idb::LibLibrary*>& lib_list);
   TimingCapacitiveUnit capacitanceUnit(idb::LibLibrary* lib_library);

@@ -21,7 +21,7 @@
 #include <vector>
 
 #include "DataManager.hpp"
-#include "query/ObjectCommands.hpp"
+#include "shell/ObjectCommands.hpp"
 #include "query/ObjectQuery.hpp"
 
 namespace ista::sdc {
