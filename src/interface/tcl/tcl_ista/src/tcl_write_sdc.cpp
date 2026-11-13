@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "STAInterface.hpp"
-#include "WriteSdc.hpp"
+#include "shell/WriteSdc.hpp"
 #include "tcl_sta.h"
 
 namespace tcl {

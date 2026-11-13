@@ -19,6 +19,8 @@
 #include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -141,7 +143,50 @@ ParasiticArnoldiPoleResidue ArnoldiWaveformSolver::poleResidue(const ParasiticAr
 
   std::vector<double> diagonal_list = arnoldi_model.get_diagonal_list();
   std::vector<double> off_diagonal_list = arnoldi_model.get_off_diagonal_list();
-  diagonal_list.front() += drive_resistance * arnoldi_model.get_total_capacitance();
+  // reference treats rd as an external source impedance (report_driver_model,
+  // Tool Commands U-2022.12 p.1483). iSTA instead folds rd*C_total into the
+  // reduced Arnoldi [0][0], which is a rank-1 modification of the reduced
+  // matrix rather than of the original network (FINDINGS 286). Scaling this
+  // term is the only knob that changes how rd enters the model, so sweep it to
+  // test whether the fold-in is the residual slew error.
+  static const double rdc_scale = [] {
+    const char* e = std::getenv("ISTA_ARNOLDI_RDC_SCALE");
+    return e != nullptr ? std::atof(e) : 1.0;
+  }();
+  // ISTA_DRIVE_RES_SERIES=1 means the caller already placed rd as a real branch
+  // of the original RC tree, so folding rd*C_total in again would double count
+  // it. The fold also cannot represent the distributed interaction between rd
+  // and the network R, which is the residual this mode removes.
+  static const bool rd_is_series = [] {
+    const char* e = std::getenv("ISTA_DRIVE_RES_SERIES");
+    return e != nullptr && *e != '0';
+  }();
+  const double rd_c_term = rd_is_series ? 0. : rdc_scale * drive_resistance * arnoldi_model.get_total_capacitance();
+  diagonal_list.front() += rd_c_term;
+  {
+    static const char* pr = std::getenv("ISTA_DUMP_TAU");
+    static const double want_rd = [] {
+      const char* e = std::getenv("ISTA_DUMP_TAU_RD");
+      return e != nullptr ? std::atof(e) : -1.0;
+    }();
+    const bool want = pr != nullptr
+        && (want_rd < 0. || std::abs(drive_resistance - want_rd) < 1e-4);
+    static FILE* tf = [] {
+      const char* q = std::getenv("ISTA_DUMP_TAU");
+      return q != nullptr ? std::fopen(q, "a") : static_cast<FILE*>(nullptr);
+    }();
+    if (pr != nullptr && tf != nullptr) {
+      FILE* const fp = tf;
+      std::fprintf(fp, "TAU,rd=%.9f,Ctot=%.12f,rdC=%.12f,diag0_before=%.12f,diag0_after=%.12f,nord=%d,tid=%p\n",
+                   drive_resistance, arnoldi_model.get_total_capacitance(), rd_c_term,
+                   diagonal_list.front() - rd_c_term, diagonal_list.front(),
+                   static_cast<int>(arnoldi_model.get_order()),
+                   static_cast<const void*>(&arnoldi_model));
+      for (int32_t q = 0; q < arnoldi_model.get_order() && q < 8; ++q)
+        std::fprintf(fp, "TAUD,%d,%.12e,%.12e\n", q, diagonal_list[q],
+                     q + 1 < arnoldi_model.get_order() ? off_diagonal_list[q] : 0.0);
+    }
+  }
 
   std::vector<double> eigenvalue_list;
   std::vector<std::vector<double>> eigenvector_list;
@@ -368,6 +413,17 @@ std::optional<double> ArnoldiWaveformSolver::crossingCapacitance(double driver_r
   const double tolerance = 1e-10 * std::max(crossing_time, 1e-6);
   if (crossing_time < ideal_time - tolerance)
     return std::nullopt;
+  {
+    static const char* ceff_dump = std::getenv("ISTA_DUMP_CEFF_PATH");
+    if (ceff_dump != nullptr) {
+      const double lump_time = rampTime(1. / (drive_resistance * total_capacitance), driver_ramp, voltage);
+      if (FILE* ceff_fp = std::fopen(ceff_dump, "a"); ceff_fp != nullptr) {
+        std::fprintf(ceff_fp, "%.12g,%.12g,%.12g,%.12g,%d\n", crossing_time, lump_time, total_capacitance, driver_ramp,
+                     crossing_time >= lump_time ? 1 : 0);
+        std::fclose(ceff_fp);
+      }
+    }
+  }
   if (crossing_time >= rampTime(1. / (drive_resistance * total_capacitance), driver_ramp, voltage))
     return total_capacitance;
   double lower = 0., upper = total_capacitance;
@@ -468,7 +524,11 @@ void ArnoldiWaveformSolver::crossingTime(double driver_ramp, const ParasiticArno
   const std::vector<double>& source_pole_list = pole_residue.get_pole_list();
   const std::vector<double>& source_residue_list = pole_residue.get_residue_list()[term_idx];
   int32_t order = pole_residue.get_order();
-  while (order > 1 && source_residue_list[order - 1] < 1E-8 && source_residue_list[order - 1] > -1E-8) {
+  static const double trunc_eps = [] {
+    const char* env = std::getenv("ISTA_TRUNC_EPS");
+    return env != nullptr ? std::atof(env) : 1E-8;
+  }();
+  while (order > 1 && source_residue_list[order - 1] < trunc_eps && source_residue_list[order - 1] > -trunc_eps) {
     order--;
   }
   if (order <= 0) {

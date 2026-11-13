@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MulanPSL-2.0
-#include "query/ObjectCommands.hpp"
+#include "compat/CompatibilityCommands.hpp"
 #include "sdc/Sdc.hpp"
 
 namespace ista::sdc {

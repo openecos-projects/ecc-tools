@@ -20,7 +20,37 @@ int main(int argc, char** argv)
   auto& db = STADM.getDatabase();
   auto& interp = SdcCommand::getInst();
   const std::string mode = argc > 1 ? argv[1] : "load";
-  if (mode == "object_names" || mode == "query_collection" || mode == "all_clock_collection") {
+  if (mode == "designs") {
+    for (const auto* command : {"get_designs *", "get_design sdc_test", "get_designs -hierarchical sdc*",
+                                "get_designs -regexp -nocase {^SDC_TEST$}",
+                                "get_designs -filter {object_class == design && full_name == sdc_test} *",
+                                "get_designs [current_design]"}) {
+      eval(command);
+      require(std::string(Tcl_GetStringResult(interp.getInterp())) == "sdc_test", "design query did not return the loaded design");
+    }
+    eval("set_max_transition .7 [get_designs *]");
+    for (const auto* command : {"get_designs -quiet missing", "get_designs {}", "get_designs [get_designs -quiet missing]",
+                                "get_designs -filter {name == missing} [current_design]"}) {
+      eval(command);
+      require(std::string(Tcl_GetStringResult(interp.getInterp())).empty(), "empty design selection expanded");
+    }
+    for (const auto* command : {"get_designs", "get_designs -nocase *", "get_designs -regexp -exact *",
+                                "get_designs [get_ports in]", "get_designs -quiet -unknown *", "get_designs -of_objects [get_ports in]"})
+      require(interp.evalString(command) == TCL_ERROR, "invalid design query accepted");
+    db.network().setName("literal*");
+    eval("get_object_name [get_designs -exact {literal*}]");
+    require(std::string(Tcl_GetStringResult(interp.getInterp())) == "literal*", "literal design name lost");
+    eval("get_designs [current_design]");
+    require(std::string(Tcl_GetStringResult(interp.getInterp())) == "literal*", "typed design name expanded");
+    const auto script = std::filesystem::temp_directory_path() / ("ista-design-source-" + std::to_string(getpid()) + ".tcl");
+    { std::ofstream out(script); out << "proc selected_design {} { return [get_designs *] }\nset chosen [selected_design]\nset_max_fanout 9 $chosen\nget_object_name $chosen\n"; }
+    require(interp.evalScriptFile(script.string()) == TCL_OK, "design query failed inside a sourced procedure");
+    require(std::string(Tcl_GetStringResult(interp.getInterp())) == "literal*", "file evaluation lost design identity");
+    std::filesystem::remove(script);
+    db.network().setName("");
+    eval("get_designs -quiet *");
+    require(std::string(Tcl_GetStringResult(interp.getInterp())).empty(), "unloaded design returned an object");
+  } else if (mode == "object_names" || mode == "query_collection" || mode == "all_clock_collection") {
     eval("create_clock -name {lit*} -period 10; create_clock -name lit_suffix -period 10");
     if (mode == "object_names") {
       eval("get_object_name [get_clocks -regexp {^lit[*]$}]");

@@ -10,6 +10,7 @@
 namespace ista::sdc {
 enum class QueryObjectType
 {
+  kDesign,
   kPort,
   kPin,
   kCell,

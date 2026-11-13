@@ -35,6 +35,11 @@ class LibertyArcSelector
   std::vector<TimingArc*> cellCandidates(TimingCellArc& timing_cell_arc, TransType input_trans_type, TransType output_trans_type,
                                          const std::string& output_pin = "");
   std::vector<TimingArc*> checkCandidates(TimingCheckArc& timing_check_arc, TransType clock_trans_type, TransType data_trans_type);
+
+
+
+
+
   bool isMatchTimingType(TimingArc& timing_arc, TransType trans_type);
   bool isMatchTimingType(TimingCellArc& timing_cell_arc, TransType trans_type);
 

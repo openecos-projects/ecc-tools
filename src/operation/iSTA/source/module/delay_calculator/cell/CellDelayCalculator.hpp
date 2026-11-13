@@ -60,7 +60,7 @@ class CellDelayCalculator
 
  private:
   void updateTimingArcDelay(Arc& arc, TimingArc& timing_arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double delay,
-                            bool is_initialization = false);
+                            bool is_initialization = false, bool is_zero_slew_probe = false);
   double convertOutputLoad(TimingArc& timing_arc, double output_load);
   double calcTimingArcSlew(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type, double input_slew,
                            double output_load);
