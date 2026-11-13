@@ -17,6 +17,8 @@
 #include "WireDelayCalculator.hpp"
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <optional>
 #include <string>
@@ -76,6 +78,17 @@ double WireDelayCalculator::calcParasiticSlew(Arc& arc, AnalysisType analysis_ty
     return input_slew;  // Propagate a flagged fallback, preserving the source slew.
   }
   std::optional<double> cached_load_slew = _arnoldi.loadSlew(arc, analysis_type, trans_type, input_slew);
+  {
+    static const char* sp = std::getenv("ISTA_DUMP_SLEWSRC");
+    if (sp != nullptr) {
+      if (FILE* fp = std::fopen(sp, "a"); fp != nullptr) {
+        std::fprintf(fp, "SS,%s,%s,%d,%d,%.15g,arnoldi=%d,%.15g\n", arc.get_source_pin().c_str(),
+                     arc.get_sink_pin().c_str(), static_cast<int>(analysis_type), static_cast<int>(trans_type),
+                     input_slew, cached_load_slew ? 1 : 0, cached_load_slew ? *cached_load_slew : 0.0);
+        std::fclose(fp);
+      }
+    }
+  }
   if (cached_load_slew) {
     return *cached_load_slew;
   }
@@ -98,6 +111,17 @@ double WireDelayCalculator::calcParasiticSlew(Arc& arc, AnalysisType analysis_ty
     return input_slew;
   double impulse = *cached_impulse;
   double output_slew = std::sqrt(input_slew * input_slew + impulse);
+  {
+    static const char* sp = std::getenv("ISTA_DUMP_SLEWSRC");
+    if (sp != nullptr) {
+      if (FILE* fp = std::fopen(sp, "a"); fp != nullptr) {
+        std::fprintf(fp, "SS,%s,%s,%d,%d,%.15g,sqrt=1,%.15g,impulse=%.15g\n", arc.get_source_pin().c_str(),
+                     arc.get_sink_pin().c_str(), static_cast<int>(analysis_type), static_cast<int>(trans_type),
+                     input_slew, output_slew, impulse);
+        std::fclose(fp);
+      }
+    }
+  }
   if (input_slew < 0.0) {
     return -output_slew;
   }
@@ -143,6 +167,7 @@ double WireDelayCalculator::calcParasiticDelay(Arc& arc, AnalysisType analysis_t
 
 double WireDelayCalculator::calcParasiticDelay(Arc& arc, AnalysisType analysis_type, TransType trans_type, double input_slew)
 {
+
   Database& database = _database;
   ParasiticNet& parasitic_net = database.parasitics().nets()[arc.get_owner_name()];
   if (_rc.hasDisabledDriver(arc.get_owner_name(), arc.get_source_pin()) || _rc.hasIncompleteNetwork(parasitic_net, arc.get_source_pin())) {
@@ -165,11 +190,33 @@ double WireDelayCalculator::calcParasiticDelay(Arc& arc, AnalysisType analysis_t
     markFailed(arc, analysis_type, trans_type);
     return 0.;  // Nonbounding placeholder; retain the failure state on the arc.
   }
-  std::optional<double> cached_wire_delay = _arnoldi.wireDelay(arc, analysis_type, trans_type, input_slew);
-  if (cached_wire_delay) {
-    return *cached_wire_delay;
+  // calcParasiticDelay prefers the Arnoldi cache, then DMP, then the input-port
+  // solve, then bare Elmore. Only the Arnoldi path has been compared against
+  // reference so far (FINDINGS 298). ISTA_WIRE_PREFER_DMP=1 skips the Arnoldi
+  // entry so the DMP result can be compared on the same arcs.
+  static const bool prefer_dmp = [] {
+    const char* e = std::getenv("ISTA_WIRE_PREFER_DMP");
+    return e != nullptr && *e != '0';
+  }();
+  std::optional<double> cached_wire_delay;
+  if (!prefer_dmp) {
+    cached_wire_delay = _arnoldi.wireDelay(arc, analysis_type, trans_type, input_slew);
+    if (cached_wire_delay) {
+      return *cached_wire_delay;
+    }
   }
   cached_wire_delay = _dmp.wireDelay(arc, analysis_type, trans_type, input_slew);
+  {
+    static const char* sp = std::getenv("ISTA_DUMP_WIRESRC");
+    if (sp != nullptr) {
+      if (FILE* fp = std::fopen(sp, "a"); fp != nullptr) {
+        std::fprintf(fp, "WS,%s,%s,%d,%d,%d,%.15g\n", arc.get_source_pin().c_str(), arc.get_sink_pin().c_str(),
+                     static_cast<int>(analysis_type), static_cast<int>(trans_type), cached_wire_delay ? 1 : 0,
+                     cached_wire_delay ? *cached_wire_delay : 0.0);
+        std::fclose(fp);
+      }
+    }
+  }
   if (cached_wire_delay) {
     return *cached_wire_delay;
   }

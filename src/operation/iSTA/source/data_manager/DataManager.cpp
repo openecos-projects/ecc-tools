@@ -71,7 +71,7 @@ void DataManager::readConfig(std::map<std::string, std::any>& config_map)
   config.output_timing_features = STAUTIL.getConfigValue<int32_t>(config_map, "-output_timing_features", 1);
   config.timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
   config.min_slew_degradation = STAUTIL.getConfigValue<int32_t>(config_map, "-min_slew_degradation", 0);
-  config.adjust_driver_resistance = STAUTIL.getConfigValue<int32_t>(config_map, "-adjust_driver_resistance", 1);
+  config.adjust_driver_resistance = STAUTIL.getConfigValue<int32_t>(config_map, "-adjust_driver_resistance", 0);
   config.small_rc_fanout_reduction = STAUTIL.getConfigValue<int32_t>(config_map, "-small_rc_fanout_reduction", 1);
   config.check_constant_capacitance = STAUTIL.getConfigValue<int32_t>(config_map, "-check_constant_capacitance", 0);
   config.timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");

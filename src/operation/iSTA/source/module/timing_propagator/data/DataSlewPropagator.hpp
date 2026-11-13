@@ -33,12 +33,15 @@ class DataSlewPropagator
 
  private:
   bool shouldStopDataSlewPropagation(Arc& arc);
+  static bool constant_driven_arc_enabled();
+  bool is_constant_driven_arc(Arc& arc);
+  static bool cell_arc_slew_enabled();
   void propagateDataSlewDelayArc(std::size_t arc_idx);
-  void propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type);
+  void propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type, bool force = true);
   void updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type, TransType input_trans_type,
-                           TransType output_trans_type);
-  void updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay);
-  void updateDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double data_slew);
+                           TransType output_trans_type, bool force = false);
+  void updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay, bool force = false);
+  void updateDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double data_slew, bool force = false);
   bool hasDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type);
   bool isBetterDelay(double candidate_delay, double current_delay, AnalysisType analysis_type);
   bool isBetterSlew(double candidate_slew, double current_slew, AnalysisType analysis_type);

@@ -2,20 +2,28 @@ add_library(ista_sdc_frontend
     SdcReader.cpp
     SdcCommand.cpp
     SdcCommandRegistry.cpp
+    compat/CompatibilityCommands.cpp
+    compat/GetName.cpp
+    query/AllClocks.cpp
     SdcTclCmd.cpp
     SetUnits.cpp
-    WriteSdc.cpp
+    shell/WriteSdc.cpp
     query/ObjectQueryOptions.cpp
-    query/RemoveFromCollection.cpp
+    shell/RemoveFromCollection.cpp
     query/AllPorts.cpp
     query/CurrentDesign.cpp
-    query/AllDelayCorners.cpp
+    shell/GetDesigns.cpp
+    shell/RemovePropagatedClock.cpp
+    shell/RemoveClockUncertainty.cpp
+    shell/RemoveClockLatency.cpp
+    shell/GetGeneratedClocks.cpp
+    compat/AllDelayCorners.cpp
     query/GetCells.cpp
-    query/GetFan.cpp
+    compat/GetFan.cpp
     query/GetClocks.cpp
     query/LibertyQueries.cpp
     query/GetNets.cpp
-    query/GetObjectNames.cpp
+    shell/GetObjectNames.cpp
     query/GetPins.cpp
     query/GetPorts.cpp
     clock/CreateClock.cpp
@@ -35,7 +43,7 @@ add_library(ista_sdc_frontend
     environment/SetTimingDerate.cpp
     environment/SetCaseAnalysis.cpp
     exception/PathExceptionCommand.cpp
-    exception/ResetPath.cpp
+    shell/ResetPath.cpp
     exception/SetFalsePath.cpp
     exception/SetMulticyclePath.cpp
     exception/SetPathDelay.cpp
