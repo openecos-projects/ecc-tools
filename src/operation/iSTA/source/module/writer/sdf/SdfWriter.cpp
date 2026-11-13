@@ -56,6 +56,8 @@ void SdfWriter::write(std::ostream& sdf_file)
   outputSdfHeader(sdf_file);
   outputSdfInterconnect(sdf_file);
   outputSdfCellList(sdf_file);
+  if (const char* slew_path = std::getenv("ISTA_DUMP_PIN_SLEW"); slew_path != nullptr && *slew_path != '\0')
+    _values.dumpPinSlew(slew_path);
   sdf_file << ")\n";
   if (!sdf_file) {
     throw std::runtime_error("Failed to write SDF");
@@ -113,8 +115,16 @@ void SdfWriter::outputSdfInterconnect(std::ostream& sdf_file)
   sdf_file << "  (DELAY\n";
   sdf_file << "   (ABSOLUTE\n";
   for (Arc& arc : database.graph().arcs()) {
-    if (arc.get_type() != ArcType::kNet || arc.get_is_disable_arc() || isSdfOutputOnlyCellArc(arc)) {
+    if (arc.get_type() != ArcType::kNet || arc.get_is_loop_disable() || isSdfOutputOnlyCellArc(arc)) {
       continue;
+    }
+    // A constant-driven net is marked is_disable_arc for path enumeration, but
+    // reference still reports its INTERCONNECT arc, so keep it in the SDF.
+    if (arc.get_is_disable_arc()) {
+      SdfDelay arc_delay = _values.arcDelay(arc);
+      if (!_values.hasDelay(arc_delay)) {
+        continue;
+      }
     }
     outputSdfInterconnectArc(sdf_file, arc);
   }
@@ -184,7 +194,12 @@ void SdfWriter::buildInstanceCellArcMap()
   Database& database = _database;
   _instance_cell_arcs.clear();
   for (Arc& arc : database.graph().arcs()) {
-    if (arc.get_type() != ArcType::kCell || arc.get_is_disable_arc()) {
+    if (arc.get_type() != ArcType::kCell || arc.get_is_loop_disable()) {
+      continue;
+    }
+    // is_disable_arc also flags the constant-driven cone, which reference still
+    // reports as IOPATH; keep any cell arc that carries a resolved delay.
+    if (arc.get_is_disable_arc() && arc.get_input_output_delay_map().empty()) {
       continue;
     }
     _instance_cell_arcs[arc.get_owner_name()].push_back(&arc);

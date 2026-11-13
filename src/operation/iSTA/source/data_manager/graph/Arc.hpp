@@ -101,7 +101,7 @@ class Arc
   void set_is_loop_disable(const bool is_loop_disable) { _is_loop_disable = is_loop_disable; }
   // function
   void update_timing_arc_delay(int32_t timing_arc_idx, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double delay,
-                               bool is_initialization)
+                               bool is_initialization, bool is_zero_slew_probe = false)
   {
     std::tuple<int32_t, AnalysisType, TransType, TransType> fallback_key = std::make_tuple(timing_arc_idx, analysis_type, input_trans_type, output_trans_type);
     auto& analysis_delay_map = _timing_arc_delay_map[timing_arc_idx];
@@ -113,10 +113,26 @@ class Arc
       if (is_initialization) {
         _timing_arc_delay_fallback_key_set.insert(fallback_key);
       }
+      // A constant cone is resolved in a follow-up sweep, after the tied driver
+      // has picked up its own slew. The main sweep evaluates the arc with
+      // input_slew == 0, an optimistic probe that the min rule would then keep
+      // forever. Record it so the first real-slew evaluation wins. The flag has
+      // to be set on the first write only; afterwards has_delay is true and this
+      // branch is never reached again.
+      if (is_zero_slew_probe) {
+        _timing_arc_delay_zero_slew_key_set.insert(fallback_key);
+      }
       return;
     }
 
     bool is_fallback = _timing_arc_delay_fallback_key_set.count(fallback_key) > 0;
+    // Replace a zero-slew probe as soon as a real input transition is known,
+    // for both min and max, bypassing the monotonic rule either way.
+    if (!is_initialization && !is_zero_slew_probe && _timing_arc_delay_zero_slew_key_set.erase(fallback_key) > 0) {
+      analysis_delay_map[analysis_type][input_trans_type][output_trans_type] = delay;
+      _timing_arc_delay_fallback_key_set.erase(fallback_key);
+      return;
+    }
     if (!is_initialization && is_fallback) {
       analysis_delay_map[analysis_type][input_trans_type][output_trans_type] = delay;
       _timing_arc_delay_fallback_key_set.erase(fallback_key);
@@ -133,6 +149,7 @@ class Arc
   }
 
  private:
+  std::set<std::tuple<int32_t, AnalysisType, TransType, TransType>> _timing_arc_delay_zero_slew_key_set;
   std::set<std::pair<AnalysisType, TransType>> _rc_failures;
   int32_t _source_vertex_idx = -1;
   int32_t _sink_vertex_idx = -1;

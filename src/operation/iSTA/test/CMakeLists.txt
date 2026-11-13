@@ -57,6 +57,11 @@ target_link_libraries(test_ista_read_parasitics PRIVATE ista_reader ista_model i
 add_test(NAME ista_read_parasitics COMMAND test_ista_read_parasitics)
 set_tests_properties(ista_read_parasitics PROPERTIES TIMEOUT 30)
 
+add_executable(test_ista_missing_liberty EXCLUDE_FROM_ALL missing_liberty_test.cpp)
+target_link_libraries(test_ista_missing_liberty PRIVATE ista_reader ista_model liberty idm)
+add_test(NAME ista_missing_liberty COMMAND test_ista_missing_liberty ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(ista_missing_liberty PROPERTIES TIMEOUT 30)
+
 add_executable(test_ista_read_network EXCLUDE_FROM_ALL read_network_test.cpp)
 target_link_libraries(test_ista_read_network PRIVATE ista_reader ista_data_manager idm idb)
 add_test(NAME ista_read_network COMMAND test_ista_read_network)
@@ -269,7 +274,7 @@ foreach(case transition capacitance derate corners scoped check force hierarchy 
   add_test(NAME ista_sdc_limits_${case} COMMAND test_ista_sdc_limits ${case})
 endforeach()
 target_link_libraries(test_ista_sdc_identity PRIVATE ista_sdc_writer ista_sdc_frontend ista_data_manager)
-foreach(case load collection fan regexp object_names query_collection all_clock_collection io_clock_count empty_related query_scope typed_setters typed_related clock_kinds exception_kinds typed_alias)
+foreach(case designs load collection fan regexp object_names query_collection all_clock_collection io_clock_count empty_related query_scope typed_setters typed_related clock_kinds exception_kinds typed_alias)
   add_test(NAME ista_sdc_identity_${case} COMMAND test_ista_sdc_identity ${case})
 endforeach()
 
