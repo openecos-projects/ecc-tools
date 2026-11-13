@@ -16,11 +16,35 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cstdint>
+#include <map>
+#include <vector>
+
 #include "GRGridGraph.hpp"
 #include "GRNet.hpp"
 #include "GRParams.hpp"
+#include "GridMap.hpp"
+#include "PlanarRect.hpp"
 
 namespace irt {
+
+class GRMazeCostContext
+{
+ public:
+  void init(const GridMap<PlanarRect>& gcell_map, int32_t micron_dbu, const std::vector<GRNet>& net_list,
+            const std::map<int32_t, double>& net_steiner_length_map);
+  double getWireLength(const PlanarCoord& first, const PlanarCoord& second) const;
+  double getTreeLength(const GRTree& tree) const;
+  double getLengthWeight(const GRParams& params) const;
+  double getReweightedLengthWeight(const GRNet& net, const GRParams& params, const GRTree& tree) const;
+  double getTreeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, const GRTree& tree) const;
+
+ private:
+  std::vector<double> x_coord_um_list_;
+  std::vector<double> y_coord_um_list_;
+  double unit_length_um_ = 0.0;
+  std::map<int32_t, double> reference_length_um_map_;
+};
 
 double edgeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, const GRWireEdgeId& edge_id, double amount = 1.0);
 double viaCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, const PlanarCoord& coord, int32_t below_layer_idx);

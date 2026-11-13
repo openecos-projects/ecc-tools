@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "EXTLayerRect.hpp"
+#include "GRCost.hpp"
 #include "GRGridGraph.hpp"
 #include "GRMaze.hpp"
 #include "GRNet.hpp"
@@ -71,6 +72,7 @@ class GlobalRouter
   void mazeRerouteOverflowNets();
   double getTotalRoutingCost() const;
   bool routeNetByMaze(GRNet& net);
+  bool buildNetMazeTree(const GRNet& net, const GRParams& params, GRTree& tree);
   void fallbackRoute();
   void cleanupDetourNets();
 
@@ -86,6 +88,7 @@ class GlobalRouter
   GRParams params_;
   GRGridGraph grid_graph_;
   std::vector<GRNet> net_list_;
+  GRMazeCostContext maze_cost_context_;
   GRMazeWorkspace maze_workspace_;
   std::vector<size_t> pattern_failed_net_idx_list_;
   std::vector<size_t> unrouted_net_idx_list_;

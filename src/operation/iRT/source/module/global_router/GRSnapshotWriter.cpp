@@ -730,15 +730,20 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
   checkFiniteNonNegative(params.congestion_hotspot_ratio, "GR congestion hotspot ratio");
   checkFiniteNonNegative(params.via_base_cost, "GR via base cost");
   checkFiniteNonNegative(params.via_demand, "GR via demand");
+  checkFiniteNonNegative(params.maze_wire_length_weight, "GR maze wire length weight");
+  checkFiniteNonNegative(params.maze_detour_ratio_weight, "GR maze detour ratio weight");
+  checkFiniteNonNegative(params.maze_detour_ratio_free, "GR maze detour free ratio");
+  checkFiniteNonNegative(params.maze_detour_ratio_reweight_start, "GR maze detour reweight ratio");
   checkFiniteNonNegative(params.max_detour_length_ratio, "GR max detour length ratio");
   checkFiniteNonNegative(params.cleanup_detour_ratio, "GR cleanup detour ratio");
   checkFiniteNonNegative(params.cleanup_min_excess_length, "GR cleanup minimum excess length");
   checkFiniteNonNegative(params.cleanup_accept_length_ratio, "GR cleanup accept length ratio");
   checkFiniteNonNegative(params.trial_smooth_neighbor_ratio, "GR trial smooth neighbor ratio");
   checkFiniteNonNegative(params.trial_reserve_start_ratio, "GR trial reserve start ratio");
-  if (params.congestion_hotspot_ratio > 1.0 || params.max_detour_offset < 0 || params.max_shift_round < 0
-      || params.cleanup_accept_length_ratio > 1.0 || params.cleanup_max_net_num < 0 || params.trial_smooth_radius < 0
-      || params.trial_smooth_neighbor_ratio > 1.0 || params.trial_reserve_start_ratio >= 1.0 || params.max_inner_3bend_point < 0) {
+  if (params.congestion_hotspot_ratio > 1.0 || params.max_detour_offset < 0 || params.max_shift_round < 0 || params.cleanup_accept_length_ratio > 1.0
+      || params.cleanup_max_net_num < 0 || params.trial_smooth_radius < 0 || params.trial_smooth_neighbor_ratio > 1.0 || params.trial_reserve_start_ratio >= 1.0
+      || params.max_inner_3bend_point < 0 || params.maze_detour_ratio_free < 1.0 || params.maze_detour_ratio_reweight_start < params.maze_detour_ratio_free
+      || params.maze_detour_ratio_power < 2) {
     throw std::runtime_error("Invalid GR parameters for snapshot");
   }
   nlohmann::json manifest;
@@ -794,6 +799,11 @@ void writeManifest(const std::filesystem::path& staging_path, const std::string&
                            {"congestion_hotspot_ratio", params.congestion_hotspot_ratio},
                            {"via_base_cost", params.via_base_cost},
                            {"via_demand", params.via_demand},
+                           {"maze_wire_length_weight", params.maze_wire_length_weight},
+                           {"maze_detour_ratio_weight", params.maze_detour_ratio_weight},
+                           {"maze_detour_ratio_free", params.maze_detour_ratio_free},
+                           {"maze_detour_ratio_reweight_start", params.maze_detour_ratio_reweight_start},
+                           {"maze_detour_ratio_power", params.maze_detour_ratio_power},
                            {"max_detour_offset", params.max_detour_offset},
                            {"max_detour_length_ratio", params.max_detour_length_ratio},
                            {"enable_u_pattern", params.enable_u_pattern},

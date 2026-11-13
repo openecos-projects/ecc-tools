@@ -76,8 +76,14 @@ PlanarCoord selectNearestTerminal(const std::vector<PlanarCoord>& pending_termin
   return target;
 }
 
-bool searchPath(const GRNet& net, const GRGridGraph& grid, const GRParams& params, GRMazeWorkspace& workspace, const PlanarCoord& target,
-                const std::vector<PlanarCoord>& tree_coord_list, std::vector<PlanarCoord>& path)
+double estimateCost(const GRParams& params, const GRMazeCostContext& cost_context, double length_weight, const PlanarCoord& coord, const PlanarCoord& target)
+{
+  double grid_distance = std::abs(coord.get_x() - target.get_x()) + std::abs(coord.get_y() - target.get_y());
+  return params.unit_wire_cost * grid_distance + length_weight * cost_context.getWireLength(coord, target);
+}
+
+bool searchPath(const GRNet& net, const GRGridGraph& grid, const GRParams& params, const GRMazeCostContext& cost_context, double length_weight,
+                GRMazeWorkspace& workspace, const PlanarCoord& target, const std::vector<PlanarCoord>& tree_coord_list, std::vector<PlanarCoord>& path)
 {
   struct MazeQueueNode
   {
@@ -95,7 +101,7 @@ bool searchPath(const GRNet& net, const GRGridGraph& grid, const GRParams& param
     for (int32_t dir = 0; dir < 2; dir++) {
       int32_t state = getState(tree_coord.get_x(), tree_coord.get_y(), dir, x_size);
       workspace.setCost(state, 0.0, -1);
-      double priority = std::abs(tree_coord.get_x() - target.get_x()) + std::abs(tree_coord.get_y() - target.get_y());
+      double priority = estimateCost(params, cost_context, length_weight, tree_coord, target);
       queue.push(MazeQueueNode{priority, state});
     }
   }
@@ -127,22 +133,23 @@ bool searchPath(const GRNet& net, const GRGridGraph& grid, const GRParams& param
       int32_t edge_x = is_horizontal ? std::min(x, next_x) : x;
       int32_t edge_y = is_horizontal ? y : std::min(y, next_y);
       double wire_cost = getWireCost(net, grid, params, workspace, edge_x, edge_y, is_horizontal);
+      wire_cost = addCost(wire_cost, length_weight * cost_context.getWireLength(PlanarCoord(x, y), PlanarCoord(next_x, next_y)));
       if (wire_cost >= GRParams::kInf) {
         continue;
       }
       int32_t next_state = getState(next_x, next_y, dir, x_size);
-      double next_cost = current_cost + wire_cost;
+      double next_cost = addCost(current_cost, wire_cost);
       if (next_cost < workspace.g[next_state]) {
         workspace.setCost(next_state, next_cost, state);
-        double priority = next_cost + std::abs(next_x - target.get_x()) + std::abs(next_y - target.get_y());
+        double priority = addCost(next_cost, estimateCost(params, cost_context, length_weight, PlanarCoord(next_x, next_y), target));
         queue.push(MazeQueueNode{priority, next_state});
       }
     }
     int32_t turn_state = state ^ 1;
-    double turn_cost = current_cost + directionCost(params);
+    double turn_cost = addCost(current_cost, directionCost(params));
     if (turn_cost < workspace.g[turn_state]) {
       workspace.setCost(turn_state, turn_cost, state);
-      double priority = turn_cost + std::abs(x - target.get_x()) + std::abs(y - target.get_y());
+      double priority = addCost(turn_cost, estimateCost(params, cost_context, length_weight, PlanarCoord(x, y), target));
       queue.push(MazeQueueNode{priority, turn_state});
     }
   }
@@ -166,8 +173,8 @@ bool searchPath(const GRNet& net, const GRGridGraph& grid, const GRParams& param
 
 }  // namespace
 
-bool buildMazePathList(const GRNet& net, const GRGridGraph& grid, const GRParams& params, GRMazeWorkspace& workspace,
-                       std::vector<std::vector<PlanarCoord>>& path_list)
+bool buildMazePathList(const GRNet& net, const GRGridGraph& grid, const GRParams& params, const GRMazeCostContext& cost_context, double length_weight,
+                       GRMazeWorkspace& workspace, std::vector<std::vector<PlanarCoord>>& path_list)
 {
   path_list.clear();
   if (net.get_pin_list().empty()) {
@@ -191,7 +198,7 @@ bool buildMazePathList(const GRNet& net, const GRGridGraph& grid, const GRParams
   while (!pending_terminal_list.empty()) {
     PlanarCoord target = selectNearestTerminal(pending_terminal_list, tree_coord_list);
     std::vector<PlanarCoord> path;
-    if (!searchPath(net, grid, params, workspace, target, tree_coord_list, path)) {
+    if (!searchPath(net, grid, params, cost_context, length_weight, workspace, target, tree_coord_list, path)) {
       return false;
     }
     for (const PlanarCoord& coord : path) {

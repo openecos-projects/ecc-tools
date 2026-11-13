@@ -17,11 +17,122 @@
 #include "GRCost.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 #include "Logger.hpp"
+#include "Net.hpp"
+#include "Pin.hpp"
 
 namespace irt {
+
+void GRMazeCostContext::init(const GridMap<PlanarRect>& gcell_map, int32_t micron_dbu, const std::vector<GRNet>& net_list,
+                             const std::map<int32_t, double>& net_steiner_length_map)
+{
+  int32_t x_size = gcell_map.get_x_size();
+  int32_t y_size = gcell_map.get_y_size();
+  if (x_size <= 0 || y_size <= 0 || micron_dbu <= 0) {
+    RTLOG.error(Loc::current(), "Invalid GCell geometry for maze length cost!");
+  }
+  x_coord_um_list_.resize(x_size);
+  y_coord_um_list_.resize(y_size);
+  double total_span_um = 0.0;
+  for (int32_t x = 0; x < x_size; x++) {
+    const PlanarRect& rect = gcell_map[x][0];
+    x_coord_um_list_[x] = static_cast<double>(rect.getMidPoint().get_x()) / micron_dbu;
+    total_span_um += static_cast<double>(rect.getXSpan()) / micron_dbu;
+  }
+  for (int32_t y = 0; y < y_size; y++) {
+    const PlanarRect& rect = gcell_map[0][y];
+    y_coord_um_list_[y] = static_cast<double>(rect.getMidPoint().get_y()) / micron_dbu;
+    total_span_um += static_cast<double>(rect.getYSpan()) / micron_dbu;
+  }
+  unit_length_um_ = total_span_um / (static_cast<double>(x_size) + y_size);
+  if (!std::isfinite(unit_length_um_) || unit_length_um_ <= 0.0) {
+    RTLOG.error(Loc::current(), "Invalid GCell unit length for maze length cost!");
+  }
+
+  reference_length_um_map_.clear();
+  for (const GRNet& net : net_list) {
+    int32_t net_idx = net.get_origin_net()->get_net_idx();
+    double steiner_length_um = 0.0;
+    auto iter = net_steiner_length_map.find(net_idx);
+    if (iter != net_steiner_length_map.end()) {
+      steiner_length_um = iter->second;
+    } else {
+      const std::vector<GRPin>& pin_list = net.get_pin_list();
+      for (const GRPin& pin : pin_list) {
+        if (pin.pin->get_access_point().get_real_coord() != pin_list.front().pin->get_access_point().get_real_coord()) {
+          RTLOG.error(Loc::current(), "Missing Steiner length for maze net ", net.get_origin_net()->get_net_name(), "!");
+        }
+      }
+    }
+    if (!std::isfinite(steiner_length_um) || steiner_length_um < 0.0) {
+      RTLOG.error(Loc::current(), "Invalid Steiner length for maze net ", net.get_origin_net()->get_net_name(), "!");
+    }
+    reference_length_um_map_.emplace(net_idx, std::max(steiner_length_um, unit_length_um_));
+  }
+}
+
+double GRMazeCostContext::getWireLength(const PlanarCoord& first, const PlanarCoord& second) const
+{
+  return std::abs(x_coord_um_list_[first.get_x()] - x_coord_um_list_[second.get_x()])
+         + std::abs(y_coord_um_list_[first.get_y()] - y_coord_um_list_[second.get_y()]);
+}
+
+double GRMazeCostContext::getTreeLength(const GRTree& tree) const
+{
+  double length_um = 0.0;
+  for (const GRWireSegment& wire : tree.wire_list) {
+    if (wire.first.get_layer_idx() == wire.second.get_layer_idx()) {
+      length_um += getWireLength(wire.first, wire.second);
+    }
+  }
+  return length_um;
+}
+
+double GRMazeCostContext::getLengthWeight(const GRParams& params) const
+{
+  if (!std::isfinite(params.maze_wire_length_weight) || params.maze_wire_length_weight < 0.0 || !std::isfinite(params.maze_detour_ratio_weight)
+      || params.maze_detour_ratio_weight < 0.0 || !std::isfinite(params.maze_detour_ratio_free) || params.maze_detour_ratio_free < 1.0
+      || !std::isfinite(params.maze_detour_ratio_reweight_start) || params.maze_detour_ratio_reweight_start < params.maze_detour_ratio_free
+      || params.maze_detour_ratio_power < 2 || !std::isfinite(params.initial_cost_weight) || params.initial_cost_weight <= 0.0
+      || !std::isfinite(params.cost_weight) || params.cost_weight < 0.0) {
+    RTLOG.error(Loc::current(), "Invalid parameters for maze length cost!");
+  }
+  double scale = params.cost_weight / params.initial_cost_weight;
+  return scale * params.maze_wire_length_weight / unit_length_um_;
+}
+
+double GRMazeCostContext::getReweightedLengthWeight(const GRNet& net, const GRParams& params, const GRTree& tree) const
+{
+  double length_weight = getLengthWeight(params);
+  double reference_length_um = reference_length_um_map_.at(net.get_origin_net()->get_net_idx());
+  double ratio = getTreeLength(tree) / reference_length_um;
+  if (params.maze_detour_ratio_weight == 0.0 || ratio <= params.maze_detour_ratio_reweight_start) {
+    return length_weight;
+  }
+  double scale = params.cost_weight / params.initial_cost_weight;
+  double excess = ratio - params.maze_detour_ratio_free;
+  double ratio_slope
+      = scale * params.maze_detour_ratio_weight * params.maze_detour_ratio_power * std::pow(excess, params.maze_detour_ratio_power - 1) / reference_length_um;
+  return addCost(length_weight, ratio_slope);
+}
+
+double GRMazeCostContext::getTreeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, const GRTree& tree) const
+{
+  double length_weight = getLengthWeight(params);
+  double length_um = getTreeLength(tree);
+  double length_cost = length_weight * length_um;
+  if (params.maze_detour_ratio_weight > 0.0) {
+    double reference_length_um = reference_length_um_map_.at(net.get_origin_net()->get_net_idx());
+    double excess = std::max(0.0, length_um / reference_length_um - params.maze_detour_ratio_free);
+    double scale = params.cost_weight / params.initial_cost_weight;
+    double ratio_cost = scale * params.maze_detour_ratio_weight * std::pow(excess, params.maze_detour_ratio_power);
+    length_cost = addCost(length_cost, ratio_cost);
+  }
+  return addCost(treeCost(grid, net, params, tree), length_cost);
+}
 
 double edgeCost(const GRGridGraph& grid, const GRNet& net, const GRParams& params, const GRWireEdgeId& edge_id, double amount)
 {

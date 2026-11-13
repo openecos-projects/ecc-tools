@@ -281,6 +281,7 @@ void GlobalRouter::initNetList()
   }
 
   std::sort(net_list_.begin(), net_list_.end(), CmpGRNet());
+  maze_cost_context_.init(RTDM.getDatabase().get_gcell_map(), RTDM.getDatabase().get_micron_dbu(), net_list_, RTDM.getDatabase().get_net_steiner_length_map());
 
   int32_t local_net_num = 0;
   for (const GRNet& gr_net : net_list_) {
@@ -555,7 +556,7 @@ double GlobalRouter::getTotalRoutingCost() const
 {
   double total_cost = 0.0;
   for (const GRNet& net : net_list_) {
-    double net_cost = treeCost(grid_graph_, net, params_, net.get_tree());
+    double net_cost = maze_cost_context_.getTreeCost(grid_graph_, net, params_, net.get_tree());
     if (net_cost >= GRParams::kInf) {
       return GRParams::kInf;
     }
@@ -569,13 +570,8 @@ bool GlobalRouter::routeNetByMaze(GRNet& net)
   GRTree old_tree = net.release_tree();
   net.ripupUsage(grid_graph_, params_, old_tree);
 
-  std::vector<std::vector<PlanarCoord>> path_list;
   GRTree new_tree;
-  bool is_built = buildMazePathList(net, grid_graph_, params_, maze_workspace_, path_list);
-  if (is_built) {
-    is_built = buildTreeFromPaths(net, grid_graph_, params_, path_list, new_tree);
-  }
-  if (!is_built) {
+  if (!buildNetMazeTree(net, params_, new_tree)) {
     net.commitUsage(grid_graph_, params_, old_tree);
     net.set_tree(std::move(old_tree));
     RTLOG.warn(Loc::current(), "Failed to maze-route net ", net.get_origin_net()->get_net_name());
@@ -583,6 +579,43 @@ bool GlobalRouter::routeNetByMaze(GRNet& net)
   }
   net.commitUsage(grid_graph_, params_, new_tree);
   net.set_tree(std::move(new_tree));
+  return true;
+}
+
+bool GlobalRouter::buildNetMazeTree(const GRNet& net, const GRParams& params, GRTree& tree)
+{
+  double length_weight = maze_cost_context_.getLengthWeight(params);
+  std::vector<std::vector<PlanarCoord>> path_list;
+  if (!buildMazePathList(net, grid_graph_, params, maze_cost_context_, length_weight, maze_workspace_, path_list)
+      || !buildTreeFromPaths(net, grid_graph_, params, path_list, tree)) {
+    return false;
+  }
+  double reweighted_length_weight = maze_cost_context_.getReweightedLengthWeight(net, params, tree);
+  if (reweighted_length_weight <= length_weight) {
+    return true;
+  }
+
+  GRTree reweighted_tree;
+  if (!buildMazePathList(net, grid_graph_, params, maze_cost_context_, reweighted_length_weight, maze_workspace_, path_list)
+      || !buildTreeFromPaths(net, grid_graph_, params, path_list, reweighted_tree)) {
+    return true;
+  }
+
+  double base_overflow = treeOverflow(grid_graph_, net, tree);
+  net.commitUsage(grid_graph_, params, tree);
+  double first_overflow = treeOverflow(grid_graph_, net, tree) - base_overflow;
+  double first_cost = maze_cost_context_.getTreeCost(grid_graph_, net, params, tree);
+  net.ripupUsage(grid_graph_, params, tree);
+
+  base_overflow = treeOverflow(grid_graph_, net, reweighted_tree);
+  net.commitUsage(grid_graph_, params, reweighted_tree);
+  double reweighted_overflow = treeOverflow(grid_graph_, net, reweighted_tree) - base_overflow;
+  double reweighted_cost = maze_cost_context_.getTreeCost(grid_graph_, net, params, reweighted_tree);
+  net.ripupUsage(grid_graph_, params, reweighted_tree);
+
+  if (isBetterResult(first_overflow, first_cost, reweighted_overflow, reweighted_cost)) {
+    tree = std::move(reweighted_tree);
+  }
   return true;
 }
 
@@ -651,18 +684,13 @@ void GlobalRouter::cleanupDetourNets()
   for (size_t i = 0; i < candidate_list.size(); i++) {
     GRNet& net = net_list_[candidate_list[i].net_idx];
     double before_overflow = treeOverflow(grid_graph_, net, net.get_tree());
-    double before_cost = treeCost(grid_graph_, net, cleanup_params, net.get_tree());
-    double before_length = getRoutedLength(net, gcell_map, micron_dbu);
+    double before_cost = maze_cost_context_.getTreeCost(grid_graph_, net, cleanup_params, net.get_tree());
+    double before_length = maze_cost_context_.getTreeLength(net.get_tree());
 
     GRTree old_tree = net.release_tree();
     net.ripupUsage(grid_graph_, params_, old_tree);
-    std::vector<std::vector<PlanarCoord>> path_list;
     GRTree new_tree;
-    bool is_built = buildMazePathList(net, grid_graph_, cleanup_params, maze_workspace_, path_list);
-    if (is_built) {
-      is_built = buildTreeFromPaths(net, grid_graph_, cleanup_params, path_list, new_tree);
-    }
-    if (!is_built) {
+    if (!buildNetMazeTree(net, cleanup_params, new_tree)) {
       net.commitUsage(grid_graph_, params_, old_tree);
       net.set_tree(std::move(old_tree));
       rejected_num++;
@@ -672,9 +700,9 @@ void GlobalRouter::cleanupDetourNets()
 
     net.commitUsage(grid_graph_, params_, new_tree);
     double after_overflow = treeOverflow(grid_graph_, net, new_tree);
-    double after_cost = treeCost(grid_graph_, net, cleanup_params, new_tree);
+    double after_cost = maze_cost_context_.getTreeCost(grid_graph_, net, cleanup_params, new_tree);
+    double after_length = maze_cost_context_.getTreeLength(new_tree);
     net.set_tree(std::move(new_tree));
-    double after_length = getRoutedLength(net, gcell_map, micron_dbu);
     bool is_accepted = after_overflow <= before_overflow + GRParams::kEpsilon
                        && after_length <= before_length * params_.cleanup_accept_length_ratio + GRParams::kEpsilon
                        && after_cost < before_cost - GRParams::kEpsilon;
