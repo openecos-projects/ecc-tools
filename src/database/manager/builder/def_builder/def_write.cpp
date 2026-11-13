@@ -48,6 +48,16 @@ namespace idb {
 
 namespace {
 
+// Keep logical supply ports visible to DEF-to-netlist import. Their physical
+// instance terminals and routing are exported through the matching SPECIALNET.
+bool has_regular_pg_connection(IdbPin* pin)
+{
+  auto* regular = pin->get_net();
+  auto* special = pin->get_special_net();
+  return regular != nullptr && regular->is_pdn() && special != nullptr
+         && regular->get_net_name() == special->get_net_name() && regular->get_connect_type() == special->get_connect_type();
+}
+
 struct DefBusBitName
 {
   std::string base_name;
@@ -624,13 +634,6 @@ int32_t DefWrite::write_component()
                halo->get_extend_top());
     }
 
-    /// routed halo
-    auto route_halo = instance->get_route_halo();
-    if (route_halo != nullptr) {
-      writestr("      + ROUTEHALO %d %s %s\n", route_halo->get_route_distance(), route_halo->get_layer_bottom()->get_name().c_str(),
-               route_halo->get_layer_top()->get_name().c_str());
-    }
-
     writestr("      ;\n");
   }
 
@@ -654,7 +657,8 @@ int32_t DefWrite::write_pin()
   for (IdbPin* pin : pin_list->get_pin_list()) {
     string direction = IdbEnum::GetInstance()->get_connect_property()->get_direction_name(pin->get_term()->get_direction());
     string use = IdbEnum::GetInstance()->get_connect_property()->get_type_name(pin->get_term()->get_type());
-    string is_special = pin->is_special_net_pin() || pin->get_term()->is_special_net() ? "+ SPECIAL " : "";
+    const bool special_only = (pin->is_special_net_pin() || pin->get_term()->is_special_net()) && !has_regular_pg_connection(pin);
+    string is_special = special_only ? "+ SPECIAL " : "";
     const std::string pin_name = format_io_pin_name(pin->get_pin_name());
     const std::string net_name = format_net_name(pin->get_net_name() == "" ? pin->get_net()->get_net_name() : pin->get_net_name());
 
@@ -912,17 +916,18 @@ int32_t DefWrite::write_special_net()
     const std::string net_name = format_net_name(special_net->get_net_name());
     writestr("- %s ", net_name.c_str());
 
-    if (special_net->get_pin_string_list().size() > 0) {
-      for (string pin_string : special_net->get_pin_string_list()) {
-        writestr("( * %s ) ", pin_string.c_str());
+    for (const string& pin_string : special_net->get_pin_string_list()) {
+      writestr("( * %s ) ", pin_string.c_str());
+    }
+    for (IdbPin* pin_io : special_net->get_io_pin_list()->get_pin_list()) {
+      if (has_regular_pg_connection(pin_io)) {
+        continue;
       }
-    } else {
-      for (IdbPin* pin_io : special_net->get_io_pin_list()->get_pin_list()) {
-        const std::string pin_name = format_io_pin_name(pin_io->get_pin_name());
-        writestr("( PIN %s ) ", pin_name.c_str());
-      }
-
-      for (IdbPin* pin_instance : special_net->get_instance_pin_list()->get_pin_list()) {
+      const std::string pin_name = format_io_pin_name(pin_io->get_pin_name());
+      writestr("( PIN %s ) ", pin_name.c_str());
+    }
+    for (IdbPin* pin_instance : special_net->get_instance_pin_list()->get_pin_list()) {
+      if (!special_net->matches_wildcard_instance_pin(pin_instance->get_term_name())) {
         const std::string instance_name = format_instance_name(pin_instance->get_instance()->get_name());
         writestr("( %s %s ) ", instance_name.c_str(), pin_instance->get_pin_name().c_str());
       }
@@ -974,6 +979,9 @@ int32_t DefWrite::write_net()
     }
 
     for (IdbPin* instance : net->get_instance_pin_list()->get_pin_list()) {
+      if ((instance->get_term()->is_power() || instance->get_term()->is_ground()) && has_regular_pg_connection(instance)) {
+        continue;
+      }
       const std::string instance_name = format_instance_name(instance->get_instance()->get_name());
       writestr(" ( %s %s )", instance_name.c_str(), instance->get_pin_name().c_str());
     }

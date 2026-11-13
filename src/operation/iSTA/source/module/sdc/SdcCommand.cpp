@@ -155,6 +155,17 @@ void SdcCommand::setIgnoreUnknownCommands(bool ignore)
 int SdcCommand::evalScriptFile(const std::string& file_name)
 {
   clearErrors();
+  _ignored_commands.clear();
+  setScreenVariables(_interp);
+  if (!_ignore_unknown_commands) {
+    // Preserve Tcl's file context for [info script], nested source, return,
+    // and file/line diagnostics. Evaluating individual strings loses it.
+    const int result = Tcl_EvalFile(_interp, file_name.c_str());
+    if (result != TCL_OK)
+      addError(Tcl_GetErrorLine(_interp), Tcl_GetStringResult(_interp));
+    return result;
+  }
+
   std::ifstream script_file(file_name);
   if (!script_file.is_open()) {
     addError(0, "failed to open SDC file '" + file_name + "'");
@@ -162,7 +173,6 @@ int SdcCommand::evalScriptFile(const std::string& file_name)
   }
 
   const std::string script((std::istreambuf_iterator<char>(script_file)), std::istreambuf_iterator<char>());
-  setScreenVariables(_interp);
   return evalScript(script);
 }
 

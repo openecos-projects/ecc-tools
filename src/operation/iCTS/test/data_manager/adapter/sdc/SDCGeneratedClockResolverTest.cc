@@ -38,11 +38,10 @@ auto primaryClock(const std::string& name = "master", const std::string& port = 
   icts::SdcClockDecl clock;
   clock.kind = icts::SdcClockDecl::Kind::kPrimary;
   clock.clock_name = name;
-  clock.targets = {{icts::SdcObjectKind::kPort, port, true}};
+  clock.targets = {{icts::SdcObjectKind::kPort, port}};
   clock.period_ns = 10.0;
   clock.period_resolved = true;
   clock.waveform_ns = {0.0, 4.0};
-  clock.waveform_explicit = true;
   clock.waveform_resolved = true;
   return clock;
 }
@@ -52,8 +51,8 @@ auto generatedClock(const std::string& name = "generated", const std::string& ma
   icts::SdcClockDecl clock;
   clock.kind = icts::SdcClockDecl::Kind::kGenerated;
   clock.clock_name = name;
-  clock.targets = {{icts::SdcObjectKind::kPin, "divider/Q", true}};
-  clock.generated_sources = {{icts::SdcObjectKind::kClock, master, true}};
+  clock.targets = {{icts::SdcObjectKind::kPin, "divider/Q"}};
+  clock.generated_sources = {{icts::SdcObjectKind::kClock, master}};
   clock.master_clock_name = master;
   return clock;
 }
@@ -166,7 +165,7 @@ TEST(SDCGeneratedClockResolverTest, LeavesAmbiguousPhysicalSourcesForGraphResolu
 {
   auto generated = generatedClock();
   generated.master_clock_name.clear();
-  generated.generated_sources = {{icts::SdcObjectKind::kPort, "clk_*", true}};
+  generated.generated_sources = {{icts::SdcObjectKind::kPort, "clk_a"}, {icts::SdcObjectKind::kPort, "clk_b"}};
   auto data = clockData({primaryClock("a", "clk_a"), primaryClock("b", "clk_b"), generated});
   const auto expected = data;
   icts::SDCGeneratedClockResolver::resolve(data);

@@ -37,7 +37,7 @@
 #include "IdbNet.h"
 #include "IdbPins.h"
 #include "IdbTerm.h"
-#include "data_manager/adapter/sdc/SDCClockReader.hh"
+#include "data_manager/adapter/sdc/ClockTrace.hh"
 #include "data_manager/design/Clock.hh"
 #include "data_manager/design/Design.hh"
 #include "data_manager/design/Net.hh"

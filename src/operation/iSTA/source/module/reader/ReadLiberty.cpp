@@ -395,8 +395,7 @@ LogicOperationType ReadLiberty::logicOperation(const int32_t liberty_expr_op)
     case LibertyExprOp::kXor:
       return LogicOperationType::kXor;
     default:
-      STALOG.error(Loc::current(), "Unrecognized type!");
-      break;
+      throw std::invalid_argument("native Liberty: unsupported logic operation");
   }
   return LogicOperationType::kNone;
 }

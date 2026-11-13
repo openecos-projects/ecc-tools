@@ -35,6 +35,7 @@ class SdcTclCmd : public ecc::TclCmd
   SdcTclCmd(const char* cmd_name, ClientData client_data);
   ~SdcTclCmd() override = default;
 
+  void addOption(ecc::TclOption* option);
   int execute(Tcl_Interp* interp, int objc, Tcl_Obj* const objv[]);
   Tcl_Interp* interpreter() const { return _interp; }
   Tcl_Obj* getOptionObject(const std::string& name) const
@@ -64,9 +65,12 @@ class SdcTclCmd : public ecc::TclCmd
   friend ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command);
   void resetExecutionState();
   void setInterpreterError(Tcl_Interp* interp) const;
+  ecc::TclOption* findOption(const std::string& name) const;
 
   Tcl_Interp* _interp = nullptr;
   ClientData _client_data = nullptr;
+  // The base TclCmd owns these options; arguments are deliberately excluded.
+  std::map<std::string, ecc::TclOption*> _named_options;
   std::string _error_message;
   std::string _result;
   std::vector<std::string> _list_result;

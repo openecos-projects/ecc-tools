@@ -3,6 +3,7 @@
 #include "Logger.hpp"
 #include "SdcCommand.hpp"
 #include <iostream>
+#include <unistd.h>
 #include <filesystem>
 #include <fstream>
 
@@ -463,6 +464,92 @@ void testWriteSdc()
   reject("write_sdc -unknown file");
 }
 
+// Guard the ECC stage contract at the file-reader boundary, including a
+// virtual clock sorted before the physical clock in all_clocks.
+static void testClockStageFiles()
+{
+  auto& constraints = PWDM.getDatabase().get_timing_constraint();
+  auto& interpreter = SdcCommand::getInst();
+  const auto directory = std::filesystem::temp_directory_path() / ("power-clock-stages-" + std::to_string(getpid()));
+  require(std::filesystem::create_directory(directory), "could not create stage test directory");
+  struct Cleanup {
+    std::filesystem::path directory;
+    ~Cleanup() { std::error_code ignored; std::filesystem::remove_all(directory, ignored); }
+  } cleanup{directory};
+  for (const auto* stage : {"pre_CTS", "post_CTS"})
+    std::filesystem::create_directory(directory / stage);
+  const auto bad_file = directory / "invalid.tcl";
+  { std::ofstream file(bad_file); file << "set_propagated_clock missing_clock\n"; }
+
+  for (int clocks = 0; clocks < 3; ++clocks) {
+    const bool has_virtual = clocks != 1;
+    const bool has_physical = clocks != 0;
+    const auto reference = has_virtual ? "VCLK_clk" : "clk";
+    std::string common;
+    if (has_virtual)
+      common += "create_clock -name VCLK_clk -period 10\n";
+    if (has_physical)
+      common += "create_clock -name clk -period 10 [get_ports clk]\n";
+    common += "set_clock_latency -source 0.5 [all_clocks]\n"
+              "set_clock_latency 1.25 [all_clocks]\n"
+              "set_clock_uncertainty -setup 0.2 [all_clocks]\n"
+              "set_clock_uncertainty -hold 0.1 [all_clocks]\n"
+              "set_clock_transition 0.15 [all_clocks]\n"
+              "set_input_transition 0.2 [get_ports in]\n"
+              "set_load 0.3 [get_ports out]\n";
+    common += std::string("set_input_delay -max 3 -clock ") + reference + " [get_ports in]\n";
+    common += std::string("set_output_delay -min -0.1 -clock ") + reference + " [get_ports out]\n";
+    for (bool post_cts : {false, true}) {
+      constraints = TimingConstraint{};
+      const auto file_path = directory / (post_cts ? "post_CTS" : "pre_CTS") / "TYP_25_TYPICAL.tcl";
+      {
+        std::ofstream file(file_path);
+        file << common;
+        if (post_cts)
+          file << "set_propagated_clock [all_clocks]\n";
+        file << "set ::clock_stage_loaded 1\n";
+        file.close();
+        require(file.good(), "could not write stage fixture");
+      }
+      require(interpreter.evalScriptFile(bad_file.string()) == TCL_ERROR, "unknown clock silently accepted");
+      for (int repeat = 0; repeat < 2; ++repeat) {
+        Tcl_UnsetVar(interpreter.getInterp(), "clock_stage_loaded", TCL_GLOBAL_ONLY);
+        require(interpreter.evalScriptFile(file_path.string()) == TCL_OK, "stage file rejected virtual clock");
+        require(interpreter.get_error_message().empty() && interpreter.get_error_line_number() == 0, "warning retained a file-reader error");
+        const char* completed = Tcl_GetVar(interpreter.getInterp(), "clock_stage_loaded", TCL_GLOBAL_ONLY);
+        require(completed && std::string(completed) == "1", "script stopped at set_propagated_clock");
+        require(constraints.get_clock_map().size() == (has_virtual && has_physical ? 2u : 1u), "clock collection changed");
+        for (auto& [name, clock] : constraints.get_clock_map()) {
+          const bool physical = name == "clk";
+          require(clock.get_is_propagated() == (post_cts && physical), "incorrect pre/post-CTS clock mode");
+          require(clock.get_source_list().empty() == !physical, "virtual clock acquired a physical source");
+          require(clock.get_source_latency(AnalysisType::kMin, ClockVariation::kEarly, TransType::kRise) == 0.5,
+                  "propagation changed source latency");
+          require(clock.get_network_latency(AnalysisType::kMax, TransType::kFall) == (post_cts && physical ? 0. : 1.25),
+                  "propagation lost virtual latency or retained physical network latency");
+          require(clock.get_setup_uncertainty() == 0.2 && clock.get_hold_uncertainty() == 0.1, "uncertainty changed");
+          if (physical)
+            require(clock.get_transition_map().at(AnalysisType::kMax).at(TransType::kRise) == 0.15, "physical clock transition changed");
+          else
+            require(clock.get_transition_map().empty(), "virtual clock acquired a transition waveform");
+        }
+        auto& ports = constraints.get_port_constraint_map();
+        const auto& inputs = ports.at("in").get_input_delay_list();
+        const auto& outputs = ports.at("out").get_output_delay_list();
+        require(inputs.size() == 2 && outputs.size() == 2, "I/O delay lanes lost or duplicated");
+        for (const auto& value : inputs)
+          require(value.get_clock_name() == reference && value.get_delay() == 3. && value.get_analysis_type() == AnalysisType::kMax,
+                  "input delay or reference clock changed");
+        for (const auto& value : outputs)
+          require(value.get_clock_name() == reference && value.get_delay() == -0.1 && value.get_analysis_type() == AnalysisType::kMin,
+                  "output delay or reference clock changed");
+        require(ports.at("in").get_input_transition(AnalysisType::kMax, TransType::kRise) == 0.2, "input slew changed");
+        require(ports.at("out").get_load(AnalysisType::kMax, TransType::kRise) == 0.3, "output load changed");
+      }
+    }
+  }
+}
+
 int main()
 {
   Logger::initInst();
@@ -484,7 +571,8 @@ int main()
         testUnitsAndCorners,
         testPinClockConstraints,
         testLiteralQueryObjects,
-        testWriteSdc}) {
+        testWriteSdc,
+        testClockStageFiles}) {
     try {
       test();
     } catch (const std::exception& error) {

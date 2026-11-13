@@ -17,6 +17,7 @@
 #include "MacroPlacer.hpp"
 
 #include "DataManager.hpp"
+#include "FPInterface.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Utility.hpp"
@@ -143,11 +144,74 @@ void MacroPlacer::cutRowList()
 {
   Database& database = FPDM.getDatabase();
   std::vector<Row> cut_row_list;
+  int32_t min_channel_width = getMinPGChannelWidth();
   for (Row& row : database.get_row_list()) {
     cutRow(row, cut_row_list);
   }
-  database.set_row_list(cut_row_list);
-  database.set_new_row_list(cut_row_list);
+  int32_t removed_row_num = 0;
+  double removed_area = 0.0;
+  std::vector<Row> usable_row_list;
+  for (const Row& row : cut_row_list) {
+    if (row.get_width() >= min_channel_width) {
+      usable_row_list.push_back(row);
+      continue;
+    }
+    for (const Instance& instance : database.get_instance_list()) {
+      if (!instance.get_placed() || instance.get_macro() || instance.is_delete_instance()) {
+        continue;
+      }
+      const PlanarRect& rect = instance.get_bounding_rect();
+      if (row.get_ll_x() < rect.get_ur_x() && rect.get_ll_x() < row.get_ur_x() && row.get_ll_y() < rect.get_ur_y()
+          && rect.get_ll_y() < row.get_ur_y()) {
+        FPLOG.error(Loc::current(), "Cannot remove unpowerable row '", row.get_name(), "': it contains placed instance '", instance.get_name(), "'.");
+      }
+    }
+    removed_row_num++;
+    removed_area += (row.get_width() / 1.0 / database.get_micron_dbu()) * (row.get_height() / 1.0 / database.get_micron_dbu());
+  }
+  if (removed_row_num > 0) {
+    FPLOG.warn(Loc::current(), "Removed ", removed_row_num, " macro-cut row fragment(s), area=", removed_area,
+               " um^2: narrower than the configured two-net PG channel (", min_channel_width, " DBU). No physical cells or rails will be placed there.");
+  }
+  reportMissingRowIntervals(usable_row_list);
+  if (!cut_row_list.empty() && usable_row_list.empty()) {
+    FPLOG.error(Loc::current(), "No usable rows remain after reserving the configured PG channel.");
+  }
+  database.set_row_list(usable_row_list);
+  database.set_new_row_list(usable_row_list);
+}
+
+int32_t MacroPlacer::getMinPGChannelWidth()
+{
+  if (_placed_macro_list.empty()) {
+    return 0;
+  }
+  Database& database = FPDM.getDatabase();
+  Config& config = FPDM.getConfig();
+  int32_t channel_width = INT32_MAX;
+  for (const PGStripe& stripe : config.pg_stripe_list) {
+    auto layer_iter = database.get_routing_layer_name_to_idx_map().find(stripe.get_layer_name());
+    if (layer_iter == database.get_routing_layer_name_to_idx_map().end()) {
+      continue;
+    }
+    const RoutingLayer& layer = database.get_routing_layer_list()[layer_iter->second];
+    if (layer.get_prefer_direction() != Direction::kVertical || stripe.get_width_micron() <= 0.0) {
+      continue;
+    }
+    for (const PGRail& rail : config.pg_rail_list) {
+      for (const PGLayerPair& pair : config.pg_layer_pair_list) {
+        if (!((pair.get_first_layer_name() == rail.get_layer_name() && pair.get_second_layer_name() == layer.get_name())
+              || (pair.get_second_layer_name() == rail.get_layer_name() && pair.get_first_layer_name() == layer.get_name()))) {
+          continue;
+        }
+        int32_t width = FPUTIL.transMicronToDBU(stripe.get_width_micron(), database.get_micron_dbu());
+        width = std::max(width, FPI.getPGViaMinSize(rail.get_layer_name(), layer.get_name()).first);
+        int32_t spacing = std::max(0, layer.get_spacing());
+        channel_width = std::min(channel_width, FPUTIL.alignUp(2 * width + spacing, std::max(1, database.get_manufacture_grid())));
+      }
+    }
+  }
+  return channel_width == INT32_MAX ? 0 : channel_width;
 }
 
 void MacroPlacer::cutRow(Row& row, std::vector<Row>& cut_row_list)
@@ -210,6 +274,42 @@ void MacroPlacer::addCutRow(Row& row, std::vector<Row>& cut_row_list, int32_t st
   cut_row.set_orient(row.get_orient());
   cut_row.set_rect(start_x, row.get_ll_y(), end_x, row.get_ur_y());
   cut_row_list.push_back(cut_row);
+}
+
+void MacroPlacer::reportMissingRowIntervals(const std::vector<Row>& usable_row_list)
+{
+  std::map<int32_t, int32_t> missing_row_y_to_ur_y_map;
+  for (const Row& row : FPDM.getDatabase().get_row_list()) {
+    auto row_iter = missing_row_y_to_ur_y_map.emplace(row.get_y(), row.get_ur_y()).first;
+    row_iter->second = std::max(row_iter->second, row.get_ur_y());
+  }
+  for (const Row& row : usable_row_list) {
+    missing_row_y_to_ur_y_map.erase(row.get_y());
+  }
+  if (missing_row_y_to_ur_y_map.empty()) {
+    return;
+  }
+
+  std::stringstream missing_y_intervals;
+  for (auto row_iter = missing_row_y_to_ur_y_map.begin(); row_iter != missing_row_y_to_ur_y_map.end();) {
+    int32_t start_y = row_iter->first;
+    int32_t end_y = row_iter->second;
+    int32_t row_y_num = 1;
+    if (row_iter != missing_row_y_to_ur_y_map.begin()) {
+      missing_y_intervals << ", ";
+    }
+    ++row_iter;
+    while (row_iter != missing_row_y_to_ur_y_map.end() && row_iter->first == end_y) {
+      end_y = row_iter->second;
+      row_y_num++;
+      ++row_iter;
+    }
+    missing_y_intervals << "[" << start_y << "," << end_y << ") (" << row_y_num << " row y-level(s))";
+  }
+  FPLOG.warn(Loc::current(), "Sparse row grid: ", missing_row_y_to_ur_y_map.size(),
+             " original row y-level(s) lost all usable fragments after macro cutting/PG-channel pruning. Missing y intervals (DBU, [begin,end)): ",
+             missing_y_intervals.str(),
+             ". Downstream placement/sizing must support sparse physical row indices; no dummy rows were inserted and surviving rows were not compacted.");
 }
 
 // private

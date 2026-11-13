@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -12,6 +13,7 @@
 #include "graph/Arc.hpp"
 #include "graph/SimValues.hpp"
 #include "graph/TimingPoint.hpp"
+#include "liberty/TimingCheckArc.hpp"
 
 namespace ista {
 
@@ -59,6 +61,8 @@ class Graph
         _incoming_arcs(other._incoming_arcs),
         _startpoints(other._startpoints),
         _endpoints(other._endpoints),
+        _clock_gating_checks(other._clock_gating_checks),
+        _clock_gating_endpoints(other._clock_gating_endpoints),
         _timing_order(other._timing_order),
         _points(other._points),
         _path_states_pruned(other._path_states_pruned),
@@ -103,6 +107,23 @@ class Graph
   const std::vector<std::string>& startpoints() const { return _startpoints; }
   std::vector<std::string>& endpoints() { return _endpoints; }
   const std::vector<std::string>& endpoints() const { return _endpoints; }
+  std::map<std::string, std::vector<TimingCheckArc>>& clockGatingChecks() { return _clock_gating_checks; }
+  const std::map<std::string, std::vector<TimingCheckArc>>& clockGatingChecks() const { return _clock_gating_checks; }
+  void addClockGatingCheck(TimingCheckArc check)
+  {
+    const auto& endpoint = check.get_data_port();
+    if (std::find(_endpoints.begin(), _endpoints.end(), endpoint) == _endpoints.end()) {
+      _endpoints.push_back(endpoint);
+      _clock_gating_endpoints.insert(endpoint);
+    }
+    _clock_gating_checks[endpoint].push_back(std::move(check));
+  }
+  void clearClockGatingChecks()
+  {
+    std::erase_if(_endpoints, [&](const auto& endpoint) { return _clock_gating_endpoints.contains(endpoint); });
+    _clock_gating_checks.clear();
+    _clock_gating_endpoints.clear();
+  }
   std::vector<std::string>& timingOrder() { return _timing_order; }
   const std::vector<std::string>& timingOrder() const { return _timing_order; }
   std::map<std::string, TimingPoint>& points() { return _points; }
@@ -138,6 +159,7 @@ class Graph
   // Clear propagated timing at both receiving and driving vertices.
   void clearTiming()
   {
+    clearClockGatingChecks();
     _path_states_pruned = false;
     _capture_required_clocks.clear();
     _exhaustive_required = false;
@@ -168,6 +190,8 @@ class Graph
   std::map<std::string, std::vector<std::size_t>> _incoming_arcs;
   std::vector<std::string> _startpoints;
   std::vector<std::string> _endpoints;
+  std::map<std::string, std::vector<TimingCheckArc>> _clock_gating_checks;
+  std::set<std::string> _clock_gating_endpoints;
   std::vector<std::string> _timing_order;
   std::map<std::string, TimingPoint> _points;
   bool _path_states_pruned = false;

@@ -83,6 +83,38 @@ void testFanout()
   require(FanoutChecker(other).check().empty(), "fanout crossed database lifetimes");
 }
 
+void testConstantFanout()
+{
+  Database db;
+  pin(db, "drv:Y", "drv", "Y");
+  pin(db, "sink:A", "sink", "A");
+  auto& net = db.network().nets()["n"];
+  net.set_net_name("n");
+  net.set_driver_pin("drv:Y");
+  net.set_driver_pin_list({"drv:Y"});
+  net.set_load_pin_list({"sink:A"});
+  db.sdc().get_max_fanout() = .5;
+  const FanoutChecker checker(db);
+  require(checker.check().size() == 1 && checker.check().front().get_slack() == -.5, "switching fanout violation missing");
+  for (auto value : {TimingCaseValue::kZero, TimingCaseValue::kOne, TimingCaseValue::kStatic}) {
+    db.graph().simValues().setValue("drv:Y", value);
+    require(checker.check().empty(), "constant driver acquired a fanout check");
+  }
+  for (auto value : {TimingCaseValue::kRise, TimingCaseValue::kFall, TimingCaseValue::kNone}) {
+    db.graph().simValues().setValue("drv:Y", value);
+    require(checker.check().size() == 1, "edge-qualified driver lost fanout check");
+  }
+  // An inout's resolved receiver value does not replace its independent driver.
+  db.network().pins().at("drv:Y").set_direction(PinDirection::kInout);
+  db.graph().driverPoints().try_emplace("drv:Y");
+  db.graph().simValues().setValue("drv:Y", TimingCaseValue::kZero);
+  require(checker.check().size() == 1, "constant receiver suppressed unknown inout driver");
+  db.graph().simValues().setValue("drv:Y", TimingCaseValue::kOne, true);
+  require(checker.check().empty(), "constant inout driver acquired fanout check");
+  db.graph().simValues().setValue("drv:Y", TimingCaseValue::kFall, true);
+  require(checker.check().size() == 1, "edge-qualified inout driver lost fanout check");
+}
+
 void testExceptions()
 {
   Database db;
@@ -141,5 +173,6 @@ int main()
 {
   // Deliberately initialize no singleton, Tcl interpreter or path search.
   testFanout();
+  testConstantFanout();
   testExceptions();
 }

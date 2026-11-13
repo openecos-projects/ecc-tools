@@ -6,33 +6,53 @@
 // iEDA is licensed under Mulan PSL v2.
 // You can use this software according to the terms and conditions of the Mulan PSL v2.
 // You may obtain a copy of Mulan PSL v2 at:
+//
 // http://license.coscl.org.cn/MulanPSL2
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-//
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
-/**
- * @file SDCCaseAnalysis.hh
- * @author Dawn Li (dawnli619215645@gmail.com)
- * @date 2026-10-28
- * @brief Registers CTS-local symbolic case constraints in the shared SDC frontend.
- */
-
 #pragma once
 
-namespace ista {
-class SdcCommand;
-}
+#include "Logger.hpp"
 
-namespace icts {
-struct SdcClockData;
-}
+namespace ifp {
 
-namespace icts::sdc_reader {
+enum class IOPlacerMode
+{
+  kIOPin,
+  kIOCell
+};
 
-auto RegisterCaseAnalysisRecorder(ista::SdcCommand& interpreter, SdcClockData& data) -> void;
+struct GetIOPlacerModeName
+{
+  std::string operator()(IOPlacerMode mode) const
+  {
+    switch (mode) {
+      case IOPlacerMode::kIOPin:
+        return "io_pin";
+      case IOPlacerMode::kIOCell:
+        return "io_cell";
+    }
+    return "io_pin";
+  }
+};
 
-}  // namespace icts::sdc_reader
+struct GetIOPlacerModeByName
+{
+  IOPlacerMode operator()(const std::string& name) const
+  {
+    if (name == "io_cell") {
+      return IOPlacerMode::kIOCell;
+    }
+    if (name == "io_pin") {
+      return IOPlacerMode::kIOPin;
+    }
+    FPLOG.error(Loc::current(), "Unrecognized io_placer.mode: ", name, ". Expected 'io_pin' or 'io_cell'.");
+    return IOPlacerMode::kIOPin;
+  }
+};
+
+}  // namespace ifp

@@ -21,9 +21,8 @@
  * @brief SDC-rooted CTS clock trace resolver implementation.
  */
 
-#include "ClockTraceResolver.hh"
-
 #include <algorithm>
+#include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
@@ -35,10 +34,10 @@
 #include <variant>
 #include <vector>
 
+#include "ClockTrace.hh"
 #include "IdbDesign.h"
 #include "IdbNet.h"
 #include "Logger.hh"
-#include "SDCClockReader.hh"
 #include "TimingConstraints.hh"
 #include "clock_trace/SDCClockTraceAlgorithm.hh"
 

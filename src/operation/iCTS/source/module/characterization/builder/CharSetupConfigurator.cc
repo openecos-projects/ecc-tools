@@ -148,16 +148,10 @@ auto resolveClockRouteSegmentRc(const ::icts::CharBuilder::Input& input) -> ::ic
   return input.clock_route_segment_rc;
 }
 
-auto resolveMaxSlew(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> ResolvedValue
+// The tightest transition rule the characterized cells declare, in the same precedence
+// the non-SDC path uses: an explicit pin rule first, then the table's last axis point.
+auto libertyMaxSlew(const ::icts::CharBuilder::Input& input) -> std::optional<ResolvedValue>
 {
-  if (config.max_slew_ns.has_value() && *config.max_slew_ns > 0.0) {
-    return ResolvedValue{
-        .value = *config.max_slew_ns,
-        .source = ResolutionSource::kRuntimeConfig,
-        .detail = "CharBuilder config: max slew",
-    };
-  }
-
   double liberty_port_min_slew = std::numeric_limits<double>::infinity();
   bool found_port_limit = false;
   for (const auto& buffer_cell : input.characterization_buffer_cells) {
@@ -189,6 +183,40 @@ auto resolveMaxSlew(const ::icts::CharBuilder::Input& input, const ::icts::CharB
         .detail = "minimum liberty input slew table-axis max",
     };
   }
+  return std::nullopt;
+}
+
+auto resolveMaxSlew(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> ResolvedValue
+{
+  if (config.sdc_max_slew_ns.has_value() && *config.sdc_max_slew_ns > 0.0) {
+    // An SDC transition limit owns the budget, but it cannot sample beyond what the
+    // characterized cells support either, so the ceiling is the tighter of the two.
+    const double sdc_limit_ns = *config.sdc_max_slew_ns;
+    if (const auto liberty_limit = libertyMaxSlew(input); liberty_limit.has_value() && liberty_limit->value > 0.0 && liberty_limit->value < sdc_limit_ns) {
+      return ResolvedValue{
+          .value = liberty_limit->value,
+          .source = liberty_limit->source,
+          .detail = liberty_limit->detail + std::string{", tighter than the SDC max transition"},
+      };
+    }
+    return ResolvedValue{
+        .value = sdc_limit_ns,
+        .source = ResolutionSource::kRuntimeConfig,
+        .detail = "SDC set_max_transition",
+    };
+  }
+  // A configured ceiling keeps its historical precedence over the cells' own rules; the
+  // cell rules are consulted only when nothing was configured.
+  if (config.max_slew_ns.has_value() && *config.max_slew_ns > 0.0) {
+    return ResolvedValue{
+        .value = *config.max_slew_ns,
+        .source = ResolutionSource::kRuntimeConfig,
+        .detail = "CharBuilder config: max slew",
+    };
+  }
+  if (const auto liberty_limit = libertyMaxSlew(input); liberty_limit.has_value()) {
+    return *liberty_limit;
+  }
 
   CTSLOG.warn(Loc::current(), "CharBuilder: failed to resolve max_slew from explicit config/liberty limits/liberty tables");
   return ResolvedValue{
@@ -198,18 +226,10 @@ auto resolveMaxSlew(const ::icts::CharBuilder::Input& input, const ::icts::CharB
   };
 }
 
-// First available max-cap source, in precedence order. Silent, so callers that only
-// need the value do not repeat the warning that the setup path already emits.
-auto resolveMaxCapCandidate(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> std::optional<ResolvedValue>
+// The tightest capacitance rule the characterized cells declare, in the same precedence
+// the non-SDC path uses: an explicit pin rule first, then the table's last axis point.
+auto libertyMaxCap(const ::icts::CharBuilder::Input& input) -> std::optional<ResolvedValue>
 {
-  if (config.max_cap_pf.has_value() && *config.max_cap_pf > 0.0) {
-    return ResolvedValue{
-        .value = *config.max_cap_pf,
-        .source = ResolutionSource::kRuntimeConfig,
-        .detail = "CharBuilder config: max cap",
-    };
-  }
-
   double liberty_port_min_cap = std::numeric_limits<double>::infinity();
   bool found_port_limit = false;
   for (const auto& buffer_cell : input.characterization_buffer_cells) {
@@ -241,8 +261,38 @@ auto resolveMaxCapCandidate(const ::icts::CharBuilder::Input& input, const ::ict
         .detail = "minimum liberty output cap table-axis max",
     };
   }
-
   return std::nullopt;
+}
+
+// First available max-cap source, in precedence order. Silent, so callers that only need
+// the value do not repeat the warning that the setup path already emits.
+auto resolveMaxCapCandidate(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> std::optional<ResolvedValue>
+{
+  if (config.sdc_max_cap_pf.has_value() && *config.sdc_max_cap_pf > 0.0) {
+    // An SDC capacitance limit owns the budget, but the lattice cannot extend past what
+    // the cells allow either, so the ceiling is the tighter of the two.
+    const double sdc_limit_pf = *config.sdc_max_cap_pf;
+    if (const auto liberty_limit = libertyMaxCap(input); liberty_limit.has_value() && liberty_limit->value > 0.0 && liberty_limit->value < sdc_limit_pf) {
+      return ResolvedValue{
+          .value = liberty_limit->value,
+          .source = liberty_limit->source,
+          .detail = liberty_limit->detail + std::string{", tighter than the SDC max capacitance"},
+      };
+    }
+    return ResolvedValue{
+        .value = sdc_limit_pf,
+        .source = ResolutionSource::kRuntimeConfig,
+        .detail = "SDC set_max_capacitance",
+    };
+  }
+  if (config.max_cap_pf.has_value() && *config.max_cap_pf > 0.0) {
+    return ResolvedValue{
+        .value = *config.max_cap_pf,
+        .source = ResolutionSource::kRuntimeConfig,
+        .detail = "CharBuilder config: max cap",
+    };
+  }
+  return libertyMaxCap(input);
 }
 
 auto resolveMaxCap(const ::icts::CharBuilder::Input& input, const ::icts::CharBuilder::Config& config) -> ResolvedValue

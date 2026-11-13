@@ -134,6 +134,7 @@ struct FastSTA::ContextStore
     std::vector<std::array<FastStaDmpDriverResult, 2U>> drivers;
     double switching_power_w;
     double max_cap_pf;
+    bool cap_limit_from_master;
 
     ClockTrialNetSnapshot(FastStaNetId net_id, FastStaNet& net);
 

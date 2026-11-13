@@ -15,33 +15,29 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 /**
- * @file ClockTraceResolver.hh
- * @author Dawn Li (dawnli619215645@gmail.com)
- * @date 2026-05-15
- * @brief Resolves SDC clock roots into CTS synthesis target nets.
+ * @file IstaConstraintReader.hh
+ * @brief Native STA initialization and owned constraint snapshot boundary.
  */
-
 #pragma once
 
-#include <cstddef>
+#include <string>
 
-#include "SDCClockReader.hh"
+#include "timing/TimingConstraints.hh"
 
-namespace icts {
-struct SdcClockData;
+namespace ista {
+class Database;
 }
 
-namespace idb {
-class IdbDesign;
-}  // namespace idb
-
 namespace icts {
 
-class ClockTraceResolver
+class IstaConstraintReader
 {
  public:
-  static auto resolve(const SdcClockData& clock_data, idb::IdbDesign* idb_design, const SdcLibertyCellLookup& liberty_cell_lookup, std::size_t max_fanout)
-      -> ClockTraceBuild;
+  // The current iDB design and shared raw Liberty generation must already be loaded.
+  // The temporary native session is destroyed before this call returns.
+  static auto read(const std::string& work_dir) -> SdcClockData;
+  // Value-only extraction; no Tcl interpretation or object-query resolution.
+  static auto snapshot(ista::Database& database) -> SdcClockData;
 };
 
 }  // namespace icts
