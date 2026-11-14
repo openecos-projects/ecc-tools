@@ -2,7 +2,6 @@
     "INPUT": {
         "tech_lef_path": "./icsprout55-pdk/prtech/techLEF/N551P6M_ecos.lef",
         "lef_paths": [
-            "./fixtures/gcd/config/ics55_v2_implants.lef",
             "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/lef/ICsprout55_9TSVT_basic.lef",
             "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/lef/ICsprout55_9TLVT_basic.lef",
             "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef/ICsprout55_9THVT_basic.lef"

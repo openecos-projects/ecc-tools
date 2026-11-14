@@ -81,7 +81,6 @@ test/**
 !test/fixtures/gcd/config/rcx_ecc.json
 !test/fixtures/gcd/config/route_ecc.json
 !test/fixtures/gcd/config/sta_ecc.json
-!test/fixtures/gcd/config/ics55_v2_implants.lef
 !test/fixtures/gcd/input/
 !test/fixtures/gcd/input/cts_in.def.gz
 !test/fixtures/gcd/input/cts_in.v.gz

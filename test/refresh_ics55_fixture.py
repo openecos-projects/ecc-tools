@@ -4,8 +4,8 @@ import argparse
 import gzip
 import hashlib
 import json
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 
 def main():
@@ -39,12 +39,6 @@ def main():
     shutil.copyfile(
         workspace / "RCX_ecc/output/gcd_TYPICAL_25C.spef", fixture / "spef/gcd_TYPICAL_25C.spef"
     )
-    implant = next(
-        Path(path)
-        for path in db["INPUT"]["lef_paths"]
-        if Path(path).name == "ics55_v2_implants.lef"
-    )
-    shutil.copyfile(implant, fixture / "config/ics55_v2_implants.lef")
     shutil.copyfile(pdk_root / "techfile/icsprout55.layermap", fixture / "config/gcd.gds.map")
 
     def portable(value):
@@ -57,8 +51,6 @@ def main():
         path = Path(value)
         if path.is_relative_to(pdk_root):
             return "./icsprout55-pdk/" + str(path.relative_to(pdk_root))
-        if path == implant:
-            return "./fixtures/gcd/config/ics55_v2_implants.lef"
         return "./output"
 
     configs = ["cts", "db", "drc", "floorplan", "rcx", "route", "sta"]
@@ -81,10 +73,16 @@ def main():
         json.dumps(
             {
                 "pdk_release": "v2-2026.10.28",
+                "technology_lef_sha256": hashlib.sha256(
+                    (pdk_root / "prtech/techLEF/N551P6M_ecos.lef").read_bytes()
+                ).hexdigest(),
                 "workspace": workspace.name,
                 "source_outputs": inputs,
                 "sha256": hashes,
-                "note": "Generated from completed ECC flow; GCD SDC retains the native API test's 50 MHz unconstrained-I/O contract.",
+                "note": (
+                    "Generated from completed ECC flow; GCD SDC retains the native API test's "
+                    "50 MHz unconstrained-I/O contract."
+                ),
             },
             indent=2,
         )
