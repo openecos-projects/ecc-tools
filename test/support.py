@@ -219,6 +219,8 @@ def _rewrite_value(
         return value
     if value.startswith("./icsprout55-pdk/"):
         return str(roots.pdk_root / value.removeprefix("./icsprout55-pdk/"))
+    if value.startswith("./fixtures/gcd/"):
+        return str(roots.fixture_root / value.removeprefix("./fixtures/gcd/"))
     if value == "./fixtures/gcd/config/gcd.sdc":
         return str(roots.fixture_root / "config" / "gcd.sdc")
     if value == "./output":
@@ -253,6 +255,8 @@ def _pdk_paths(roots: TestRoots) -> dict[str, Path | list[Path]]:
 
 
 def _pdk_path(roots: TestRoots, value: str) -> Path:
+    if value.startswith("./fixtures/gcd/"):
+        return roots.fixture_root / value.removeprefix("./fixtures/gcd/")
     prefix = "./icsprout55-pdk/"
     if not value.startswith(prefix):
         raise ValueError(f"expected PDK-relative path, got: {value}")

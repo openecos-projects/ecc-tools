@@ -57,6 +57,7 @@ test/**
 !test/conftest.py
 !test/native_scenarios.py
 !test/support.py
+!test/refresh_ics55_fixture.py
 !test/data/
 !test/data/buffer_port_mutation.py
 !test/data/test_python_io.py
@@ -70,6 +71,7 @@ test/**
 !test/timing/endpoint_qualification_test.cpp
 !test/fixtures/
 !test/fixtures/gcd/
+!test/fixtures/gcd/provenance.json
 !test/fixtures/gcd/config/
 !test/fixtures/gcd/config/cts_ecc.json
 !test/fixtures/gcd/config/db_ecc.json
@@ -79,6 +81,7 @@ test/**
 !test/fixtures/gcd/config/rcx_ecc.json
 !test/fixtures/gcd/config/route_ecc.json
 !test/fixtures/gcd/config/sta_ecc.json
+!test/fixtures/gcd/config/ics55_v2_implants.lef
 !test/fixtures/gcd/input/
 !test/fixtures/gcd/input/cts_in.def.gz
 !test/fixtures/gcd/input/cts_in.v.gz

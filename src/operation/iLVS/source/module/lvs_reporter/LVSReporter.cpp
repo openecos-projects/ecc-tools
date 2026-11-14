@@ -433,6 +433,8 @@ void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Vi
   *json_file << "{\n";
   *json_file << "  \"entity\": " << entity_json.dump(2) << ",\n";
   *json_file << "  \"connectivity\": " << connectivity_json.dump(2) << ",\n";
+  nlohmann::json non_routing_supply = physical_graph.get_non_routing_supply_pin_net_map();
+  *json_file << "  \"non_routing_supply_terminals\": " << non_routing_supply.dump(2) << ",\n";
   *json_file << "  \"violations\": [";
   for (int32_t violation_idx = 0; violation_idx < static_cast<int32_t>(violation_list.size()); violation_idx++) {
     const Violation& violation = *violation_list[violation_idx];

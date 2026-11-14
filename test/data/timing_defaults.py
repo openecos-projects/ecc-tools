@@ -6,6 +6,19 @@ import re
 from pathlib import Path
 
 
+def constant_terminals(manifest):
+    """Identify tied controls independently from the exported timing arrays."""
+    text = Path(manifest["inputs"]["def"]).read_text()
+    ties = set(re.findall(r"^\s*-\s+(\S+)\s+TIE(?:HI|LO)X\S+\s", text, re.MULTILINE))
+    nets = re.search(r"^\s*NETS\s+\d+\s*;(.*?)END NETS", text, re.MULTILINE | re.DOTALL)
+    terminals = set()
+    for net in nets.group(1).split(";"):
+        pins = re.findall(r"\(\s*(\S+)\s+(\S+)\s*\)", net)
+        if any(instance in ties for instance, _pin in pins):
+            terminals.update(f"{instance}:{pin}" for instance, pin in pins)
+    return terminals
+
+
 def assert_placement_timing_defaults(place_db, manifest):
     config = json.loads(Path(manifest["config"]["db_ecc"]).read_text())
     layer_name = config["LayerSettings"]["routing_layer_1st"]
@@ -38,6 +51,7 @@ def assert_placement_timing_defaults(place_db, manifest):
     clock = place_db.timing_clock_info[0]
     capture_deadline = float(clock[1]) - float(clock[4])
     setup_pins = {int(arc[1]) for arc in place_db.endpoints_constraint_arcs}
+    tied_pins = constant_terminals(manifest)
     assert setup_pins
     corrected = 0
     preserved = 0
@@ -50,7 +64,12 @@ def assert_placement_timing_defaults(place_db, manifest):
             float(place_db.backend_endpoint_rRAT[index]),
             float(place_db.backend_endpoint_fRAT[index]),
         )
-        if int(pin_id) in setup_pins:
+        if str(place_db.pin_names[int(pin_id)]) in tied_pins:
+            # v2 GCD includes clock-gate test enables tied off by TIELO cells.
+            # Constant controls have no data path to receive a setup correction.
+            assert seeds == checked
+            preserved += 1
+        elif int(pin_id) in setup_pins:
             assert all(
                 math.isclose(seed, capture_deadline, rel_tol=0, abs_tol=1e-3) for seed in seeds
             ), (str(place_db.pin_names[int(pin_id)]), seeds, capture_deadline)

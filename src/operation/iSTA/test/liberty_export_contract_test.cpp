@@ -111,6 +111,26 @@ void checkTransitionCapacitanceExport()
           "min pin capacitance was substituted with the max transition range");
 }
 
+void checkV2CellFamilies()
+{
+  LibertyLibrary library;
+  double leakage = 1.0;
+  for (const auto* name : {"BUFX0P5_9THVT", "BUFX0P5_9TSVT", "BUFX0P5_9TLVT", "BUFX24_9TLVT", "INVX1_9TSVT"}) {
+    auto& cell = library.get_cell_map()[name];
+    cell.set_cell_name(name);
+    cell.set_leakage_power(leakage++);
+  }
+  const auto cells = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF);
+  require(cells.size() == 5, "v2 cell export lost masters");
+  require(cells[0].main_id == cells[3].main_id && cells[3].main_id != cells[4].main_id,
+          "v2 buffers do not share one family or include an inverter");
+  require(cells[0].size_index == cells[2].size_index && cells[2].size_index < cells[3].size_index,
+          "v2 fractional and integer drive strengths were not grouped");
+  require(cells[0].vt_index < cells[1].vt_index && cells[1].vt_index < cells[2].vt_index
+              && cells[2].vt_index == cells[3].vt_index,
+          "v2 threshold-voltage coordinates were not grouped");
+}
+
 void checkEndpointIdentity()
 {
   for (bool reverse : {false, true}) {
@@ -192,5 +212,6 @@ int main()
   checkUnreadyExport();
   checkRectangularTableExport();
   checkTransitionCapacitanceExport();
+  checkV2CellFamilies();
   checkDiagnosticOrder();
 }

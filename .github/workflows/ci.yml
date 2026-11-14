@@ -82,10 +82,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git clone --depth 1 https://github.com/openecos-projects/icsprout55-pdk.git icsprout55-pdk
-          gh release download --repo openecos-projects/icsprout55-pdk \
+          git clone --no-checkout https://github.com/openecos-projects/icsprout55-pdk.git icsprout55-pdk
+          git -C icsprout55-pdk checkout --detach 25ed1437181f293b3792342a1fc0f3d2af0398cc
+          gh release download v2-2026.10.28 --repo openecos-projects/icsprout55-pdk \
             --pattern '*.tar.bz2' --dir icsprout55-pdk
           make -C icsprout55-pdk unzip
+          (cd icsprout55-pdk && sha256sum --check --quiet release-files.sha256)
 
       - name: Run Python API integration tests
         working-directory: test

@@ -553,6 +553,23 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, const int32_t
   } else if (is_ground_net) {
     def_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kGround;
   }
+  // Well/implant terminals have no metal connection to the routing graph.
+  // Keep their logical supply assignment, and report the missing extraction
+  // coverage separately. Empty, unknown, cut-only, and mixed metal pins still
+  // participate in PDN checks so malformed or disconnected power pins fail.
+  bool substrate_only = !pin->get_port_box_list().empty();
+  for (idb::IdbLayerShape* shape : pin->get_port_box_list()) {
+    auto* layer = shape == nullptr ? nullptr : shape->get_layer();
+    if (layer == nullptr || shape->get_rect_list().empty()
+        || (layer->get_type() != idb::IdbLayerType::kLayerMasterslice && layer->get_type() != idb::IdbLayerType::kLayerImplant)) {
+      substrate_only = false;
+      break;
+    }
+  }
+  if ((is_power_net || is_ground_net) && substrate_only) {
+    physical_graph.get_non_routing_supply_pin_net_map()[terminal_name] = net_name;
+    return;
+  }
   if (!pin->is_io_pin()) {
     if (is_power_net) {
       physical_graph.get_power_instance_pin_net_map()[terminal_name] = net_name;

@@ -110,9 +110,11 @@ struct FamilyClass
 
 FamilyClass classifyFamily(const LibertyCellData& cell)
 {
-  // Only classify the characterized ICS55 X<drive>H7<VT> masters. Other
-  // libraries remain singleton families until their naming contract is known.
-  static const std::regex master_name(R"(^(.+)X([0-9]+(?:P[0-9]+)?)(H7[HRL])$)");
+  // Classify both the legacy ICS55 X<drive>H7<VT> masters and the v2 9T
+  // X<drive>_<VT> masters. Other libraries remain singleton families until
+  // their naming contract is known.
+  static const std::regex master_name(
+      R"(^(.+)X([0-9]+(?:P[0-9]+)?)(_9T(?:HVT|LVT|SVT)|H7[HRL])$)");
   std::smatch match;
   if (cell.is_macro || !std::regex_match(cell.name, match, master_name)) {
     return {cell.name, cell.name, cell.name};
