@@ -80,10 +80,14 @@ jobs:
 
       - name: Setup PDK
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PDK_READ_TOKEN }}
         run: |
-          git clone --no-checkout https://github.com/openecos-projects/icsprout55-pdk.git icsprout55-pdk
-          git -C icsprout55-pdk checkout --detach 25ed1437181f293b3792342a1fc0f3d2af0398cc
+          git init icsprout55-pdk
+          git -C icsprout55-pdk remote add origin https://github.com/openecos-projects/icsprout55-pdk-v2.git
+          GIT_TERMINAL_PROMPT=0 git -C icsprout55-pdk \
+            -c credential.helper= -c 'credential.helper=!gh auth git-credential' \
+            fetch --depth 1 origin 7d83e6d8b0427ae1b5e76b43a112f26fbabe4a50
+          git -C icsprout55-pdk checkout --detach FETCH_HEAD
           gh release download v2-2026.10.28 --repo openecos-projects/icsprout55-pdk \
             --pattern '*.tar.bz2' --dir icsprout55-pdk
           make -C icsprout55-pdk unzip
