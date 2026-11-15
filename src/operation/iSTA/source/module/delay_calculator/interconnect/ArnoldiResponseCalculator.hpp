@@ -30,6 +30,7 @@ class ArnoldiResponseCalculator
     _driver_responses.clear();
     _responses.clear();
     _ceff_by_pin.clear();
+    _basis_rd_by_net.clear();
   }
   DriverResponse& response(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type, double input_slew);
   bool loadFailed(Arc& arc, AnalysisType analysis, TransType edge, double slew);
@@ -42,6 +43,7 @@ class ArnoldiResponseCalculator
 
  private:
   std::map<std::tuple<std::string, AnalysisType, TransType>, double> _ceff_by_pin;
+  std::map<std::string, double> _basis_rd_by_net;
   using TimingResultKey = std::tuple<std::string, std::uintptr_t, AnalysisType, TransType, double>;
   using DriverResultKey = std::tuple<std::string, AnalysisType, TransType, double>;
 

@@ -53,6 +53,45 @@ double LoadCalculator::pinLoad(std::string& output_pin, AnalysisType analysis_ty
 double LoadCalculator::netLoad(Net& net, const std::string& driver_pin, AnalysisType analysis_type, TransType output_trans_type)
 {
   Database& database = _database;
+  {
+    static const char* cl_env = std::getenv("ISTA_FORCE_CELL_LOAD");
+    static const std::unordered_map<std::string, double> cl_map = [] {
+      std::unordered_map<std::string, double> m;
+      if (cl_env == nullptr) return m;
+      FILE* f = std::fopen(cl_env, "r");
+      if (f == nullptr) return m;
+      char line[512];
+      while (std::fgets(line, sizeof(line), f) != nullptr) {
+        std::string text(line);
+        std::vector<std::string> part;
+        std::size_t start = 0;
+        while (true) {
+          std::size_t comma = text.find(',', start);
+          part.push_back(text.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+          if (comma == std::string::npos) break;
+          start = comma + 1;
+        }
+        if (part.size() < 4) continue;
+        m[part[0] + "," + part[1] + "," + part[2]] = std::atof(part[3].c_str());
+      }
+      std::fclose(f);
+      return m;
+    }();
+    if (!cl_map.empty()) {
+      const std::string key = driver_pin + "," + std::to_string(static_cast<int>(analysis_type)) + "," + std::to_string(static_cast<int>(output_trans_type));
+      const auto it = cl_map.find(key);
+      if (it != cl_map.end() && it->second > 0.) {
+        if (const char* fd = std::getenv("ISTA_DUMP_CELL_LOAD")) {
+          if (FILE* fp = std::fopen(fd, "a"); fp != nullptr) {
+            std::fprintf(fp, "CLO,%s,%s,%d,%d,%.15g\n", net.get_net_name().c_str(), driver_pin.c_str(),
+                         static_cast<int>(analysis_type), static_cast<int>(output_trans_type), it->second);
+            std::fclose(fp);
+          }
+        }
+        return it->second;
+      }
+    }
+  }
   auto& net_load_map = database.sdc().get_net_load_map();
   const auto load_constraint = net_load_map.find(net.get_net_name());
   if (load_constraint != net_load_map.end() && load_constraint->second.has(analysis_type, output_trans_type)) {

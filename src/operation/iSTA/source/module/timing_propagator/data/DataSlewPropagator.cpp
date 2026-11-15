@@ -76,6 +76,16 @@ void DataSlewPropagator::propagate()
 {
   auto measurement = _database.timingExecutionStats().measure(TimingPhase::kDataSlew);
   Database& database = _database;
+  static const int slew_rounds = [] {
+    const char* e = std::getenv("ISTA_SLEW_ROUNDS");
+    const int v = (e != nullptr) ? std::atoi(e) : 1;
+    return v > 0 ? v : 1;
+  }();
+  static const double slew_tol = [] {
+    const char* e = std::getenv("ISTA_SLEW_TOL");
+    return e != nullptr ? std::atof(e) : 0.0;
+  }();
+  for (int round = 0; round < slew_rounds; ++round) {
   for (int32_t vertex_idx : database.graph().vertexOrder()) {
     for (std::size_t arc_idx : database.graph().vertices()[vertex_idx].get_outgoing_arc_list()) {
       if (_path_query.isDisableArc(database.graph().arcs()[arc_idx])
@@ -84,6 +94,7 @@ void DataSlewPropagator::propagate()
       }
       propagateDataSlewDelayArc(arc_idx);
     }
+  }
   }
   // A constant-driven arc is disabled, so its sink vertex never receives an
   // indegree from it and the vertex order can place that sink before its own

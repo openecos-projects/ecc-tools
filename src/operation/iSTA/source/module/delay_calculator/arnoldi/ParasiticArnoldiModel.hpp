@@ -45,11 +45,8 @@ class ParasiticArnoldiModel
   // net slew degradation as a function of this quantity.
   const std::array<double, 2>& totalTimeConstants() const { return _total_time_constants; }
   void setTotalTimeConstants(std::array<double, 2> values) { _total_time_constants = values; }
-  // reference's single-pole regime for nets outside the reduced-fanout range:
-  // the net delay is exactly ln2 * TotalR * TotalC for every receiver. Measured
-  // by report_delay_calculation over 1,843 corners; see FINDINGS 589.
-  const int& ptLumpedMode() const { return _ref_lumped_mode; }
-  void setPtLumpedMode(int value) { _ref_lumped_mode = value; }
+  const int& lumpedMode() const { return _ref_lumped_mode; }
+  void setLumpedMode(int value) { _ref_lumped_mode = value; }
   void setSmallNetTimeConstants(std::array<double, 2> values, bool correct_source)
   {
     _small_net_time_constants = values;
@@ -73,6 +70,33 @@ class ParasiticArnoldiModel
   void setZeroCapacitanceTerms(std::vector<bool> terms) { _zero_capacitance_terms = std::move(terms); }
   const std::vector<std::vector<double>>& responseProjection() const { return _response_projection; }
   void setResponseProjection(std::vector<std::vector<double>> values) { _response_projection = std::move(values); }
+  struct TwoPoleModel
+  {
+    bool valid = false;
+    double a00 = 0.;               // V^T diag(c) V, (0,0)
+    double a01 = 0.;               // V^T diag(c) V, (0,1) = (1,0)
+    double a11 = 0.;               // V^T diag(c) V, (1,1)
+    double c11 = 0.;               // V^T L V, (1,1) only: L annihilates the uniform v0
+    double u0 = 0.;                // V[driver,0] = -1/sqrt(n)
+    double u1 = 0.;                // V[driver,1]
+    std::vector<double> term_v1;   // V[term,1] per terminal
+  };
+  const TwoPoleModel& twoPole() const { return _two_pole; }
+  void setTwoPole(TwoPoleModel value) { _two_pole = std::move(value); }
+  struct KrylovModel
+  {
+    bool valid = false;
+    int32_t order = 0;
+    std::vector<std::vector<double>> v;   // term_num x order, v[i][k] = component k of V at terminal i
+    std::vector<std::vector<double>> a;   // order x order, V^T diag(C_pF) V
+    std::vector<std::vector<double>> g;   // order x order, V^T G V
+    std::vector<double> b;                // order, V^T b
+    std::vector<double> driver_projection;  // order, u = V^T e0
+    double driver_conductance = 0.;         // gd the reduction above was assembled with
+    std::vector<bool> zero_capacitance_terms;
+  };
+  const KrylovModel& krylov() const { return _krylov; }
+  void setKrylov(KrylovModel value) { _krylov = std::move(value); }
   // setter
   void set_is_valid(const bool is_valid) { _is_valid = is_valid; }
   void set_order(const int32_t order) { _order = order; }
@@ -103,6 +127,8 @@ class ParasiticArnoldiModel
   std::vector<std::vector<double>> _projection_list;
   std::vector<bool> _zero_capacitance_terms;
   std::vector<std::vector<double>> _response_projection;
+  TwoPoleModel _two_pole;
+  KrylovModel _krylov;
 };
 
 class ParasiticArnoldiPoleResidue
