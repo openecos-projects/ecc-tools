@@ -185,24 +185,17 @@ std::optional<bool> ReportPathContext::getTieDriverValue(const std::string& name
     const auto instance = _database.network().instances().find(driver->second.get_instance_name());
     if (instance == _database.network().instances().end())
       continue;
-    if (isTieHighCell(instance->second))
-      return true;
-    if (isTieLowCell(instance->second))
-      return false;
+    const auto cell = _database.liberty().get_cell_map().find(instance->second.get_cell_name());
+    if (cell == _database.liberty().get_cell_map().end() || cell->second.get_is_sequential())
+      continue;
+    const auto port = cell->second.get_port_map().find(driver->second.get_pin_name());
+    if (port == cell->second.get_port_map().end() || !port->second.get_is_output())
+      continue;
+    const auto value = port->second.get_function_expression().evaluate_constant({});
+    if (value.has_value())
+      return value;
   }
   return std::nullopt;
-}
-
-bool ReportPathContext::isTieHighCell(const Instance& instance)
-{
-  const std::string& cell_name = instance.get_cell_name();
-  return cell_name.rfind("TIEHI", 0) == 0;
-}
-
-bool ReportPathContext::isTieLowCell(const Instance& instance)
-{
-  const std::string& cell_name = instance.get_cell_name();
-  return cell_name.rfind("TIELO", 0) == 0;
 }
 
 ReportEndpoint ReportPathContext::endPoint(TimingPath& path)

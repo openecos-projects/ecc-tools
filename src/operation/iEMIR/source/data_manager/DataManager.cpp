@@ -501,11 +501,12 @@ void DataManager::readEMLimitFile(const std::string& em_limit_file_path)
     }
     iss >> em_adjust;
     std::string normalized_name = normalizeRuleName(name);
-    if (normalized_name.rfind("M", 0) == 0 || normalized_name.rfind("MET", 0) == 0 || normalized_name == "TM" || normalized_name == "T4M2"
-        || normalized_name == "RDL") {
+    if (em_tech.get_metal_rule_map().contains(normalized_name)) {
       addMetalRule(em_tech, name, em_limit, em_adjust);
-    } else {
+    } else if (em_tech.get_via_rule_map().contains(normalized_name)) {
       addViaRule(em_tech, name, em_limit, 0.0);
+    } else {
+      EMIRLOG.error(Loc::current(), "EM limit refers to an undeclared technology object: ", name);
     }
   }
 }

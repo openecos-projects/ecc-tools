@@ -1,4 +1,5 @@
 #include "LibertyDataExporter.hpp"
+#include "CellCatalog.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -108,18 +109,24 @@ struct FamilyClass
   std::string vt;
 };
 
-FamilyClass classifyFamily(const LibertyCellData& cell)
+FamilyClass classifyFamily(const LibertyCellData& cell, const CellCatalog& catalog, const LibertyLibrary& library)
 {
-  // Classify both the legacy ICS55 X<drive>H7<VT> masters and the v2 9T
-  // X<drive>_<VT> masters. Other libraries remain singleton families until
-  // their naming contract is known.
-  static const std::regex master_name(
-      R"(^(.+)X([0-9]+(?:P[0-9]+)?)(_9T(?:HVT|LVT|SVT)|H7[HRL])$)");
-  std::smatch match;
-  if (cell.is_macro || !std::regex_match(cell.name, match, master_name)) {
+  const auto entry = catalog.find(cell.name);
+  const auto liberty = library.get_cell_map().find(cell.name);
+  // Sequential equivalence needs state/reset semantics beyond this interface.
+  // Preserve singleton families until that proof is provided by the backend.
+  if (cell.is_macro || cell.is_sequential || entry == catalog.end() || liberty == library.get_cell_map().end())
     return {cell.name, cell.name, cell.name};
+  std::string signature = entry->second.family;
+  for (const auto& [name, port] : liberty->second.get_port_map()) {
+    if (!port.get_is_output())
+      continue;
+    if (port.get_function_expression().get_is_empty())
+      return {cell.name, cell.name, cell.name};
+    signature += "|function:" + name;
+    for (const auto& term : port.get_function_expression().get_term_list())
+      signature += ":" + std::to_string(static_cast<int>(term.get_operation_type())) + ":" + term.get_port_name();
   }
-  std::string signature = match[1].str();
   signature += cell.is_sequential ? "|sequential" : "|combinational";
   for (const auto& port : cell.ports) {
     signature += "|" + port.name + ":" + std::to_string(port.is_input) + std::to_string(port.is_output) + std::to_string(port.is_clock);
@@ -128,7 +135,7 @@ FamilyClass classifyFamily(const LibertyCellData& cell)
     signature += "|" + arc.source_port + ":" + arc.sink_port + ":" + std::to_string(arc.sense) + ":" + std::to_string(arc.trigger) + ":"
                  + std::to_string(arc.check_type);
   }
-  return {signature, match[2].str(), match[3].str()};
+  return {signature, std::to_string(entry->second.drive_rank), entry->second.vt};
 }
 
 double leakageRank(const LibertyCellData& cell)
@@ -163,15 +170,15 @@ bool isBuffer(LibertyCell& cell)
          && function.evaluate_constant({{input->get_port_name(), true}}) == std::optional<bool>(true);
 }
 
-std::map<std::string, int32_t> rankAxis(const std::vector<LibertyCellData>& cells, bool drive)
+std::map<std::string, int32_t> rankAxis(const std::vector<LibertyCellData>& cells, bool drive, const CellCatalog& catalog, const LibertyLibrary& library)
 {
   std::map<std::string, double> rank_by_name;
   for (const auto& cell : cells) {
-    const auto classification = classifyFamily(cell);
+    const auto classification = classifyFamily(cell, catalog, library);
     const std::string& key = drive ? classification.drive : classification.vt;
-    auto [it, inserted] = rank_by_name.emplace(key, leakageRank(cell));
+    auto [it, inserted] = rank_by_name.emplace(key, drive && catalog.contains(cell.name) ? catalog.at(cell.name).drive_rank : leakageRank(cell));
     if (!inserted)
-      it->second = std::min(it->second, leakageRank(cell));
+      it->second = std::min(it->second, drive && catalog.contains(cell.name) ? catalog.at(cell.name).drive_rank : leakageRank(cell));
   }
   std::vector<std::pair<std::string, double>> ranked(rank_by_name.begin(), rank_by_name.end());
   std::sort(ranked.begin(), ranked.end(), [](const auto& lhs, const auto& rhs) { return std::tie(lhs.second, lhs.first) < std::tie(rhs.second, rhs.first); });
@@ -184,8 +191,9 @@ std::map<std::string, int32_t> rankAxis(const std::vector<LibertyCellData>& cell
 
 }  // namespace
 
-std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& library, TimingTimeUnit, TimingCapacitiveUnit)
+std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& library, TimingTimeUnit, TimingCapacitiveUnit, const std::string& cell_catalog_path)
 {
+  const auto catalog = readCellCatalog(cell_catalog_path);
   std::vector<LibertyCellData> cells;
   cells.reserve(library.get_cell_map().size());
   for (auto& [cell_name, cell] : library.get_cell_map()) {
@@ -253,19 +261,19 @@ std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& li
   }
   std::map<std::string, std::vector<LibertyCellData>> families;
   for (auto& cell : cells)
-    families[classifyFamily(cell).key].push_back(std::move(cell));
+    families[classifyFamily(cell, catalog, library).key].push_back(std::move(cell));
 
   std::vector<LibertyCellData> ordered;
   ordered.reserve(cells.size());
   for (auto& entry : families) {
     auto& family = entry.second;
-    const auto drives = rankAxis(family, true);
-    const auto vts = rankAxis(family, false);
+    const auto drives = rankAxis(family, true, catalog, library);
+    const auto vts = rankAxis(family, false, catalog, library);
     std::sort(family.begin(), family.end(),
               [](const auto& lhs, const auto& rhs) { return std::make_tuple(leakageRank(lhs), lhs.name) < std::make_tuple(leakageRank(rhs), rhs.name); });
     const auto main_id = static_cast<int32_t>(ordered.empty() ? 0 : ordered.back().main_id + 1);
     for (auto& cell : family) {
-      const auto classification = classifyFamily(cell);
+      const auto classification = classifyFamily(cell, catalog, library);
       cell.main_id = main_id;
       cell.size_index = drives.at(classification.drive) + 1;
       cell.vt_index = vts.at(classification.vt);
