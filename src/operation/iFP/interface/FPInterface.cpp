@@ -23,6 +23,7 @@
 #include <sstream>
 
 #include "DataManager.hpp"
+#include "ReplayCapture.hpp"
 #include "DieBuilder.hpp"
 #include "IOPlacer.hpp"
 #include "IdbHalo.h"
@@ -146,6 +147,7 @@ void FPInterface::destroyInst()
 
 void FPInterface::initFP(std::map<std::string, std::any> config_map)
 {
+  beginReplayCapture();
   _run_failed = false;
   _pg_via_min_size_cache.clear();
   _pg_via_stack_cache.clear();
@@ -170,6 +172,7 @@ void FPInterface::initFP(std::map<std::string, std::any> config_map)
 
   DataManager::initInst();
   FPDM.input(config_map);
+  captureReplay("initialized", "init floorplan");
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
@@ -182,6 +185,7 @@ void FPInterface::runFP()
 
   DieBuilder::initInst();
   FPDB.build();
+  captureReplay("floorplan_tracks", "create tracks");
   DieBuilder::destroyInst();
 
   IOPlacer::initInst();
@@ -192,18 +196,22 @@ void FPInterface::runFP()
     return;
   }
   FPIP.place();
+  captureReplay("io_placement", "place io pins");
   IOPlacer::destroyInst();
 
   MacroPlacer::initInst();
   FPMP.place();
+  captureReplay("macro_halo_row_cut", "place io pins");
   MacroPlacer::destroyInst();
 
   PhyPlacer::initInst();
   FPPP.place();
+  captureReplay("physical_cells", "tap cell");
   PhyPlacer::destroyInst();
 
   PDNGenerator::initInst();
   FPPG.generate();
+  captureReplay("pdn_complete", "PDN");
   PDNGenerator::destroyInst();
 
   _run_failed = false;
@@ -227,6 +235,7 @@ void FPInterface::runSimpleFP()
     return;
   }
   FPIP.placeAuto();
+  captureReplay("io_auto", "init floorplan");
   IOPlacer::destroyInst();
 
   outputFloorplan();
@@ -249,8 +258,11 @@ void FPInterface::destroyFP()
     PDNGenerator::destroyInst();
   } else {
     FPDM.output();
+    // The ECC runner captures the committed IDB after export. FPDM has already
+    // transferred IO ports at this point and is no longer a complete scene.
   }
   DataManager::destroyInst();
+  endReplayCapture();
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
   FPLOG.printLogFilePath();

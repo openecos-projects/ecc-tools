@@ -14,6 +14,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PDNGenerator.hpp"
+#include "ReplayCapture.hpp"
 #include <array>
 #include <cmath>
 #include <fnmatch.h>
@@ -427,15 +428,18 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
 {
   buildPGNet(pg_model);
   buildRail(pg_model);
+  captureReplay("rails", "PDN");
   buildStripe(pg_model);
   addUncoveredEdgeStripes(pg_model);
   alignStripeSegmentList();
+  captureReplay("stripes", "PDN");
   initPowerLayerPair(pg_model);
   pruneDeadEndStripes();
   buildLayerConnect(pg_model);
   buildMacroConnect(pg_model);
   // Repair needs the full mesh span; IO routing needs the trimmed endpoints.
   repairPGConnectivity(pg_model);
+  captureReplay("layer_macro_connect", "PDN");
   trimStripeEnds();
   buildIOCoreConnect(pg_model);
   mergeIoWireSegmentList();
@@ -443,6 +447,7 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   // Now that the IO wires exist, trim every unused stripe tail in one final
   // pass; real contacts (including IO wires and vias) are preserved.
   trimStripeEnds(false, "stripe_trim_after_io.rpt");
+  captureReplay("io_core_connect", "PDN");
   mergeOverlappingViaStacks();
   trimDanglingFollowPins();
   pruneUnneededMacroGapStripes(pg_model);

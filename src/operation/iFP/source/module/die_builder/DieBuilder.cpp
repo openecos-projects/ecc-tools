@@ -15,6 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "DieBuilder.hpp"
+#include "ReplayCapture.hpp"
 
 #include "DataManager.hpp"
 #include "Logger.hpp"
@@ -67,7 +68,9 @@ void DieBuilder::build()
   FPLOG.info(Loc::current(), "Starting...");
 
   buildFloorplan();
+  captureReplay("die_core_rows", "init floorplan");
   buildTrackList();
+  captureReplay("tracks", "init floorplan");
 
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
