@@ -14,6 +14,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PhyPlacer.hpp"
+#include "ReplayCapture.hpp"
 
 #include "DataManager.hpp"
 #include "Logger.hpp"
@@ -126,9 +127,12 @@ void PhyPlacer::placePhyCell(PPModel& pp_model)
   int32_t boundary_tap_idx = 1;
   insertCornerEndcap(pp_model, endcap_idx);
   insertSideEndcap(pp_model, endcap_idx);
+  captureReplay("corner_side_endcaps", "tap cell");
   insertBoundaryTap(pp_model, boundary_tap_rule, boundary_tap_idx);
   insertEdgeEndcap(pp_model, endcap_idx);
+  captureReplay("boundary_taps_endcaps", "tap cell");
   insertWellTap(pp_model, tap_distance, tapcell_idx);
+  captureReplay("well_taps", "tap cell");
   for (auto& boundary : pp_model.get_boundary_region_list()) {
     if (!getEmptyPPRegionList(pp_model, boundary).empty()) {
       FPLOG.error(Loc::current(), "Uncovered physical boundary at y=", boundary.get_y_coord(), ".");

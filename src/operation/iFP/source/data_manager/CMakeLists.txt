@@ -8,6 +8,7 @@ endif()
 
 add_library(ifp_data_manager
     ${IFP_DATA_MANAGER}/DataManager.cpp
+    ${IFP_DATA_MANAGER}/ReplayCapture.cpp
 )
 
 target_link_libraries(ifp_data_manager

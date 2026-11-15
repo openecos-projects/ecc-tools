@@ -26,6 +26,7 @@
 
 #include "py_db.h"
 #include "py_db_op.h"
+#include "py_replay.h"
 namespace python_interface {
 namespace py = pybind11;
 
@@ -49,6 +50,7 @@ void register_idb(py::module& m)
         py::arg("is_add_space_for_escape_name") = false);
   m.def("gds_save", saveGDSII, py::arg("gds_name"), py::arg("layer_map_path"));
   m.def("json_save", saveJson, py::arg("path"));
+  m.def("replay_geometry", replayGeometry);
   m.def("geometry_snapshot_save", saveGeometrySnapshot, py::arg("output_dir"), py::arg("include_drc") = false,
         py::arg("thumbnail_path") = py::none(), py::arg("clock_tree_stage") = py::none(), py::arg("clock_tree_graph") = py::none());
   m.def("place_instance", placeInstance, py::arg("inst_name"), py::arg("llx"), py::arg("lly"), py::arg("orient"), py::arg("cellmaster"),
