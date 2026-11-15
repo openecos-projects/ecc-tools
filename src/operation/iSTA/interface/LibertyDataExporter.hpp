@@ -2,6 +2,7 @@
 #pragma once
 
 #include <vector>
+#include <string>
 
 #include "TimingData.hpp"
 
@@ -14,7 +15,7 @@ enum class TimingCapacitiveUnit;
 class LibertyDataExporter
 {
  public:
-  static std::vector<LibertyCellData> exportCells(LibertyLibrary& library, TimingTimeUnit time_unit, TimingCapacitiveUnit cap_unit);
+  static std::vector<LibertyCellData> exportCells(LibertyLibrary& library, TimingTimeUnit time_unit, TimingCapacitiveUnit cap_unit, const std::string& cell_catalog_path = "");
 };
 
 }  // namespace ista
