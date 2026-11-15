@@ -39,7 +39,9 @@ std::string replayGeometry()
     if (owner.type == OwnerType::kInstanceBBox) { key = "inst:" + name; kind = macros[name] ? "macro" : "instance"; }
     if (owner.type == OwnerType::kInstanceHalo) { key = "halo:" + name; kind = "halo"; }
     if (owner.type == OwnerType::kIoPinPortShape || owner.type == OwnerType::kPinPortShape) kind = "pin";
-    if (owner.type == OwnerType::kSpecialWireSegment || owner.type == OwnerType::kVia) kind = "pdn";
+    if (owner.type == OwnerType::kNetWireSegment) kind = "wire";
+    if (owner.type == OwnerType::kSpecialWireSegment) kind = "pdn";
+    if (owner.type == OwnerType::kVia) kind = "via";
     const auto& b = shape.bbox;
     objects[key] = {{"kind", kind}, {"name", name}, {"bbox", {b.lx, b.ly, b.hx, b.hy}},
                     {"layer", std::to_string(shape.layer_id)}};
