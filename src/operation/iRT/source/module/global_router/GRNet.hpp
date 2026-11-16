@@ -78,6 +78,7 @@ class GRNet
 
   void commitUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const;
   void ripupUsage(GRGridGraph& grid, const GRParams& params, const GRTree& tree) const;
+  void refreshExemptEdgeSet(const GRGridGraph& grid);
   bool hasOverflow(const GRGridGraph& grid) const;
   double getOverflow(const GRGridGraph& grid, const GRTree& tree) const;
 

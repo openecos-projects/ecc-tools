@@ -29,14 +29,20 @@ class Macro
   // getter
   std::string& get_inst_name() { return _inst_name; }
   PlanarRect& get_body_rect() { return _body_rect; }
+  bool get_is_placed() const { return _is_placed; }
+  const PlanarRect& get_placement_body_rect() const { return _placement_body_rect; }
   // setter
   void set_inst_name(const std::string& inst_name) { _inst_name = inst_name; }
   void set_body_rect(const PlanarRect& body_rect) { _body_rect = body_rect; }
+  void set_is_placed(bool is_placed) { _is_placed = is_placed; }
+  void set_placement_body_rect(const PlanarRect& body_rect) { _placement_body_rect = body_rect; }
   // function
 
  private:
   std::string _inst_name;
   PlanarRect _body_rect;
+  bool _is_placed = false;
+  PlanarRect _placement_body_rect;
 };
 
 }  // namespace irt
