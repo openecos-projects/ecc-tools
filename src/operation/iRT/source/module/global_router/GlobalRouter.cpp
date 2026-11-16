@@ -125,16 +125,22 @@ bool GlobalRouter::route()
 
   patternRoute("");
   reportDetourStat("GR pattern");
+  captureReplay("patternRoute");
   detourRoute();
   reportDetourStat("GR detour");
+  captureReplay("detourRoute");
   mazeRouteFailedNets();
   reportDetourStat("GR maze failed");
+  captureReplay("mazeRouteFailedNets");
   mazeRerouteOverflowNets();
   reportDetourStat("GR maze overflow");
+  captureReplay("mazeRerouteOverflowNets");
   fallbackRoute();
   reportDetourStat("GR fallback");
+  captureReplay("fallbackRoute");
   cleanupDetourNets();
   reportDetourStat("GR cleanup");
+  captureReplay("cleanupDetourNets");
   // debugPlot("after_route");
   // debugExport("after_route");
 

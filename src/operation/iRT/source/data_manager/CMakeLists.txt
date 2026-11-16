@@ -7,12 +7,14 @@ else()
 endif()
 
 add_library(irt_data_manager
+    ${IRT_DATA_MANAGER}/ReplayRouting.cpp
     ${IRT_DATA_MANAGER}/DataManager.cpp
 )
 
 target_link_libraries(irt_data_manager
     PUBLIC
     irt_toolkit
+    geometry_builder
 )
 
 target_include_directories(irt_data_manager

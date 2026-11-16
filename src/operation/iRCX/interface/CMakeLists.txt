@@ -16,6 +16,7 @@ target_link_libraries(ircx_interface
     PRIVATE
     ircx_aux
     ircx_source
+    geometry_builder
     idm
 )
 

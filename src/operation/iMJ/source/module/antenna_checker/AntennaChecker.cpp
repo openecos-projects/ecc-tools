@@ -36,6 +36,7 @@
 #include "IdbTerm.h"
 #include "IdbUnits.h"
 #include "IdbVias.h"
+#include "ReplayCapture.h"
 #include "Utility.hpp"
 #include "idm.h"
 
@@ -76,9 +77,12 @@ void AntennaChecker::check(std::map<std::string, std::any> config_map)
 
   MJLOG.info(Loc::current(), "Starting...");
 
+  ecc::replay::analysisPhase("antenna_check_started", "check antenna");
   ACModel ac_model = initACModel(config_map);
   runACModel(ac_model);
+  ecc::replay::analysisPhase("antenna_check_completed", "check antenna");
   reportACModel(ac_model);
+  ecc::replay::analysisPhase("antenna_report_completed", "check antenna");
 
   MJLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

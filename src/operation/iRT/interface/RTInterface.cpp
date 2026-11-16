@@ -1,3 +1,4 @@
+#include "ReplayCapture.h"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
 // Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -105,6 +106,8 @@ void RTInterface::runERT(std::map<std::string, std::any> config_map)
 
 bool RTInterface::runRT()
 {
+  if (ecc::replay::enabled())
+    ecc::replay::sample("routing_start", "run routing", nlohmann::json::object(), "patch", "analysis_state");
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 

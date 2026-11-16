@@ -22,6 +22,7 @@
 #include "IdbBlockages.h"
 #include "IdbViaMaster.h"
 #include "Monitor.hpp"
+#include "ReplayCapture.h"
 #include "RuleValidator.hpp"
 #include "Utility.hpp"
 #include "feature_manager.h"
@@ -85,11 +86,14 @@ void DRCInterface::runDRC()
   bool origin_quiet = DRCLOG.isQuiet();
   DRCLOG.disableQuiet();
 
+  ecc::replay::analysisPhase("drc_shapes_started", "run DRC");
   std::vector<DRCShape> env_shape_list = buildEnvShapeList();
   std::vector<DRCShape> result_shape_list = buildResultShapeList();
+  ecc::replay::analysisPhase("drc_shapes_completed", "run DRC");
   std::vector<ids::Violation> violation_list = getViolationList(std::move(env_shape_list), std::move(result_shape_list), {}, {});
 
   std::map<std::string, std::vector<ids::Violation>> type_violation_map;
+  ecc::replay::analysisPhase("drc_checks_completed", "run DRC");
   for (ids::Violation& violation : violation_list) {
     type_violation_map[violation.violation_type].push_back(std::move(violation));
   }
@@ -97,6 +101,7 @@ void DRCInterface::runDRC()
   outputViolationJson(type_violation_map);
   outputViolationFile(type_violation_map);
   outputTofeature(type_violation_map);
+  ecc::replay::analysisPhase("drc_report_completed", "run DRC");
 
   DRCLOG.setQuiet(origin_quiet);
 }
@@ -811,6 +816,9 @@ void DRCInterface::outputViolationJson(std::map<std::string, std::vector<ids::Vi
     for (ids::Violation& violation : violation_list) {
       nlohmann::json violation_json;
       violation_json["type"] = violation.violation_type;
+      violation_json["is_routing"] = violation.is_routing;
+      violation_json["original_layer"] = violation.is_routing ? routing_layer_list.at(violation.layer_idx).get_layer_name()
+                                                              : DRCDM.getDatabase().get_cut_layer_list().at(violation.layer_idx).get_layer_name();
 
       int32_t layer_idx = violation.layer_idx;
       if (!violation.is_routing) {

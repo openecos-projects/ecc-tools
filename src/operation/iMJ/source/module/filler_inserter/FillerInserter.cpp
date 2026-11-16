@@ -1,3 +1,4 @@
+#include "ReplayCapture.h"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
 // Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -57,6 +58,7 @@ void FillerInserter::insert(std::map<std::string, std::any> config_map)
 
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(0), "MJ insertFiller");
 
+  ecc::replay::guarded([&] { ecc::replay::sample("filler_start", "run filler", nlohmann::json::object(), "patch", "analysis_state"); });
   FIModel fi_model = initFIModel(config_map);
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
 
@@ -324,9 +326,18 @@ void FillerInserter::buildAvailableSegmentList(FIModel& fi_model)
 void FillerInserter::addFillerCell(FIModel& fi_model, idb::IdbDesign* idb_design)
 {
   for (FIRow& fi_row : fi_model.get_row_list()) {
+    const auto first = ecc::replay::enabled() ? idb_design->get_instance_list()->get_instance_list().size() : 0;
     for (FISegment& fi_segment : fi_row.get_available_segment_list()) {
       addFillerToSegment(fi_model, fi_row, fi_segment, idb_design);
     }
+    ecc::replay::guarded([&] {
+      auto objects = nlohmann::json::object();
+      const auto& instances = idb_design->get_instance_list()->get_instance_list();
+      for (size_t i = first; i < instances.size(); ++i)
+        objects["inst:" + instances[i]->get_name()] = ecc::replay::instance(*instances[i]);
+      if (!objects.empty())
+        ecc::replay::sample("filler_row", "run filler", std::move(objects), "patch", "native_committed");
+    });
   }
 }
 

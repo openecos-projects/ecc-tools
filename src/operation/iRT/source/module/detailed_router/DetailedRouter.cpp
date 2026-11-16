@@ -1,3 +1,4 @@
+#include "ReplayRouting.hpp"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
 // Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -169,6 +170,8 @@ bool DetailedRouter::routeDRModel(DRModel& dr_model)
     if (!step.is_repair) {
       ++normal_iter;
       runNormalIteration(dr_model, step.iter_param, normal_iter, normal_iter_num, step_iter);
+      captureReplayRouting("detailed_route_iteration", dr_model.get_curr_result().get_net_detailed_result_map(),
+                           dr_model.get_curr_result().get_net_detailed_patch_map(), step_iter, getRouteViolationNum(dr_model));
 
       int32_t curr_violation_num = getRouteViolationNum(dr_model);
       if (9 <= normal_iter && prev_violation_num + 1000 < curr_violation_num) {
@@ -205,6 +208,8 @@ bool DetailedRouter::routeDRModel(DRModel& dr_model)
   }
 
   selectBestResult(dr_model);
+  captureReplayRouting("best_route_restored", dr_model.get_curr_result().get_net_detailed_result_map(), dr_model.get_curr_result().get_net_detailed_patch_map(),
+                       0, getRouteViolationNum(dr_model));
   if (!abort_routing) {
     for (DRIterParam& repair_param : final_repair_param_list) {
       if (stopIteration(dr_model)) {
@@ -221,6 +226,8 @@ bool DetailedRouter::routeDRModel(DRModel& dr_model)
     }
   }
   reportDetourStat(dr_model, "DR final");
+  captureReplayRouting("detailed_route_final", dr_model.get_curr_result().get_net_detailed_result_map(),
+                       dr_model.get_curr_result().get_net_detailed_patch_map(), 0, getRouteViolationNum(dr_model));
   uploadDRModel(dr_model);
   return !abort_routing;
 }

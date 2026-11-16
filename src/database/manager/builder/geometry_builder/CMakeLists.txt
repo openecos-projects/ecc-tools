@@ -1,4 +1,5 @@
 add_library(geometry_builder
+    ReplayCapture.cpp
     BlockageEditAdapter.cpp
     ClockTreeCollector.cpp
     GeometryBuilder.cpp
