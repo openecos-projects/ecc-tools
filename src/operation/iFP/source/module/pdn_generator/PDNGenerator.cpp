@@ -269,6 +269,11 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   // pass may move stripe endpoints to preserve macro and PG contacts.
   buildIOCoreConnect(pg_model);
   mergeIoWireSegmentList();
+  // The first pass keeps core-boundary ends for possible IO connections.
+  // Now that the IO wires exist, trim every unused stripe tail in one final
+  // pass; real contacts (including IO wires and vias) are preserved.  Repair
+  // may add new geometry below, so run this before it.
+  trimStripeEnds(false, "stripe_trim_after_io.rpt");
   repairPGConnectivity(pg_model);
   mergeOverlappingViaStacks();
   trimDanglingFollowPins();
@@ -420,7 +425,7 @@ void PDNGenerator::pruneDeadEndStripes()
   FPLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void PDNGenerator::trimStripeEnds()
+void PDNGenerator::trimStripeEnds(bool preserve_io_core_ends, const std::string& report_name)
 {
   auto& database = FPDM.getDatabase();
   auto& segments = database.get_pg_segment_list();
@@ -439,7 +444,7 @@ void PDNGenerator::trimStripeEnds()
   // trimStripeEnds can move the end to a macro pin via, and the IO-core
   // connector is then forced to land on the macro edge.
   const Config& config = FPDM.getConfig();
-  const bool keep_io_core_ends = config.pg_io_core_connect.enabled;
+  const bool keep_io_core_ends = preserve_io_core_ends && config.pg_io_core_connect.enabled;
   struct IoExtent {
     int32_t low;
     int32_t high;
@@ -484,24 +489,32 @@ void PDNGenerator::trimStripeEnds()
     const bool horizontal = stripe.is_horizontal();
     const int32_t half = stripe.get_width() / 2;
     Candidate candidate{i};
-    const auto& core = database.get_core();
-    // Ring-connected stripes extend outside the core and are not selected here.
-    bool core_start = horizontal ? stripe.get_start_x() == core.get_ll_x() : stripe.get_start_y() == core.get_ll_y();
-    bool core_end = horizontal ? stripe.get_end_x() == core.get_ur_x() : stripe.get_end_y() == core.get_ur_y();
-    if (keep_io_core_ends
-        && std::find(config.pg_io_core_connect.pin_layers.begin(), config.pg_io_core_connect.pin_layers.end(), stripe.get_layer_name())
-               != config.pg_io_core_connect.pin_layers.end()) {
-      const int32_t tangent = horizontal ? stripe.get_start_y() : stripe.get_start_x();
-      if (horizontal) {
-        core_start = core_start && !has_io_overlap(left_io_extents, tangent, half);
-        core_end = core_end && !has_io_overlap(right_io_extents, tangent, half);
-      } else {
-        core_start = core_start && !has_io_overlap(bottom_io_extents, tangent, half);
-        core_end = core_end && !has_io_overlap(top_io_extents, tangent, half);
+    if (!preserve_io_core_ends) {
+      // Final cleanup pass: every generated stripe end is a candidate.  All
+      // real contacts, including IO wires and vias, are frozen below, so this
+      // only removes tails that no connection uses.
+      candidate.start = true;
+      candidate.end = true;
+    } else {
+      const auto& core = database.get_core();
+      // Ring-connected stripes extend outside the core and are not selected here.
+      bool core_start = horizontal ? stripe.get_start_x() == core.get_ll_x() : stripe.get_start_y() == core.get_ll_y();
+      bool core_end = horizontal ? stripe.get_end_x() == core.get_ur_x() : stripe.get_end_y() == core.get_ur_y();
+      if (keep_io_core_ends
+          && std::find(config.pg_io_core_connect.pin_layers.begin(), config.pg_io_core_connect.pin_layers.end(), stripe.get_layer_name())
+                 != config.pg_io_core_connect.pin_layers.end()) {
+        const int32_t tangent = horizontal ? stripe.get_start_y() : stripe.get_start_x();
+        if (horizontal) {
+          core_start = core_start && !has_io_overlap(left_io_extents, tangent, half);
+          core_end = core_end && !has_io_overlap(right_io_extents, tangent, half);
+        } else {
+          core_start = core_start && !has_io_overlap(bottom_io_extents, tangent, half);
+          core_end = core_end && !has_io_overlap(top_io_extents, tangent, half);
+        }
       }
+      candidate.start = core_start;
+      candidate.end = core_end;
     }
-    candidate.start = core_start;
-    candidate.end = core_end;
     for (auto* instance : _placed_macro_list) {
       if (findRoutingLayer(stripe.get_layer_name())->get_order() > getMacroTopLayerOrder(*instance)) {
         continue;
@@ -558,6 +571,31 @@ void PDNGenerator::trimStripeEnds()
           const int32_t dx = std::min(stripe.get_ur_x(), rect.get_ur_x()) - std::max(stripe.get_ll_x(), rect.get_ll_x());
           const int32_t dy = std::min(stripe.get_ur_y(), rect.get_ur_y()) - std::max(stripe.get_ll_y(), rect.get_ll_y());
           if (candidate.index == source || dx < 0 || dy < 0 || (dx == 0 && dy == 0)) {
+            continue;
+          }
+          const int32_t tangential = horizontal ? dx : dy;
+          const int32_t cross = horizontal ? dy : dx;
+          if (cross <= 0) {
+            continue;
+          }
+          if (tangential == 0) {
+            // End-to-end touch is a real connection but has no overlap
+            // interval.  Retain one half stripe width so trimming keeps the
+            // endpoint attached (common for stripe -> IOWIRE extensions).
+            const int32_t half_width = stripe.get_width() / 2;
+            if (horizontal) {
+              if (rect.get_ur_x() <= stripe.get_ll_x()) {
+                candidate.first_contact = std::min(candidate.first_contact, stripe.get_ll_x() - half_width);
+              } else {
+                candidate.last_contact = std::max(candidate.last_contact, stripe.get_ur_x() + half_width);
+              }
+            } else {
+              if (rect.get_ur_y() <= stripe.get_ll_y()) {
+                candidate.first_contact = std::min(candidate.first_contact, stripe.get_ll_y() - half_width);
+              } else {
+                candidate.last_contact = std::max(candidate.last_contact, stripe.get_ur_y() + half_width);
+              }
+            }
             continue;
           }
           int32_t first = horizontal ? std::max(stripe.get_ll_x(), rect.get_ll_x()) : std::max(stripe.get_ll_y(), rect.get_ll_y());
@@ -646,7 +684,7 @@ void PDNGenerator::trimStripeEnds()
   int32_t trimmed = 0;
   std::ofstream report;
   if (!FPDM.getConfig().pg_temp_directory_path.empty()) {
-    report.open(FPDM.getConfig().pg_temp_directory_path + "/stripe_trim.rpt");
+    report.open(FPDM.getConfig().pg_temp_directory_path + "/" + report_name);
     report << "net layer direction fixed_coord old_begin old_end new_begin new_end (DBU)\n";
   }
   const int32_t grid = std::max(1, database.get_manufacture_grid());
@@ -2144,9 +2182,17 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
   std::map<std::pair<std::string, std::string>, std::vector<size_t>> by_net_layer;
   for (size_t index = 0; index < pg_segments.size(); ++index) {
     const PGSegment& segment = pg_segments[index];
-    if (segment.is_line()) {
-      by_net_layer[{segment.get_net_name(), segment.get_layer_name()}].push_back(index);
+    if (!segment.is_line()) {
+      continue;
     }
+    // IO-core connections are closed on their own pin layer.  Inserting a via
+    // at every IOWIRE crossing with another PG layer would create redundant,
+    // tightly packed via arrays along the core boundary.  Layer-change IO
+    // connections are handled explicitly in buildIOCoreConnect().
+    if (segment.get_type() == PGSegmentType::kIoWire) {
+      continue;
+    }
+    by_net_layer[{segment.get_net_name(), segment.get_layer_name()}].push_back(index);
   }
 
   std::set<std::pair<std::string, std::string>> seen_pairs;
