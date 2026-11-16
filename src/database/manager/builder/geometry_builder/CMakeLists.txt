@@ -44,3 +44,10 @@ target_link_libraries(geometry_builder_tests
 )
 
 add_test(NAME geometry_builder_tests COMMAND geometry_builder_tests)
+
+if(UNIX)
+    add_executable(replay_capture_gate_test test/ReplayCaptureGateTest.cpp)
+    target_link_libraries(replay_capture_gate_test PRIVATE geometry_builder)
+    target_compile_options(replay_capture_gate_test PRIVATE -UNDEBUG)
+    add_test(NAME replay_capture_gate_test COMMAND replay_capture_gate_test)
+endif()

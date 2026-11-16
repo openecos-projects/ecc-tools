@@ -15,10 +15,10 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
-
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -30,6 +30,7 @@
 #include "GRParams.hpp"
 #include "GRTreeBuilder.hpp"
 #include "LayerRect.hpp"
+#include "json.hpp"
 
 namespace irt {
 
@@ -77,7 +78,7 @@ class GlobalRouter
   void cleanupDetourNets();
 
   // output
-  void captureReplay(const std::string& phase) const;
+  void captureReplay(std::string_view phase, nlohmann::json metrics = nullptr) const;
   void uploadGRResult();
   void reportDetourStat(const std::string& stage);
   void reportSupplyReserve(const std::string& stage) const;

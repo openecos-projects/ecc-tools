@@ -74,6 +74,7 @@ void TARouter::route()
     assignTracks(ta_net);
   }
 
+  captureReplay("track_assignment_initial", 0, std::nullopt);
   rerouteOverflowNets();
 
   for (TANet& ta_net : ta_net_list_) {
@@ -724,6 +725,7 @@ void TARouter::rerouteOverflowNets()
       track_table_.ripupNet(ta_net.net_idx);
       assignTracks(ta_net);
     }
+    captureReplay("track_assignment_iteration", iteration + 1, overflow_net_set.size());
   }
 }
 

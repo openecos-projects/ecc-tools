@@ -19,6 +19,8 @@
 #include "DRCEngine.hpp"
 #include "GDSPlotter.hpp"
 #include "RTInterface.hpp"
+#include "ReplayCapture.h"
+#include "ReplayRouting.hpp"
 #include "Utility.hpp"
 
 namespace irt {
@@ -56,6 +58,12 @@ void ViolationReporter::report()
   RTLOG.info(Loc::current(), "Starting...");
   VRModel vr_model = initVRModel();
   uploadViolation(vr_model);
+  ecc::replay::guarded([&] {
+    auto& database = RTDM.getDatabase();
+    const auto violations = RTDM.getViolationList(database.get_die());
+    captureReplayRouting("routing_check_complete", database.get_net_detailed_result_map(), database.get_net_detailed_patch_map(), 0,
+                         static_cast<int>(violations.size()), &violations, {{"check_scope", "router_drc"}});
+  });
   // debugPlotVRModel(vr_model, "best");
   updateSummary(vr_model);
   printSummary(vr_model);

@@ -16,6 +16,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "DetailedRouter.hpp"
+#include "ReplayCapture.h"
 
 #include "DRBox.hpp"
 #include "DRBoxId.hpp"
@@ -170,8 +171,6 @@ bool DetailedRouter::routeDRModel(DRModel& dr_model)
     if (!step.is_repair) {
       ++normal_iter;
       runNormalIteration(dr_model, step.iter_param, normal_iter, normal_iter_num, step_iter);
-      captureReplayRouting("detailed_route_iteration", dr_model.get_curr_result().get_net_detailed_result_map(),
-                           dr_model.get_curr_result().get_net_detailed_patch_map(), step_iter, getRouteViolationNum(dr_model));
 
       int32_t curr_violation_num = getRouteViolationNum(dr_model);
       if (9 <= normal_iter && prev_violation_num + 1000 < curr_violation_num) {
@@ -208,8 +207,7 @@ bool DetailedRouter::routeDRModel(DRModel& dr_model)
   }
 
   selectBestResult(dr_model);
-  captureReplayRouting("best_route_restored", dr_model.get_curr_result().get_net_detailed_result_map(), dr_model.get_curr_result().get_net_detailed_patch_map(),
-                       0, getRouteViolationNum(dr_model));
+  captureReplay(dr_model, "best_route_restored");
   if (!abort_routing) {
     for (DRIterParam& repair_param : final_repair_param_list) {
       if (stopIteration(dr_model)) {
@@ -226,8 +224,7 @@ bool DetailedRouter::routeDRModel(DRModel& dr_model)
     }
   }
   reportDetourStat(dr_model, "DR final");
-  captureReplayRouting("detailed_route_final", dr_model.get_curr_result().get_net_detailed_result_map(),
-                       dr_model.get_curr_result().get_net_detailed_patch_map(), 0, getRouteViolationNum(dr_model));
+  captureReplay(dr_model, "detailed_route_final");
   uploadDRModel(dr_model);
   return !abort_routing;
 }
@@ -251,6 +248,7 @@ void DetailedRouter::runNormalIteration(DRModel& dr_model, DRIterParam& iter_par
   updateNetPatch(dr_model);
   updateViolation(dr_model);
   freeDRBoxMap(dr_model);
+  captureReplay(dr_model, "detailed_route_normalized");
   patchFinalMinArea(dr_model);
   updateBestResult(dr_model);
   // debugPlotDRModel(dr_model, "after");
@@ -259,6 +257,7 @@ void DetailedRouter::runNormalIteration(DRModel& dr_model, DRIterParam& iter_par
   outputNetCSV(dr_model);
   outputViolationCSV(dr_model);
 
+  captureReplay(dr_model, "detailed_route_iteration");
   RTLOG.info(Loc::current(), "***** End normal iteration ", normal_iter, "/", normal_iter_num, "(", RTUTIL.getPercentage(normal_iter, normal_iter_num), ")",
              monitor.getStatsInfo(), " *****");
 }
@@ -663,6 +662,7 @@ void DetailedRouter::routeDRBoxMap(DRModel& dr_model)
   for (std::vector<DRBoxId>& dr_box_id_list : dr_model.get_dr_box_id_list_list()) {
     Monitor stage_monitor;
     routeDRBoxList(dr_model, dr_box_id_list);
+    captureReplay(dr_model, "detailed_route_wave", ReplayState::kDistributed, &dr_box_id_list);
     routed_box_num += dr_box_id_list.size();
     RTLOG.info(Loc::current(), "Routed ", routed_box_num, "/", total_box_num, "(", RTUTIL.getPercentage(routed_box_num, total_box_num), ") boxes with ",
                getRouteViolationNum(dr_model), " violations", stage_monitor.getStatsInfo());
@@ -3383,6 +3383,9 @@ bool DetailedRouter::runRepairIteration(DRModel& dr_model, DRIterParam& repair_i
     updateBestResult(dr_box);
     routeDRBox(dr_model, dr_box);
     updateRepairDRModel(dr_model, dr_box.get_curr_result());
+    ecc::replay::guarded([&] {
+      captureReplayRegions(dr_model, "violation_repair_box", {dr_box.get_box_rect().get_real_rect()});
+    });
     repaired_box_num++;
     RTLOG.info(Loc::current(), "Repaired ", repaired_box_num, "/", repair_box_rect_list.size(), "(",
                RTUTIL.getPercentage(repaired_box_num, repair_box_rect_list.size()), ") boxes", box_monitor.getStatsInfo());
@@ -3405,6 +3408,7 @@ bool DetailedRouter::runRepairIteration(DRModel& dr_model, DRIterParam& repair_i
   printSummary(dr_model);
   outputNetCSV(dr_model);
   outputViolationCSV(dr_model);
+  captureReplay(dr_model, accepted ? "violation_repair_accepted" : "violation_repair_restored");
   RTLOG.info(Loc::current(), "***** End repair step ", step_iter, " *****", monitor.getStatsInfo());
   return accepted;
 }
@@ -3620,10 +3624,12 @@ void DetailedRouter::patchFinalMinArea(DRModel& dr_model)
       }
       updateRepairDRModel(dr_model, box_result);
     }
+    captureReplayRegions(dr_model, "minimum_area_patch_wave", patch_box_rect_list, &patch_box_idx_list);
   }
 
   if (new_patch_num > 0) {
     updateViolation(dr_model);
+    captureReplay(dr_model, "minimum_area_patch_checked");
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
