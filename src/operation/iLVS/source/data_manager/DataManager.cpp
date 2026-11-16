@@ -249,6 +249,19 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
       = physical_graph_build_data.get_net_terminal_build_data_map();
 
   DisjointSet graph(static_cast<int32_t>(graph_node_list.size()));
+  std::vector<uint8_t> keep_net_shape_list(physical_graph.get_net_routing_graph_list().size(), 0);
+  for (const std::string& net_name : physical_graph.get_power_net_name_set()) {
+    int32_t net_id = physical_graph.getNetId(net_name);
+    if (net_id >= 0) {
+      keep_net_shape_list[net_id] = 1;
+    }
+  }
+  for (const std::string& net_name : physical_graph.get_ground_net_name_set()) {
+    int32_t net_id = physical_graph.getNetId(net_name);
+    if (net_id >= 0) {
+      keep_net_shape_list[net_id] = 1;
+    }
+  }
   std::map<int32_t, std::vector<int32_t>> layer_node_idx_map;
   for (int32_t node_idx = 0; node_idx < static_cast<int32_t>(graph_node_list.size()); node_idx++) {
     layer_node_idx_map[graph_node_list[node_idx].get_shape().get_layer_idx()].push_back(node_idx);
@@ -264,6 +277,7 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
   constexpr int32_t kMaxLayerThreadNum = 3;
   int32_t layer_thread_num = std::max<int32_t>(
       1, std::min<int32_t>({kMaxLayerThreadNum, std::max(_config.thread_number, 1), static_cast<int32_t>(layer_work_list.size())}));
+  std::vector<std::vector<std::pair<int32_t, int32_t>>> layer_terminal_abutment_list(layer_work_list.size());
 
   // Same-layer sets are disjoint until via connectivity is added, so their DSU writes do not overlap.
 #pragma omp parallel for schedule(dynamic) num_threads(layer_thread_num)
@@ -273,13 +287,18 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
     std::vector<std::pair<BGRectInt, int32_t>> bg_rect_node_pair_list;
     bg_rect_node_pair_list.reserve(node_idx_list.size());
     for (int32_t node_idx : node_idx_list) {
-      if (graph_node_list[node_idx].get_is_terminal()) {
+      const PhysicalGraphBuildNode& graph_node = graph_node_list[node_idx];
+      // Signal terminals stay out of the index. A PG terminal joins it so an IO-ring
+      // pin can abut the next cell's pin without a DEF routing segment between them.
+      if (graph_node.get_is_terminal() && !keep_net_shape_list[graph_node.get_net_id()]) {
         continue;
       }
-      const Shape& node_shape = graph_node_list[node_idx].get_shape();
-      bg_rect_node_pair_list.emplace_back(convertToBGRectInt(node_shape), node_idx);
+      bg_rect_node_pair_list.emplace_back(convertToBGRectInt(graph_node.get_shape()), node_idx);
     }
     bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>> bg_rtree(bg_rect_node_pair_list);
+    // The disjoint set is shared by every layer thread, so PG-pin abutment is recorded
+    // here and applied after the parallel loop.
+    std::vector<std::pair<int32_t, int32_t>>& terminal_abutment_list = layer_terminal_abutment_list[layer_work_idx];
 
 #pragma omp critical(ilvs_physical_graph_log)
     LVSLOG.info(Loc::current(), "Querying layer ", layer_idx, " routing connectivity.");
@@ -293,15 +312,32 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
         if (!graph_node_list[node_idx].get_is_terminal() && active_node_idx >= node_idx) {
           continue;
         }
+        // Two terminals connect only when they belong to the same PG net. Different nets
+        // that touch stay disconnected here and are still reported as a short.
+        bool terminal_abutment = graph_node_list[node_idx].get_is_terminal() && graph_node_list[active_node_idx].get_is_terminal();
+        if (terminal_abutment && graph_node_list[node_idx].get_net_id() != graph_node_list[active_node_idx].get_net_id()) {
+          continue;
+        }
         const Shape& active_shape = graph_node_list[active_node_idx].get_shape();
         if (active_shape.get_ll_x() <= node_shape.get_ur_x() && node_shape.get_ll_x() <= active_shape.get_ur_x()
             && active_shape.get_ll_y() <= node_shape.get_ur_y() && node_shape.get_ll_y() <= active_shape.get_ur_y()) {
-          graph.unite(active_node_idx, node_idx);
+          if (terminal_abutment) {
+            terminal_abutment_list.emplace_back(active_node_idx, node_idx);
+          } else {
+            graph.unite(active_node_idx, node_idx);
+          }
         }
       }
     }
 #pragma omp critical(ilvs_physical_graph_log)
     LVSLOG.info(Loc::current(), "Completed layer ", layer_idx, " routing connectivity.");
+  }
+
+  LVSLOG.info(Loc::current(), "Building PG terminal abutment...");
+  for (std::vector<std::pair<int32_t, int32_t>>& terminal_abutment_list : layer_terminal_abutment_list) {
+    for (auto& [first_node_idx, second_node_idx] : terminal_abutment_list) {
+      graph.unite(first_node_idx, second_node_idx);
+    }
   }
 
   LVSLOG.info(Loc::current(), "Building via connectivity...");
@@ -333,19 +369,6 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
   std::vector<int32_t>& short_component_id_list = physical_graph.get_short_component_id_list();
   std::vector<int32_t> component_first_net_id_list(component_id, -1);
   std::vector<uint8_t> component_keep_shape_list(component_id, 0);
-  std::vector<uint8_t> keep_net_shape_list(physical_graph.get_net_routing_graph_list().size(), 0);
-  for (const std::string& net_name : physical_graph.get_power_net_name_set()) {
-    int32_t net_id = physical_graph.getNetId(net_name);
-    if (net_id >= 0) {
-      keep_net_shape_list[net_id] = 1;
-    }
-  }
-  for (const std::string& net_name : physical_graph.get_ground_net_name_set()) {
-    int32_t net_id = physical_graph.getNetId(net_name);
-    if (net_id >= 0) {
-      keep_net_shape_list[net_id] = 1;
-    }
-  }
 
   LVSLOG.info(Loc::current(), "Uploading physical graph components...");
   int32_t current_net_id = -1;

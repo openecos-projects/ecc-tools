@@ -709,11 +709,13 @@ void LVSInterface::wrapSpecialNetWireData(idb::IdbDesign* design, DefData& def_d
             if (segment == nullptr) {
               continue;
             }
-            if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_line()) {
+            const bool is_routing_layer = segment->get_layer() != nullptr && segment->get_layer()->is_routing();
+            if (is_routing_layer && !segment->is_via() && !segment->is_rect() && segment->get_point_start() != nullptr
+                && segment->get_point_second() != nullptr) {
               appendRoutingShape(*routing_graph, wrapRoutingDataShape(
                                                      segment->get_layer(), idb::IdbRect(segment->get_point_start(), segment->get_point_second(),
                                                                                       segment->get_route_width())));
-            } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_rect() && segment->get_delta_rect() != nullptr) {
+            } else if (is_routing_layer && segment->is_rect() && segment->get_delta_rect() != nullptr) {
               appendRoutingShape(*routing_graph, wrapRoutingDataShape(segment->get_layer(), *segment->get_delta_rect()));
             }
           }
