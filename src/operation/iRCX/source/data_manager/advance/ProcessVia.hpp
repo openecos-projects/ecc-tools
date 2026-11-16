@@ -15,6 +15,9 @@
 // ***************************************************************************************
 #pragma once
 
+#include <cmath>
+#include <stdexcept>
+
 #include "ProcessEffectType.hpp"
 #include "ProcessTable1D.hpp"
 #include "ProcessViaEtchTable.hpp"
@@ -61,8 +64,20 @@ class ProcessVia
   // function
   std::optional<double> query_resistance(double area) const
   {
+    if (!std::isfinite(area) || area <= 0.0) {
+      throw std::invalid_argument("invalid resistance cut area for via " + _layer_name);
+    }
     if (_resistance > 0.0) {
-      return _resistance;
+      if (!std::isfinite(_area) || _area <= 0.0) {
+        throw std::invalid_argument("RPV requires a positive finite AREA for via " + _layer_name);
+      }
+      // RPV describes a cut of the ITF reference AREA, not every drawn cut.
+      // The caller supplies the physical area after scaling and resistance etch.
+      const double resistance = _resistance * (_area / area);
+      if (!std::isfinite(resistance) || resistance <= 0.0) {
+        throw std::invalid_argument("invalid area-scaled resistance for via " + _layer_name);
+      }
+      return resistance;
     }
     return _resistance_by_area_table.query(area);
   }

@@ -51,7 +51,10 @@ int main()
   const auto layers = pattern::crossLayers({near, far}, 0, 100);
   assert(layers.first == 2 && layers.second == 6);
   assert(pattern::crossLayers({near}, 0, 101).second == -1);
-  setenv("IRCX_MULTI_MODE", "collect", 1);
+  std::ofstream("pattern_fixture.captab") << "IRCX_CAP_TABLE_V1\n8 1\nM1 .1 .1 .1 0 .1 0\n1\nM1 SUBSTRATE - 1000 100 0 0\t.2\nEND\n";
+  setenv("IRCX_MULTI_MODE", "prebuilt", 1);
+  setenv("IRCX_PATTERN_TABLE", "pattern_fixture.captab", 1);
+  setenv("IRCX_PATTERN_GRID", "unused_in_geometry_test", 1);
   setenv("IRCX_MULTI_RANK", "3", 1);
   TopoPool pool;
   pool.add_net({}, {edge(0, 0, 0, 1000, 101)});
@@ -137,25 +140,12 @@ int main()
   zero.add(true, 0, 10, 20);
   zero.add(false, 0, 10, 0);
   assert(zero.value() == 10);
-  setenv("IRCX_MULTI_MODE", "apply", 1);
-  std::ofstream("pattern_test.tsv") << p[1].key << "\t1 2 3 4\n";
-  setenv("IRCX_MULTI_TABLE", "pattern_test.tsv", 1);
-  pattern::MultiNeighborCache apply(pool);
-  assert(apply.caps(p[1].key)[3] == 4);
-  bool missing = false;
-  try {
-    apply.caps("missing");
-  } catch (const std::runtime_error&) {
-    missing = true;
+  // Removed experimental modes must fail explicitly.
+  for (const char* mode : {"apply", "collect"}) {
+    setenv("IRCX_MULTI_MODE", mode, 1);
+    bool rejected=false;
+    try {pattern::MultiNeighborCache bad(pool);} catch (const std::runtime_error&) {rejected=true;}
+    assert(rejected);
   }
-  assert(missing);
-  std::ofstream("pattern_test.tsv") << "bad\tnan\n";
-  bool invalid = false;
-  try {
-    pattern::MultiNeighborCache bad(pool);
-  } catch (const std::runtime_error&) {
-    invalid = true;
-  }
-  assert(invalid);
-  std::remove("pattern_test.tsv");
+  std::remove("pattern_fixture.captab");
 }
