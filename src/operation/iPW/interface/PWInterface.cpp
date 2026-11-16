@@ -260,6 +260,8 @@ void PWInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   PWDM.getConfig().temp_directory_path
       = PWUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./pw_temp_directory");
   PWDM.getConfig().thread_number = PWUTIL.getConfigValue<int32_t>(config_map, "-thread_number", 128);
+  PWDM.getConfig().replay_geometry_directory
+      = PWUTIL.getConfigValue<std::string>(config_map, "-replay_geometry_directory", "");
   PWDM.getConfig().min_slew_degradation = 1;
   PWDM.getConfig().sdc_file_path = dmInst->get_config().get_sdc_path();
   omp_set_num_threads(std::max(PWDM.getConfig().thread_number, 1));
@@ -340,6 +342,13 @@ void PWInterface::wrapInstance(idb::IdbInstance* idb_instance)
   instance.set_instance_name(idb_instance->get_name());
   instance.set_cell_name(idb_instance->get_cell_master()->get_name());
   instance.set_is_io_cell(idb_instance->get_cell_master()->is_io_cell());
+  if (!PWDM.getConfig().replay_geometry_directory.empty()
+      && (idb_instance->is_placed() || idb_instance->is_fixed() || idb_instance->is_cover())) {
+    if (auto* bbox = idb_instance->get_bounding_box(); bbox != nullptr && bbox->get_width() > 0 && bbox->get_height() > 0) {
+      PWDM.getConfig().replay_instance_bounds[instance.get_instance_name()]
+          = {bbox->get_low_x(), bbox->get_low_y(), bbox->get_high_x(), bbox->get_high_y()};
+    }
+  }
   PWDM.getDatabase().get_instance_map()[instance.get_instance_name()] = instance;
 }
 

@@ -58,6 +58,13 @@ void PowerReporter::report()
 
   outputPowerReport();
   outputInstancePower();
+  if (!PWDM.getConfig().replay_geometry_directory.empty()) {
+    try {
+      outputInstancePowerGeometry();
+    } catch (const std::exception& error) {
+      PWLOG.warn(Loc::current(), "Replay power geometry unavailable: ", error.what());
+    }
+  }
 
   PWLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

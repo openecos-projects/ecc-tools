@@ -53,6 +53,7 @@ class PowerReporter
   void outputPowerGroup(std::ofstream* power_report_file, PowerGroupType power_group_type);
   void outputPowerAttribute(std::ofstream* power_report_file);
   void outputInstancePower();
+  void outputInstancePowerGeometry();
   void outputPeakInstancePower(std::ofstream* instance_power_file);
   void outputInstancePowerRow(
       std::ofstream* instance_power_file,

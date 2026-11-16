@@ -1,5 +1,6 @@
 add_library(ipw_power_reporter
     ${IPW_MODULE}/power_reporter/PowerReporter.cpp
+    ${IPW_MODULE}/power_reporter/PowerGeometry.cpp
 )
 
 target_link_libraries(ipw_power_reporter
