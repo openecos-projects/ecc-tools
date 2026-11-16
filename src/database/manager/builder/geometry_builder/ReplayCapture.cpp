@@ -1,4 +1,5 @@
 #include "ReplayCapture.h"
+#include "ReplayRoutingDelta.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -120,6 +121,7 @@ void sample(const std::string& phase, const std::string& subflow, Json objects, 
     return;
   static std::mutex mutex;
   static std::string previous;
+  static RoutingDelta routing_delta;
   static uint64_t sequence = 0;
   static std::chrono::steady_clock::time_point started;
   static int64_t offset = 0;
@@ -129,6 +131,7 @@ void sample(const std::string& phase, const std::string& subflow, Json objects, 
   try {
     if (directory != previous) {
       previous = directory;
+      routing_delta.reset();
       sequence = 0;
       started = std::chrono::steady_clock::now();
       const char* anchor = std::getenv("ECC_REPLAY_OFFSET_NS");
@@ -139,6 +142,7 @@ void sample(const std::string& phase, const std::string& subflow, Json objects, 
     Json frame = {{"sequence", sequence},         {"producer", producer},   {"elapsed_ns", elapsed}, {"phase", phase},
                   {"subflow", subflow},           {"state_domain", domain}, {"scope", scope},        {"objects", std::move(objects)},
                   {"metrics", std::move(metrics)}};
+    routing_delta.compact(frame);
     auto path = std::filesystem::path(directory) / (producer + "-" + std::to_string(sequence++) + ".json");
     auto temp = path;
     temp += ".tmp";

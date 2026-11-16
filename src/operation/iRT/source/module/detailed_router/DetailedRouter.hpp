@@ -15,8 +15,8 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
-
 #include <optional>
+#include <string_view>
 
 #include "ChangeType.hpp"
 #include "Config.hpp"
@@ -77,6 +77,15 @@ class DetailedRouter
   void splitNetResult(DRModel& dr_model);
   std::set<DRBoxId, CmpDRBoxId> getDRBoxIdSet(DRModel& dr_model, PlanarRect real_rect);
   void routeDRBoxMap(DRModel& dr_model);
+  enum class ReplayState
+  {
+    kModel,
+    kDistributed,
+    kUnevaluated
+  };
+  void captureReplay(DRModel& model, std::string_view phase, ReplayState state = ReplayState::kModel, const std::vector<DRBoxId>* active_boxes = nullptr);
+  void captureReplayRegions(DRModel& model, std::string_view phase, const std::vector<PlanarRect>& boxes,
+                            const std::vector<size_t>* active = nullptr);
   void routeDRBoxList(DRModel& dr_model, const std::vector<DRBoxId>& dr_box_id_list);
   void routeDRBox(DRModel& dr_model, DRBox& dr_box);
   void rerouteCleanDRBox(DRModel& dr_model, DRBox& dr_box);

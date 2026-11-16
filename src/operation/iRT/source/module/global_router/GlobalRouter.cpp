@@ -33,6 +33,7 @@
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Net.hpp"
+#include "ReplayCapture.h"
 #include "RoutingLayer.hpp"
 #include "Segment.hpp"
 #include "Utility.hpp"
@@ -123,6 +124,7 @@ void GlobalRouter::route()
   analyzeSupply();
   initNetList();
   trialRouteReserveSupply();
+  captureReplay("global_supply_ready");
 
   patternRoute("");
   reportDetourStat("GR pattern");
@@ -147,6 +149,7 @@ void GlobalRouter::route()
 
   uploadGRResult();
   RTDM.rebuildGlobalResultRTree();
+  captureReplay("global_route_complete");
   printSummary();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -550,8 +553,26 @@ void GlobalRouter::mazeRerouteOverflowNets()
         net.commitUsage(grid_graph_, params_, old_tree);
         net.set_tree(std::move(old_tree));
       }
+      ecc::replay::guarded([&] {
+        captureReplay("global_reroute_restored", {{"iteration", iteration + 1},
+                                                  {"affected_nets", net_idx_list.size()},
+                                                  {"before_overflow", before_overflow},
+                                                  {"candidate_overflow", after_overflow},
+                                                  {"before_cost", before_cost},
+                                                  {"candidate_cost", after_cost},
+                                                  {"accepted", is_accepted}});
+      });
       break;
     }
+    ecc::replay::guarded([&] {
+      captureReplay("global_reroute_accepted", {{"iteration", iteration + 1},
+                                                {"affected_nets", net_idx_list.size()},
+                                                {"before_overflow", before_overflow},
+                                                {"candidate_overflow", after_overflow},
+                                                {"before_cost", before_cost},
+                                                {"candidate_cost", after_cost},
+                                                {"accepted", is_accepted}});
+    });
     if (params_.cost_weight < params_.max_cost_weight) {
       params_.cost_weight = std::min(params_.cost_weight * 2.0, params_.max_cost_weight);
     }

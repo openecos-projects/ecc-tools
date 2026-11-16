@@ -4,7 +4,7 @@
 #include "Utility.hpp"
 
 namespace irt {
-void GlobalRouter::captureReplay(const std::string& phase) const
+void GlobalRouter::captureReplay(std::string_view phase, nlohmann::json metrics) const
 {
   ecc::replay::guarded([&] {
     auto objects = nlohmann::json::object();
@@ -35,14 +35,31 @@ void GlobalRouter::captureReplay(const std::string& phase) const
       const auto& edges = grid_graph_.getEdgeMap(layer);
       for (int x = 0; x < edges.get_x_size(); ++x)
         for (int y = 0; y < edges.get_y_size(); ++y) {
+          if (!grid_graph_.hasWireEdge({x, y, layer}))
+            continue;
           const auto& edge = edges[x][y];
           demand += edge.getDemand();
           supply += edge.getUsableSupply();
           overflow += edge.getOverflow();
+          const auto rect = RTUTIL.getRealRectByGCell(PlanarCoord(x, y), axis);
+          objects["congestion:" + std::to_string(layer) + ":" + std::to_string(x) + ":" + std::to_string(y)]
+              = {{"kind", "route_congestion"},
+                 {"layer", database.get_routing_layer_list().at(layer).get_layer_name()},
+                 {"bbox", {rect.get_ll_x(), rect.get_ll_y(), rect.get_ur_x(), rect.get_ur_y()}},
+                 {"demand", edge.getDemand()},
+                 {"capacity", edge.getUsableSupply()},
+                 {"overflow", edge.getOverflow()},
+                 {"direction", grid_graph_.isHorizontalLayer(layer) ? "horizontal" : "vertical"},
+                 {"blocked", edge.getUsableSupply() <= 0},
+                 {"units", "tracks"}};
         }
     }
-    ecc::replay::sample(phase, "run routing", std::move(objects), "routing", "algorithm_state",
-                        {{"demand", demand}, {"capacity", supply}, {"overflow", overflow}});
+    if (metrics.is_null())
+      metrics = nlohmann::json::object();
+    metrics["demand"] = demand;
+    metrics["capacity"] = supply;
+    metrics["overflow"] = overflow;
+    ecc::replay::sample(std::string(phase), "run routing", std::move(objects), "routing", "algorithm_state", std::move(metrics));
   });
 }
 }  // namespace irt

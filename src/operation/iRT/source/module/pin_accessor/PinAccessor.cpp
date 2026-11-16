@@ -68,6 +68,7 @@ void PinAccessor::access()
   setPAComParam(pa_model);
   initAccessPointList(pa_model, false);
   buildAccessPointRTree(pa_model);
+  captureReplay(pa_model, "pin_access_candidates");
   // debugPlotPAModel(pa_model, "init");
   routePAModel(pa_model);
   uploadAccessPoint(pa_model);
@@ -114,6 +115,7 @@ void PinAccessor::routePAModel(PAModel& pa_model)
     setPAIterParam(pa_model, iter, pa_iter_param_list[i]);
     initPABoxMap(pa_model);
     buildPinOwner(pa_model);
+    captureReplay(pa_model, "pin_access_partition");
     // Boxes capture the initial-routing flag before subsequent iterations clear it.
     pa_model.set_initial_routing(false);
     buildBoxSchedule(pa_model);
@@ -142,6 +144,7 @@ void PinAccessor::routePAModel(PAModel& pa_model)
     }
   }
   selectBestResult(pa_model);
+  captureReplay(pa_model, "pin_access_best_restored");
 }
 
 void PinAccessor::routePABoxMap(PAModel& pa_model)

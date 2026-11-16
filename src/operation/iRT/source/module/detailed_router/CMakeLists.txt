@@ -9,6 +9,7 @@ endif()
 add_library(irt_detailed_router
     ## module detailed_router
     ${IRT_MODULE}/detailed_router/DetailedRouter.cpp
+    ${IRT_MODULE}/detailed_router/DRReplay.cpp
 )
 
 target_link_libraries(irt_detailed_router

@@ -15,9 +15,10 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
-
 #include <cstdint>
 #include <map>
+#include <string_view>
+#include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -103,6 +104,7 @@ class TARouter
   std::pair<int32_t, int32_t> getEdgeScaleRange(const TANet& ta_net, const TAEdge& edge, bool is_horizontal, bool use_pin_terminal) const;
   // output
   void outputNet(TANet& ta_net);
+  void captureReplay(std::string_view phase, int iteration, std::optional<size_t> conflicts_before);
   void updateSummary();
   void printSummary();
   void addWireSegment(std::vector<Segment<LayerCoord>>& segment_list, const LayerCoord& first_coord, const LayerCoord& second_coord);
