@@ -7,6 +7,8 @@ target_link_libraries(
   icts_source_module_instantiation
   PUBLIC
   icts_source_data_manager
+  geometry_builder
+  idm
   PRIVATE
   icts_source_toolkit_logger
   icts_source_toolkit_monitor

@@ -18,8 +18,9 @@
 
 #include "RCXBackendType.hpp"
 #include "RCXInterface.hpp"
-#include "ircx_ics55.h"
+#include "RCXReplay.hpp"
 #include "idm.h"
+#include "ircx_ics55.h"
 
 namespace python_interface {
 
@@ -80,7 +81,9 @@ bool init_rcx(const std::filesystem::path& config, const std::optional<std::stri
 bool run_rcx()
 {
   if (active_backend == RCXBackendType::kIcs55) {
+    ircx::replay::phase("ics55_extraction_started");
     ircx_ics55_run();
+    ircx::replay::phase("ics55_extraction_completed");
     return true;
   }
 

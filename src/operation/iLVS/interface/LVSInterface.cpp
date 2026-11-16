@@ -32,6 +32,7 @@
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "PDNChecker.hpp"
+#include "ReplayCapture.h"
 #include "RoutingChecker.hpp"
 #include "RoutingShape.hpp"
 #include "Utility.hpp"
@@ -91,21 +92,28 @@ void LVSInterface::runLVS()
   Monitor monitor;
   LVSLOG.info(Loc::current(), "Starting...");
 
+  ecc::replay::analysisPhase("entity_check_started", "run LVS");
   EntityChecker::initInst();
   LVSEC.check();
   EntityChecker::destroyInst();
+  ecc::replay::analysisPhase("entity_check_completed", "run LVS");
 
+  ecc::replay::analysisPhase("routing_check_started", "run LVS");
   RoutingChecker::initInst();
   LVSRC.check();
   RoutingChecker::destroyInst();
+  ecc::replay::analysisPhase("routing_check_completed", "run LVS");
 
+  ecc::replay::analysisPhase("pdn_check_started", "run LVS");
   PDNChecker::initInst();
   LVSPC.check();
   PDNChecker::destroyInst();
+  ecc::replay::analysisPhase("pdn_check_completed", "run LVS");
 
   LVSReporter::initInst();
   LVSLR.report();
   LVSReporter::destroyInst();
+  ecc::replay::analysisPhase("lvs_report_completed", "run LVS");
 
   LVSLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

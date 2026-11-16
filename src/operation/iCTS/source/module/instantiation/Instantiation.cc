@@ -29,8 +29,10 @@
 #include "LogTable.hh"
 #include "Logger.hh"
 #include "Monitor.hh"
+#include "ReplayCapture.h"
 #include "data_manager/DataManager.hh"
 #include "design/Design.hh"
+#include "idm.h"
 #include "io/Wrapper.hh"
 
 namespace icts {
@@ -71,6 +73,9 @@ auto Instantiation::run() -> InstantiationSummary
       summary.success = false;
       summary.failure_reason = commit_status.message;
     }
+  }
+  if (summary.success && ecc::replay::enabled()) {
+    ecc::replay::database(*dmInst->get_idb_design(), *dmInst->get_idb_layout(), "clock_instantiation_committed", "run CTS");
   }
   EmitLogTable(Loc::current(), "CTS Instantiation Overview", {"Property", "Value"},
                {{"Design Ready", ToLogTableCell(summary.design_ready)},

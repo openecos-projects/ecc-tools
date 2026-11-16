@@ -28,6 +28,7 @@
 #include "Monitor.hpp"
 #include "PlotSpefTool.hh"
 #include "RCXHeader.hpp"
+#include "RCXReplay.hpp"
 #include "ResExtractor.hpp"
 #include "RunRCXFromTopologyTool.hh"
 #include "SPEFWriter.hpp"
@@ -138,31 +139,38 @@ void RCXInterface::initRCX(std::map<std::string, std::any> config_map)
 
 void RCXInterface::runRCX()
 {
+  replay::phase("rc_extraction_started");
   Monitor monitor;
   RCXLOG.info(Loc::current(), "Starting...");
 
   TopoBuilder::initInst();
   RCXTB.build();
+  replay::phase("rc_topology_complete");
   TopoBuilder::destroyInst();
 
   EnvBuilder::initInst();
   RCXEB.build();
+  replay::phase("rc_environment_complete");
   EnvBuilder::destroyInst();
 
   VarProcessor::initInst();
   RCXVP.process();
+  replay::phase("rc_variation_complete");
   VarProcessor::destroyInst();
 
   ResExtractor::initInst();
   RCXRE.extract();
+  replay::phase("resistance_extraction_complete");
   ResExtractor::destroyInst();
 
   CapExtractor::initInst();
   RCXCE.extract();
+  replay::phase("capacitance_extraction_complete");
   CapExtractor::destroyInst();
 
   SPEFWriter::initInst();
   RCXSW.write();
+  replay::phase("spef_export_complete");
   SPEFWriter::destroyInst();
 
   RCXLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
@@ -250,24 +258,30 @@ void RCXInterface::runRCXFromTopo(std::map<std::string, std::any> config_map)
     return;
   }
 
+  replay::phase("rc_topology_loaded");
   EnvBuilder::initInst();
   RCXEB.build();
+  replay::phase("rc_environment_complete");
   EnvBuilder::destroyInst();
 
   VarProcessor::initInst();
   RCXVP.process();
+  replay::phase("rc_variation_complete");
   VarProcessor::destroyInst();
 
   ResExtractor::initInst();
   RCXRE.extract();
+  replay::phase("resistance_extraction_complete");
   ResExtractor::destroyInst();
 
   CapExtractor::initInst();
   RCXCE.extract();
+  replay::phase("capacitance_extraction_complete");
   CapExtractor::destroyInst();
 
   SPEFWriter::initInst();
   RCXSW.write();
+  replay::phase("spef_export_complete");
   SPEFWriter::destroyInst();
 
   RCXLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());

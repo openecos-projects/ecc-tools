@@ -77,6 +77,7 @@ class GlobalRouter
   void cleanupDetourNets();
 
   // output
+  void captureReplay(const std::string& phase) const;
   void uploadGRResult();
   void reportDetourStat(const std::string& stage);
   void reportSupplyReserve(const std::string& stage) const;

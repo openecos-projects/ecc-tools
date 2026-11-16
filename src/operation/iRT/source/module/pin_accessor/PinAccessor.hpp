@@ -88,6 +88,7 @@ class PinAccessor
   PinAccessor& operator=(const PinAccessor& other) = delete;
   PinAccessor& operator=(PinAccessor&& other) = delete;
   // Model, stage, box and task flow.
+  void captureReplay(PAModel& model, const std::string& phase);
   void routePAModel(PAModel& pa_model);
   void routePABoxMap(PAModel& pa_model);
   void routePABoxList(PAModel& pa_model, const std::vector<PABoxId>& pa_box_id_list);

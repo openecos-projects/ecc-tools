@@ -128,6 +128,7 @@ void EMIRReporter::report()
   outputIRReport(er_model);
   outputEMReport(er_model);
   outputResNetworkReport();
+  outputReplayAnalysis();
   _via_geometry_index.clear();
 
   EMIRLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());

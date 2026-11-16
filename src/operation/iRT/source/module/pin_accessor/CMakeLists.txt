@@ -9,10 +9,12 @@ endif()
 add_library(irt_pin_accessor
     ## module pin_accessor
     ${IRT_MODULE}/pin_accessor/PinAccessor.cpp
+    ${IRT_MODULE}/pin_accessor/PAReplay.cpp
 )
 
 target_link_libraries(irt_pin_accessor
     PUBLIC
+    geometry_builder
     irt_data_manager
     irt_module
     irt_toolkit

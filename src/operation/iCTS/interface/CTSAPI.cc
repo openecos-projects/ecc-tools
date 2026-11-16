@@ -1,3 +1,4 @@
+#include "ReplayCapture.h"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
 // Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -124,6 +125,7 @@ auto CTSAPI::runCTS() -> CTSStatus
 
   Monitor monitor;
   CTSLOG.info(Loc::current(), "Starting CTS flow...");
+  ecc::replay::guarded([&] { ecc::replay::sample("cts_start", "run CTS", nlohmann::json::object(), "patch", "analysis_state"); });
   const auto synthesis = Synthesis::run();
   if (synthesis.outcome == SynthesisOutcome::kNoOp) {
     CTSLOG.info(Loc::current(), "Completed CTS flow with no work", monitor.getStatsInfo());
@@ -135,12 +137,17 @@ auto CTSAPI::runCTS() -> CTSStatus
     return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS synthesis failed: " + reason, .diagnostics = {}});
   }
 
+  ecc::replay::guarded([&] { ecc::replay::sample("synthesis_complete", "run CTS", nlohmann::json::object(), "patch", "analysis_state"); });
   const auto optimization = Optimization::run();
   if (!optimization.success) {
     const auto reason = optimization.reason.empty() ? std::string{"unspecified"} : optimization.reason;
     CTSLOG.warn(Loc::current(), "CTS flow failed during optimization: ", reason, monitor.getStatsInfo());
     return api.setLastStatus(CTSStatus{.code = CTSStatusCode::kFlowError, .message = "CTS optimization failed: " + reason, .diagnostics = {}});
   }
+  ecc::replay::guarded([&] {
+    ecc::replay::sample("optimization_complete", "run CTS", nlohmann::json::object(), "patch", "analysis_state",
+                        {{"accepted_sizing_edits", optimization.accepted_edit_count}});
+  });
   const auto instantiation = Instantiation::run();
   if (!instantiation.success) {
     CTSLOG.warn(Loc::current(), "CTS flow failed during instantiation: ", instantiation.failure_reason, monitor.getStatsInfo());

@@ -6,6 +6,7 @@ target_link_libraries(
   icts_interface
   PRIVATE
   icts_source
+  geometry_builder
   idm
   feature_db
 )

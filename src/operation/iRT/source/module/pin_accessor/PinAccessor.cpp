@@ -71,6 +71,7 @@ void PinAccessor::access()
   // debugPlotPAModel(pa_model, "init");
   routePAModel(pa_model);
   uploadAccessPoint(pa_model);
+  captureReplay(pa_model, "pin_access_complete");
   // uploadAccessResult(pa_model);
   // uploadAccessPatch(pa_model);
   // uploadViolation(pa_model);
@@ -126,6 +127,7 @@ void PinAccessor::routePAModel(PAModel& pa_model)
     // debugPlotPAModel(pa_model, "after");
     updateSummary(pa_model);
     printSummary(pa_model);
+    captureReplay(pa_model, "pin_access_iteration");
     outputNetCSV(pa_model);
     outputViolationCSV(pa_model);
     RTLOG.info(Loc::current(), "***** End Iteration ", iter, "/", pa_iter_param_list.size(), "(", RTUTIL.getPercentage(iter, pa_iter_param_list.size()), ")",

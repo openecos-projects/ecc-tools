@@ -8,10 +8,12 @@ endif()
 
 add_library(iemir_emir_reporter
     ${IEMIR_MODULE}/emir_reporter/EMIRReporter.cpp
+    ${IEMIR_MODULE}/emir_reporter/ReplayAnalysis.cpp
 )
 
 target_link_libraries(iemir_emir_reporter
     PUBLIC
+    geometry_builder
     iemir_data_manager
     iemir_toolkit
 )

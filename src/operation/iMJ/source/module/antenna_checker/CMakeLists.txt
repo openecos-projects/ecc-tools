@@ -14,6 +14,7 @@ add_library(imj_antenna_checker
 target_link_libraries(imj_antenna_checker
     PUBLIC
     geometry_db
+    geometry_builder
     imj_data_manager
     imj_module
     imj_toolkit

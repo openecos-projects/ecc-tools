@@ -1,4 +1,5 @@
 add_library(irt_global_router
+    ${IRT_MODULE}/global_router/GRReplay.cpp
     ${IRT_MODULE}/global_router/GlobalRouter.cpp
     ${IRT_MODULE}/global_router/GRGridGraph.cpp
     ${IRT_MODULE}/global_router/GRNet.cpp

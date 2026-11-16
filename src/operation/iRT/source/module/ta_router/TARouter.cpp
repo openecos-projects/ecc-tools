@@ -1,3 +1,4 @@
+#include "ReplayRouting.hpp"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
 // Copyright (c) 2023-2025 Institute of Computing Technology, Chinese Academy of Sciences
@@ -79,6 +80,7 @@ void TARouter::route()
     outputNet(ta_net);
   }
 
+  captureReplayRouting("track_assignment_complete", RTDM.getDatabase().get_net_detailed_result_map(), RTDM.getDatabase().get_net_detailed_patch_map());
   updateSummary();
   printSummary();
 

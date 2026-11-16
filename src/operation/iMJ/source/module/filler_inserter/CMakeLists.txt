@@ -16,6 +16,7 @@ target_link_libraries(imj_filler_inserter
     imj_module
     imj_toolkit
     idm
+    geometry_builder
 )
 
 target_include_directories(imj_filler_inserter
