@@ -155,9 +155,11 @@ TARouter::TANet TARouter::buildTANet(Net& net)
   std::map<LayerCoord, std::set<int32_t>, CmpLayerCoordByXASC> key_coord_pin_map;
   std::vector<LayerCoord> candidate_root_coord_list;
   std::set<LayerCoord, CmpLayerCoordByXASC> root_key_set;
+  int32_t bottom_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
+  int32_t top_layer_idx = RTDM.getConfig().top_routing_layer_idx;
   for (Pin& pin : net.get_pin_list()) {
     AccessPoint& access_point = pin.get_access_point();
-    LayerCoord key(access_point.get_grid_coord(), access_point.get_layer_idx());
+    LayerCoord key(access_point.get_grid_coord(), std::clamp(access_point.get_layer_idx(), bottom_layer_idx, top_layer_idx));
     key_coord_pin_map[key].insert(pin.get_pin_idx());
     if (root_key_set.insert(key).second) {
       candidate_root_coord_list.push_back(key);
@@ -251,10 +253,12 @@ void TARouter::addEdge(TANet& ta_net, int32_t first_node_idx, int32_t second_nod
 
 void TARouter::attachPins(TANet& ta_net, NodeMap& node_map)
 {
+  int32_t bottom_layer_idx = RTDM.getConfig().bottom_routing_layer_idx;
+  int32_t top_layer_idx = RTDM.getConfig().top_routing_layer_idx;
   for (Pin& pin : ta_net.origin_net->get_pin_list()) {
     AccessPoint& access_point = pin.get_access_point();
     PlanarCoord ap_grid_coord = access_point.get_grid_coord();
-    int32_t ap_layer_idx = access_point.get_layer_idx();
+    int32_t ap_layer_idx = std::clamp(access_point.get_layer_idx(), bottom_layer_idx, top_layer_idx);
     std::tuple<int32_t, int32_t, int32_t> key(ap_grid_coord.get_x(), ap_grid_coord.get_y(), ap_layer_idx);
     int32_t node_idx = node_map.at(key);
     // Pin is a gcell terminal. TA stops just inside the gcell boundary; DR connects the AP.

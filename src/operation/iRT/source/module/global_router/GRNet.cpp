@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "GRNet.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <set>
 #include <vector>
@@ -37,9 +38,12 @@ void GRNet::init(Net& net, const GRGridGraph& grid)
   exempt_edge_set_.clear();
   tree_ = GRTree();
 
+  int32_t bottom_layer_idx = grid.getBottomLayerIdx();
+  int32_t top_layer_idx = grid.getTopLayerIdx();
   for (Pin& pin : net.get_pin_list()) {
     AccessPoint& access_point = pin.get_access_point();
-    pin_list_.push_back(GRPin{&pin, access_point.get_grid_coord(), access_point.get_layer_idx()});
+    int32_t layer_idx = std::clamp(access_point.get_layer_idx(), bottom_layer_idx, top_layer_idx);
+    pin_list_.push_back(GRPin{&pin, access_point.get_grid_coord(), layer_idx});
   }
   buildExemptEdgeSet(grid);
 }
