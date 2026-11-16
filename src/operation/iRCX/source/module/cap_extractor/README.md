@@ -1,56 +1,52 @@
-# Physical pattern extraction
+# Process-based pattern capacitance tables
 
-The existing extraction remains the default. These optional modes adapt the frozen
-2026-10-09 paper experiments to the current native topology API.
-
-| Environment variable | Meaning |
-| --- | --- |
-| `IRCX_MULTI_MODE` | `off` (default), `collect`, `apply`, or `grid` |
-| `IRCX_MULTI_RANK` | 1–3 neighbors on each side; `grid` requires 1 |
-| `IRCX_MULTI_TABLE` | Exact geometry coefficient TSV for `apply` |
-| `IRCX_PATTERN_GRID` | Process-specific asymmetric Cartesian grid for `grid` |
-| `IRCX_MULTI_OUTPUT` | Existing directory for requests and coverage statistics |
-| `IRCX_PATTERN_CROSS=physical` | Optional corrected cross-layer selection in the legacy path; leave unset for baseline comparisons |
-
-For the selected grid model:
+The reusable library is prepared from the process stack, dielectric and etch
+parameters, nominal widths, and predetermined synthetic sections. Preparation
+has no target-layout input. Extraction reads the routed layout and queries the
+same library for every design in a process corner.
 
 ```sh
-export IRCX_MULTI_MODE=grid
-export IRCX_MULTI_RANK=1
-export IRCX_PATTERN_GRID=/absolute/path/to/technology.grid
-export IRCX_MULTI_OUTPUT=/existing/run/geometry
+export IRCX_MULTI_MODE=prebuilt
+export IRCX_MULTI_RANK=3
+export IRCX_PATTERN_TABLE=/absolute/path/to/patterns.captab
+export IRCX_PATTERN_GRID=/absolute/path/to/lef_grid192.captab
+export IRCX_MULTI_OUTPUT=/existing/output/directory
 ```
 
-The grid contains nominal geometry coefficients in fF/um. Explicit `-1` spacing
-represents an absent neighbor; left and right spacing are independent. Queries
-interpolate the sampled width and spacing axes and clamp outside them. The benchmark
-grids use one nominal master width per layer and nominal LEF neighbor widths;
-`grid_width_clamped_dbu` audits master-width clamping;
-`grid_gap_clamped_dbu` audits spacing clamping. No empirical
-capacitance scale is applied. Technology matching and table hashes are checked by
-`experiments/pattern_port_20261011/native_pattern.sh` in the workspace root; direct
-binary callers must independently ensure the grid matches their ITF and layer map.
+`PatternCapacitanceTable.hpp` stores field-solver coefficients. A query retains up
+to three neighbors on each side, including their individual widths and gaps,
+and its upper/lower shielding context. Within the same context and neighbor
+counts, it selects 64 nearby samples and computes a local affine interpolation
+of log capacitances. The fixed ridge is 1e-4; results are bounded by the local
+coefficient range. An existing sample is returned directly. Reflection uses a
+canonical orientation. No coefficient weights are trained or stored.
 
-Same-layer parallel shapes are indexed by physical boxes within 8 um. Longitudinal
-supports are split where neighbor ranks change. Coincident same-owner geometry is
-canonicalized. Ground coefficients are integrated once; special-net coupling is
-folded into ground. Regular-net coupling is integrated over the union of directed
-supports, averaging only where both directions observe the same edge pair.
+The process etch transformation is applied consistently to sample and query
+coordinates. Overlap, invalid post-etch geometry, missing context, and geometry
+outside the declared range use the independent nearest-neighbor grid. This
+fallback uses nominal dimensions and has only one neighbor per side; its limits
+must not be represented as full three-neighbor characterization.
+`prebuilt_stats.txt` and `multi_stats.txt` report supported and fallback lengths.
+The table and grid must match the ITF, layer mapping and process corner.
 
-Normal pattern queries select the nearest covered upper/lower layers. Ambiguous
-overlap uses an explicit fallback with canonical nearest sides, nominal spacing and
-the native 1D table. This fallback intentionally retains legacy cross-layer selection
-and its native same-net ground convention; it is not continuously equivalent to the
-grid model. `field_fallback_dbu` records its extent. Missing exact keys fail rather
-than silently substituting coefficients. Pattern application currently supports one
-process corner per extraction.
+`IRCX_MULTI_MODE=grid` with rank 1 selects the independent grid alone. Unset or
+`off` retains the native extraction path. Target-conditioned table modes are
+rejected. No field solver runs during extraction and no geometry-request file
+is produced.
 
-`collect` records exact rank geometry while retaining the original capacitance
-output. `apply` uses separately characterized exact rank coefficients. Grid rank 1
-and exact rank 3 are separate experiments. Landing completion and perpendicular
-cross projection from the manuscript are not included in this port.
+The resistance path applies the process horizontal scale to lengths, raw widths
+and finite gaps before querying physical etch values. The shared capacitance
+profile and thickness remain unchanged. Invalid scales fail before parallel
+processing. Wire endpoints retain the routing topology's original support.
 
-Build `ecc_bin` and `ircx_pattern_test`; run `ctest -R ircx_pattern_test` from the build
-directory. The test covers spatial selection against an independent enumerator,
-absent/asymmetric grid queries, canonical ownership, fallback sides, special nets,
-reciprocal support integration, and malformed coefficient inputs.
+Build `ecc_bin`, `ircx_pattern_test`, `ircx_capacitance_table_test`, and
+`ircx_resistance_geometry_test`. Run:
+
+```sh
+ctest --test-dir build -R 'ircx_(pattern|capacitance_table|resistance_geometry)' --output-on-failure
+```
+
+The native port and the paper extraction source use the same capacitance table
+and interpolation implementation. Their geometry/interval assembly differs, so
+the paper's measured results belong to the source and binary identified in
+`/nfs/share/home/xuyipei/paper/overleaf-online/.build/table_library_20261028/`.

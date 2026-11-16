@@ -1,6 +1,8 @@
 // Adapted from the frozen paper manuscript rank3 collector (2026-10-09).
 #pragma once
 #include <atomic>
+#include <array>
+#include <memory>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <cmath>
@@ -15,6 +17,7 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "PatternCapacitanceTable.hpp"
 #include "RankedNeighbors.hpp"
 #include "TopoPool.hpp"
 namespace ircx::pattern {
@@ -40,11 +43,11 @@ class MultiNeighborCache
   std::atomic<std::int64_t> spans_{0}, total_dbu_{0}, duplicate_dbu_{0}, overlap_spans_{0}, overlap_dbu_{0}, field_fallback_spans_{0}, field_fallback_dbu_{0};
   std::atomic<std::int64_t> grid_dbu_{0}, grid_width_clamped_dbu_{0}, grid_gap_clamped_dbu_{0};
   std::map<std::pair<int32_t, bool>, LayerIndex> index_;
-  std::unordered_map<std::string, std::vector<double>> caps_;
-  std::set<std::string> requests_;
-  std::mutex mutex_;
-  bool active_ = false, collect_ = false, grid_ = false;
+  bool active_ = false, grid_ = false;
   int rank_ = 3;
+  std::unique_ptr<const captable::Library> library_;
+  mutable std::array<std::atomic<std::int64_t>, 3> library_queries_{};
+  mutable std::array<std::atomic<std::int64_t>, 3> library_dbu_{};
   static std::size_t owner(const ircx::TopoEdge& e) { return (std::size_t(e.get_is_special_net()) << 32) | std::uint32_t(e.get_net_idx()); }
   static std::filesystem::path outputPath(const char* name)
   {
@@ -66,9 +69,8 @@ class MultiNeighborCache
     if (!mode || std::string(mode) == "off")
       return;
     active_ = true;
-    collect_ = std::string(mode) == "collect";
     grid_ = std::string(mode) == "grid";
-    if (!collect_ && !grid_ && std::string(mode) != "apply")
+    if (!grid_ && std::string(mode) != "prebuilt")
       throw std::runtime_error("invalid multi mode");
     const char* rank = std::getenv("IRCX_MULTI_RANK");
     if (rank)
@@ -110,41 +112,28 @@ class MultiNeighborCache
       }
       index.spatial = SpatialIndex(values.begin(), values.end());
     }
-    if (!collect_ && !grid_) {
-      const char* path = std::getenv("IRCX_MULTI_TABLE");
-      if (!path)
-        throw std::runtime_error("missing multi table");
-      std::ifstream in(path);
-      if (!in)
-        throw std::runtime_error("cannot open multi table");
-      for (std::string line; std::getline(in, line);) {
-        auto tab = line.find('\t');
-        if (tab == std::string::npos)
-          throw std::runtime_error("invalid multi row");
-        std::istringstream s(line.substr(tab + 1));
-        std::vector<double> c;
-        double v;
-        while (s >> v)
-          c.push_back(v);
-        if ((!s.eof() || c.empty()) && line.substr(tab + 1) != "F")
-          throw std::runtime_error("empty multi coefficients");
-        for (double x : c)
-          if (!std::isfinite(x) || x < 0)
-            throw std::runtime_error("invalid multi coefficient");
-        if (!caps_.emplace(line.substr(0, tab), std::move(c)).second)
-          throw std::runtime_error("duplicate multi key");
-      }
+    if (std::string(mode) == "prebuilt") {
+      const char* path = std::getenv("IRCX_PATTERN_TABLE");
+      const char* grid = std::getenv("IRCX_PATTERN_GRID");
+      if (!path || !*path)
+        throw std::runtime_error("missing prebuilt capacitance table");
+      if (!grid || !*grid)
+        throw std::runtime_error("prebuilt mode requires independent grid fallback");
+      library_ = std::make_unique<const captable::Library>(path);
     }
+
   }
   ~MultiNeighborCache()
   {
     if (!active_)
       return;
-    if (collect_) {
-      std::ofstream out(outputPath("multi_requests.txt"));
-      for (const auto& k : requests_)
-        out << k << '\n';
-      if (!out)
+    if (library_) {
+      std::ofstream report(outputPath("prebuilt_stats.txt"));
+      const char* names[] = {"supported", "geometry_fallback", "domain_fallback"};
+      for (std::size_t i = 0; i < 3; ++i)
+        report << names[i] << "_queries " << library_queries_[i] << '\n'
+               << names[i] << "_dbu " << library_dbu_[i] << '\n';
+      if (!report)
         std::abort();
     }
     std::ofstream out(outputPath("multi_stats.txt"));
@@ -166,19 +155,25 @@ class MultiNeighborCache
     field_fallback_dbu_ += length;
   }
   bool active() const { return active_; }
-  bool collecting() const { return collect_; }
+  bool collecting() const { return false; }
   bool gridded() const { return grid_; }
-  const std::vector<double>& caps(const std::string& key) const
+  bool tabulated() const { return bool(library_); }
+  // Each caller owns its result: concurrent and consecutive queries cannot alias.
+  std::vector<double> caps(const std::string& key, std::int64_t length = 0) const
   {
     static const std::vector<double> zero{0.}, fallback{};
     if (key == "__ZERO")
       return zero;
     if (key == "__FALLBACK")
       return fallback;
-    auto it = caps_.find(key);
-    if (it == caps_.end())
-      throw std::runtime_error("missing multi geometry: " + key);
-    return it->second;
+    if (library_) {
+      auto result = library_->query(key);
+      const auto status = static_cast<std::size_t>(result.status);
+      ++library_queries_[status];
+      library_dbu_[status] += length;
+      return result.caps;
+    }
+    return fallback;
   }
   std::vector<Piece> pieces(ircx::TopoEdge& master, std::int64_t lo, std::int64_t hi, double micron_per_dbu, const std::string& layer, const std::string& below,
                             const std::string& above)
@@ -284,12 +279,6 @@ class MultiNeighborCache
         }
       }
       out = std::move(owned);
-    }
-    if (collect_) {
-      std::lock_guard<std::mutex> lock(mutex_);
-      for (const auto& piece : out)
-        if (piece.key != "__ZERO" && piece.key != "__FALLBACK")
-          requests_.insert(piece.key);
     }
     return out;
   }
