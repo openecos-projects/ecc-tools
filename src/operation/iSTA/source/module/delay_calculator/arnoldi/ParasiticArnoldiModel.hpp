@@ -41,6 +41,15 @@ class ParasiticArnoldiModel
   // limited-fanout model corrects the capacitive table source response.
   const std::optional<std::array<double, 2>>& smallNetTimeConstants() const { return _small_net_time_constants; }
   bool hasSmallNetSourceCorrection() const { return _small_net_source_correction; }
+  // Total RC (resistance * total load) per edge, in ns. reference reports the
+  // net slew degradation as a function of this quantity.
+  const std::array<double, 2>& totalTimeConstants() const { return _total_time_constants; }
+  void setTotalTimeConstants(std::array<double, 2> values) { _total_time_constants = values; }
+  // reference's single-pole regime for nets outside the reduced-fanout range:
+  // the net delay is exactly ln2 * TotalR * TotalC for every receiver. Measured
+  // by report_delay_calculation over 1,843 corners; see FINDINGS 589.
+  const int& ptLumpedMode() const { return _ref_lumped_mode; }
+  void setPtLumpedMode(int value) { _ref_lumped_mode = value; }
   void setSmallNetTimeConstants(std::array<double, 2> values, bool correct_source)
   {
     _small_net_time_constants = values;
@@ -78,6 +87,8 @@ class ParasiticArnoldiModel
   // function
 
  private:
+  std::array<double, 2> _total_time_constants{0., 0.};
+  int _ref_lumped_mode{0};
   bool _is_valid = false;
   int32_t _order = 0;
   double _total_capacitance = 0.0;

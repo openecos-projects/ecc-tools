@@ -16,10 +16,16 @@
 // ***************************************************************************************
 #include "LibertyArcSelector.hpp"
 
+#include <cstdio>
+#include <cstdlib>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdlib>
 
 namespace ista {
 
@@ -143,6 +149,20 @@ std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing
     }
     candidate_arc_list.push_back(&timing_arc);
   }
+  {
+    static const char* cd = std::getenv("ISTA_DUMP_CAND");
+    if (cd != nullptr) {
+      if (FILE* f = std::fopen(cd, "a"); f != nullptr) {
+        std::fprintf(f, "CAND,%s,%d,%d,%zu", output_pin.c_str(), static_cast<int>(input_trans_type),
+                     static_cast<int>(output_trans_type), candidate_arc_list.size());
+        for (TimingArc* ta : candidate_arc_list) {
+          std::fprintf(f, ",%d|%s", static_cast<int>(ta->get_sense()), ta->get_when_expression().get_is_empty() ? "-" : "W");
+        }
+        std::fprintf(f, "\n");
+        std::fclose(f);
+      }
+    }
+  }
   if (is_virtual_driver && !candidate_arc_list.empty()) {
     // A set_driving_cell cell is a virtual instance, so it has no instance
     // pins from which to resolve Liberty `when` conditions.  OpenSTA uses the
@@ -234,5 +254,15 @@ bool LibertyArcSelector::isMatchTimingType(TimingCellArc& timing_cell_arc, Trans
   }
   return false;
 }
+
+
+
+
+
+
+
+
+
+
 
 }  // namespace ista

@@ -7,6 +7,8 @@
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
+#include <vector>
 
 #include "DelayCalculator.hpp"
 #include "PathReportWriter.hpp"
@@ -118,9 +120,101 @@ static void failedReceiverPath()
   std::filesystem::remove_all(directory);
 }
 
+static void clockPathJson()
+{
+  Database db;
+  Config config;
+  const auto directory = std::filesystem::temp_directory_path() / ("ista-clock-path-json-" + std::to_string(getpid()));
+  std::filesystem::create_directories(directory);
+  config.tr_temp_directory_path = directory.string() + "/";
+  config.timing_path_limit = 100;
+
+  auto add_pin = [&](const std::string& name, const std::string& pin_name, const std::string& instance_name, bool is_port, PinDirection direction,
+                     const std::string& net_name) {
+    auto& pin = db.network().pins()[name];
+    pin.set_full_name(name);
+    pin.set_pin_name(pin_name);
+    pin.set_instance_name(instance_name);
+    pin.set_is_port(is_port);
+    pin.set_direction(direction);
+    pin.set_net_name(net_name);
+    pin.set_load_vertex_idx(static_cast<int32_t>(db.graph().vertices().size()));
+    auto& vertex = db.graph().vertices().emplace_back();
+    vertex.set_pin_name(name);
+    vertex.set_timing_point(&db.graph().points()[name]);
+  };
+  add_pin("clk", "clk", "", true, PinDirection::kInput, "clk_root");
+  add_pin("buf:A", "A", "buf", false, PinDirection::kInput, "clk_root");
+  add_pin("buf:Y", "Y", "buf", false, PinDirection::kOutput, "clk_leaf");
+  add_pin("ff:CK", "CK", "ff", false, PinDirection::kInput, "clk_leaf");
+  auto& buffer = db.network().instances()["buf"];
+  buffer.set_instance_name("buf");
+  buffer.set_cell_name("BUF");
+  buffer.set_pin_name_list({"buf:A", "buf:Y"});
+  auto& register_instance = db.network().instances()["ff"];
+  register_instance.set_instance_name("ff");
+  register_instance.set_cell_name("DFF");
+  register_instance.set_pin_name_list({"ff:CK"});
+  for (auto [name, pins] :
+       {std::pair{"clk_root", std::vector<std::string>{"clk", "buf:A"}}, std::pair{"clk_leaf", std::vector<std::string>{"buf:Y", "ff:CK"}}}) {
+    auto& net = db.network().nets()[name];
+    net.set_net_name(name);
+    net.set_pin_name_list(pins);
+  }
+  for (auto [pin_name, predecessor, predecessor_vertex] : {std::tuple{"ff:CK", "buf:Y", 2}, std::tuple{"buf:Y", "buf:A", 1}, std::tuple{"buf:A", "clk", 0}}) {
+    auto& state = db.graph().points()[pin_name].get_clock_state("clk");
+    for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
+      for (auto edge : {TransType::kRise, TransType::kFall}) {
+        auto& waveform = state.waveforms[edge];
+        waveform.predecessor_map[mode][TransType::kRise] = predecessor;
+        waveform.predecessor_vertex_map[mode][TransType::kRise] = predecessor_vertex;
+        waveform.predecessor_trans_type_map[mode][TransType::kRise] = TransType::kRise;
+      }
+    }
+  }
+  auto& clock = db.sdc().get_clock_map()["clk"];
+  clock.set_clock_name("clk");
+  clock.set_period(10.);
+  clock.set_source_list({"clk"});
+  clock.set_is_propagated(true);
+
+  TimingPath path;
+  path.set_start_point("ff:Q");
+  path.set_end_point("ff:D");
+  path.set_clock_name("clk");
+  path.set_capture_clock_name("clk");
+  path.set_launch_clock_pin("ff:CK");
+  path.set_capture_clock_pin("ff:CK");
+  path.set_launch_clock_pin_transition(TransType::kRise);
+  path.set_capture_clock_pin_transition(TransType::kRise);
+  path.set_launch_clock_transition(TransType::kRise);
+  path.set_capture_clock_transition(TransType::kRise);
+  path.set_analysis_type(AnalysisType::kMax);
+  path.set_check_type(TimingCheckType::kSetup);
+  path.set_slack(-0.1);
+  PathGroup group;
+  group.setName("clk");
+  group.endpointPaths()["ff:D"].push_back(path);
+  db.pathGroups().push_back(std::move(group));
+
+  TimingJsonWriter(db, config).write();
+  std::ifstream input(directory / "timing_paths.json");
+  std::string json((std::istreambuf_iterator<char>(input)), {});
+  require(json.find("\"launch_clock_source_pin\":\"clk\"") != std::string::npos && json.find("\"launch_clock_endpoint_pin\":\"ff:CK\"") != std::string::npos
+              && json.find("\"capture_clock_source_pin\":\"clk\"") != std::string::npos
+              && json.find("\"capture_clock_endpoint_pin\":\"ff:CK\"") != std::string::npos,
+          "timing JSON did not export physical clock endpoints");
+  require(json.find("\"launch_clock_path\":[{\"kind\":\"point\",\"pin\":\"clk\"") != std::string::npos && json.find("\"pin\":\"buf:A\"") != std::string::npos
+              && json.find("\"pin\":\"buf:Y\"") != std::string::npos
+              && json.find("\"capture_clock_path\":[{\"kind\":\"point\",\"pin\":\"clk\"") != std::string::npos,
+          "timing JSON did not export the source-to-endpoint clock path");
+  std::filesystem::remove_all(directory);
+}
+
 int main()
 {
   failedReceiverPath();
+  clockPathJson();
   for (int choice : {0, 1})
     for (int scenario : {0, 1, 2, 3, 4}) {
       Database db;

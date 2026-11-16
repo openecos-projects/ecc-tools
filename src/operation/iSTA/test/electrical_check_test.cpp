@@ -20,6 +20,7 @@
 #include "GraphBuilder.hpp"
 #include "Logger.hpp"
 #include "QorReportWriter.hpp"
+#include "QorSummaryBuilder.hpp"
 #include "ReadLiberty.hpp"
 #include "ReportFormatter.hpp"
 #include "TimingAnalyzer.hpp"
@@ -66,6 +67,15 @@ void checkViolationReports()
   config.tr_temp_directory_path = dir.string() + "/";
   config.output_timing_reports = 1;
   config.output_timing_features = 1;
+  // Keep connected black boxes, but exclude empty, unresolved filler instances.
+  for (int i = 0; i < 1000; ++i) {
+    auto& connected = db.network().instances()["connected" + std::to_string(i)];
+    connected.set_cell_name("UNKNOWN");
+    connected.get_pin_name_list().push_back("connected" + std::to_string(i) + "/A");
+    db.network().pins()[connected.get_pin_name_list().front()].set_net_name("n");
+    db.network().instances()["empty" + std::to_string(i)].set_cell_name("UNKNOWN");
+  }
+  require(QorSummaryBuilder(db).getQorLeafCellK() == 1, "QoR must exclude empty unresolved instances and retain connected black boxes");
   // Literal differences smaller than the timing tolerance, plus equality and positive slack.
   for (double actual : {1.000000097, 1.0, .999999903}) {
     const int count = actual > 1.0 ? 1 : 0;
@@ -79,6 +89,9 @@ void checkViolationReports()
     db.fanoutChecks() = {fanout};
     ElectricalReportWriter(db, config).write();
     FanoutReportWriter(db, config).write();
+    const double clock_actual = 1.0 + (actual - 1.0) * 100.;
+    db.clockChecks() = {{"period", "clk", TimingCheckType::kPeriod, TransType::kRise, 1., clock_actual},
+                        {"width", "clk", TimingCheckType::kWidth, TransType::kRise, 1., clock_actual}};
     QorReportWriter(db, config).write();
     for (const auto* rule : {"max_capacitance", "max_transition", "max_fanout"}) {
       const auto json = readReport(dir / (std::string(rule) + ".json"));
@@ -88,6 +101,12 @@ void checkViolationReports()
       require((report.find("VIOLATED") != std::string::npos) == (count == 1), std::string(rule) + " text/JSON disagree");
     }
     const auto qor = readReport(dir / "qor_summary.json");
+    const int clock_count = actual < 1.0 ? 1 : 0;
+    require(jsonNumber(qor, "min_period") == clock_count, "QoR period count mismatch");
+    require(jsonNumber(qor, "min_pulse_width") == clock_count, "QoR width count mismatch");
+    require(jsonNumber(qor, "tdrc") == 3 * count, "QoR electrical total mismatch");
+    const auto text = readReport(dir / "qor_summary.rpt");
+    require(text.find("Clock check violations") == std::string::npos, "QoR text contains an extra clock-check section");
     for (const auto* rule : {"cap", "tran", "fanout"})
       require(jsonNumber(qor, rule) == count, std::string("QoR lost ") + rule + " violation");
   }

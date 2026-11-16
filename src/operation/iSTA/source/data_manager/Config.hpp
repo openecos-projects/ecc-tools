@@ -36,7 +36,7 @@ class Config
   int32_t output_timing_features = 1;
   int32_t timing_path_limit = 20;
   int32_t min_slew_degradation = 0;
-  int32_t adjust_driver_resistance = 1;
+  int32_t adjust_driver_resistance = 0;
   // Keep the existing PT2018-calibrated approximation available explicitly.
   int32_t small_rc_fanout_reduction = 1;
   int32_t check_constant_capacitance = 0;

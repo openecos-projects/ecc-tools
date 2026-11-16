@@ -9,5 +9,5 @@ target_include_directories(ista_report_paths PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/
 
 add_library(ista_timing_reporter TimingReporter.cpp FanoutReportWriter.cpp ElectricalReportWriter.cpp ClockReportWriter.cpp TimingJsonWriter.cpp
     path/PathReportWriter.cpp qor/QorReportWriter.cpp)
-target_link_libraries(ista_timing_reporter PUBLIC ista_report_paths PRIVATE ista_toolkit)
+target_link_libraries(ista_timing_reporter PUBLIC ista_report_paths PRIVATE ista_toolkit ista_clock_reconvergence_calculator)
 target_include_directories(ista_timing_reporter PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

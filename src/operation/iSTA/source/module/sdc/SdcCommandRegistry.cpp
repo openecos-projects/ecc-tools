@@ -18,42 +18,31 @@
 #include "SdcCommand.hpp"
 #include "SdcTclCmd.hpp"
 #include "SetUnits.hpp"
-#include "WriteSdc.hpp"
+#include "shell/WriteSdc.hpp"
 #include "clock/ClockCommands.hpp"
 #include "environment/EnvironmentCommands.hpp"
 #include "exception/PathExceptionCommand.hpp"
-#include "query/GetFan.hpp"
-#include "query/ObjectCommands.hpp"
+#include "compat/CompatibilityCommands.hpp"
+#include "CommandRegistration.hpp"
+#include "shell/EditingCommands.hpp"
+#include "shell/ObjectCommands.hpp"
 
 namespace ista::sdc {
 
 namespace {
 
-template <typename Command>
-void registerCommand(SdcCommand& interpreter, const char* name)
+void registerShellCommands(SdcCommand& interpreter)
 {
-  interpreter.createCmd(name, &executeTclCommand<Command>);
-}
-
-template <typename Command>
-int executeConstraintCommand(ClientData data, Tcl_Interp* interp, int objc, Tcl_Obj* const objv[])
-{
-  if (DataManager::isInitialized())
-    STADM.getDatabase().sdc().markChanged();
-  return executeTclCommand<Command>(data, interp, objc, objv);
-}
-
-template <typename Command>
-void registerConstraintCommand(SdcCommand& interpreter, const char* name)
-{
-  interpreter.createCmd(name, &executeConstraintCommand<Command>);
-}
-
-void registerCollectionCommands(SdcCommand& interpreter)
-{
-  // Collection operations are tool commands exposed through Tcl; they are not
-  // part of the Tcl language itself.
   registerCommand<TclRemoveFromCollection>(interpreter, "remove_from_collection");
+  registerCommand<TclGetDesigns>(interpreter, "get_designs");
+  registerCommand<TclGetDesigns>(interpreter, "get_design");
+  registerCommand<TclGetFullName>(interpreter, "get_object_name");
+  registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
+  registerConstraintCommand<TclRemoveClockLatency>(interpreter, "remove_clock_latency");
+  registerConstraintCommand<TclRemoveClockUncertainty>(interpreter, "remove_clock_uncertainty");
+  registerConstraintCommand<TclRemovePropagatedClock>(interpreter, "remove_propagated_clock");
+  registerConstraintCommand<TclResetPath>(interpreter, "reset_path");
+  interpreter.createCmd("write_sdc", &writeSdcCommand);
 }
 
 void registerObjectQueryCommands(SdcCommand& interpreter)
@@ -62,15 +51,8 @@ void registerObjectQueryCommands(SdcCommand& interpreter)
   registerCommand<TclAllInputs>(interpreter, "all_inputs");
   registerCommand<TclAllOutputs>(interpreter, "all_outputs");
   registerCommand<TclAllClocks>(interpreter, "all_clocks");
-  registerCommand<TclAllDelayCorners>(interpreter, "all_delay_corners");
-  registerCommand<TclGetFullName>(interpreter, "get_full_name");
-  registerCommand<TclGetFullName>(interpreter, "get_object_name");
-  registerCommand<TclGetName>(interpreter, "get_name");
-  registerCommand<TclGetFan>(interpreter, "get_fanin");
-  registerCommand<TclGetFan>(interpreter, "get_fanout");
   registerCommand<TclGetClocks>(interpreter, "get_clock");
   registerCommand<TclGetClocks>(interpreter, "get_clocks");
-  registerCommand<TclGetGeneratedClocks>(interpreter, "get_generated_clocks");
   registerCommand<TclGetLibs>(interpreter, "get_lib");
   registerCommand<TclGetLibs>(interpreter, "get_libs");
   registerCommand<TclGetLibCells>(interpreter, "get_lib_cell");
@@ -92,15 +74,9 @@ void registerClockConstraintCommands(SdcCommand& interpreter)
   registerConstraintCommand<TclCreateGeneratedClock>(interpreter, "create_generated_clock");
   registerConstraintCommand<TclSetClockGroups>(interpreter, "set_clock_groups");
   registerConstraintCommand<TclSetClockLatency>(interpreter, "set_clock_latency");
-  registerConstraintCommand<TclRemoveClockLatency>(interpreter, "remove_clock_latency");
-  registerConstraintCommand<TclRemoveClockLatency>(interpreter, "unset_clock_latency");
   registerConstraintCommand<TclSetClockTransition>(interpreter, "set_clock_transition");
   registerConstraintCommand<TclSetClockUncertainty>(interpreter, "set_clock_uncertainty");
-  registerConstraintCommand<TclRemoveClockUncertainty>(interpreter, "remove_clock_uncertainty");
-  registerConstraintCommand<TclRemoveClockUncertainty>(interpreter, "unset_clock_uncertainty");
   registerConstraintCommand<TclSetPropagatedClock>(interpreter, "set_propagated_clock");
-  registerConstraintCommand<TclRemovePropagatedClock>(interpreter, "remove_propagated_clock");
-  registerConstraintCommand<TclRemovePropagatedClock>(interpreter, "unset_propagated_clock");
 }
 
 void registerEnvironmentConstraintCommands(SdcCommand& interpreter)
@@ -123,17 +99,15 @@ void registerPathExceptionCommands(SdcCommand& interpreter)
   registerConstraintCommand<TclSetMaxDelay>(interpreter, "set_max_delay");
   registerConstraintCommand<TclSetMinDelay>(interpreter, "set_min_delay");
   registerConstraintCommand<TclSetMulticyclePath>(interpreter, "set_multicycle_path");
-  registerConstraintCommand<TclResetPath>(interpreter, "reset_path");
-  registerConstraintCommand<TclResetPath>(interpreter, "unset_path_exceptions");
 }
 
 }  // namespace
 
 void registerSdcCommands(SdcCommand& interpreter)
 {
-  interpreter.createCmd("write_sdc", &writeSdcCommand);
   registerCommand<TclSetUnits>(interpreter, "set_units");
-  registerCollectionCommands(interpreter);
+  registerShellCommands(interpreter);
+  registerCompatibilityCommands(interpreter);
   registerObjectQueryCommands(interpreter);
   registerClockConstraintCommands(interpreter);
   registerEnvironmentConstraintCommands(interpreter);

@@ -42,6 +42,8 @@ struct QorSummary
   int32_t fanout_violations{};
   int32_t capacitance_violations{};
   int32_t transition_violations{};
+  int32_t min_period_violations{};
+  int32_t min_pulse_width_violations{};
   int32_t cell_area{};
   int32_t leaf_cell_k{};
 };

@@ -42,6 +42,11 @@ class ArnoldiDelayCalculator
   std::optional<ArnoldiDelayResult> calculate(TimingArc& timing_arc, TransType output_trans_type, double input_slew, const ParasiticArnoldiModel& arnoldi_model,
                                               bool adjust_drive_resistance = false) const;
 
+  // Public probe used by ISTA_DRIVE_RES_SERIES: the series source resistance
+  // must be known before the model is built, and it only needs the network
+  // total capacitance. Returns 0 when the arc or capacitance is unusable.
+  double sourceResistance(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double total_capacitance) const;
+
  private:
   static double tableResistance(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double total_capacitance, double voltage_log,
                                 double slew_derate, double delay_resistance);

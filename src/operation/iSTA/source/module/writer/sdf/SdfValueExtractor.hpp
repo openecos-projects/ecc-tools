@@ -42,6 +42,11 @@ class SdfValueExtractor
   SdfCellArcDelayMap graphCellArcDelays(Arc& arc);
   SdfCellArcDelayMap cellArcDelays(TimingCellArc& cell_arc);
   SdfCheckValues checkValues(Instance& instance, TimingCheckArc& check_arc, TimingArc& timing_arc, TransType transition);
+  // Reverse-engineering aid (FINDINGS 541): write every pin's four transition
+  // times so they can be diffed against reference's reports/pin_attr.csv
+  // (`actual_{rise,fall}_transition_{min,max}`). Read-only; runs only when
+  // ISTA_DUMP_PIN_SLEW names an output path.
+  void dumpPinSlew(const char* path);
 
  private:
   SdfDelay timingArcDelay(Arc& arc, TimingArc& timing_arc, TransType input_trans_type, bool allow_aggregate);

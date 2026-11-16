@@ -37,7 +37,7 @@ ObjectQueryOptions getObjectQueryOptions(SdcTclCmd& command)
     options.has_of_objects = true;
     for (Tcl_Obj* object : command.getOptionObjects("-of_objects")) {
       const auto type = queryObjectType(object);
-      if (type == QueryObjectType::kAny && SdcObject::getType(object) != SdcObjectType::kNone)
+      if (type == QueryObjectType::kDesign || (type == QueryObjectType::kAny && SdcObject::getType(object) != SdcObjectType::kNone))
         throw std::invalid_argument("unsupported object type for -of_objects");
       options.of_objects.emplace_back(type, Tcl_GetString(object));
     }

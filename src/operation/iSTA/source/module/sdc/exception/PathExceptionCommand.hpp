@@ -78,12 +78,6 @@ class TclSetMulticyclePath : public TclPathException
   unsigned exec() override;
 };
 
-class TclResetPath : public TclPathException
-{
- public:
-  TclResetPath(const char* cmd_name, ClientData client_data);
-  unsigned check() override { return 1; }
-  unsigned exec() override;
-};
+
 
 }  // namespace ista::sdc

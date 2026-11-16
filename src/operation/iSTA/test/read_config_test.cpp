@@ -32,7 +32,7 @@ int main()
   require(config.temp_directory_path == "./sta_temp_directory" && config.thread_number == 128, "default execution config");
   require(config.path_report_number == 1 && config.endpoint_path_report_number == 1 && !config.is_path_report_number_specified, "default report limits");
   require(config.output_timing_reports == 1 && config.output_timing_features == 1 && config.timing_path_limit == 20 && config.min_slew_degradation == 0
-              && config.adjust_driver_resistance == 1 && config.timing_corner.empty(),
+              && config.adjust_driver_resistance == 0 && config.timing_corner.empty(),
           "default export config");
   require(config.small_rc_fanout_reduction == 1 && config.check_constant_capacitance == 0, "default calculation/check policy changed");
   options = {{"-nworst", int32_t{4}}, {"-thread_number", int32_t{0}}};

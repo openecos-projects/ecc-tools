@@ -39,7 +39,7 @@ void QorReportWriter::write()
   auto summary = _qor_summary_builder.build(_report_path_selector);
   auto& [setup_wns_map, setup_tns_map, setup_nvp_map, setup_frequency_map, hold_wns_map, hold_tns_map, hold_nvp_map, group_set, total_setup_tns,
          total_setup_nvp, total_hold_tns, total_hold_nvp, setup_group_list, hold_group_list, fanout_violations, capacitance_violations, transition_violations,
-         cell_area, leaf_cell_k]
+         min_period_violations, min_pulse_width_violations, cell_area, leaf_cell_k]
       = summary;
   int32_t max_group_length = 20;
   for (std::string group_name : group_set) {
@@ -157,6 +157,7 @@ void QorReportWriter::write()
     }
     json_file << "},\n  \"design_statistics\": {\"cap\":" << capacitance_violations << ",\"fanout\":" << fanout_violations
               << ",\"tran\":" << transition_violations << ",\"tdrc\":" << (fanout_violations + capacitance_violations + transition_violations)
+              << ",\"min_period\":" << min_period_violations << ",\"min_pulse_width\":" << min_pulse_width_violations
               << ",\"cella\":" << cell_area << ",\"bufs\":null,\"leafs_k\":" << leaf_cell_k << ",\"tnets_k\":null,\"ctbuf\":null,\"regs\":null}\n}\n";
     STAUTIL.finishOutputFile(json_file);
   };
@@ -213,6 +214,7 @@ void QorReportWriter::write()
               << getQorNilString(7) << "K" << getQorKString(leaf_cell_k, 10) << getQorNilString(11) << "K" << getQorNilString(11) << getQorNilString(8) << "\n";
   report_file << bar << "\n";
   report_file << "\n";
+  report_file << "TDRC   - CAP + FANOUT + TRAN violations\n";
   report_file << "NVP    - No. of Violating Paths\n";
   report_file << "FREQ   - Estimated Frequency, not accurate in some cases, multi/half-cycle, etc\n";
   report_file << "WNS(H) - Hold WNS\n";

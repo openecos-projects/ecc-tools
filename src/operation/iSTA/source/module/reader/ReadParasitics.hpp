@@ -42,7 +42,8 @@ class ReadParasitics
   bool connectionsMatch(const spef::Net& net, const std::string& net_name) const;
   void readNet(spef::Net& spef_net);
   void readConnection(ParasiticNet& parasitic_net, spef::ConnEntry& spef_conn);
-  void readCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap);
+  void readCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap, const std::string& driver_instance,
+                      const std::string& driver_pin);
   void readResistance(ParasiticNet& parasitic_net, spef::ResCap& spef_res);
   double readCapacitance(double spef_capacitance);
   double readResistance(double spef_resistance);

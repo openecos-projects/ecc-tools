@@ -118,6 +118,8 @@ void addObjectMatch(std::vector<ObjectMatch>& matches, std::string object_name, 
 std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectType type)
 {
   std::vector<ObjectMatch> matches;
+  if (type == QueryObjectType::kDesign && !database.network().name().empty())
+    addObjectMatch(matches, database.network().name(), database.network().name(), "design");
   LibertyLibrary& library = database.liberty();
   if (type == QueryObjectType::kLibrary || type == QueryObjectType::kAny) {
     std::set<std::string> names(library.get_library_name_list().begin(), library.get_library_name_list().end());

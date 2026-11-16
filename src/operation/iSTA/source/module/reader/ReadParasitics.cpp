@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -60,8 +61,52 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   for (spef::ResCap& spef_res : spef_net.ress) {
     readResistance(parasitic_net, spef_res);
   }
+  // REF2022 reverse-engineered on ip2 `_07829_` (`_11805_`/MUX4X1P4H7R driving
+  // `_11807_`/AOI22X0P5H7R): the driver cell's own output-to-input coupling
+  // (`Y | S1` = 0.062109 fF) is excluded from the wire capacitance. The liberty
+  // cell tables already contain that intra-cell effect, so counting it again
+  // inflates the load. The residual after excluding only this pair is 0.000308 fF
+  // against REF's `report_delay_calculation`. ISTA_WIRE_CAP_EXCL_DRIVER_CC=0
+  // restores the previous behaviour.
+  // Excluding the driver's own output-to-input coupling closes ip2 `_11805_` to
+  // 0.00031 fF against reference, but it was refuted at suite level: gcd 88.1% ->
+  // 54.1%, ip2 60.0% -> 48.7%, ws2811 91.3% -> 58.4%, s713 90.3% -> 55.0%. ip2 has
+  // 1434 such pairs totalling 77.3 fF (max 1.11 fF) while `_11805_` needs only
+  // 0.062 fF, so the rule is not general. Keep it opt-in for further probing.
+  static const bool excl_driver_cc = [] {
+    const char* e = std::getenv("ISTA_WIRE_CAP_EXCL_DRIVER_CC");
+    return e != nullptr && *e == '1';
+  }();
+  std::string driver_instance;
+  std::string driver_pin;
+  if (excl_driver_cc) {
+    const auto net_it = _network.nets().find(net_name);
+    if (net_it != _network.nets().end()) {
+      for (const auto& pin_name : net_it->second.get_pin_name_list()) {
+        const auto pin_it = _network.pins().find(pin_name);
+        if (pin_it == _network.pins().end())
+          continue;
+        const auto direction = pin_it->second.get_direction();
+        if (direction == PinDirection::kOutput || direction == PinDirection::kInout) {
+          driver_instance = pin_it->second.get_instance_name();
+          // SPEF node names use `instance:pin`; build the matching form.
+          driver_pin = driver_instance + ":" + pin_it->second.get_pin_name();
+          break;
+        }
+      }
+    }
+  }
+  {
+    static const char* dp = std::getenv("ISTA_DUMP_DRIVER_PIN");
+    if (dp != nullptr && excl_driver_cc) {
+      if (FILE* f = std::fopen(dp, "a"); f != nullptr) {
+        std::fprintf(f, "NET,%s,inst=%s,pin=%s\n", net_name.c_str(), driver_instance.c_str(), driver_pin.c_str());
+        std::fclose(f);
+      }
+    }
+  }
   for (spef::ResCap& spef_cap : spef_net.caps) {
-    readCapacitance(parasitic_net, spef_cap);
+    readCapacitance(parasitic_net, spef_cap, driver_instance, driver_pin);
   }
   // The U-2022.12 model normalizes extracted nodes to at least 1 zF.
   // Apply this in pF after duplicate CAP entries have been summed, including
@@ -115,9 +160,30 @@ void ReadParasitics::readConnection(ParasiticNet& parasitic_net, spef::ConnEntry
   parasitic_node.set_y(spef_conn.coordinate.y);
 }
 
-void ReadParasitics::readCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap)
+void ReadParasitics::readCapacitance(ParasiticNet& parasitic_net, spef::ResCap& spef_cap, const std::string& driver_instance,
+                                    const std::string& driver_pin)
 {
   double capacitance = readCapacitance(spef_cap.res_or_cap);
+  // Skip a coupling whose endpoints both belong to the driving cell: it is an
+  // intra-cell effect already modelled by the liberty tables.
+  if (!driver_instance.empty() && !spef_cap.node2.empty()) {
+    const auto instanceOf = [](const std::string& node) -> std::string {
+      const auto colon = node.rfind(':');
+      return colon == std::string::npos ? std::string() : node.substr(0, colon);
+    };
+    // Only the driver's own output-to-input coupling is an intra-cell effect.
+    // Receiver input-to-input coupling stays in the wire capacitance.
+    static const char* dc = std::getenv("ISTA_DUMP_DRIVER_CC");
+    const bool both_driver = instanceOf(spef_cap.node1) == driver_instance && instanceOf(spef_cap.node2) == driver_instance;
+    if (dc != nullptr && both_driver) {
+      if (FILE* f = std::fopen(dc, "a"); f != nullptr) {
+        std::fprintf(f, "CC,%s|%s,%.9f,drv=%s\n", spef_cap.node1.c_str(), spef_cap.node2.c_str(), capacitance, driver_pin.c_str());
+        std::fclose(f);
+      }
+    }
+    if (both_driver && (spef_cap.node1 == driver_pin || spef_cap.node2 == driver_pin))
+      return;
+  }
   ParasiticNode& parasitic_node = ensureNode(parasitic_net, spef_cap.node1);
   parasitic_node.set_capacitance(parasitic_node.get_capacitance() + capacitance);
 

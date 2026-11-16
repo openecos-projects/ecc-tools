@@ -46,9 +46,6 @@ void TimingReporter::writeReports()
     }
   }
   if (output_reports || output_features) {
-    _fanout_report_writer.write();
-    _electrical_report_writer.write();
-    _clock_report_writer.write();
     _qor_report_writer.write();
   }
   if (output_features) {

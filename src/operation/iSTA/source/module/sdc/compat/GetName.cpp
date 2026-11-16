@@ -10,45 +10,10 @@
 #include <vector>
 
 #include "DataManager.hpp"
-#include "query/ObjectCommands.hpp"
+#include "compat/CompatibilityCommands.hpp"
 #include "query/ObjectQuery.hpp"
 
 namespace ista::sdc {
-
-TclAllClocks::TclAllClocks(const char* cmd_name, ClientData client_data) : SdcTclCmd(cmd_name, client_data)
-{
-}
-
-unsigned TclAllClocks::exec()
-{
-  // all_clocks uses the same query path as get_clocks so ordering and object
-  // matching stay consistent.
-  setResult(findObjects(interpreter(), STADM.getDatabase(), {"*"}, QueryObjectType::kClock), SdcObjectType::kClock);
-  return 1;
-}
-
-TclGetFullName::TclGetFullName(const char* cmd_name, ClientData client_data) : SdcTclCmd(cmd_name, client_data)
-{
-  addOption(new ecc::TclStringOption("object", 1));
-}
-
-unsigned TclGetFullName::exec()
-{
-  ecc::TclOption* object = getOptionOrArg("object");
-  if (!object->is_set_val()) {
-    setTclError(std::string(get_cmd_name()) + " requires an object");
-    return 0;
-  }
-
-  try {
-    setResult(getFullNames(interpreter(), STADM.getDatabase(), getOptionObjects("object")));
-  } catch (const std::exception& error) {
-    setTclError(error.what());
-    return 0;
-  }
-  return 1;
-}
-
 TclGetName::TclGetName(const char* cmd_name, ClientData client_data) : SdcTclCmd(cmd_name, client_data)
 {
   addOption(new ecc::TclStringOption("object", 1));
@@ -99,4 +64,4 @@ unsigned TclGetName::exec()
   return 1;
 }
 
-}  // namespace ista::sdc
+}

@@ -40,6 +40,8 @@ namespace ista::sdc {
 QueryObjectType queryObjectType(Tcl_Obj* object)
 {
   switch (SdcObject::getType(object)) {
+    case SdcObjectType::kDesign:
+      return QueryObjectType::kDesign;
     case SdcObjectType::kPort:
       return QueryObjectType::kPort;
     case SdcObjectType::kNet:
