@@ -16,6 +16,10 @@
 // ***************************************************************************************
 #include "ResExtractor.hpp"
 
+#include <cmath>
+#include <exception>
+#include <stdexcept>
+
 #include "EdgeEtchInterval.hpp"
 #include "ProcessConductor.hpp"
 #include "ProcessEffectType.hpp"
@@ -86,9 +90,23 @@ void ResExtractor::extractCornerResistance(int32_t corner_idx)
   }
   int32_t net_num = RCXDM.getDatabase().get_layout_data().get_regular_net_num();
   int32_t thread_num = RCXUTIL.getThreadNum(net_num, RCXDM.getConfig().thread_number);
+  std::exception_ptr extraction_error;
 #pragma omp parallel for schedule(dynamic) num_threads(thread_num)
   for (int32_t net_idx = 0; net_idx < net_num; ++net_idx) {
-    extractNetResistance(corner_idx, net_idx);
+    try {
+      extractNetResistance(corner_idx, net_idx);
+    } catch (...) {
+      // Exceptions must leave the OpenMP region on the calling thread.
+#pragma omp critical(ircx_resistance_error)
+      {
+        if (!extraction_error) {
+          extraction_error = std::current_exception();
+        }
+      }
+    }
+  }
+  if (extraction_error) {
+    std::rethrow_exception(extraction_error);
   }
 }
 
@@ -146,28 +164,32 @@ double ResExtractor::extractWireResistance(CornerData& corner_data, ProcessCondu
     }
 
     double length = overlap_end - overlap_start;
-    double width = edge_interval.get_width();
-    if (scale != 1.0) {
-      // Reconstruct physical wire width before applying physical etch values.
-      // The shared interval remains unchanged for capacitance extraction.
-      width = edge.get_width() * micron_per_dbu * scale;
-      const double lo_gap = edge_interval.get_lower_spacing() < 0.0
-                                ? edge_interval.get_lower_spacing() : edge_interval.get_lower_spacing() * scale;
-      const double hi_gap = edge_interval.get_upper_spacing() < 0.0
-                                ? edge_interval.get_upper_spacing() : edge_interval.get_upper_spacing() * scale;
-      for (const auto& etch : conductor.get_etch_table_list()) {
-        const double lo = etch.get_table().query(width, lo_gap).value_or(0.0);
-        const double hi = etch.get_table().query(width, hi_gap).value_or(0.0);
-        const double adjusted = width - lo - hi;
-        if (adjusted <= 0.0) {
-          RCXLOG.warn(Loc::current(), "resistance skipped etch that would collapse wire width");
-          continue;
-        }
-        width = adjusted;
+    // Reconstruct resistance geometry even at scale 1: shared intervals may
+    // already contain capacitive-only etch and must not be modified here.
+    double width = edge.get_width() * micron_per_dbu * scale;
+    const double lower_spacing
+        = edge_interval.get_lower_spacing() < 0.0 ? edge_interval.get_lower_spacing() : edge_interval.get_lower_spacing() * scale;
+    const double upper_spacing
+        = edge_interval.get_upper_spacing() < 0.0 ? edge_interval.get_upper_spacing() : edge_interval.get_upper_spacing() * scale;
+    for (const auto& etch : conductor.get_etch_table_list()) {
+      if (etch.get_effect_type() == ProcessEffectType::kCapacitance) {
+        continue;
+      }
+      const double lower_etch = etch.get_table().query(width, lower_spacing).value_or(0.0);
+      const double upper_etch = etch.get_table().query(width, upper_spacing).value_or(0.0);
+      width -= lower_etch + upper_etch;
+      if (!std::isfinite(width) || width <= 0.0) {
+        throw std::runtime_error("invalid resistance wire width after etch table on " + conductor.get_layer_name());
       }
     }
+    // ITF scalar etch is per sidewall and follows the width/spacing tables.
+    // Negative etch expands the conductor; CAPACITIVE_ONLY_ETCH does not enter R.
+    width -= 2.0 * (conductor.get_etch() + conductor.get_resistive_only_etch());
+    if (!std::isfinite(width) || width <= 0.0) {
+      throw std::runtime_error("invalid resistance wire width after ETCH/RESISTIVE_ONLY_ETCH on " + conductor.get_layer_name());
+    }
     double thickness = edge_interval.get_thickness();
-    if (width <= 0.0 || thickness <= 0.0) {
+    if (thickness <= 0.0) {
       continue;
     }
 

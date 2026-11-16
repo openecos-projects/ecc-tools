@@ -28,9 +28,15 @@ if(BUILD_TESTING)
   target_link_libraries(ircx_interface_test
       PRIVATE
       ircx_interface
+      ircx_data_manager
+      ircx_utility
+      idm
   )
 
   add_test(NAME ircx_interface_test COMMAND ircx_interface_test)
+  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database)
+    add_test(NAME ircx_interface_${scenario} COMMAND ircx_interface_test ${scenario})
+  endforeach()
 endif()
 
 if(BUILD_TESTING)
@@ -48,8 +54,11 @@ endif()
 
 if(BUILD_TESTING)
   add_executable(ircx_resistance_geometry_test RCXResistanceGeometryTest.cpp)
-  target_link_libraries(ircx_resistance_geometry_test PRIVATE ircx_res_extractor)
+  target_link_libraries(ircx_resistance_geometry_test PRIVATE ircx_res_extractor ircx_var_processor ircx_interface idm)
   foreach(scale 0.9 0.73 1 0 -1 nan)
     add_test(NAME ircx_resistance_geometry_${scale} COMMAND ircx_resistance_geometry_test ${scale})
+  endforeach()
+  foreach(scenario wire_etch via_area invalid_geometry)
+    add_test(NAME ircx_resistance_${scenario} COMMAND ircx_resistance_geometry_test ${scenario})
   endforeach()
 endif()
