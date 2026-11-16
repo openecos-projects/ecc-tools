@@ -29,6 +29,8 @@ class Config
   // **********        PW        ********** //
   std::string temp_directory_path;  // required
   int32_t thread_number;            // optional
+  std::string replay_geometry_directory;  // Empty disables Replay geometry collection.
+  std::map<std::string, std::array<int32_t, 4>> replay_instance_bounds;
   int32_t min_slew_degradation = 1;
   std::string sdc_file_path;  // input
   // 峰值（time_based）流程的 X 翻转折算系数和初始化处理选项。
