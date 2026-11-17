@@ -117,10 +117,10 @@ ClockNodeKind node_kind_for(const std::string& kind, const std::string& role)
 
 ClockTreeStage stage_for(const std::string& stage)
 {
-  if (stage == "postFloorplan") {
+  if (stage == "post_floorplan") {
     return ClockTreeStage::kPostFloorplan;
   }
-  if (stage == "CTS") {
+  if (stage == "cts") {
     return ClockTreeStage::kCts;
   }
   if (stage == "filler") {
@@ -233,7 +233,7 @@ std::optional<ClockTreeSnapshot> clockTreeSnapshotFromPython(const pybind11::obj
     std::vector<std::string> diagnostics = string_list(data, "diagnostics");
     const auto note = [&diagnostics](std::string message) { diagnostics.push_back(std::move(message)); };
 
-    const std::string stage_name = string_or(data, "stage", "CTS");
+    const std::string stage_name = string_or(data, "stage", "cts");
     const ClockTreeStage stage = stage_for(stage_name);
     if (stage == ClockTreeStage::kUnknown) {
       note("unknown clock-tree stage: " + stage_name);

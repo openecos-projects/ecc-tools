@@ -213,7 +213,7 @@ json FeatureParser::buildSummaryPL(std::string step)
 
   PlaceSummary& pl_summary = _summary->get_summary_ipl();
 
-  if (step == "place") {
+  if (step == "placement") {
     summary_pl["gplace"]["place_density"] = pl_summary.gplace.place_density;
     summary_pl["gplace"]["HPWL"] = pl_summary.gplace.HPWL;
     summary_pl["gplace"]["STWL"] = pl_summary.gplace.STWL;

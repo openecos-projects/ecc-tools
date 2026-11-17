@@ -56,9 +56,18 @@ class DetailedRouter
   ~DetailedRouter() = default;
   DetailedRouter& operator=(const DetailedRouter& other) = delete;
   DetailedRouter& operator=(DetailedRouter&& other) = delete;
+
+  struct DRStep
+  {
+    bool is_repair = false;
+    DRIterParam iter_param;
+    int32_t max_violation_num = 0;
+  };
+
   // function
   DRModel initDRModel();
   void routeDRModel(DRModel& dr_model);
+  void runNormalIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t normal_iter, int32_t normal_iter_num, int32_t step_iter);
   void setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param);
   void initDRBoxMap(DRModel& dr_model);
   void buildBoxSchedule(DRModel& dr_model);
@@ -90,6 +99,7 @@ class DetailedRouter
   void buildLayerNodeMap(DRBox& dr_box);
   void buildDRNodeNeighbor(DRBox& dr_box);
   void buildOrientNetMap(DRBox& dr_box);
+  void updateMacroRectToGraph(DRBox& dr_box);
   void buildDRShapeIndex(DRBox& dr_box);
   void updateNetShapeIndex(DRBox& dr_box, int32_t net_idx);
   void exemptPinShape(DRModel& dr_model, DRBox& dr_box);
@@ -163,7 +173,7 @@ class DetailedRouter
   void updateBestResult(DRModel& dr_model);
   bool stopIteration(DRModel& dr_model);
   void selectBestResult(DRModel& dr_model);
-  void repairViolation(DRModel& dr_model, std::vector<DRIterParam>& repair_iter_param_list);
+  bool runRepairIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t step_iter);
   std::vector<PlanarRect> getRepairBoxRectList(const std::vector<Violation>& violation_list, int32_t expand_size);
   void mergeRepairBoxRectList(std::vector<PlanarRect>& repair_box_rect_list);
   void initRepairDRBox(DRModel& dr_model, DRBox& dr_box, const PlanarRect& grid_rect, int32_t repair_iter, int32_t box_idx);
@@ -186,6 +196,8 @@ class DetailedRouter
   void addRouteViolationToGraph(DRBox& dr_box, LayerRect& searched_rect, std::vector<Segment<LayerCoord>>& overlap_segment_list);
   void updateNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
   void updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
+  void updateRoutingNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed,
+                                    const std::vector<std::pair<int32_t, int32_t>>& spacing_pair_list);
   void updatePlanarRectToGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateViaRectToGraph(DRBox& dr_box, ChangeType change_type, int32_t net_idx, int32_t layer_idx, const PlanarRect& rect, bool is_fixed);
   void updateCutNetShapeToGraph(DRBox& dr_box, ChangeType change_type, NetShape& net_shape, bool is_fixed);
@@ -201,6 +213,7 @@ class DetailedRouter
 #if 1  // exhibit
   void updateSummary(DRModel& dr_model);
   void printSummary(DRModel& dr_model);
+  void reportDetourStat(DRModel& dr_model, const std::string& stage);
   void outputNetCSV(DRModel& dr_model);
   void outputViolationCSV(DRModel& dr_model);
 #endif
