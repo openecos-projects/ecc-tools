@@ -170,11 +170,11 @@ bool FeatureManager::save_timing_eval_summary(std::string path)
 bool FeatureManager::save_tools(std::string path, std::string step)
 {
   FeatureBuilder builder;
-  if (step == "place" || step == "legalization" || (step == "filler")) {
+  if (step == "placement" || step == "legalization" || (step == "filler")) {
     auto db = builder.buildPLSummary(step);
 
     _summary->set_ipl(db);
-  } else if (step == "CTS") {
+  } else if (step == "cts") {
     auto db = builder.buildCTSSummary();
 
     _summary->set_icts(db);
@@ -190,7 +190,7 @@ bool FeatureManager::save_tools(std::string path, std::string step)
     auto db = builder.buildTimingOptSummary();
 
     _summary->set_ito_optsetup(db);
-  } else if (step == "route") {
+  } else if (step == "routing") {
     // skip
   } else {
   }

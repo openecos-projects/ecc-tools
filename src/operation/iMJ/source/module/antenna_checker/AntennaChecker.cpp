@@ -1697,7 +1697,7 @@ void AntennaChecker::writeReport(const ACModel& ac_model) const
     }
     nlohmann::json payload = {
         {"schema_version", 1},
-        {"step", "antennaCheck"},
+        {"step", "antenna_check"},
         {"antenna_check",
          {{"violation_count", ac_model.get_violation_num()},
           {"signal_net_count", ac_model.get_signal_net_cnt()},
