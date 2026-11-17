@@ -163,8 +163,7 @@ this PLOC audit; `ir_analyzer/solver_diagnostics.csv` reports their source count
 
 These checks implement the input contract and circuit boundary requirements
 using the project's existing geometry operations. Contact validation tests use
-synthetic circuits with hand-checked coordinates and resistances. No external
-private implementation, binary layout or decompiled code is used.
+synthetic circuits with hand-checked coordinates and resistances.
 
 ## Module boundary
 

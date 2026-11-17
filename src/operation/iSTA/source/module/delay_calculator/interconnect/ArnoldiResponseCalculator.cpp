@@ -45,9 +45,9 @@ std::optional<DriverResponse> ArnoldiResponseCalculator::smallNetResponse(Timing
       return std::nullopt;
   }
   const double time_scale = timing_arc.get_time_unit_scale();
-  // reference's `report_delay_calculation` prints TotalC in the "Effective
-  // capacitance" fields, so the load it actually interpolates can only be
-  // recovered from `Cell delay` (FINDINGS §269). For gcd `fixio_net_0`
+  // A per-arc delay report prints TotalC in its "Effective capacitance"
+  // fields, so the load actually interpolated has to be recovered from the
+  // reported cell delay. For gcd `fixio_net_0`
   // (`BUFX3H7R`, slew 12.1961 ps) the delay 66.8050 ps corresponds to
   // 9.499412 fF against a 9.525504 fF total, i.e. 99.7261%. ISTA_SMALLNET_CEFF_SCALE
   // sweeps that ratio to test whether it explains the residual.
@@ -71,9 +71,11 @@ std::optional<DriverResponse> ArnoldiResponseCalculator::smallNetResponse(Timing
     const char* e = std::getenv("ISTA_SMALLNET_CORR");
     return e != nullptr ? std::atof(e) : 1.0;
   }();
-  // reference's source correction is K = 0.314922 / (N+1), where N is the
-  // number of loads (term_pin_list().size() == N+1). Measured on 14 BUFX16H7R
-  // instances: K0 = 0.052487 with +/-1.5% spread (FINDINGS 523).
+  // The small-net source correction is K = K0 * 6 / (N+1) with K0 = 0.052487,
+  // where N is the number of loads (term_pin_list().size() == N+1). K0 is a
+  // process-calibrated coefficient for the cx55 library, where it holds to
+  // about +/-1.5% across BUFX16H7R drivers. Re-calibrate it for another
+  // library; small drivers (BUFX2/BUFX3P5) fall outside the fitted range.
   static const double corr_k = [] {
     const char* e = std::getenv("ISTA_SMALLNET_CORR_K");
     return e != nullptr ? std::atof(e) : 0.314922;
@@ -104,15 +106,15 @@ std::optional<DriverResponse> ArnoldiResponseCalculator::smallNetResponse(Timing
     const char* e = std::getenv("ISTA_SMALLNET_CORR_EDGE_TAU");
     return e != nullptr && *e != '0';
   }();
-  // reference's correction scales with TotalR * EffCap (measured over 45 arcs:
-  // residual/tau = const, FINDINGS 521), not with the Arnoldi pole constants[0]
-  // (which is 3.8x smaller on wire83). ISTA_SMALLNET_CORR_TAU=0 restores constants[0].
+  // The correction scales with TotalR * EffCap, not with the Arnoldi pole
+  // constants[0] (which is 3.8x smaller on wire83).
+  // ISTA_SMALLNET_CORR_TAU=0 restores constants[0].
   static const int corr_tau_src = [] {
     const char* e = std::getenv("ISTA_SMALLNET_CORR_TAU");
     return e != nullptr ? std::atoi(e) : 1;
   }();
-  // totalTimeConstants() is R * totalC per edge (ns); reference's slew
-  // degradation is a function of exactly this quantity.
+  // totalTimeConstants() is R * totalC per edge (ns); the slew degradation
+  // is an explicit function of exactly this quantity.
   const double rc_tau = model.totalTimeConstants()[fall ? 1 : 0];
   double slew_tau = constants[0];
   if (corr_tau_src == 1 && std::isfinite(rc_tau) && rc_tau > 0.)
@@ -129,15 +131,16 @@ std::optional<DriverResponse> ArnoldiResponseCalculator::smallNetResponse(Timing
   // Dropping the log(2) factor was measured on ip2 `_11805_` and refuted at the
   // suite level: gcd drops 88.1% -> 85.3% and ip2 drops 60.0% -> 57.0%. Keep it.
   // The delay half uses the same TotalR*TotalC time constant as the slew half
-  // (FINDINGS 527): reference's delay degradation tracks R * totalC, not the
-  // Arnoldi pole constants[0]. ISTA_SMALLNET_CORR_TAU=0 restores constants[0].
+  // and the delay half picks the same time constant: the delay degradation
+  // tracks R * totalC, not the Arnoldi pole constants[0].
+  // ISTA_SMALLNET_CORR_TAU=0 restores constants[0].
   const double delay_tau = (corr_tau_src == 1 && std::isfinite(rc_tau) && rc_tau > 0.) ? rc_tau : tau;
   result.set_gate_delay(delay - delay_correction * delay_tau * std::log(2.));
   result.set_driver_slew(source_slew);
   for (std::size_t term = 0; term < model.get_term_pin_list().size(); ++term) {
     auto pin = model.get_term_pin_list()[term];
-    const double ref_lumped_tau = model.ptLumpedMode() == 1 && std::isfinite(rc_tau) && rc_tau > 0. ? rc_tau : tau;
-    double wire_delay = term == 0 ? 0. : ref_lumped_tau * std::log(2.);
+    const double lumped_tau = model.lumpedMode() == 1 && std::isfinite(rc_tau) && rc_tau > 0. ? rc_tau : tau;
+    double wire_delay = term == 0 ? 0. : lumped_tau * std::log(2.);
     double load_slew = term == 0 ? source_slew : std::hypot(source_slew, tau * slew_factor);
     if (term > 0)
       _threshold.adjust(timing_arc, pin, edge, wire_delay, load_slew);
@@ -380,8 +383,8 @@ DriverResponse ArnoldiResponseCalculator::calculate(std::string& output_pin, Tim
       // The default branch subtracts delay_list.front() from delay_list[term],
       // which cancels both the fitted driver start and the common slew-induced
       // shift of middle_time. The resulting wire delay then has no slew
-      // dependence at all (FINDINGS 300), while reference's net delay grows
-      // with the driver transition (0.851 ps vs 0.623 ps on _272_, 37%).
+      // dependence at all, whereas the net delay should grow with the driver
+      // transition (0.851 ps vs 0.623 ps on _272_, 37%).
       // Take the source-referenced crossingTime path unconditionally to keep
       // the slew dependence; ISTA_NET_ARC_CROSSING=0 restores the old branch.
       static const bool use_crossing = [] {
