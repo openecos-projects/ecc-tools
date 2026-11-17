@@ -24,8 +24,8 @@
 #include "GraphBuilder.hpp"
 #include "IRAnalyzer.hpp"
 #include "InstancePower.hpp"
-#include "Logger.hpp"
 #include "InstancePowerReader.hpp"
+#include "Logger.hpp"
 #include "PowerEdge.hpp"
 #include "PowerEdgeType.hpp"
 #include "PowerGraph.hpp"
@@ -117,32 +117,53 @@ bool checkReport(const std::string& report_file_path, const std::string& content
   return report_content.find(content) != std::string::npos;
 }
 
-bool checkIRSpatial(const std::filesystem::path& path)
+bool checkIRSpatial(const std::filesystem::path& directory)
 {
-  std::ifstream stream(path);
-  const auto document = nlohmann::json::parse(stream);
-  if (document.at("schema") != "ecos.emir.ir.v1" || document.at("coordinate_unit") != "dbu"
-      || document.at("dbu_per_micron") != EMIRDM.getDatabase().get_micron_dbu())
-    return false;
   auto& graphs = EMIRDM.getDatabase().get_power_graph_map();
-  if (document.at("views").size() != graphs.size())
-    return false;
-  for (const auto& view : document.at("views")) {
-    auto& graph = graphs.at(view.at("summary").at("net").get<std::string>());
-    if (view.at("unit") != "V" || view.at("basis") != "final" || view.at("items").size() != graph.get_node_list().size())
+  std::size_t checked = 0;
+  for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+    if (!entry.path().filename().string().ends_with("-nodes.gdisplay"))
+      continue;
+    std::ifstream stream(entry.path(), std::ios::binary);
+    auto integer = [&](unsigned size) {
+      uint64_t value = 0;
+      for (unsigned i = 0; i < size; ++i)
+        value |= uint64_t(uint8_t(stream.get())) << (8 * i);
+      return value;
+    };
+    char magic[8];
+    stream.read(magic, 8);
+    if (std::string(magic, 8) != "ECOSDSP1" || integer(4) != 1 || integer(4) != 2)
       return false;
-    for (std::size_t i = 0; i < graph.get_node_list().size(); ++i) {
+    auto size = integer(4);
+    if (integer(4) != 0)
+      return false;
+    auto count = integer(8), index = integer(8);
+    std::string text(size, '\0');
+    stream.read(text.data(), size);
+    const auto meta = nlohmann::json::parse(text);
+    if (meta.at("coordinate_unit") != "dbu" || meta.at("dbu_per_micron") != EMIRDM.getDatabase().get_micron_dbu())
+      return false;
+    auto& graph = graphs.at(meta.at("network").get<std::string>());
+    if (count != graph.get_node_list().size())
+      return false;
+    for (std::size_t i = 0; i < count; ++i) {
+      stream.seekg(index + i * 8);
+      auto begin = integer(8), end = integer(8);
+      std::vector<uint8_t> bytes(end - begin);
+      stream.seekg(40 + size + begin);
+      stream.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+      const auto item = nlohmann::json::from_msgpack(bytes);
       auto& node = graph.get_node_list()[i];
-      const auto& item = view.at("items")[i];
-      const auto expected = nlohmann::json::array({nlohmann::json::array({node.get_x(), node.get_y(), node.get_x(), node.get_y()})});
-      if (item.at("bboxes") != expected || item.at("details").at("voltage_v") != node.get_voltage())
+      if (item.at("x") != node.get_x() || item.at("y") != node.get_y() || item.at("voltage_v") != node.get_voltage())
         return false;
-      const double drop = std::abs(node.get_voltage() - item.at("details").at("ideal_voltage_v").get<double>());
+      const double drop = std::abs(node.get_voltage() - item.at("ideal_voltage_v").get<double>());
       if (std::abs(item.at("value").get<double>() - drop) > 1e-12)
         return false;
     }
+    ++checked;
   }
-  return true;
+  return checked == graphs.size();
 }
 
 bool checkRepeatedIRLoads(const std::filesystem::path& directory)
@@ -900,8 +921,7 @@ int main(int argc, char* argv[])
   iemir::EMIRReporter::initInst();
   EMIRER.report();
   iemir::EMIRReporter::destroyInst();
-  is_pass = is_pass && checkIRSpatial(report_directory_path / "ir_drop.json")
-            && checkReport((report_directory_path / "ir.rpt").string(), "#voltage #ideal_volt")
+  is_pass = is_pass && checkIRSpatial(report_directory_path) && checkReport((report_directory_path / "ir.rpt").string(), "#voltage #ideal_volt")
             && checkReport((report_directory_path / "em.rpt").string(), "# For wires: #layer #end-to-end_coordinates #EM_Ratio #Current_value")
             && checkReport((report_directory_path / "test_design.ir.worst").string(), "#x_y_location")
             && checkReport((report_directory_path / "test_design.em.worst").string(), "#current")

@@ -13,6 +13,8 @@
 
 namespace ieval {
 
+void writeMapDisplay(const std::string& csv_path, const std::vector<std::vector<double>>& matrix, bool reverse_rows);
+
 struct MapLayoutCell
 {
   int32_t pixel_row;

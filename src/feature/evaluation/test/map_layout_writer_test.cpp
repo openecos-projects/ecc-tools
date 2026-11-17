@@ -1,6 +1,9 @@
 #include "map_layout_writer.h"
 
+#include <array>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -52,6 +55,31 @@ int main()
   expectEqual(lines[3], "0,2,2,1,120,210,125,218", "last column should clamp ux to region ux");
   expectEqual(lines[4], "1,0,0,0,100,200,110,210", "second pixel row should map to bottom grid y");
   expectEqual(lines[6], "1,2,2,0,120,200,125,210", "bottom-right pixel bbox mismatch");
+
+  // A top-left display cell must use the high-Y native row and preserve f64.
+  const double peak = 0.12345678901234567;
+  ieval::writeMapDisplay((out_dir / "density.csv").string(), {{1.0, 2.0, 3.0}, {peak, 5.0, 6.0}}, true);
+  std::ifstream binary(out_dir / "density.gdisplay", std::ios::binary);
+  auto integer = [&](unsigned size) {
+    uint64_t value = 0;
+    for (unsigned i = 0; i < size; ++i)
+      value |= uint64_t(uint8_t(binary.get())) << (8 * i);
+    return value;
+  };
+  binary.seekg(16);
+  const auto metadata_size = integer(4);
+  binary.seekg(24);
+  if (integer(8) != 6)
+    return 1;
+  binary.seekg(40 + metadata_size);
+  std::array<int32_t, 6> coordinates;
+  for (auto& value : coordinates)
+    value = static_cast<int32_t>(integer(4));
+  const auto bits = integer(8);
+  double value;
+  std::memcpy(&value, &bits, sizeof(value));
+  if (coordinates != std::array<int32_t, 6>{0, 0, 100, 210, 110, 218} || value != peak)
+    return 1;
 
   const std::vector<ieval::MapLayoutCell> gcell_layout = {
       {.pixel_row = 0, .pixel_col = 0, .grid_x = 0, .grid_y = 7, .lx = 10, .ly = 30, .ux = 20, .uy = 40},

@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "py_ircx.h"
 
+#include "GeometrySpefDisplay.h"
 #include "RCXBackendType.hpp"
 #include "RCXInterface.hpp"
 #include "RCXReplay.hpp"
@@ -27,6 +28,7 @@ namespace python_interface {
 namespace {
 
 RCXBackendType active_backend = RCXBackendType::kNone;
+std::filesystem::path display_directory;
 
 bool is_native_pdk(const std::optional<std::string>& pdk)
 {
@@ -59,6 +61,7 @@ bool destroy_rcx()
 bool init_rcx(const std::filesystem::path& config, const std::optional<std::string>& pdk)
 {
   const std::string config_ = config.string();
+  display_directory.clear();
   active_backend = RCXBackendType::kNone;
 
   if (!validate_pdk(pdk)) {
@@ -66,6 +69,11 @@ bool init_rcx(const std::filesystem::path& config, const std::optional<std::stri
   }
 
   if (is_ics55_pdk(pdk)) {
+    std::ifstream input(config);
+    const auto settings = nlohmann::json::parse(input);
+    const auto output = settings.value("output", std::string{});
+    if (!output.empty())
+      display_directory = std::filesystem::path(output) / "spef_writer";
     ircx_ics55_init(config_.c_str(), dmInst->get_idb_design());
     active_backend = RCXBackendType::kIcs55;
     return true;
@@ -82,7 +90,21 @@ bool run_rcx()
 {
   if (active_backend == RCXBackendType::kIcs55) {
     ircx::replay::phase("ics55_extraction_started");
+    std::map<std::filesystem::path, std::filesystem::file_time_type> previous;
+    if (!display_directory.empty() && std::filesystem::is_directory(display_directory)) {
+      for (const auto& entry : std::filesystem::directory_iterator(display_directory)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".spef")
+          previous[entry.path()] = entry.last_write_time();
+      }
+    }
     ircx_ics55_run();
+    if (!display_directory.empty() && std::filesystem::is_directory(display_directory)) {
+      for (const auto& entry : std::filesystem::directory_iterator(display_directory)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".spef"
+            && (!previous.contains(entry.path()) || previous.at(entry.path()) != entry.last_write_time()))
+          ecc::geometry::writeSpefDisplay(entry.path());
+      }
+    }
     ircx::replay::phase("ics55_extraction_completed");
     return true;
   }

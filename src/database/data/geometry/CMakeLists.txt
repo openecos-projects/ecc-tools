@@ -29,3 +29,7 @@ target_link_libraries(geometry_data_tests
 )
 
 add_test(NAME geometry_data_tests COMMAND geometry_data_tests)
+
+add_executable(geometry_spef_display_test test/GeometrySpefDisplayTest.cpp)
+target_link_libraries(geometry_spef_display_test PRIVATE geometry_data)
+add_test(NAME geometry_spef_display_test COMMAND geometry_spef_display_test)

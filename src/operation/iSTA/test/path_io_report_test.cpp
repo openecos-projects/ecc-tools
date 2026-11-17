@@ -1,3 +1,4 @@
+#include "json.hpp"
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <unistd.h>
 
@@ -204,9 +205,11 @@ static void clockPathJson()
               && json.find("\"capture_clock_source_pin\":\"clk\"") != std::string::npos
               && json.find("\"capture_clock_endpoint_pin\":\"ff:CK\"") != std::string::npos,
           "timing JSON did not export physical clock endpoints");
-  require(json.find("\"launch_clock_path\":[{\"kind\":\"point\",\"pin\":\"clk\"") != std::string::npos && json.find("\"pin\":\"buf:A\"") != std::string::npos
-              && json.find("\"pin\":\"buf:Y\"") != std::string::npos
-              && json.find("\"capture_clock_path\":[{\"kind\":\"point\",\"pin\":\"clk\"") != std::string::npos,
+  const auto document = nlohmann::json::parse(json);
+  const auto& json_path = document.at("paths").at(0);
+  require(json_path.at("launch_clock_path").at(0).at("kind") == "point" && json_path.at("launch_clock_path").at(0).at("pin") == "clk"
+              && json_path.at("capture_clock_path").at(0).at("pin") == "clk" && json.find("\"pin\":\"buf:A\"") != std::string::npos
+              && json.find("\"pin\":\"buf:Y\"") != std::string::npos,
           "timing JSON did not export the source-to-endpoint clock path");
   std::filesystem::remove_all(directory);
 }

@@ -11,7 +11,6 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <algorithm>
 #include <iomanip>
 #include <sstream>
 #include <unordered_set>
@@ -174,6 +173,7 @@ std::string DensityEval::evalDensity(DensityCells cells, DensityRegion region, i
 
   csv_file.close();
   writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
+  writeMapDisplay(output_path, density_grid, true);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -269,6 +269,7 @@ std::string DensityEval::evalPinDensity(DensityPins pins, DensityRegion region, 
 
   csv_file.close();
   writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
+  writeMapDisplay(output_path, density_grid, true);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -329,6 +330,7 @@ std::string DensityEval::evalNetDensity(DensityNets nets, DensityRegion region, 
           }
         }
         neighbor_net_count[row][col] = sum;
+        net_count[row][col] = sum;
       }
     }
     output_path = map_dir + "/" + "neighbor_" + output_filename;
@@ -369,6 +371,10 @@ std::string DensityEval::evalNetDensity(DensityNets nets, DensityRegion region, 
     csv_file.close();
   }
   writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
+  std::vector<std::vector<double>> display_values;
+  for (const auto& row : net_count)
+    display_values.emplace_back(row.begin(), row.end());
+  writeMapDisplay(output_path, display_values, true);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -468,6 +474,11 @@ std::string DensityEval::evalMargin(DensityCells cells, DensityRegion die, Densi
 
   csv_file.close();
   writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, die.lx, die.ly, die.ux, die.uy);
+  std::vector<std::vector<double>> display_values(grid_rows, std::vector<double>(grid_cols));
+  for (int32_t row = 0; row < grid_rows; ++row)
+    for (int32_t col = 0; col < grid_cols; ++col)
+      display_values[row][col] = margin_grid[row * grid_cols + col].margin;
+  writeMapDisplay(output_path, display_values, true);
 
   return getAbsoluteFilePath(output_path);
 }

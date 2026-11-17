@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "LVSReporter.hpp"
 
+#include "GeometryDisplayWriter.h"
 #include "LVSHeader.hpp"
 #include "Logger.hpp"
 #include "Utility.hpp"
@@ -429,6 +430,11 @@ void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Vi
          {"total", row.get_total_num()}});
   }
 
+  auto binary_path = std::filesystem::path(lr_model.get_json_file_path());
+  binary_path.replace_extension(".gdisplay");
+  ecc::geometry::GeometryDisplayWriter binary(
+      binary_path, {{"kind", "lvs"}, {"key", "lvs"}, {"label", "LVS violations"}, {"entity", entity_json}, {"connectivity", connectivity_json}},
+      ecc::geometry::GeometryDisplayWriter::Encoding::kRecords);
   std::ofstream* json_file = LVSUTIL.getOutputFileStream(lr_model.get_json_file_path());
   *json_file << "{\n";
   *json_file << "  \"entity\": " << entity_json.dump(2) << ",\n";
@@ -465,6 +471,7 @@ void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Vi
     if (violation_idx > 0) {
       *json_file << ",";
     }
+    binary.record(violation_json);
     *json_file << "\n" << violation_json.dump(2);
   }
   if (!violation_list.empty()) {
@@ -473,6 +480,7 @@ void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Vi
   *json_file << "  ]\n";
   *json_file << "}\n";
   LVSUTIL.closeFileStream(json_file);
+  binary.finish();
 }
 
 void LVSReporter::printSummary(const std::vector<fort::char_table>& summary_table_list)

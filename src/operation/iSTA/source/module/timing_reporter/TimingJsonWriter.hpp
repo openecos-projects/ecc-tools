@@ -24,6 +24,7 @@
 #include "ReportOptions.hpp"
 #include "ReportPathContext.hpp"
 #include "ReportPathSelector.hpp"
+#include "json.hpp"
 
 namespace ista {
 class TimingJsonWriter
@@ -37,7 +38,7 @@ class TimingJsonWriter
 
  private:
   std::string getTimingPathsJsonFilePath();
-  void outputTimingPathJson(std::ostream& json_file, TimingPath& timing_path, std::string& path_group_name, DelayType delay_type);
+  nlohmann::json timingPathValue(TimingPath& timing_path, std::string& path_group_name, DelayType delay_type);
   std::string getTimingPathId(TimingPath& timing_path, std::string& path_group_name, DelayType delay_type);
   Database& _database;
   const Config& _config;

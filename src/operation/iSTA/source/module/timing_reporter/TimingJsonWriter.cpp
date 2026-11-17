@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "ClockReconvergenceCalculator.hpp"
+#include "GeometryDisplayWriter.h"
 #include "ReportFormatter.hpp"
 #include "ReportPathFilter.hpp"
 #include "ReportPathSelector.hpp"
@@ -66,24 +67,21 @@ std::optional<TransType> clockSourceTransition(TransType transition)
   return transition == TransType::kNone ? std::nullopt : std::optional<TransType>{transition};
 }
 
-void outputClockPathJson(std::ostream& json_file, Database& database, const std::vector<ClockPathPointInfo>& clock_path)
+nlohmann::json clockPathValue(Database& database, const std::vector<ClockPathPointInfo>& clock_path)
 {
-  json_file << "[";
-  bool first = true;
+  auto result = nlohmann::json::array();
   for (const auto& point : clock_path) {
-    if (!first)
-      json_file << ",";
     const auto pin = database.network().pins().find(point.pin_name);
     const bool is_port = pin != database.network().pins().end() && pin->second.get_is_port();
     const std::string instance_name = pin == database.network().pins().end() ? std::string{} : pin->second.get_instance_name();
     const auto instance = database.network().instances().find(instance_name);
-    const std::string cell_name = instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
-    json_file << "{\"kind\":\"" << (is_port ? "point" : "clock_arc") << "\",\"pin\":\"" << escapeJsonString(point.pin_name) << "\",\"instance\":\""
-              << escapeJsonString(instance_name) << "\",\"cell\":\"" << escapeJsonString(cell_name) << "\",\"transition\":\""
-              << GetTransTypeName()(point.transition) << "\"}";
-    first = false;
+    result.push_back({{"kind", is_port ? "point" : "clock_arc"},
+                      {"pin", point.pin_name},
+                      {"instance", instance_name},
+                      {"cell", instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name()},
+                      {"transition", GetTransTypeName()(point.transition)}});
   }
-  json_file << "]";
+  return result;
 }
 }  // namespace
 
@@ -95,6 +93,11 @@ void TimingJsonWriter::write()
   const std::string corner = _config.timing_corner.empty() ? "unknown" : _config.timing_corner;
 
   json_file << "{\n  \"schema_version\": 1,\n  \"corner\": \"" << escapeJsonString(corner) << "\",\n  \"path_limit\": " << path_limit << ",\n  \"paths\": [";
+  auto binary_path = std::filesystem::path(getTimingPathsJsonFilePath());
+  binary_path.replace_extension(".gdisplay");
+  ecc::geometry::GeometryDisplayWriter binary(
+      binary_path, {{"kind", "timing"}, {"key", "timing:" + corner}, {"label", corner + " timing paths"}, {"corner", corner}, {"unit", "ns"}},
+      ecc::geometry::GeometryDisplayWriter::Encoding::kRecords);
   bool first_path = true;
   for (DelayType delay_type : {DelayType::kMax, DelayType::kMin}) {
     std::vector<std::pair<std::string, TimingPath*>> timing_paths;
@@ -115,13 +118,16 @@ void TimingJsonWriter::write()
         json_file << ",";
       }
       std::string group_name = path_group_name;
-      outputTimingPathJson(json_file, *timing_path, group_name, delay_type);
+      auto value = timingPathValue(*timing_path, group_name, delay_type);
+      binary.record(value);
+      json_file << value.dump();
       first_path = false;
       output_count++;
     }
   }
   json_file << "]\n}\n";
   STAUTIL.finishOutputFile(json_file);
+  binary.finish();
 }
 
 std::string TimingJsonWriter::getTimingPathsJsonFilePath()
@@ -129,31 +135,26 @@ std::string TimingJsonWriter::getTimingPathsJsonFilePath()
   return STAUTIL.getString(_config.tr_temp_directory_path, "timing_paths.json");
 }
 
-void TimingJsonWriter::outputTimingPathJson(std::ostream& json_file, TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)
+nlohmann::json TimingJsonWriter::timingPathValue(TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)
 {
-  const std::string analysis_type = delay_type == DelayType::kMax ? "setup" : "hold";
-  const std::string clock_name = _report_path_context.getClockName(timing_path);
-  const std::string check_type = GetTimingCheckTypeName()(timing_path.get_check_type());
-  json_file << "{\"path_id\":\"" << escapeJsonString(getTimingPathId(timing_path, path_group_name, delay_type)) << "\",\"analysis_type\":\"" << analysis_type
-            << "\",\"path_group\":\"" << escapeJsonString(path_group_name) << "\",\"start_point\":\"" << escapeJsonString(timing_path.get_start_point())
-            << "\",\"end_point\":\"" << escapeJsonString(timing_path.get_end_point()) << "\",\"launch_clock\":\"" << escapeJsonString(clock_name)
-            << "\",\"capture_clock\":\"" << escapeJsonString(timing_path.get_capture_clock_name()) << "\",\"check_type\":\"" << escapeJsonString(check_type)
-            << "\",\"slack_ns\":";
-  outputJsonNumber(json_file, timing_path.get_slack());
-  json_file << ",\"arrival_ns\":";
-  outputJsonNumber(json_file, timing_path.get_path_delay());
-  json_file << ",\"required_ns\":";
-  outputJsonNumber(json_file, timing_path.get_required_time());
-  json_file << ",\"cppr_ns\":";
-  outputJsonNumber(json_file, timing_path.get_clock_reconvergence_pessimism());
-  json_file << ",\"launch_clock_source_latency_ns\":";
-  outputJsonNumber(json_file, timing_path.get_launch_clock_source_latency());
-  json_file << ",\"launch_clock_network_delay_ns\":";
-  outputJsonNumber(json_file, timing_path.get_launch_clock_network_delay());
-  json_file << ",\"capture_clock_source_latency_ns\":";
-  outputJsonNumber(json_file, timing_path.get_capture_clock_source_latency());
-  json_file << ",\"capture_clock_network_delay_ns\":";
-  outputJsonNumber(json_file, timing_path.get_capture_clock_network_delay());
+  const auto clock_name = _report_path_context.getClockName(timing_path);
+  nlohmann::json value = {{"path_id", getTimingPathId(timing_path, path_group_name, delay_type)},
+                          {"analysis_type", delay_type == DelayType::kMax ? "setup" : "hold"},
+                          {"path_group", path_group_name},
+                          {"start_point", timing_path.get_start_point()},
+                          {"end_point", timing_path.get_end_point()},
+                          {"launch_clock", clock_name},
+                          {"capture_clock", timing_path.get_capture_clock_name()},
+                          {"check_type", GetTimingCheckTypeName()(timing_path.get_check_type())}};
+  auto number = [&](const char* key, double x) { value[key] = std::isfinite(x) ? nlohmann::json(x) : nlohmann::json(nullptr); };
+  number("slack_ns", timing_path.get_slack());
+  number("arrival_ns", timing_path.get_path_delay());
+  number("required_ns", timing_path.get_required_time());
+  number("cppr_ns", timing_path.get_clock_reconvergence_pessimism());
+  number("launch_clock_source_latency_ns", timing_path.get_launch_clock_source_latency());
+  number("launch_clock_network_delay_ns", timing_path.get_launch_clock_network_delay());
+  number("capture_clock_source_latency_ns", timing_path.get_capture_clock_source_latency());
+  number("capture_clock_network_delay_ns", timing_path.get_capture_clock_network_delay());
   ClockReconvergenceCalculator reconvergence(_database);
   const auto launch_clock_path = timing_path.get_launch_clock_pin().empty()
                                      ? std::vector<ClockPathPointInfo>{}
@@ -166,43 +167,34 @@ void TimingJsonWriter::outputTimingPathJson(std::ostream& json_file, TimingPath&
                                                                        captureAnalysisType(timing_path.get_analysis_type()),
                                                                        localClockTransition(timing_path.get_capture_clock_pin_transition()),
                                                                        clockSourceTransition(timing_path.get_capture_clock_transition()));
-  json_file << ",\"launch_clock_virtual\":" << (isVirtualClock(_database, clock_name) ? "true" : "false");
-  json_file << ",\"launch_clock_source_pin\":\"" << escapeJsonString(clockSourcePin(launch_clock_path)) << "\",\"launch_clock_endpoint_pin\":\""
-            << escapeJsonString(clockEndpointPin(launch_clock_path)) << "\",\"launch_clock_path\":";
-  outputClockPathJson(json_file, _database, launch_clock_path);
-  json_file << ",\"capture_clock_virtual\":" << (isVirtualClock(_database, timing_path.get_capture_clock_name()) ? "true" : "false");
-  json_file << ",\"capture_clock_source_pin\":\"" << escapeJsonString(clockSourcePin(capture_clock_path)) << "\",\"capture_clock_endpoint_pin\":\""
-            << escapeJsonString(clockEndpointPin(capture_clock_path)) << "\",\"capture_clock_path\":";
-  outputClockPathJson(json_file, _database, capture_clock_path);
-  if (std::any_of(timing_path.get_point_list().begin(), timing_path.get_point_list().end(), [](const TimingPathPoint& point) { return point.rcNonbounding(); }))
-    json_file << ",\"rc_nonbounding\":true";
-  json_file << ",\"stages\":[";
-  bool first_stage = true;
-  for (TimingPathPoint& path_point : timing_path.get_point_list()) {
-    if (!first_stage) {
-      json_file << ",";
+  value["launch_clock_virtual"] = isVirtualClock(_database, clock_name);
+  value["capture_clock_virtual"] = isVirtualClock(_database, timing_path.get_capture_clock_name());
+  value["launch_clock_source_pin"] = clockSourcePin(launch_clock_path);
+  value["launch_clock_endpoint_pin"] = clockEndpointPin(launch_clock_path);
+  value["capture_clock_source_pin"] = clockSourcePin(capture_clock_path);
+  value["capture_clock_endpoint_pin"] = clockEndpointPin(capture_clock_path);
+  value["launch_clock_path"] = clockPathValue(_database, launch_clock_path);
+  value["capture_clock_path"] = clockPathValue(_database, capture_clock_path);
+  value["stages"] = nlohmann::json::array();
+  for (auto& point : timing_path.get_point_list()) {
+    auto kind = GetArcTypeName()(point.get_arc_type());
+    kind = kind == "none" ? "point" : kind + "_arc";
+    nlohmann::json stage = {{"kind", kind},
+                            {"pin", point.get_pin_name()},
+                            {"instance", point.get_instance_name()},
+                            {"cell", point.get_cell_name()},
+                            {"transition", GetTransTypeName()(point.get_trans_type())}};
+    stage["incremental_delay_ns"] = std::isfinite(point.get_arc_delay()) ? nlohmann::json(point.get_arc_delay()) : nlohmann::json(nullptr);
+    stage["arrival_ns"] = std::isfinite(point.get_arrival()) ? nlohmann::json(point.get_arrival()) : nlohmann::json(nullptr);
+    if (point.rcFailed())
+      stage["rc_failed"] = true;
+    if (point.rcNonbounding()) {
+      stage["rc_nonbounding"] = true;
+      value["rc_nonbounding"] = true;
     }
-    std::string kind = GetArcTypeName()(path_point.get_arc_type());
-    if (kind == "none") {
-      kind = "point";
-    } else {
-      kind += "_arc";
-    }
-    json_file << "{\"kind\":\"" << kind << "\",\"pin\":\"" << escapeJsonString(path_point.get_pin_name()) << "\",\"instance\":\""
-              << escapeJsonString(path_point.get_instance_name()) << "\",\"cell\":\"" << escapeJsonString(path_point.get_cell_name())
-              << "\",\"incremental_delay_ns\":";
-    outputJsonNumber(json_file, path_point.get_arc_delay());
-    json_file << ",\"arrival_ns\":";
-    outputJsonNumber(json_file, path_point.get_arrival());
-    json_file << ",\"transition\":\"" << GetTransTypeName()(path_point.get_trans_type()) << "\"";
-    if (path_point.rcFailed())
-      json_file << ",\"rc_failed\":true";
-    if (path_point.rcNonbounding())
-      json_file << ",\"rc_nonbounding\":true";
-    json_file << "}";
-    first_stage = false;
+    value["stages"].push_back(std::move(stage));
   }
-  json_file << "]}";
+  return value;
 }
 
 std::string TimingJsonWriter::getTimingPathId(TimingPath& timing_path, std::string& path_group_name, DelayType delay_type)

@@ -23,9 +23,8 @@
 #include "init_egr.h"
 #include "init_idb.h"
 #include "map_layout_writer.h"
-#include "wirelength_lut.h"
-
 #include "utility/logger/Logger.hpp"
+#include "wirelength_lut.h"
 namespace ieval {
 
 #define EVAL_INIT_EGR_INST (ieval::InitEGR::getInst())
@@ -265,6 +264,7 @@ string CongestionEval::evalEGR(string rt_dir_path, string egr_type, string outpu
   }
   out_file.close();
   writeEGRLayoutCsv(rt_dir_path, map_dir, sum_matrix);
+  writeMapDisplay(output_path, sum_matrix, false);
 
   return output_path;
 }
@@ -363,6 +363,7 @@ string CongestionEval::evalRUDY(CongestionNets nets, CongestionRegion region, in
 
   csv_file.close();
   writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
+  writeMapDisplay(output_path, density_grid, true);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -484,6 +485,7 @@ string CongestionEval::evalLUTRUDY(CongestionNets nets, CongestionRegion region,
 
   csv_file.close();
   writeMapLayoutCsv(map_dir, grid_cols, grid_rows, grid_size, region.lx, region.ly, region.ux, region.uy);
+  writeMapDisplay(output_path, density_grid, true);
 
   return getAbsoluteFilePath(output_path);
 }
@@ -644,7 +646,6 @@ int32_t CongestionEval::evalMaxOverflow(string stage, string rt_dir_path, string
     return -1;
   }
   std::string file_path_str = dmInst->get_config().get_feature_path() + "/egr_congestion_map/" + file_name;
-
 
   std::ifstream file(file_path_str);
   if (!file.is_open()) {
