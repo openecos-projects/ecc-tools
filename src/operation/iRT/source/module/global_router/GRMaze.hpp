@@ -26,6 +26,8 @@
 
 namespace irt {
 
+class GRMazeCostContext;
+
 struct GRMazeWorkspace
 {
   static constexpr double kNoEdgeCost = -1.0;
@@ -46,7 +48,7 @@ struct GRMazeWorkspace
   std::vector<int32_t> cost_touched;
 };
 
-bool buildMazePathList(const GRNet& net, const GRGridGraph& grid, const GRParams& params, GRMazeWorkspace& workspace,
-                       std::vector<std::vector<PlanarCoord>>& path_list);
+bool buildMazePathList(const GRNet& net, const GRGridGraph& grid, const GRParams& params, const GRMazeCostContext& cost_context, double length_weight,
+                       GRMazeWorkspace& workspace, std::vector<std::vector<PlanarCoord>>& path_list);
 
 }  // namespace irt

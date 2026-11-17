@@ -17,6 +17,7 @@
 #include "IOPlacer.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -24,7 +25,6 @@
 #include <limits>
 #include <set>
 #include <sstream>
-#include <tuple>
 #include <vector>
 
 #include "DataManager.hpp"
@@ -37,14 +37,6 @@
 namespace ifp {
 
 namespace {
-
-struct PinSlot
-{
-  int64_t cost = 0;
-  int32_t edge_order = 0;
-  IOEdgeType edge_type = IOEdgeType::kNone;
-  int32_t coord = 0;
-};
 
 struct InputPinPlacement
 {
@@ -472,33 +464,62 @@ void IOPlacer::placeIOPinsFromFile(const std::string& file_path)
 void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
 {
   Database& database = FPDM.getDatabase();
-  std::string horizontal_layer_name;
-  std::string vertical_layer_name;
+
+  struct AutoPinLayer
+  {
+    std::string name;
+    std::string access_name;
+    int32_t width = 0;
+    int32_t pitch = 0;
+    int32_t offset = 0;
+  };
+
+  std::vector<AutoPinLayer> horizontal_layers;
+  std::vector<AutoPinLayer> vertical_layers;
+  std::set<std::string> seen_layer_name_set;
   for (std::string& layer_name : layer_name_list) {
     std::map<std::string, int32_t>::iterator routing_layer_iter = database.get_routing_layer_name_to_idx_map().find(layer_name);
     if (routing_layer_iter == database.get_routing_layer_name_to_idx_map().end()) {
+      FPLOG.warn(Loc::current(), "IO layer '", layer_name, "' is not a routing layer; ignored.");
+      continue;
+    }
+    if (!seen_layer_name_set.insert(layer_name).second) {
       continue;
     }
 
     RoutingLayer& routing_layer = database.get_routing_layer_list()[routing_layer_iter->second];
-    if (routing_layer.get_prefer_direction() == Direction::kHorizontal && horizontal_layer_name.empty()) {
-      horizontal_layer_name = routing_layer.get_name();
+    const int32_t width = routing_layer.get_min_width();
+    const int32_t pitch = getTrackPitch(layer_name);
+    if (width <= 0 || pitch <= 0) {
+      FPLOG.warn(Loc::current(), "IO layer '", layer_name, "' has invalid width ", width, " or track pitch ", pitch, "; ignored.");
+      continue;
     }
-    if (routing_layer.get_prefer_direction() == Direction::kVertical && vertical_layer_name.empty()) {
-      vertical_layer_name = routing_layer.get_name();
+
+    AutoPinLayer auto_pin_layer;
+    auto_pin_layer.name = routing_layer.get_name();
+    auto_pin_layer.width = width;
+    auto_pin_layer.pitch = pitch;
+    auto_pin_layer.offset = getTrackOffset(layer_name);
+    if (routing_layer.get_prefer_direction() == Direction::kHorizontal) {
+      horizontal_layers.push_back(auto_pin_layer);
+    } else if (routing_layer.get_prefer_direction() == Direction::kVertical) {
+      vertical_layers.push_back(auto_pin_layer);
+    } else {
+      FPLOG.warn(Loc::current(), "IO layer '", layer_name, "' has no preferred routing direction; ignored.");
     }
-  }
-  if (horizontal_layer_name.empty() || vertical_layer_name.empty()) {
-    return;
   }
 
-  int32_t horizontal_width = getLayerMinWidth(horizontal_layer_name);
-  int32_t vertical_width = getLayerMinWidth(vertical_layer_name);
-  int32_t horizontal_pitch = getTrackPitch(horizontal_layer_name);
-  int32_t vertical_pitch = getTrackPitch(vertical_layer_name);
-  if (horizontal_width <= 0 || vertical_width <= 0 || horizontal_pitch <= 0 || vertical_pitch <= 0) {
-    FPLOG.error(Loc::current(), "IO pin widths and track pitches must be positive!");
+  if (horizontal_layers.empty() || vertical_layers.empty()) {
+    FPLOG.warn(Loc::current(), "Auto IO pin placement requires at least one horizontal and one vertical routing layer.");
     return;
+  }
+  // The access layer only determines the pin depth; use the first perpendicular
+  // layer so every configured pin layer keeps a legal, track-aligned geometry.
+  for (AutoPinLayer& layer : horizontal_layers) {
+    layer.access_name = vertical_layers.front().name;
+  }
+  for (AutoPinLayer& layer : vertical_layers) {
+    layer.access_name = horizontal_layers.front().name;
   }
 
   std::vector<IOPin>& io_pin_list = database.get_io_pin_list();
@@ -507,81 +528,178 @@ void IOPlacer::autoPlacePins(std::vector<std::string>& layer_name_list)
     return;
   }
 
-  int32_t horizontal_offset = getTrackOffset(horizontal_layer_name);
-  int32_t vertical_offset = getTrackOffset(vertical_layer_name);
   Die& die = database.get_die();
   Core& core = database.get_core();
 
-  auto build_slots = [&](int32_t spacing_multiplier) {
-    std::vector<PinSlot> slot_list;
-    auto add_edge_slots = [&](IOEdgeType edge_type, int32_t edge_order, int32_t range_low, int32_t range_high, int32_t die_low,
-                              int32_t die_high, int32_t pin_span, int32_t access_pitch, int32_t track_offset, int32_t track_pitch,
-                              int32_t perpendicular_span) {
-      int32_t legal_low = std::max(range_low, die_low + access_pitch);
-      int32_t legal_high = std::min(range_high, die_high - access_pitch);
-      int32_t lower_half_span = pin_span / 2;
-      int32_t upper_half_span = pin_span - lower_half_span;
-      int32_t start = track_offset + FPUTIL.alignUp(legal_low + lower_half_span - track_offset, track_pitch);
-      int32_t end = track_offset + FPUTIL.alignDown(legal_high - upper_half_span - track_offset, track_pitch);
-      if (start > end) {
-        return;
-      }
-
-      int64_t center2 = static_cast<int64_t>(die_low) + die_high;
-      int32_t anchor = track_offset + FPUTIL.alignNearest(static_cast<int32_t>(center2 / 2) - track_offset, track_pitch);
-      anchor = std::max(start, std::min(end, anchor));
-      int32_t spacing = spacing_multiplier * track_pitch;
-      while (anchor - spacing >= start) {
-        anchor -= spacing;
-      }
-
-      for (int64_t coord = anchor; coord <= end; coord += spacing) {
-        slot_list.push_back(
-            {static_cast<int64_t>(perpendicular_span) + std::abs(2 * coord - center2), edge_order, edge_type, static_cast<int32_t>(coord)});
-      }
-    };
-
-    add_edge_slots(IOEdgeType::kLeft, 0, core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), horizontal_width,
-                   vertical_pitch, horizontal_offset, horizontal_pitch, die.get_width());
-    add_edge_slots(IOEdgeType::kRight, 1, core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), horizontal_width,
-                   vertical_pitch, horizontal_offset, horizontal_pitch, die.get_width());
-    add_edge_slots(IOEdgeType::kBottom, 2, core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), vertical_width,
-                   horizontal_pitch, vertical_offset, vertical_pitch, die.get_height());
-    add_edge_slots(IOEdgeType::kTop, 3, core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), vertical_width,
-                   horizontal_pitch, vertical_offset, vertical_pitch, die.get_height());
-    std::sort(slot_list.begin(), slot_list.end(), [](const PinSlot& lhs, const PinSlot& rhs) {
-      return std::tie(lhs.cost, lhs.edge_order, lhs.coord) < std::tie(rhs.cost, rhs.edge_order, rhs.coord);
-    });
-    return slot_list;
+  struct EdgeRange
+  {
+    int32_t first;
+    int32_t last;
   };
 
-  int32_t spacing_multiplier = 2;
-  std::vector<PinSlot> slot_list = build_slots(spacing_multiplier);
-  if (slot_list.size() < io_pin_list.size()) {
-    spacing_multiplier = 1;
-    slot_list = build_slots(spacing_multiplier);
+  auto get_edge_range = [&](int32_t range_low, int32_t range_high, int32_t die_low, int32_t die_high, int32_t pin_span,
+                            int32_t access_pitch, int32_t track_offset, int32_t track_pitch) {
+    int32_t legal_low = std::max(range_low, die_low + access_pitch);
+    int32_t legal_high = std::min(range_high, die_high - access_pitch);
+    int32_t lower_half_span = pin_span / 2;
+    int32_t upper_half_span = pin_span - lower_half_span;
+    int32_t first = track_offset + FPUTIL.alignUp(legal_low + lower_half_span - track_offset, track_pitch);
+    int32_t last = track_offset + FPUTIL.alignDown(legal_high - upper_half_span - track_offset, track_pitch);
+    return EdgeRange{first, last};
+  };
+
+  auto build_edge_slots = [](const EdgeRange& range, int32_t track_pitch) {
+    std::vector<int32_t> slots;
+    for (int64_t coord = range.first; coord <= range.last; coord += track_pitch) {
+      slots.push_back(static_cast<int32_t>(coord));
+    }
+    return slots;
+  };
+
+  auto get_candidate_layers = [&](bool vertical_edge) -> const std::vector<AutoPinLayer>& {
+    if (vertical_edge) {
+      return horizontal_layers;
+    }
+    return vertical_layers;
+  };
+
+  const std::array<IOEdgeType, 4> edge_type_list{IOEdgeType::kLeft, IOEdgeType::kRight, IOEdgeType::kBottom, IOEdgeType::kTop};
+  std::array<std::vector<std::vector<int32_t>>, 4> edge_slots;
+  std::array<int32_t, 4> slot_counts{};
+  for (int32_t edge_idx = 0; edge_idx < static_cast<int32_t>(edge_type_list.size()); ++edge_idx) {
+    const IOEdgeType edge_type = edge_type_list[edge_idx];
+    const bool vertical_edge = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kRight;
+    const std::vector<AutoPinLayer>& candidate_layers = get_candidate_layers(vertical_edge);
+    const int32_t access_pitch = vertical_edge ? vertical_layers.front().pitch : horizontal_layers.front().pitch;
+    for (const AutoPinLayer& layer : candidate_layers) {
+      EdgeRange range;
+      if (vertical_edge) {
+        range = get_edge_range(core.get_ll_y(), core.get_ur_y(), die.get_ll_y(), die.get_ur_y(), layer.width, access_pitch, layer.offset,
+                               layer.pitch);
+      } else {
+        range = get_edge_range(core.get_ll_x(), core.get_ur_x(), die.get_ll_x(), die.get_ur_x(), layer.width, access_pitch, layer.offset,
+                               layer.pitch);
+      }
+      edge_slots[edge_idx].push_back(build_edge_slots(range, layer.pitch));
+      slot_counts[edge_idx] += static_cast<int32_t>(edge_slots[edge_idx].back().size());
+    }
   }
-  if (slot_list.size() < io_pin_list.size()) {
-    FPLOG.error(Loc::current(), "IO pins exceed the total legal edge capacity at the minimum track pitch spacing.");
+
+  int32_t total_slots = slot_counts[0] + slot_counts[1] + slot_counts[2] + slot_counts[3];
+  if (total_slots <= 0) {
+    return;
+  }
+  if (total_slots < io_pin_num) {
+    FPLOG.error(Loc::current(), "IO pins exceed the total legal track capacity (", io_pin_num, " pins, ", total_slots, " slots).");
     return;
   }
 
-  slot_list.resize(io_pin_list.size());
-  std::sort(slot_list.begin(), slot_list.end(), [](const PinSlot& lhs, const PinSlot& rhs) {
-    return std::tie(lhs.edge_order, lhs.coord) < std::tie(rhs.edge_order, rhs.coord);
-  });
+  int32_t counts[4] = {0, 0, 0, 0};
+  int32_t remaining = io_pin_num;
+  for (int32_t idx = 0; idx < 3; ++idx) {
+    counts[idx] = static_cast<int32_t>((static_cast<int64_t>(io_pin_num) * slot_counts[idx]) / total_slots);
+    remaining -= counts[idx];
+  }
+  counts[3] = remaining;
+  // The proportional split can leave more pins on the last edge than its
+  // tracks can host when the edge lengths differ. Move that excess to edges
+  // with free capacity without changing the normal distribution.
+  if (counts[3] > slot_counts[3]) {
+    int32_t excess = counts[3] - slot_counts[3];
+    counts[3] = slot_counts[3];
+    int32_t edge_cursor = 0;
+    while (excess > 0) {
+      bool moved = false;
+      for (int32_t offset = 0; offset < 4 && excess > 0; ++offset) {
+        const int32_t edge_idx = (edge_cursor + offset) % 4;
+        if (counts[edge_idx] < slot_counts[edge_idx]) {
+          ++counts[edge_idx];
+          --excess;
+          edge_cursor = (edge_idx + 1) % 4;
+          moved = true;
+          break;
+        }
+      }
+      if (!moved) {
+        FPLOG.error(Loc::current(), "IO pins exceed the legal track capacity on the edges.");
+        return;
+      }
+    }
+  }
 
-  for (size_t pin_idx = 0; pin_idx < io_pin_list.size(); ++pin_idx) {
-    const PinSlot& slot = slot_list[pin_idx];
-    bool vertical_edge = slot.edge_type == IOEdgeType::kLeft || slot.edge_type == IOEdgeType::kRight;
-    int32_t width = vertical_edge ? horizontal_width : vertical_width;
-    int32_t depth = calculatePinDepth(slot.edge_type, width, vertical_edge ? horizontal_layer_name : vertical_layer_name,
-                                      vertical_edge ? vertical_layer_name : horizontal_layer_name);
-    int32_t x = vertical_edge ? (slot.edge_type == IOEdgeType::kLeft ? die.get_ll_x() + depth / 2 : die.get_ur_x() - depth / 2)
-                             : slot.coord;
-    int32_t y = vertical_edge ? slot.coord
-                              : (slot.edge_type == IOEdgeType::kBottom ? die.get_ll_y() + depth / 2 : die.get_ur_y() - depth / 2);
-    addIOPinPort(io_pin_list[pin_idx], slot.edge_type, x, y, width, depth, vertical_edge ? horizontal_layer_name : vertical_layer_name);
+  constexpr int32_t max_gap_tracks = 10;
+  int32_t pin_idx = 0;
+  auto place_edge = [&](IOEdgeType edge_type, const std::vector<int32_t>& slots, int32_t count, int32_t width,
+                        const std::string& pin_layer, const std::string& access_layer) {
+    if (count <= 0) {
+      return;
+    }
+    if (static_cast<int32_t>(slots.size()) < count) {
+      FPLOG.error(Loc::current(), "IO pins exceed the legal track capacity on an edge.");
+      return;
+    }
+
+    std::vector<int32_t> selected;
+    selected.reserve(count);
+    if (count == 1) {
+      selected.push_back(slots[slots.size() / 2]);
+    } else {
+      int32_t slot_count = static_cast<int32_t>(slots.size());
+      int32_t span = static_cast<int32_t>(std::min<int64_t>(slot_count - 1, static_cast<int64_t>(count - 1) * max_gap_tracks));
+      int32_t start = (slot_count - 1 - span) / 2;
+      int32_t base = span / (count - 1);
+      int32_t remainder = span % (count - 1);
+      int32_t index = start;
+      for (int32_t idx = 0; idx < count; ++idx) {
+        selected.push_back(slots[index]);
+        if (idx + 1 < count) {
+          index += base + (idx < remainder ? 1 : 0);
+        }
+      }
+    }
+
+    bool vertical_edge = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kRight;
+    for (int32_t coord : selected) {
+      int32_t depth = calculatePinDepth(edge_type, width, pin_layer, access_layer);
+      int32_t x = vertical_edge ? (edge_type == IOEdgeType::kLeft ? die.get_ll_x() + depth / 2 : die.get_ur_x() - depth / 2) : coord;
+      int32_t y = vertical_edge ? coord : (edge_type == IOEdgeType::kBottom ? die.get_ll_y() + depth / 2 : die.get_ur_y() - depth / 2);
+      addIOPinPort(io_pin_list[pin_idx++], edge_type, x, y, width, depth, pin_layer);
+    }
+  };
+
+  for (int32_t edge_idx = 0; edge_idx < static_cast<int32_t>(edge_type_list.size()); ++edge_idx) {
+    const IOEdgeType edge_type = edge_type_list[edge_idx];
+    const bool vertical_edge = edge_type == IOEdgeType::kLeft || edge_type == IOEdgeType::kRight;
+    const std::vector<AutoPinLayer>& candidate_layers = get_candidate_layers(vertical_edge);
+
+    std::vector<int32_t> layer_counts(candidate_layers.size(), 0);
+    int32_t remaining_count = counts[edge_idx];
+    int32_t layer_cursor = 0;
+    while (remaining_count > 0) {
+      bool progress = false;
+      for (size_t offset = 0; offset < candidate_layers.size() && remaining_count > 0; ++offset) {
+        const size_t layer_idx = (static_cast<size_t>(layer_cursor) + offset) % candidate_layers.size();
+        if (layer_counts[layer_idx] < static_cast<int32_t>(edge_slots[edge_idx][layer_idx].size())) {
+          ++layer_counts[layer_idx];
+          --remaining_count;
+          layer_cursor = static_cast<int32_t>((layer_idx + 1) % candidate_layers.size());
+          progress = true;
+          break;
+        }
+      }
+      if (!progress) {
+        FPLOG.error(Loc::current(), "IO pins exceed the legal track capacity on an edge.");
+        return;
+      }
+    }
+
+    for (size_t layer_idx = 0; layer_idx < candidate_layers.size(); ++layer_idx) {
+      if (layer_counts[layer_idx] == 0) {
+        continue;
+      }
+      const AutoPinLayer& layer = candidate_layers[layer_idx];
+      place_edge(edge_type, edge_slots[edge_idx][layer_idx], layer_counts[layer_idx], layer.width, layer.name, layer.access_name);
+    }
   }
 }
 

@@ -1070,6 +1070,7 @@ bool checkPGExport(const std::string& directory, idb::IdbLefService& lef, idb::I
   master->set_type("BLOCK");
   master->set_width(1000);
   master->set_height(1000);
+  master->add_term("PWR");
   idb::IdbInstance* macro = design->get_instance_list()->add_instance("macro");
   macro->set_cell_master(master);
   macro->set_orient(idb::IdbOrient::kN_R0);
@@ -1080,11 +1081,24 @@ bool checkPGExport(const std::string& directory, idb::IdbLefService& lef, idb::I
   route_halo->set_layer_bottom(lef.get_layout()->get_layers()->find_layer("M99"));
   route_halo->set_layer_top(lef.get_layout()->get_layers()->find_layer("M10"));
 
+  // Verilog may connect a supply pin as an ordinary wire.  The shadow NETS
+  // entry must be removed once the PG net owns that terminal.
+  design->connectInstancePinToNet("macro", "PWR", "VDD_A");
+  for (PGNet& pg_net : FPDM.getDatabase().get_pg_net_list()) {
+    if (pg_net.get_name() == "VDD_A") {
+      pg_net.add_instance_pin("macro", "PWR");
+    }
+  }
+
   FPI.outputPGNetList();
   FPI.outputPGNetList();
-  bool passed = check(design->get_net_list()->get_num() == 1 && design->get_net_list()->find_net("DATA") != nullptr,
-                      "PG export must remove empty shadow nets and preserve unrelated signal nets")
+  bool passed = check(design->get_net_list()->get_num() == 1 && design->get_net_list()->find_net("DATA") != nullptr
+                          && design->get_net_list()->find_net("VDD_A") == nullptr,
+                      "PG export must remove empty and fully covered shadow nets and preserve unrelated signal nets")
                 && check(design->get_special_net_list()->get_num() == 2, "Repeated PG binding must not duplicate special nets");
+  idb::IdbSpecialNet* exported_power = design->get_special_net_list()->find_net("VDD_A");
+  passed = check(exported_power != nullptr && exported_power->get_instance_pin_list()->contains("PWR", "macro"),
+                 "Covered shadow terminal must survive on the exported SPECIALNETS net") && passed;
   for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
     segment.set_generated(true);
   }
@@ -1146,6 +1160,101 @@ void addIDBViaRule(idb::IdbLefService& lef, std::string bottom_name, std::string
   rule->get_enclosure_top()->set_overhang_1(40);
   rule->get_enclosure_top()->set_overhang_2(35);
   cut->set_via_rule(rule);
+}
+
+bool testStripeEndKeepsCollinearIoWire(const std::string& directory)
+{
+  idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
+  idb::IdbDefService* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  addIDBViaRule(lef, "M99", "VIA_TRIM_TEST", "M10");
+  initFixture(directory);
+  addConnect("M99", "M10");
+
+  // One crossing keeps the stripe alive; the collinear IO extension touches
+  // its top endpoint exactly and must not be trimmed away.
+  addLine("VDD_A", "M99", PGSegmentType::kStripe, 5000, 10000, 15000, 10000, 1000);
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 10000, 2003, 10000, 22003, 1000);
+  FPDM.getDatabase().get_pg_segment_list().back().set_generated(true);
+  addLine("VDD_A", "M10", PGSegmentType::kIoWire, 10000, 22003, 10000, 23000, 1000);
+
+  FPPG.generate();
+
+  bool stripe_found = false;
+  bool io_wire_found = false;
+  bool end_preserved = false;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_net_name() != "VDD_A" || segment.get_layer_name() != "M10") {
+      continue;
+    }
+    if (segment.get_type() == PGSegmentType::kStripe && segment.get_start_x() == 10000 && segment.get_end_x() == 10000) {
+      stripe_found = true;
+      end_preserved = segment.get_end_y() == 22003;
+    } else if (segment.get_type() == PGSegmentType::kIoWire) {
+      io_wire_found = true;
+    }
+  }
+
+  bool passed = check(stripe_found, "Generated stripe must survive the final trim pass");
+  passed = check(io_wire_found, "Collinear IO extension must survive the final trim pass") && passed;
+  passed = check(end_preserved, "Final trim must not detach a collinear IO extension from the stripe endpoint") && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
+bool testIoWireSkipsLayerVia(const std::string& directory)
+{
+  idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
+  idb::IdbDefService* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  addIDBViaRule(lef, "M99", "VIA_IO_TEST", "M10");
+  initFixture(directory);
+  addConnect("M99", "M10");
+
+  // A crossing IO wire must stay a same-layer connection.
+  addLine("VDD_A", "M99", PGSegmentType::kStripe, 1000, 10000, 20000, 10000, 1000);
+  addLine("VDD_A", "M10", PGSegmentType::kIoWire, 10000, 9000, 10000, 11000, 1000);
+  // A regular stripe crossing still receives its layer-connect via.
+  addLine("VSS_B", "M99", PGSegmentType::kStripe, 1000, 5000, 20000, 5000, 1000);
+  addLine("VSS_B", "M10", PGSegmentType::kStripe, 15000, 4000, 15000, 6000, 1000);
+
+  FPPG.generate();
+
+  bool io_via = false;
+  bool regular_via = false;
+  for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() != PGSegmentType::kVia) {
+      continue;
+    }
+    const bool crosses = (segment.get_bottom_layer_name() == "M99" && segment.get_top_layer_name() == "M10")
+                         || (segment.get_bottom_layer_name() == "M10" && segment.get_top_layer_name() == "M99");
+    if (!crosses) {
+      continue;
+    }
+    io_via = io_via || segment.get_net_name() == "VDD_A";
+    regular_via = regular_via || segment.get_net_name() == "VSS_B";
+  }
+
+  bool passed = check(!io_via, "Layer connect must not insert vias on IO-core connection wires");
+  passed = check(regular_via, "Layer connect must keep vias for regular PG stripe crossings") && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
 }
 
 bool testConfiguredRailWidth(const std::string& directory)
@@ -1375,6 +1484,8 @@ int main(int argc, char* argv[])
   passed = ifp::testUncoveredEdgeStripe(directory) && passed;
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
+  passed = ifp::testStripeEndKeepsCollinearIoWire(directory) && passed;
+  passed = ifp::testIoWireSkipsLayerVia(directory) && passed;
   passed = ifp::testConfiguredRailWidth(directory) && passed;
   passed = ifp::testViaMinimumArea(directory) && passed;
   passed = ifp::testTechnologyEdgeStripe(directory) && passed;

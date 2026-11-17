@@ -19,9 +19,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "EXTLayerRect.hpp"
+#include "GRCost.hpp"
 #include "GRGridGraph.hpp"
 #include "GRMaze.hpp"
 #include "GRNet.hpp"
@@ -59,27 +61,38 @@ class GlobalRouter
   void initNetList();
 
   // route
-  void patternRoute();
+  void trialRouteReserveSupply();
+  void applyUniformReserve();
+  void clearTrialRoute();
+  void refreshNetExemptEdgeSet();
+  void patternRoute(const std::string& stage);
   void detourRoute();
   std::vector<size_t> getOverflowNetIndexList() const;
   void mazeRouteFailedNets();
   void mazeRerouteOverflowNets();
   double getTotalRoutingCost() const;
   bool routeNetByMaze(GRNet& net);
+  bool buildNetMazeTree(const GRNet& net, const GRParams& params, GRTree& tree);
   void fallbackRoute();
+  void cleanupDetourNets();
 
   // output
   void uploadGRResult();
+  void reportDetourStat(const std::string& stage);
+  void reportSupplyReserve(const std::string& stage) const;
   void printSummary() const;
   bool isLayerInRange(int32_t layer_idx) const;
   void debugPlot(const std::string& flag) const;
+  void debugExport(const std::string& flag) const;
 
   GRParams params_;
   GRGridGraph grid_graph_;
   std::vector<GRNet> net_list_;
+  GRMazeCostContext maze_cost_context_;
   GRMazeWorkspace maze_workspace_;
   std::vector<size_t> pattern_failed_net_idx_list_;
   std::vector<size_t> unrouted_net_idx_list_;
+  std::vector<std::pair<size_t, GRTree>> trial_ghost_tree_list_;
 };
 
 }  // namespace irt

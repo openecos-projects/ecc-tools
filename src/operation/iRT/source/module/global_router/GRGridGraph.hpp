@@ -47,12 +47,15 @@ struct GRWireEdgeId
 struct GRWireEdge
 {
   double supply = 0.0;
-  double fixed_demand = 0.0;
+  double blocked_demand = 0.0;
+  double reserved_supply = 0.0;
   double routing_demand = 0.0;
 
   // fixed_demand is already removed from usable supply, so demand only counts routing demand.
   double getDemand() const { return routing_demand; }
-  double getUsableSupply() const { return std::max(0.0, supply - fixed_demand); }
+  double getFixedDemand() const { return blocked_demand + reserved_supply; }
+  double getBaseSupply() const { return std::max(0.0, supply - blocked_demand); }
+  double getUsableSupply() const { return std::max(0.0, supply - getFixedDemand()); }
   double getOverflow() const { return std::max(0.0, getDemand() - getUsableSupply()); }
 };
 
@@ -73,6 +76,10 @@ struct GRLayerUsage
   double overflow = 0.0;
   double max_overflow = 0.0;
   int32_t overflow_edge_num = 0;
+  double raw_supply = 0.0;
+  double blocked_demand = 0.0;
+  double reserved_supply = 0.0;
+  int32_t reserved_edge_num = 0;
 };
 
 class GRGridGraph
@@ -81,7 +88,8 @@ class GRGridGraph
   GRGridGraph() = default;
 
   void init(const GRGridShape& shape);
-  void setSupply(const GRWireEdgeId& edge_id, int32_t supply_num, int32_t usable_num);
+  void setSupply(const GRWireEdgeId& edge_id, int32_t supply_num, int32_t blocked_num);
+  void addReserved(const GRWireEdgeId& edge_id, double delta);
   void addDemand(const GRWireEdgeId& edge_id, double delta, const char* demand_type);
 
   int32_t getXSize() const { return x_size_; }
@@ -98,6 +106,7 @@ class GRGridGraph
   const GridMap<GRWireEdge>& getEdgeMap(int32_t layer_idx) const { return edge_map_[layer_idx]; }
 
   double getTotalOverflow() const;
+  double getTotalDemand() const;
   GRLayerUsage getLayerUsage(int32_t layer_idx) const;
 
  private:

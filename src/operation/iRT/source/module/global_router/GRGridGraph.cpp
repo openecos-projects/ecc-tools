@@ -43,11 +43,20 @@ void GRGridGraph::init(const GRGridShape& shape)
   }
 }
 
-void GRGridGraph::setSupply(const GRWireEdgeId& edge_id, int32_t supply_num, int32_t usable_num)
+void GRGridGraph::setSupply(const GRWireEdgeId& edge_id, int32_t supply_num, int32_t blocked_num)
 {
   GRWireEdge& edge = getWireEdge(edge_id);
   edge.supply = static_cast<double>(supply_num);
-  edge.fixed_demand = static_cast<double>(supply_num - usable_num);
+  edge.blocked_demand = static_cast<double>(blocked_num);
+}
+
+void GRGridGraph::addReserved(const GRWireEdgeId& edge_id, double delta)
+{
+  GRWireEdge& edge = getWireEdge(edge_id);
+  if (delta < 0.0) {
+    RTLOG.error(Loc::current(), "The added reserved supply is negative!");
+  }
+  edge.reserved_supply = std::min(edge.reserved_supply + delta, edge.getBaseSupply());
 }
 
 void GRGridGraph::addDemand(const GRWireEdgeId& edge_id, double delta, const char* demand_type)
@@ -85,6 +94,20 @@ double GRGridGraph::getTotalOverflow() const
   return total_overflow;
 }
 
+double GRGridGraph::getTotalDemand() const
+{
+  double total_demand = 0.0;
+  for (int32_t layer_idx = bottom_layer_idx_; layer_idx <= top_layer_idx_; layer_idx++) {
+    const GridMap<GRWireEdge>& edge_map = edge_map_[layer_idx];
+    for (int32_t x = 0; x < edge_map.get_x_size(); x++) {
+      for (int32_t y = 0; y < edge_map.get_y_size(); y++) {
+        total_demand += edge_map[x][y].getDemand();
+      }
+    }
+  }
+  return total_demand;
+}
+
 GRLayerUsage GRGridGraph::getLayerUsage(int32_t layer_idx) const
 {
   GRLayerUsage layer_usage;
@@ -94,6 +117,12 @@ GRLayerUsage GRGridGraph::getLayerUsage(int32_t layer_idx) const
       const GRWireEdge& edge = edge_map[x][y];
       layer_usage.supply += edge.getUsableSupply();
       layer_usage.demand += edge.getDemand();
+      layer_usage.raw_supply += edge.supply;
+      layer_usage.blocked_demand += edge.blocked_demand;
+      layer_usage.reserved_supply += edge.reserved_supply;
+      if (edge.reserved_supply > GRParams::kEpsilon) {
+        layer_usage.reserved_edge_num++;
+      }
       double overflow = edge.getOverflow();
       layer_usage.overflow += overflow;
       layer_usage.max_overflow = std::max(layer_usage.max_overflow, overflow);
