@@ -56,7 +56,7 @@ class PeakPowerEngine
   PeakPowerEngine& operator=(PeakPowerEngine&& other) = delete;
   // function
   double check(const std::string& vcd_file_path);
-  // 峰值流程用 PTPX time_based 口径（X 折算、初始 X 处理见 VcdTransitionModel.hh）。
+  // 峰值流程用 time_based 口径（X 折算、初始 X 处理见 VcdTransitionModel.hh）。
   vcd::ActivityModelOptions buildActivityModelOptions() const;
   double resolveWindowLength();
   int32_t resolveThreadNum();

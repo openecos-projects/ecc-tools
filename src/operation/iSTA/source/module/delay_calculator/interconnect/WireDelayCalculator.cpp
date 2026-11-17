@@ -192,7 +192,7 @@ double WireDelayCalculator::calcParasiticDelay(Arc& arc, AnalysisType analysis_t
   }
   // calcParasiticDelay prefers the Arnoldi cache, then DMP, then the input-port
   // solve, then bare Elmore. Only the Arnoldi path has been compared against
-  // reference so far (FINDINGS 298). ISTA_WIRE_PREFER_DMP=1 skips the Arnoldi
+  // reference so far. ISTA_WIRE_PREFER_DMP=1 skips the Arnoldi
   // entry so the DMP result can be compared on the same arcs.
   static const bool prefer_dmp = [] {
     const char* e = std::getenv("ISTA_WIRE_PREFER_DMP");
