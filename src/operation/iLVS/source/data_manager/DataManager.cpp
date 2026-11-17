@@ -234,6 +234,7 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
       = physical_graph_build_data.get_net_terminal_build_data_map();
 
   DisjointSet graph(static_cast<int32_t>(graph_node_list.size()));
+  // Retain PG geometry even when its component is not shorted.
   std::vector<uint8_t> keep_net_shape_list(physical_graph.get_net_routing_graph_list().size(), 0);
   for (const std::string& net_name : physical_graph.get_power_net_name_set()) {
     int32_t net_id = physical_graph.getNetId(net_name);
@@ -273,16 +274,11 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
     bg_rect_node_pair_list.reserve(node_idx_list.size());
     for (int32_t node_idx : node_idx_list) {
       const PhysicalGraphBuildNode& graph_node = graph_node_list[node_idx];
-      // Signal terminals stay out of the index. A PG terminal joins it so an IO-ring
-      // pin can abut the next cell's pin without a DEF routing segment between them.
-      if (graph_node.get_is_terminal() && !keep_net_shape_list[graph_node.get_net_id()]) {
-        continue;
-      }
+      // Index every pin RECT so direct pin contacts participate in physical connectivity.
       bg_rect_node_pair_list.emplace_back(convertToBGRectInt(graph_node.get_shape()), node_idx);
     }
     bgi::rtree<std::pair<BGRectInt, int32_t>, bgi::quadratic<16>> bg_rtree(bg_rect_node_pair_list);
-    // The disjoint set is shared by every layer thread, so PG-pin abutment is recorded
-    // here and applied after the parallel loop.
+    // Keep terminal contacts deferred until all same-layer scans have finished.
     std::vector<std::pair<int32_t, int32_t>>& terminal_abutment_list = layer_terminal_abutment_list[layer_work_idx];
 
 #pragma omp critical(ilvs_physical_graph_log)
@@ -294,15 +290,11 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
            query_iter != bg_rtree.qend(); ++query_iter) {
         const std::pair<BGRectInt, int32_t>& candidate_rect_node_pair = *query_iter;
         int32_t active_node_idx = candidate_rect_node_pair.second;
-        if (!graph_node_list[node_idx].get_is_terminal() && active_node_idx >= node_idx) {
+        if (active_node_idx >= node_idx) {
           continue;
         }
-        // Two terminals connect only when they belong to the same PG net. Different nets
-        // that touch stay disconnected here and are still reported as a short.
+        // Cross-net contacts must join the component so short detection can see both nets.
         bool terminal_abutment = graph_node_list[node_idx].get_is_terminal() && graph_node_list[active_node_idx].get_is_terminal();
-        if (terminal_abutment && graph_node_list[node_idx].get_net_id() != graph_node_list[active_node_idx].get_net_id()) {
-          continue;
-        }
         const Shape& active_shape = graph_node_list[active_node_idx].get_shape();
         if (active_shape.get_ll_x() <= node_shape.get_ur_x() && node_shape.get_ll_x() <= active_shape.get_ur_x()
             && active_shape.get_ll_y() <= node_shape.get_ur_y() && node_shape.get_ll_y() <= active_shape.get_ur_y()) {
@@ -318,7 +310,7 @@ void DataManager::buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_g
     LVSLOG.info(Loc::current(), "Completed layer ", layer_idx, " routing connectivity.");
   }
 
-  LVSLOG.info(Loc::current(), "Building PG terminal abutment...");
+  LVSLOG.info(Loc::current(), "Building terminal abutment...");
   for (std::vector<std::pair<int32_t, int32_t>>& terminal_abutment_list : layer_terminal_abutment_list) {
     for (auto& [first_node_idx, second_node_idx] : terminal_abutment_list) {
       graph.unite(first_node_idx, second_node_idx);

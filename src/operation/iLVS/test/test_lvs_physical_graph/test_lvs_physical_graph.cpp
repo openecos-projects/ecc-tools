@@ -21,6 +21,8 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <map>
+#include <omp.h>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -94,6 +96,26 @@ void check(int expected_shorts, int expected_opens = 0)
   expect(summary.open_net_num == expected_opens, "unexpected routing open count");
 }
 
+using ShortNetSets = std::multiset<std::vector<std::string>>;
+
+ShortNetSets shortNetSets()
+{
+  ShortNetSets result;
+  for (const auto& violation : LVSDM.getDatabase().get_summary().rc_summary.violation_list) {
+    if (violation.get_violation_type() == ilvs::ViolationType::kRoutingShort) {
+      auto names = violation.get_related_net_name_list();
+      std::sort(names.begin(), names.end());
+      result.insert(names);
+    }
+  }
+  return result;
+}
+
+void expectShortNets(const ShortNetSets& expected)
+{
+  expect(shortNetSets() == expected, "wrong short violation net ownership or count");
+}
+
 }  // namespace
 
 int main()
@@ -105,6 +127,119 @@ int main()
       pin("victim", "U/A", shape(0, 0, 0, 10, 10));
       wire("aggressor", shape(0, 9, 5, 20, 6));
       check(1);
+    }},
+    {"wire_before_foreign_signal_pin_still_shorts", [] {
+      wire("aggressor", shape(0, 9, 5, 20, 6));
+      pin("victim", "U/A", shape(0, 0, 0, 10, 10));
+      check(1);
+      expectShortNets({{"aggressor", "victim"}});
+    }},
+    {"signal_pin_area_overlap_without_wire_is_a_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("second", "U2/A", shape(0, 5, 5, 15, 15));
+      check(1);
+      expectShortNets({{"first", "second"}});
+      expect(graph().get_component_shape_list(graph().get_short_component_id_list().front()).size() == 2,
+             "pin-only short lost its geometry");
+    }},
+    {"signal_pin_shared_edge_without_wire_is_a_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("second", "U2/A", shape(0, 10, 0, 20, 10));
+      check(1);
+      expectShortNets({{"first", "second"}});
+    }},
+    {"signal_pin_shared_corner_without_wire_is_a_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("second", "U2/A", shape(0, 10, 10, 20, 20));
+      check(1);
+      expectShortNets({{"first", "second"}});
+    }},
+    {"signal_power_pin_contact_without_wire_is_a_short", [] {
+      graph().get_power_net_name_set().insert("VDD");
+      pin("VDD", "U1/VDD", shape(0, 0, 0, 10, 10));
+      pin("signal", "U2/A", shape(0, 10, 0, 20, 10));
+      check(1);
+      expectShortNets({{"VDD", "signal"}});
+    }},
+    {"signal_ground_pin_contact_without_wire_is_a_short", [] {
+      graph().get_ground_net_name_set().insert("VSS");
+      pin("signal", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("VSS", "U2/VSS", shape(0, 10, 0, 20, 10));
+      check(1);
+      expectShortNets({{"VSS", "signal"}});
+    }},
+    {"power_ground_pin_contact_without_wire_is_a_short", [] {
+      graph().get_power_net_name_set().insert("VDD");
+      graph().get_ground_net_name_set().insert("VSS");
+      pin("VDD", "U1/VDD", shape(0, 0, 0, 10, 10));
+      pin("VSS", "U2/VSS", shape(0, 10, 0, 20, 10));
+      check(1);
+      expectShortNets({{"VDD", "VSS"}});
+    }},
+    {"pin_one_dbu_gap_is_not_a_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("second", "U2/A", shape(0, 11, 0, 20, 10));
+      check(0);
+    }},
+    {"pins_on_different_layers_are_not_a_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("second", "U2/A", shape(1, 0, 0, 10, 10));
+      check(0);
+    }},
+    {"pin_bounding_box_overlap_without_rect_contact_is_not_a_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 2, 2));
+      pin("first", "U1/A", shape(0, 8, 0, 10, 2));
+      pin("second", "U2/A", shape(0, 4, 0, 6, 2));
+      check(0);
+    }},
+    {"multiple_rect_contacts_in_one_component_report_one_short", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("first", "U1/A", shape(0, 20, 0, 30, 10));
+      pin("second", "U2/A", shape(0, 5, 5, 15, 15));
+      pin("second", "U2/A", shape(0, 25, 5, 35, 15));
+      check(1);
+      expectShortNets({{"first", "second"}});
+      expect(graph().get_component_shape_list(graph().get_short_component_id_list().front()).size() == 4,
+             "multi-RECT short lost or duplicated geometry");
+    }},
+    {"separate_pin_contacts_between_same_nets_report_two_components", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("first", "U2/A", shape(0, 20, 0, 30, 10));
+      pin("second", "U3/A", shape(0, 5, 5, 15, 15));
+      pin("second", "U4/A", shape(0, 25, 5, 35, 15));
+      check(2, 2);
+      expectShortNets({{"first", "second"}, {"first", "second"}});
+    }},
+    {"three_net_pin_contact_chain_reports_all_nets", [] {
+      pin("first", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("second", "U2/A", shape(0, 10, 0, 20, 10));
+      pin("third", "U3/A", shape(0, 20, 0, 30, 10));
+      check(1);
+      expectShortNets({{"first", "second", "third"}});
+    }},
+    {"foreign_pin_bypass_does_not_hide_same_net_open", [] {
+      pin("victim", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("victim", "U2/A", shape(0, 20, 0, 30, 10));
+      pin("bridge", "U3/A", shape(0, 5, 5, 25, 6));
+      check(1, 1);
+      expectShortNets({{"bridge", "victim"}});
+      const auto& violations = LVSDM.getDatabase().get_summary().rc_summary.violation_list;
+      auto open = std::find_if(violations.begin(), violations.end(), [](const auto& violation) {
+        return violation.get_violation_type() == ilvs::ViolationType::kRoutingOpen;
+      });
+      expect(open != violations.end() && open->get_net_name() == "victim"
+                 && open->get_terminal_name_list() == std::vector<std::string>{"U2/A"},
+             "foreign pin bypass masked the disconnected terminal");
+    }},
+    {"pin_contacts_across_three_layers_join_through_one_terminal", [] {
+      pin("victim", "U/A", shape(0, 0, 0, 10, 10));
+      pin("victim", "U/A", shape(1, 100, 100, 110, 110));
+      pin("victim", "U/A", shape(2, 200, 200, 210, 210));
+      pin("first", "U1/A", shape(0, 10, 0, 20, 10));
+      pin("second", "U2/A", shape(1, 110, 100, 120, 110));
+      pin("third", "U3/A", shape(2, 210, 200, 220, 210));
+      check(1);
+      expectShortNets({{"first", "second", "third", "victim"}});
     }},
     {"mdu_three_reported_contacts", [] {
       pin("u_core/n319", "u_core/U819/A0", shape(0, 1212625, 1558655, 1212925, 1558745));
@@ -156,6 +291,15 @@ int main()
       pin("pad", "PIN/IN", shape(0, 0, 0, 10, 10));
       pin("pad", "PAD/PAD", shape(0, 5, 5, 15, 15));
       check(0);
+      auto& components = graph().get_terminal_component_map();
+      expect(components.at("PIN/IN") == components.at("PAD/PAD"), "same-net pad contact was lost");
+    }},
+    {"same_net_signal_pin_abutment_is_connected", [] {
+      pin("n", "U1/A", shape(0, 0, 0, 10, 10));
+      pin("n", "U2/A", shape(0, 10, 0, 20, 10));
+      check(0);
+      auto& components = graph().get_terminal_component_map();
+      expect(components.at("U1/A") == components.at("U2/A"), "same-net signal pin abutment was lost");
     }},
     {"pg_pin_abutment_is_preserved", [] {
       graph().get_power_net_name_set().insert("VDD");
@@ -177,16 +321,26 @@ int main()
     }},
   };
   int failed = 0;
-  for (const auto& [name, run] : tests) {
-    LVSDM.getDatabase().reset();
-    LVSDM.getConfig().thread_number = 3;
-    graph().reserveNetNum(20);
-    try {
-      run();
-      std::cout << "RESULT PASS " << name << '\n';
-    } catch (const std::exception& error) {
-      ++failed;
-      std::cout << "RESULT FAIL " << name << ": " << error.what() << '\n';
+  std::map<std::string, ShortNetSets> single_thread_shorts;
+  omp_set_dynamic(0);
+  for (int thread_number : {1, 3}) {
+    omp_set_num_threads(thread_number);
+    for (const auto& [name, run] : tests) {
+      LVSDM.getDatabase().reset();
+      LVSDM.getConfig().thread_number = thread_number;
+      graph().reserveNetNum(20);
+      try {
+        run();
+        if (thread_number == 1) {
+          single_thread_shorts[name] = shortNetSets();
+        } else {
+          expect(shortNetSets() == single_thread_shorts.at(name), "short components differ between one and three threads");
+        }
+        std::cout << "RESULT PASS " << name << " threads=" << thread_number << '\n';
+      } catch (const std::exception& error) {
+        ++failed;
+        std::cout << "RESULT FAIL " << name << " threads=" << thread_number << ": " << error.what() << '\n';
+      }
     }
   }
   ilvs::DataManager::destroyInst();
