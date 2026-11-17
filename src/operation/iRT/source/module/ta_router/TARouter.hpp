@@ -94,7 +94,8 @@ class TARouter
   int32_t getPinTrackTarget(const TANet& ta_net, const TAEdge& edge, bool is_horizontal) const;
   // assign
   void assignTracks(TANet& ta_net);
-  void assignWireTrack(TANet& ta_net, TAEdge& edge);
+  void assignWireTrack(TANet& ta_net, const std::vector<int32_t>& run_edge_idx_list);
+  std::vector<std::vector<int32_t>> buildStraightRunList(const TANet& ta_net) const;
   void commitNetUsage(TANet& ta_net);
   void addViaUsage(TANet& ta_net, const TAEdge& edge);
   void rerouteOverflowNets();

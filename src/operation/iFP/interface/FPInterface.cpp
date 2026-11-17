@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <fstream>
 #include <cmath>
+#include <set>
 #include <sstream>
 
 #include "DataManager.hpp"
@@ -1253,19 +1254,36 @@ void FPInterface::outputPGNetList()
   idb::IdbDesign* idb_design = dmInst->get_idb_design();
   for (PGNet& pg_net : FPDM.getDatabase().get_pg_net_list()) {
     idb::IdbNet* shadow_net = idb_design->get_net_list()->find_net(pg_net.get_name());
+    bool remove_shadow_net = false;
     if (shadow_net != nullptr) {
-      if (shadow_net->get_pin_number() != 0 || shadow_net->get_segment_num() != 0) {
+      // A NETS entry can be dropped only when it carries no routing and all of
+      // its terminals are already owned by the PG net.  Verilog often connects
+      // PAD/PLL supply pins as ordinary wires; leaving both NETS and SPECIALNETS
+      // would export the same connectivity twice.
+      const std::set<std::pair<std::string, std::string>> pg_terminals(pg_net.get_instance_pins().begin(),
+                                                                      pg_net.get_instance_pins().end());
+      bool covered = shadow_net->get_segment_num() == 0;
+      if (covered && shadow_net->get_instance_pin_list() != nullptr) {
+        for (idb::IdbPin* pin : shadow_net->get_instance_pin_list()->get_pin_list()) {
+          idb::IdbInstance* instance = pin == nullptr ? nullptr : pin->get_instance();
+          if (instance == nullptr || !pg_terminals.contains({instance->get_name(), pin->get_pin_name()})) {
+            covered = false;
+            break;
+          }
+        }
+      }
+      if (covered && shadow_net->get_io_pins() != nullptr && !shadow_net->get_io_pins()->get_pin_list().empty()) {
+        // Top-level PG PINS are removed by outputIOPinList; any that survived
+        // would lose their only connectivity if the NETS entry were dropped.
+        covered = false;
+      }
+      if (!covered) {
         FPLOG.error(Loc::current(), "NETS entry '", pg_net.get_name(),
                     "' duplicates SPECIALNETS and is not empty; refusing to export ambiguous DEF.");
         _run_failed = true;
         continue;
       }
-      if (!idb_design->removeNetSafe(pg_net.get_name())) {
-        FPLOG.error(Loc::current(), "Failed to remove empty shadow NETS entry '", pg_net.get_name(), "'.");
-        _run_failed = true;
-        continue;
-      }
-      FPLOG.info(Loc::current(), "Removed empty shadow NETS entry '", pg_net.get_name(), "'.");
+      remove_shadow_net = true;
     }
     idb::IdbConnectType connect_type = idb::IdbConnectType::kNone;
     if (pg_net.get_type() == PGNetType::kPower) {
@@ -1300,6 +1318,16 @@ void FPInterface::outputPGNetList()
     }
     if (!idb_design->connectPinsToSpecialNet(instance_pins, idb_special_net)) {
       FPLOG.error(Loc::current(), "Cannot bind instance pins to PG net '", pg_net.get_name(), "'.");
+    }
+    if (remove_shadow_net) {
+      // Bind SPECIALNETS first so removing the NETS entry cannot erase the only
+      // remaining connectivity.  removeNetSafe() clears regular-net refs only.
+      if (!idb_design->removeNetSafe(pg_net.get_name())) {
+        FPLOG.error(Loc::current(), "Failed to remove shadow NETS entry '", pg_net.get_name(), "'.");
+        _run_failed = true;
+        continue;
+      }
+      FPLOG.info(Loc::current(), "Removed shadow NETS entry '", pg_net.get_name(), "'.");
     }
     // Power/ground is exported through SPECIALNETS and IO-cell terminals only;
     // do not recreate top-level PINS for it.

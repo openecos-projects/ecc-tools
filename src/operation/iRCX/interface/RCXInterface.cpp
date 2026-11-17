@@ -313,6 +313,9 @@ void RCXInterface::plotSpef(std::map<std::string, std::any> config_map)
 
 void RCXInterface::input(std::map<std::string, std::any>& config_map)
 {
+  if (dmInst == nullptr || dmInst->get_idb_lef_service() == nullptr || dmInst->get_idb_def_service() == nullptr) {
+    RCXLOG.error(Loc::current(), "iRCX requires an initialized LEF layout and DEF design. Load LEF and DEF before initializing iRCX.");
+  }
   wrapConfig(config_map);
   wrapDatabase();
 }

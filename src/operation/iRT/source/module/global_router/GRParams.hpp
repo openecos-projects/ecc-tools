@@ -26,15 +26,33 @@ struct GRParams
   static constexpr double kEpsilon = 1e-6;
 
   double unit_wire_cost = 1.0;
-  double initial_cost_weight = 20.0;
+  double initial_cost_weight = 10.0;
   double cost_weight = initial_cost_weight;
-  double congestion_saturation_ratio = 0.8;
+  double max_cost_weight = 40.0;
   double congestion_hotspot_ratio = 0.9;
   double via_base_cost = 2.0;
   double via_demand = 0.5;
-  int32_t max_detour_offset = 8;
+  double maze_wire_length_weight = 0.5;
+  double maze_detour_ratio_weight = 10.0;
+  double maze_detour_ratio_free = 1.5;
+  double maze_detour_ratio_reweight_start = 1.5;
+  int32_t maze_detour_ratio_power = 2;
+  int32_t max_detour_offset = 4;
   double max_detour_length_ratio = 0.25;
+  bool enable_u_pattern = true;
+  bool enable_inner_3bend = true;
+  int32_t max_inner_3bend_point = 64;
   int32_t max_shift_round = 1;
+  double cleanup_detour_ratio = 2.0;
+  double cleanup_min_excess_length = 20.0;
+  double cleanup_accept_length_ratio = 0.9;
+  int32_t cleanup_max_net_num = 2000;
+  bool enable_supply_trial = true;
+  bool trial_ghost_failed_net = true;
+  int32_t trial_smooth_radius = 2;
+  double trial_smooth_neighbor_ratio = 0.75;
+  double trial_reserve_start_ratio = 0.6;
+  bool trial_keep_last_track = true;
 };
 
 }  // namespace irt
