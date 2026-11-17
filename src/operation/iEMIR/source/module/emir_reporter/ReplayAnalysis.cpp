@@ -14,17 +14,8 @@ void EMIRReporter::outputReplayAnalysis()
     using Json = nlohmann::json;
     auto views = Json::array();
     for (auto& [net, graph] : EMIRDM.getDatabase().get_power_graph_map()) {
-      auto ir = Json::array();
       auto em = Json::array();
       size_t evaluated = 0, missing = 0;
-      for (auto& node : graph.get_node_list()) {
-        const auto x = node.get_x(), y = node.get_y();
-        ir.push_back(
-            {{"label", net + ":" + std::to_string(node.get_node_id())},
-             {"value", getIRSeverity(graph, node)},
-             {"bboxes", {{x, y, x, y}}},
-             {"details", {{"voltage_v", node.get_voltage()}, {"source", node.get_is_source()}, {"layer", getLayerName(graph, node.get_layer_idx())}}}});
-      }
       for (auto& edge : graph.get_edge_list()) {
         if (!edge.get_is_em_checkable())
           continue;
@@ -54,8 +45,7 @@ void EMIRReporter::outputReplayAnalysis()
         }
         em.push_back(std::move(item));
       }
-      views.push_back(
-          {{"label", net + " · IR drop"}, {"kind", "ir"}, {"unit", "V"}, {"items", std::move(ir)}, {"summary", {{"nodes", graph.get_node_list().size()}}}});
+      views.push_back(buildIRView(graph));
       views.push_back({{"label", net + " · EM evaluation"},
                        {"kind", "em"},
                        {"unit", "%"},
