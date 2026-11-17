@@ -5,6 +5,7 @@ add_library(ipw_power_reporter
 
 target_link_libraries(ipw_power_reporter
     PUBLIC
+    geometry_data
     ipw_data_manager
     ipw_toolkit
 )

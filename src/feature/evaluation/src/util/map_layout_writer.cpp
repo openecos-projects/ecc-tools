@@ -11,6 +11,8 @@
 #include <fstream>
 #include <sstream>
 
+#include "GeometryDisplayWriter.h"
+
 namespace ieval {
 
 namespace {
@@ -26,14 +28,71 @@ bool writeCells(const std::string& map_dir, const std::vector<MapLayoutCell>& ce
   }
 
   layout_file << "pixel_row,pixel_col,grid_x,grid_y,lx,ly,ux,uy\n";
+  using Writer = ecc::geometry::GeometryDisplayWriter;
+  Writer binary(std::filesystem::path(map_dir) / "layout.glayout", {{"kind", "layout"}, {"key", "layout"}, {"label", "layout"}},
+                Writer::Encoding::kCells);
   for (const MapLayoutCell& cell : cells) {
-    layout_file << cell.pixel_row << "," << cell.pixel_col << "," << cell.grid_x << "," << cell.grid_y << "," << cell.lx << ","
-                << cell.ly << "," << cell.ux << "," << cell.uy << "\n";
+    binary.cell(cell.pixel_row, cell.pixel_col, {cell.lx, cell.ly, cell.ux, cell.uy}, 0.0);
+    layout_file << cell.pixel_row << "," << cell.pixel_col << "," << cell.grid_x << "," << cell.grid_y << "," << cell.lx << "," << cell.ly
+                << "," << cell.ux << "," << cell.uy << "\n";
   }
+  binary.finish();
 
   return true;
 }
 }  // namespace
+
+void writeMapDisplay(const std::string& csv_path, const std::vector<std::vector<double>>& matrix, bool reverse_rows)
+{
+  using Writer = ecc::geometry::GeometryDisplayWriter;
+  if (matrix.empty() || matrix.front().empty())
+    return;
+  const std::filesystem::path source(csv_path);
+  const auto category = source.parent_path().filename().string();
+  auto destination = source;
+  destination.replace_extension(".gdisplay");
+  std::ifstream layout(source.parent_path() / "layout.glayout", std::ios::binary);
+  layout.exceptions(std::ios::failbit | std::ios::badbit);
+  auto integer = [&](unsigned count) {
+    uint64_t value = 0;
+    for (unsigned i = 0; i < count; ++i)
+      value |= uint64_t(static_cast<unsigned char>(layout.get())) << (i * 8);
+    return value;
+  };
+  char magic[8];
+  layout.read(magic, 8);
+  if (std::string(magic, 8) != "ECOSDSP1" || integer(4) != 1 || integer(4) != 1)
+    throw std::runtime_error("Invalid map layout binary");
+  const auto metadata = integer(4);
+  if (integer(4) != 32)
+    throw std::runtime_error("Invalid layout cell size");
+  const auto count = integer(8);
+  integer(8);
+  layout.seekg(40 + metadata);
+  Writer output(destination,
+                {{"kind", "map"},
+                 {"key", category + ":" + source.stem().string()},
+                 {"label", source.stem().string()},
+                 {"category", category},
+                 {"rows", matrix.size()},
+                 {"columns", matrix.front().size()},
+                 {"coordinate_unit", "dbu"}},
+                Writer::Encoding::kCells);
+  for (uint64_t i = 0; i < count; ++i) {
+    const auto row = integer(4), col = integer(4);
+    std::array<int32_t, 4> bounds;
+    for (auto& value : bounds)
+      value = static_cast<int32_t>(integer(4));
+    integer(8);
+    if (row >= matrix.size() || col >= matrix.front().size())
+      throw std::runtime_error("Map layout exceeds matrix");
+    const auto& values = matrix[reverse_rows ? matrix.size() - 1 - row : row];
+    if (values.size() != matrix.front().size())
+      throw std::runtime_error("Ragged map matrix");
+    output.cell(row, col, bounds, values[col]);
+  }
+  output.finish();
+}
 
 bool writeMapLayoutCsv(const std::string& map_dir, int32_t grid_cols, int32_t grid_rows, int32_t grid_size, int32_t lx, int32_t ly,
                        int32_t ux, int32_t uy)

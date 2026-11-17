@@ -14,6 +14,7 @@ add_library(ilvs_lvs_reporter
 target_link_libraries(ilvs_lvs_reporter
     PUBLIC
     fort
+    geometry_data
     ilvs_data_manager
     ilvs_module
     ilvs_toolkit

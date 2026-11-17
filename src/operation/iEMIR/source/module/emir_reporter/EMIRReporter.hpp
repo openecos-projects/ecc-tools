@@ -93,7 +93,6 @@ class EMIRReporter
   void outputEMReportHeader(std::ofstream* em_report_file, bool worst_only);
   void outputResNetworkReport();
   void outputReplayAnalysis();
-  nlohmann::json buildIRView(PowerGraph& graph);
   void outputIRSpatial();
   void outputResNetworkReportFile(const std::string& report_file_path);
   void outputResNetworkReportHeader(std::ofstream* res_network_report_file);

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "ClockTreeSchema.h"
+#include "GeometryDisplayWriter.h"
 #include "GeometrySnapshotSchema.h"
 #include "json.hpp"
 
@@ -78,7 +79,7 @@ bool write_file_bytes(const std::filesystem::path& path, const std::vector<char>
   return static_cast<bool>(file);
 }
 
-bool write_drc_file(const std::filesystem::path& path, const GeometryDrcDistribution& distribution)
+bool write_legacy_drc_file(const std::filesystem::path& path, const GeometryDrcDistribution& distribution)
 {
   nlohmann::json drc;
   drc["number"] = 0;
@@ -113,6 +114,35 @@ bool write_drc_file(const std::filesystem::path& path, const GeometryDrcDistribu
   }
   file << nlohmann::json{{"drc", std::move(drc)}}.dump() << '\n';
   return static_cast<bool>(file);
+}
+
+bool write_drc_file(const std::filesystem::path& path, const GeometryDrcDistribution& distribution)
+{
+  auto text_path = path;
+  text_path.replace_extension(".json");
+  if (!write_legacy_drc_file(text_path, distribution))
+    return false;
+  GeometryDisplayWriter writer(path, {{"kind", "drc"}, {"key", "drc"}, {"label", "DRC violations"}},
+                               GeometryDisplayWriter::Encoding::kRecords);
+  for (const auto& [type, layers] : distribution) {
+    for (const auto& [layer, violations] : layers) {
+      for (const auto& violation : violations) {
+        nlohmann::json entry = {{"type", type},
+                                {"layer", layer},
+                                {"llx", violation.bbox.lx},
+                                {"lly", violation.bbox.ly},
+                                {"urx", violation.bbox.hx},
+                                {"ury", violation.bbox.hy},
+                                {"net", violation.nets},
+                                {"inst", violation.instances}};
+        if (violation.required_size)
+          entry["required_size"] = *violation.required_size;
+        writer.record(entry);
+      }
+    }
+  }
+  writer.finish();
+  return true;
 }
 
 bool file_bytes_equal(const std::filesystem::path& path, const std::vector<char>& bytes)
@@ -546,66 +576,102 @@ bool write_grid_metadata_file(const std::filesystem::path& path, std::span<const
 
 bool write_connectivity_metadata_file(const std::filesystem::path& path, std::span<const GeometryConnectivityMetadata> connectivity)
 {
-  std::ofstream file(path);
+  auto text_path = path;
+  text_path.replace_extension(".txt");
+  std::ofstream file(text_path);
   if (!file) {
     return false;
   }
 
+  GeometryDisplayWriter binary(path, {{"kind", "connectivity"}, {"key", "connectivity"}, {"label", "connectivity"}},
+                               GeometryDisplayWriter::Encoding::kRecords);
   file << "net\tkind\tendpoint_type\tinstance\tpin\tmaster\n";
   for (const GeometryConnectivityMetadata& endpoint : connectivity) {
+    binary.record({{"net_name", endpoint.net_name},
+                   {"net_kind", endpoint.net_kind},
+                   {"endpoint_type", endpoint.endpoint_type},
+                   {"instance_name", endpoint.instance_name},
+                   {"pin_name", endpoint.pin_name},
+                   {"master_name", endpoint.master_name}});
     file << sanitize_layer_text(endpoint.net_name, "") << '\t' << sanitize_layer_text(endpoint.net_kind, "other") << '\t'
          << sanitize_layer_text(endpoint.endpoint_type, "unknown") << '\t' << sanitize_layer_text(endpoint.instance_name, "") << '\t'
          << sanitize_layer_text(endpoint.pin_name, "") << '\t' << sanitize_layer_text(endpoint.master_name, "") << '\n';
   }
 
+  binary.finish();
   return static_cast<bool>(file);
 }
 
 bool write_net_metadata_file(const std::filesystem::path& path, std::span<const GeometryNetMetadata> nets)
 {
-  std::ofstream file(path);
+  auto text_path = path;
+  text_path.replace_extension(".txt");
+  std::ofstream file(text_path);
   if (!file) {
     return false;
   }
 
+  GeometryDisplayWriter binary(path, {{"kind", "net"}, {"key", "net"}, {"label", "net"}}, GeometryDisplayWriter::Encoding::kRecords);
   file << "name\tkind\n";
   for (const GeometryNetMetadata& net : nets) {
+    binary.record({{"name", net.name}, {"kind", net.kind}});
     file << sanitize_layer_text(net.name, "") << '\t' << sanitize_layer_text(net.kind, "other") << '\n';
   }
 
+  binary.finish();
   return static_cast<bool>(file);
 }
 
 bool write_bus_metadata_file(const std::filesystem::path& path, std::span<const GeometryBusMetadata> buses)
 {
-  std::ofstream file(path);
+  auto text_path = path;
+  text_path.replace_extension(".txt");
+  std::ofstream file(text_path);
   if (!file) {
     return false;
   }
 
+  GeometryDisplayWriter binary(path, {{"kind", "bus"}, {"key", "bus"}, {"label", "bus"}}, GeometryDisplayWriter::Encoding::kRecords);
   file << "name\ttype\tleft\tright\tnet_count\tpin_count\tnets\tpins\n";
   for (const GeometryBusMetadata& bus : buses) {
+    binary.record({{"name", bus.name},
+                   {"bus_type", bus.bus_type},
+                   {"left", bus.left},
+                   {"right", bus.right},
+                   {"net_count", bus.net_count},
+                   {"pin_count", bus.pin_count},
+                   {"net_names", bus.net_names},
+                   {"pin_names", bus.pin_names}});
     file << sanitize_layer_text(bus.name, "") << '\t' << sanitize_layer_text(bus.bus_type, "unknown") << '\t' << bus.left << '\t'
          << bus.right << '\t' << bus.net_count << '\t' << bus.pin_count << '\t' << join_metadata_names(bus.net_names) << '\t'
          << join_metadata_names(bus.pin_names) << '\n';
   }
 
+  binary.finish();
   return static_cast<bool>(file);
 }
 
 bool write_group_metadata_file(const std::filesystem::path& path, std::span<const GeometryGroupMetadata> groups)
 {
-  std::ofstream file(path);
+  auto text_path = path;
+  text_path.replace_extension(".txt");
+  std::ofstream file(text_path);
   if (!file) {
     return false;
   }
 
+  GeometryDisplayWriter binary(path, {{"kind", "group"}, {"key", "group"}, {"label", "group"}}, GeometryDisplayWriter::Encoding::kRecords);
   file << "name\tregion\tinstance_count\tinstances\n";
   for (const GeometryGroupMetadata& group : groups) {
+    binary.record({{"name", group.name},
+                   {"region_name", group.region_name},
+                   {"instance_count", group.instance_count},
+                   {"instance_names", group.instance_names}});
     file << sanitize_layer_text(group.name, "") << '\t' << sanitize_layer_text(group.region_name, "") << '\t' << group.instance_count
          << '\t' << join_metadata_names(group.instance_names) << '\n';
   }
 
+  binary.finish();
   return static_cast<bool>(file);
 }
 
@@ -749,12 +815,12 @@ SnapshotWriteResult GeometrySnapshotWriter::write(GeometryStore& store, const Sn
   paths.masters = (std::filesystem::path(file_prefix) / "geometry.masters.txt").generic_string();
   paths.vias = (std::filesystem::path(file_prefix) / "geometry.vias.txt").generic_string();
   paths.grids = (std::filesystem::path(file_prefix) / "geometry.grids.txt").generic_string();
-  paths.connectivity = (std::filesystem::path(file_prefix) / "geometry.connectivity.txt").generic_string();
-  paths.nets = (std::filesystem::path(file_prefix) / "geometry.nets.txt").generic_string();
-  paths.buses = (std::filesystem::path(file_prefix) / "geometry.buses.txt").generic_string();
-  paths.groups = (std::filesystem::path(file_prefix) / "geometry.groups.txt").generic_string();
+  paths.connectivity = (std::filesystem::path(file_prefix) / "geometry.connectivity.gdisplay").generic_string();
+  paths.nets = (std::filesystem::path(file_prefix) / "geometry.nets.gdisplay").generic_string();
+  paths.buses = (std::filesystem::path(file_prefix) / "geometry.buses.gdisplay").generic_string();
+  paths.groups = (std::filesystem::path(file_prefix) / "geometry.groups.gdisplay").generic_string();
   if (options.drc) {
-    paths.drc = (std::filesystem::path(file_prefix) / "geometry.drc.json").generic_string();
+    paths.drc = (std::filesystem::path(file_prefix) / "geometry.drc.gdisplay").generic_string();
   }
   bool wrote_clock_tree = true;
   if (options.clock_tree) {

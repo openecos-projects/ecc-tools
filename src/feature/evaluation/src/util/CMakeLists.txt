@@ -19,6 +19,7 @@ target_include_directories(eval_util_general_ops
 add_library(eval_util_map_layout_writer
     ${EVAL_UTIL}/map_layout_writer.cpp
 )
+target_link_libraries(eval_util_map_layout_writer PUBLIC geometry_data)
 
 target_include_directories(eval_util_map_layout_writer
     PUBLIC

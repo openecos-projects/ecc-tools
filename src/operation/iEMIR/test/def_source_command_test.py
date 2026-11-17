@@ -1,6 +1,8 @@
 """Check explicit DEF supply selection through real Tcl/Python solves."""
 import csv
 import json
+import struct
+import math
 from pathlib import Path
 import subprocess
 import sys
@@ -53,19 +55,23 @@ END DESIGN
 
 
 def source_counts(directory):
-    spatial_path = directory / "emir_reporter" / "ir_drop.json"
-    spatial = json.loads(spatial_path.read_text())
-    assert spatial["schema"] == "ecos.emir.ir.v1"
-    assert spatial["coordinate_unit"] == "dbu" and spatial["dbu_per_micron"] == 1000
-    assert {v["summary"]["net"] for v in spatial["views"]} == {"VDD", "VSS"}
-    for view in spatial["views"]:
-        assert view["unit"] == "V" and view["basis"] == "final" and view["items"]
-        for item in view["items"]:
-            x, y, hx, hy = item["bboxes"][0]
-            assert (x, y) == (hx, hy) and x >= 100000 and y >= 200000
-            assert item["details"]["layer"] == "M1"
-            expected = abs(item["details"]["voltage_v"] - item["details"]["ideal_voltage_v"])
-            assert abs(item["value"] - expected) < 1e-12
+    networks = set()
+    for path in (directory / "emir_reporter").glob("ir-*-0.gdisplay"):
+        data = path.read_bytes()
+        magic, version, encoding, size, record_size, count, index = struct.unpack_from("<8sIIIIQQ", data)
+        assert (magic, version, encoding, record_size, index) == (b"ECOSDSP1", 1, 1, 32, 0)
+        meta = json.loads(data[40:40 + size])
+        assert meta["coordinate_unit"] == "dbu" and meta["dbu_per_micron"] == 1000
+        assert meta["unit"] == "V" and meta["layer"] == "" and count > 0
+        networks.add(meta["network"])
+        maximum = 0
+        for row, col, lx, ly, hx, hy, value in struct.iter_unpack("<IIiiiid", data[40 + size:]):
+            assert row < meta["rows"] and col < meta["columns"]
+            assert 100000 <= lx < hx and 200000 <= ly < hy
+            assert math.isfinite(value) and value >= 0
+            maximum = max(maximum, value)
+        assert abs(maximum - meta["maximum"]) < 1e-12
+    assert networks == {"VDD", "VSS"}
     with (directory / "ir_analyzer" / "solver_diagnostics.csv").open() as stream:
         rows = list(csv.DictReader(stream))
     return {row["net"]: int(row["source_count"]) for row in rows}

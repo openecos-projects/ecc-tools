@@ -2,6 +2,8 @@
 #include "PowerReporter.hpp"
 
 #include "DataManager.hpp"
+#include "GeometryDisplayWriter.h"
+#include <memory>
 
 namespace ipw {
 
@@ -12,10 +14,7 @@ void PowerReporter::outputInstancePowerGeometry()
   const auto staging = destination.parent_path() / "power.tmp";
   std::filesystem::remove_all(staging);
   std::filesystem::create_directories(staging / "power_map");
-  std::ifstream source(std::filesystem::path(config.pr_temp_directory_path) / "instance_power.tsv");
-  if (!source) {
-    throw std::runtime_error("Missing instance power report");
-  }
+
   auto open = [&](const std::filesystem::path& name) {
     std::ofstream stream;
     stream.exceptions(std::ios::failbit | std::ios::badbit);
@@ -33,36 +32,72 @@ void PowerReporter::outputInstancePowerGeometry()
   for (size_t i = 0; i < components.size(); ++i) {
     maps[i] = open("power_map/" + components[i] + "_power_w.csv");
   }
+  using Writer = ecc::geometry::GeometryDisplayWriter;
+  auto& database = PWDM.getDatabase();
+  auto& powers = database.get_instance_power_list();
+  auto& peak = database.get_peak_power_summary();
+  const bool is_peak = peak.get_is_enabled();
   size_t reported = 0, matched = 0;
-  std::string line;
-  while (std::getline(source, line)) {
-    if (line.empty() || line[0] == '#' || line.starts_with("instance_name\t")) {
-      continue;
+  Writer names(
+      std::filesystem::path(config.pr_temp_directory_path) / "power-instances.gdisplay",
+      {{"kind", "power_instances"}, {"key", "power:instances"}, {"label", "Power instances"}},
+      Writer::Encoding::kRecords
+  );
+  std::array<std::unique_ptr<Writer>, 4> binary;
+  for (size_t i = 0; i < components.size(); ++i) {
+    binary[i] = std::make_unique<Writer>(
+        std::filesystem::path(config.pr_temp_directory_path) / (components[i] + "-power.gdisplay"),
+        nlohmann::json{
+            {"kind", "power"},
+            {"key", "power:" + components[i]},
+            {"label", components[i] + " power [W]"},
+            {"category", "power_map"},
+            {"unit", "W"},
+            {"coordinate_unit", "dbu"},
+            {"component", components[i]},
+            {"rows", config.replay_instance_bounds.size()},
+            {"columns", 1},
+            {"basis", is_peak ? "per_instance_peak" : "average"}},
+        Writer::Encoding::kCells
+    );
+  }
+  for (auto& [name, instance] : database.get_instance_map()) {
+    auto& normal = powers.at(instance.get_instance_id());
+    auto* value = &normal.get_power_value();
+    if (is_peak) {
+      auto* p = peak.findInstancePeakValue(instance.get_instance_id());
+      if (!p)
+        continue;
+      value = &p->get_power_value();
     }
     ++reported;
-    std::istringstream row(line);
-    std::vector<std::string> fields;
-    std::string field;
-    while (std::getline(row, field, '\t')) fields.push_back(field);
-    if (fields.size() != 7) throw std::runtime_error("Invalid instance power row");
-    const auto bounds = config.replay_instance_bounds.find(fields[0]);
-    if (bounds == config.replay_instance_bounds.end()) continue;
+    const auto bounds = config.replay_instance_bounds.find(name);
+    if (bounds == config.replay_instance_bounds.end())
+      continue;
     const auto& b = bounds->second;
-    geometry << fields[0];
-    for (auto coordinate : b) geometry << '\t' << coordinate;
+    const double internal = std::max(0.0, value->get_internal_power());
+    const std::array<double, 4> values
+        = {internal,
+           value->get_switching_power(),
+           value->get_leakage_power(),
+           internal + value->get_switching_power() + value->get_leakage_power()};
+    names.record(name);
+    geometry << name;
+    for (auto coordinate : b)
+      geometry << '\t' << coordinate;
     for (size_t i = 0; i < components.size(); ++i) {
-      size_t consumed = 0;
-      const double value = std::stod(fields[i + 2], &consumed);
-      if (consumed != fields[i + 2].size() || !std::isfinite(value) || value < 0.0) {
+      if (!std::isfinite(values[i]) || values[i] < 0.0)
         throw std::runtime_error("Invalid instance power value");
-      }
-      geometry << '\t' << fields[i + 2];
-      maps[i] << fields[i + 2] << '\n';
+      geometry << '\t' << values[i];
+      maps[i] << values[i] << '\n';
+      binary[i]->cell(matched, 0, b, values[i]);
     }
     geometry << '\n';
     layout << matched++ << ",0," << b[0] << ',' << b[1] << ',' << b[2] << ',' << b[3] << '\n';
   }
-  if (source.bad()) throw std::runtime_error("Cannot read instance power report");
+  names.finish();
+  for (auto& writer : binary)
+    writer->finish();
   geometry.close();
   layout.close();
   for (auto& map : maps) map.close();

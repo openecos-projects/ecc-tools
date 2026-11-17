@@ -18,6 +18,7 @@
 
 #include "DataManager.hpp"
 #include "Direction.hpp"
+#include "GeometryDisplayWriter.h"
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Net.hpp"
@@ -63,8 +64,10 @@ class SPEFWriter
   void writePortList(std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map);
   char getSPEFDirection(Direction direction);
   void writeLayerMap(SWModel& sw_model, std::ofstream& spef_file_stream);
-  void writeDNetList(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx);
-  void writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx, int32_t net_idx);
+  void writeDNetList(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+                     int32_t corner_idx);
+  void writeDNet(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+                 int32_t corner_idx, int32_t net_idx);
   void getNearestNodePair(TopoEdge& self_edge, TopoEdge& other_edge, int32_t& self_node_idx, int32_t& other_node_idx);
   std::string getNodeSPEFName(SPEFNameMap& spef_name_map, TopoNode& node);
   Direction getPinDirection(Net& net, const std::string& pin_name);

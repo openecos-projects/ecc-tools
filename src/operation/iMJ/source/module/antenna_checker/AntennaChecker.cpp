@@ -26,6 +26,7 @@
 #include "ACUFNode.hpp"
 #include "ACUnionFind.hpp"
 #include "DataManager.hpp"
+#include "GeometryDisplayWriter.h"
 #include "IdbDesign.h"
 #include "IdbInstance.h"
 #include "IdbLayer.h"
@@ -1990,8 +1991,12 @@ void AntennaChecker::writeReport(const ACModel& ac_model) const
           {"conductors_out_of_range", ac_model.get_conductors_out_of_range().load()},
           {"partial_areas_dropped", ac_model.get_partial_areas_dropped().load()}}},
         {"violations", nlohmann::json::array()}};
+    auto binary_path = json_path;
+    binary_path.replace_extension(".gdisplay");
+    ecc::geometry::GeometryDisplayWriter binary(binary_path, {{"kind", "antenna"}, {"key", "antenna"}, {"label", "Antenna violations"}},
+                                                ecc::geometry::GeometryDisplayWriter::Encoding::kRecords);
     for (const ACViolation& violation : ac_model.get_violation_list()) {
-      payload["violations"].push_back({
+      nlohmann::json row = {
           {"net", violation.net_name},
           {"layer", violation.layer_name},
           {"type", GetACViolationTypeName()(violation.type)},
@@ -2005,8 +2010,11 @@ void AntennaChecker::writeReport(const ACModel& ac_model) const
           {"side_area", violation.side_area},
           {"cut_area", violation.cut_area},
           {"location", {{"lx", violation.lx}, {"ly", violation.ly}, {"hx", violation.hx}, {"hy", violation.hy}}},
-      });
+      };
+      binary.record(row);
+      payload["violations"].push_back(std::move(row));
     }
+    binary.finish();
     std::ofstream output(json_path);
     if (!output.is_open()) {
       MJLOG.error(Loc::current(), "Failed to write antenna step JSON: ", json_path.string());

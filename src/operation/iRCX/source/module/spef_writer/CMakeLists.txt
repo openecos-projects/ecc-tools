@@ -13,6 +13,7 @@ add_library(ircx_spef_writer
 
 target_link_libraries(ircx_spef_writer
     PUBLIC
+    geometry_data
     ircx_data_manager
     ircx_module
     ircx_toolkit

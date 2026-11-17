@@ -134,7 +134,17 @@ void SPEFWriter::writeSPEF(SWModel& sw_model, SPEFNameMap& spef_name_map, int32_
   writeNameMap(*spef_file_stream, spef_name_map);
   writePortList(*spef_file_stream, spef_name_map);
   writeLayerMap(sw_model, *spef_file_stream);
-  writeDNetList(sw_model, *spef_file_stream, spef_name_map, corner_idx);
+  auto display_path = spef_file_path;
+  display_path.replace_extension(".gdisplay");
+  ecc::geometry::GeometryDisplayWriter display(display_path,
+                                               {{"kind", "rcx"},
+                                                {"key", "rcx:" + corner_data.get_corner_name()},
+                                                {"label", spef_file_path.stem().string() + " · SPEF extraction"},
+                                                {"corner", corner_data.get_corner_name()},
+                                                {"unit", "fF"}},
+                                               ecc::geometry::GeometryDisplayWriter::Encoding::kRecords);
+  writeDNetList(display, sw_model, *spef_file_stream, spef_name_map, corner_idx);
+  display.finish();
   RCXUTIL.closeFileStream(spef_file_stream);
   RCXLOG.info(Loc::current(), "Wrote SPEF: ", spef_file_path.string());
 }
@@ -303,15 +313,17 @@ void SPEFWriter::writeLayerMap(SWModel& sw_model, std::ofstream& spef_file_strea
   }
 }
 
-void SPEFWriter::writeDNetList(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx)
+void SPEFWriter::writeDNetList(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+                               int32_t corner_idx)
 {
   int32_t net_num = RCXDM.getDatabase().get_layout_data().get_regular_net_num();
   for (int32_t net_idx = 0; net_idx < net_num; ++net_idx) {
-    writeDNet(sw_model, spef_file_stream, spef_name_map, corner_idx, net_idx);
+    writeDNet(display, sw_model, spef_file_stream, spef_name_map, corner_idx, net_idx);
   }
 }
 
-void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map, int32_t corner_idx, int32_t net_idx)
+void SPEFWriter::writeDNet(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+                           int32_t corner_idx, int32_t net_idx)
 {
   Database& database = RCXDM.getDatabase();
   Net& net = database.get_layout_data().get_net_list()[net_idx];
@@ -366,6 +378,7 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
     total_capacitance += coupling_capacitance;
   }
 
+  display.record({{"label", net.get_net_name()}, {"nets", {net.get_net_name()}}, {"value", total_capacitance}});
   double micron_per_dbu = 1 / 1.0 / database.get_layout_data().get_dbu_per_micron();
   spef_file_stream << "\n*D_NET " << net_spef_name << " " << std::fixed << std::setprecision(6) << total_capacitance << "\n\n";
   // IEEE 1481-1998 requires *CONN to contain at least one *P or *I connection; omit *CONN on pinless nets.

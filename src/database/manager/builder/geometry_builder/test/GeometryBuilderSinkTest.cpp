@@ -1,26 +1,3 @@
-#include "GeometrySink.h"
-#include "GeometryEditApplier.h"
-#include "GeometryEditJson.h"
-#include "GeometryEditSession.h"
-#include "GeometryBuilder.h"
-#include "GeometryNameQuery.h"
-#include "GeometrySnapshotReader.h"
-#include "GeometrySnapshotExporter.h"
-#include "GeometrySnapshotWorkflow.h"
-#include "GeometrySnapshotWriter.h"
-#include "StoreGeometrySink.h"
-
-#include "GeometryStore.h"
-#include "GeometrySnapshotSchema.h"
-#include "IdbDesign.h"
-#include "IdbInstance.h"
-#include "IdbCellMaster.h"
-#include "IdbLayer.h"
-#include "IdbObs.h"
-#include "IdbViaMaster.h"
-#include "IdbVias.h"
-#include "json.hpp"
-
 #include <cassert>
 #include <filesystem>
 #include <fstream>
@@ -28,6 +5,28 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#include "GeometryBuilder.h"
+#include "GeometryEditApplier.h"
+#include "GeometryEditJson.h"
+#include "GeometryEditSession.h"
+#include "GeometryNameQuery.h"
+#include "GeometrySink.h"
+#include "GeometrySnapshotExporter.h"
+#include "GeometrySnapshotReader.h"
+#include "GeometrySnapshotSchema.h"
+#include "GeometrySnapshotWorkflow.h"
+#include "GeometrySnapshotWriter.h"
+#include "GeometryStore.h"
+#include "IdbCellMaster.h"
+#include "IdbDesign.h"
+#include "IdbInstance.h"
+#include "IdbLayer.h"
+#include "IdbObs.h"
+#include "IdbViaMaster.h"
+#include "IdbVias.h"
+#include "StoreGeometrySink.h"
+#include "json.hpp"
 
 namespace {
 
@@ -3428,10 +3427,10 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(manifest.find("geometry.masters.txt") != std::string::npos);
   assert(manifest.find("geometry.vias.txt") != std::string::npos);
   assert(manifest.find("geometry.grids.txt") != std::string::npos);
-  assert(manifest.find("geometry.connectivity.txt") != std::string::npos);
-  assert(manifest.find("geometry.nets.txt") != std::string::npos);
-  assert(manifest.find("geometry.buses.txt") != std::string::npos);
-  assert(manifest.find("geometry.groups.txt") != std::string::npos);
+  assert(manifest.find("geometry.connectivity.gdisplay") != std::string::npos);
+  assert(manifest.find("geometry.nets.gdisplay") != std::string::npos);
+  assert(manifest.find("geometry.buses.gdisplay") != std::string::npos);
+  assert(manifest.find("geometry.groups.gdisplay") != std::string::npos);
 
   const std::string layer_manifest = read_text_file(layers_path);
   assert(layer_manifest.find("layer_id\torder\ttype\tdirection\twidth\tpitch_x\tpitch_y\tname") != std::string::npos);
@@ -3461,19 +3460,19 @@ void test_geometry_snapshot_writer_writes_manifest_and_core_binary_files()
   assert(grid_manifest.find("type\tindex\tdirection\tstart\tstep\tcount\twidth\tlayers") != std::string::npos);
   assert(grid_manifest.find("track\t0\tx\t100\t200\t4\t2\tM1,M2") != std::string::npos);
 
-  const std::string connectivity_manifest = read_text_file(connectivity_path);
+  const std::string connectivity_manifest = read_text_file(std::filesystem::path(connectivity_path).replace_extension(".txt"));
   assert(connectivity_manifest.find("net\tkind\tendpoint_type\tinstance\tpin\tmaster") != std::string::npos);
   assert(connectivity_manifest.find("clk\tclock\tinstance\tu0\tA\tINVX1") != std::string::npos);
 
-  const std::string nets_manifest = read_text_file(nets_path);
+  const std::string nets_manifest = read_text_file(std::filesystem::path(nets_path).replace_extension(".txt"));
   assert(nets_manifest.find("name\tkind") != std::string::npos);
   assert(nets_manifest.find("clk\tclock") != std::string::npos);
 
-  const std::string bus_manifest = read_text_file(buses_path);
+  const std::string bus_manifest = read_text_file(std::filesystem::path(buses_path).replace_extension(".txt"));
   assert(bus_manifest.find("name\ttype\tleft\tright\tnet_count\tpin_count\tnets\tpins") != std::string::npos);
   assert(bus_manifest.find("data\tnet\t7\t0\t2\t1\tdata[0],data[1]\tDATA_IN") != std::string::npos);
 
-  const std::string group_manifest = read_text_file(groups_path);
+  const std::string group_manifest = read_text_file(std::filesystem::path(groups_path).replace_extension(".txt"));
   assert(group_manifest.find("name\tregion\tinstance_count\tinstances") != std::string::npos);
   assert(group_manifest.find("cluster0\tregion0\t2\tu0,u1") != std::string::npos);
 
@@ -3749,7 +3748,7 @@ void test_geometry_snapshot_writer_publishes_hierarchical_drc_in_same_epoch()
   assert(!drc_path.empty());
   const std::filesystem::path first_drc = output_dir / drc_path;
   assert(std::filesystem::exists(first_drc));
-  const auto json = nlohmann::json::parse(read_text_file(first_drc));
+  const auto json = nlohmann::json::parse(read_text_file(std::filesystem::path(first_drc).replace_extension(".json")));
   assert(json["drc"]["number"] == 2);
   assert(json["drc"]["distribution"]["MetalShort"]["number"] == 2);
   assert(json["drc"]["distribution"]["MetalShort"]["layers"]["MET1"]["number"] == 1);
@@ -3767,7 +3766,8 @@ void test_geometry_snapshot_writer_publishes_hierarchical_drc_in_same_epoch()
   empty_options.drc.emplace();
   const SnapshotWriteResult third = writer.write(store, empty_options);
   assert(third.ok);
-  const auto empty_json = nlohmann::json::parse(read_text_file(output_dir / manifest_value(manifest, "drc")));
+  const auto empty_json = nlohmann::json::parse(
+      read_text_file(std::filesystem::path(output_dir / manifest_value(manifest, "drc")).replace_extension(".json")));
   assert(empty_json["drc"]["number"] == 0);
   assert(empty_json["drc"]["distribution"] == nlohmann::json::object());
 
