@@ -1,5 +1,6 @@
 """Check explicit DEF supply selection through real Tcl/Python solves."""
 import csv
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -52,6 +53,19 @@ END DESIGN
 
 
 def source_counts(directory):
+    spatial_path = directory / "emir_reporter" / "ir_drop.json"
+    spatial = json.loads(spatial_path.read_text())
+    assert spatial["schema"] == "ecos.emir.ir.v1"
+    assert spatial["coordinate_unit"] == "dbu" and spatial["dbu_per_micron"] == 1000
+    assert {v["summary"]["net"] for v in spatial["views"]} == {"VDD", "VSS"}
+    for view in spatial["views"]:
+        assert view["unit"] == "V" and view["basis"] == "final" and view["items"]
+        for item in view["items"]:
+            x, y, hx, hy = item["bboxes"][0]
+            assert (x, y) == (hx, hy) and x >= 100000 and y >= 200000
+            assert item["details"]["layer"] == "M1"
+            expected = abs(item["details"]["voltage_v"] - item["details"]["ideal_voltage_v"])
+            assert abs(item["value"] - expected) < 1e-12
     with (directory / "ir_analyzer" / "solver_diagnostics.csv").open() as stream:
         rows = list(csv.DictReader(stream))
     return {row["net"]: int(row["source_count"]) for row in rows}

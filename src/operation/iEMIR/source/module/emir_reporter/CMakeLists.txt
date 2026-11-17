@@ -9,6 +9,7 @@ endif()
 add_library(iemir_emir_reporter
     ${IEMIR_MODULE}/emir_reporter/EMIRReporter.cpp
     ${IEMIR_MODULE}/emir_reporter/ReplayAnalysis.cpp
+    ${IEMIR_MODULE}/emir_reporter/IRSpatial.cpp
 )
 
 target_link_libraries(iemir_emir_reporter

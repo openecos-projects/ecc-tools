@@ -126,6 +126,7 @@ void EMIRReporter::report()
   buildViaGeometryIndex();
   ERModel er_model = initERModel();
   outputIRReport(er_model);
+  outputIRSpatial();
   outputEMReport(er_model);
   outputResNetworkReport();
   outputReplayAnalysis();

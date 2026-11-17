@@ -117,6 +117,34 @@ bool checkReport(const std::string& report_file_path, const std::string& content
   return report_content.find(content) != std::string::npos;
 }
 
+bool checkIRSpatial(const std::filesystem::path& path)
+{
+  std::ifstream stream(path);
+  const auto document = nlohmann::json::parse(stream);
+  if (document.at("schema") != "ecos.emir.ir.v1" || document.at("coordinate_unit") != "dbu"
+      || document.at("dbu_per_micron") != EMIRDM.getDatabase().get_micron_dbu())
+    return false;
+  auto& graphs = EMIRDM.getDatabase().get_power_graph_map();
+  if (document.at("views").size() != graphs.size())
+    return false;
+  for (const auto& view : document.at("views")) {
+    auto& graph = graphs.at(view.at("summary").at("net").get<std::string>());
+    if (view.at("unit") != "V" || view.at("basis") != "final" || view.at("items").size() != graph.get_node_list().size())
+      return false;
+    for (std::size_t i = 0; i < graph.get_node_list().size(); ++i) {
+      auto& node = graph.get_node_list()[i];
+      const auto& item = view.at("items")[i];
+      const auto expected = nlohmann::json::array({nlohmann::json::array({node.get_x(), node.get_y(), node.get_x(), node.get_y()})});
+      if (item.at("bboxes") != expected || item.at("details").at("voltage_v") != node.get_voltage())
+        return false;
+      const double drop = std::abs(node.get_voltage() - item.at("details").at("ideal_voltage_v").get<double>());
+      if (std::abs(item.at("value").get<double>() - drop) > 1e-12)
+        return false;
+    }
+  }
+  return true;
+}
+
 bool checkRepeatedIRLoads(const std::filesystem::path& directory)
 {
   auto field = [&](const std::string& name) {
@@ -872,7 +900,8 @@ int main(int argc, char* argv[])
   iemir::EMIRReporter::initInst();
   EMIRER.report();
   iemir::EMIRReporter::destroyInst();
-  is_pass = is_pass && checkReport((report_directory_path / "ir.rpt").string(), "#voltage #ideal_volt")
+  is_pass = is_pass && checkIRSpatial(report_directory_path / "ir_drop.json")
+            && checkReport((report_directory_path / "ir.rpt").string(), "#voltage #ideal_volt")
             && checkReport((report_directory_path / "em.rpt").string(), "# For wires: #layer #end-to-end_coordinates #EM_Ratio #Current_value")
             && checkReport((report_directory_path / "test_design.ir.worst").string(), "#x_y_location")
             && checkReport((report_directory_path / "test_design.em.worst").string(), "#current")
