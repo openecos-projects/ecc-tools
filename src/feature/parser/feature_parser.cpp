@@ -101,16 +101,16 @@ bool FeatureParser::buildTools(std::string json_path, std::string step)
   }
 
   using SummaryBuilder = std::function<json()>;
-  auto stepToBuilder = std::unordered_map<std::string, SummaryBuilder>{{"place", [this, step]() { return buildSummaryPL(step); }},
+  auto stepToBuilder = std::unordered_map<std::string, SummaryBuilder>{{"placement", [this, step]() { return buildSummaryPL(step); }},
                                                                        {"legalization", [this, step]() { return buildSummaryPL(step); }},
                                                                        {"filler", [this, step]() { return buildSummaryPL(step); }},
-                                                                       {"CTS", [this]() { return buildSummaryCTS(); }},
+                                                                       {"cts", [this]() { return buildSummaryCTS(); }},
                                                                        {"optDrv", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"optHold", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"optSetup", [this, step]() { return buildSummaryTO(step); }},
                                                                        {"sta", [this]() { return buildSummarySTA(); }},
                                                                        {"drc", [this]() { return buildSummaryDRC(); }},
-                                                                       {"route", [this]() { return buildSummaryRT(); }}};
+                                                                       {"routing", [this]() { return buildSummaryRT(); }}};
 
   const auto builder_it = stepToBuilder.find(step);
   if (builder_it == stepToBuilder.end()) {

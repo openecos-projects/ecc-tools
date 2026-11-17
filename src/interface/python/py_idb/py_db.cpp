@@ -258,10 +258,10 @@ bool saveGeometrySnapshot(const std::filesystem::path& output_dir, bool include_
   std::optional<ecc::geometry::ClockTreeSnapshot> clock_tree_snapshot;
   if (clock_tree_stage) {
     ecc::geometry::ClockTreeCollectOptions options;
-    if (*clock_tree_stage == "postFloorplan") {
+    if (*clock_tree_stage == "post_floorplan") {
       options.stage = ecc::geometry::ClockTreeStage::kPostFloorplan;
-      options.timing_unavailable_reason = "postFloorplan clock network has topology only; insertion delay was not requested";
-    } else if (*clock_tree_stage == "CTS") {
+      options.timing_unavailable_reason = "post_floorplan clock network has topology only; insertion delay was not requested";
+    } else if (*clock_tree_stage == "cts") {
       options.stage = ecc::geometry::ClockTreeStage::kCts;
       options.analysis_source = ecc::geometry::ClockTreeAnalysisSource::kCtsFastSta;
       options.timing_unavailable_reason = "CTS clock topology is available; committed FastSTA edge-level timing was unavailable";
