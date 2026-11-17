@@ -471,8 +471,8 @@ class VcdFileParser
   }
 
   // 窗口是左闭右开 [k * length, (k + 1) * length)：正好落在边界上的事件归右窗，
-  // 也就是"第 k 个时钟沿之后那一个周期"，和 PrimeTime PX time_based 波形里
-  // 采样点 t 覆盖 [t, t + cycle) 的定义一致（边界事件算在采样点自己的周期里）。
+  // 也就是"第 k 个时钟沿之后那一个周期"。采样点 t 覆盖 [t, t + cycle)，
+  // 边界事件算在采样点自己的周期里。
   bool isWindowComplete() const { return _current_time >= _window.end; }
 
   // 文件末尾不足一窗的余量也要吐出去；正好停在边界上时最后那个时间点的翻转会

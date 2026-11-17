@@ -78,7 +78,7 @@ ecc_py.destroy_rcx()
 
 1. 调用方没有初始化 ECC/idb 设计数据库时，`run`、`report`、`extract` 不能完成抽取。
 2. 设计工艺、layer 名、routing 数据和内置 ICS55 mapping/corner 不匹配时不能使用。
-3. 需要绝对防反编译时不能使用。当前库不暴露明文 corner 文件，也避免常规 `strings` 直接看到 ITF 内容，但不能防止运行时内存提取或高级逆向。
+3. 要求工艺数据始终不可读取的场景不能使用。当前库不暴露明文 corner 文件，也避免常规 `strings` 直接看到 ITF 内容，但运行时内存中的数据仍可能被提取。
 4. 不适合同一进程内并发跑多个 extraction job，内部仍有全局单例状态。
 5. Windows、macOS 或 ABI 不兼容的 Linux 环境不能直接使用，需要重新构建。
 6. 如果目标环境不是 Linux x86-64，或 glibc/动态加载器版本不兼容，程序不能正常加载该 `.so`。

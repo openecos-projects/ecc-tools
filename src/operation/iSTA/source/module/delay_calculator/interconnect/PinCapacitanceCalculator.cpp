@@ -59,8 +59,9 @@ double PinCapacitanceCalculator::pinCapacitance(std::string& pin_name, AnalysisT
   LibertyPort& timing_cell_port = timing_cell.get_port_map()[pin.get_pin_name()];
   // Replacing the per-edge pin capacitance with the plain `capacitance` was tried and
   // refuted at suite level: gcd 88.1% -> 13.9%, ip2 60.0% -> 11.7%. The per-edge
-  // `rise_capacitance`/`fall_capacitance` are required; REF's `Total capacitance` report
-  // is a separate bookkeeping quantity, not the load used for table lookup.
+  // `rise_capacitance`/`fall_capacitance` are required; the reported total
+  // capacitance is a separate bookkeeping quantity, not the load used for table
+  // lookup.
   {
     static const char* pc = std::getenv("ISTA_DUMP_PIN_CAP2");
     if (pc != nullptr) {
