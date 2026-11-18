@@ -38,6 +38,10 @@ int main()
   idb::IdbPin* io_pin = design.createOrFindIoPin("IN");
   assert(io_pin != nullptr);
   io_pin->set_term()->set_name("IN");
+  idb::IdbPin* power_io_pin = design.createOrFindIoPin("VDD");
+  assert(power_io_pin != nullptr);
+  power_io_pin->set_term()->set_name("VDD");
+  power_io_pin->set_term()->set_type(idb::IdbConnectType::kPower);
 
   idb::IdbInstance* instance = design.get_instance_list()->add_instance("u0");
   assert(instance != nullptr);
@@ -63,9 +67,21 @@ int main()
   vdd_net->add_wildcard_instance_pin("VDD");
   vss_net->add_wildcard_instance_pin("VSS");
 
+  idb::IdbLayer* metal5 = layout.get_layers()->set_layer("MET5", "ROUTING");
+  assert(metal5 != nullptr);
+  idb::IdbSpecialWire* vdd_wire = vdd_net->get_wire_list()->add_wire();
+  idb::IdbSpecialWireSegment* io_wire = vdd_wire->add_segment();
+  io_wire->set_layer(metal5);
+  io_wire->set_route_width(1000);
+  io_wire->set_shape_type(idb::IdbWireShapeType::kIoWire);
+  io_wire->add_point(100, 200);
+  io_wire->add_point(300, 200);
+  io_wire->set_bounding_box();
+
   ilvs::NetlistData netlist_data = LVSI.wrapNetlistData(&design);
   assert(netlist_data.get_design_name() == "top");
-  assert(netlist_data.get_io_terminal_name_list() == std::vector<std::string>({"PIN/IN"}));
+  assert(netlist_data.get_io_terminal_name_list() == std::vector<std::string>({"PIN/IN", "PIN/VDD"}));
+  assert(netlist_data.get_terminal_connect_type_map().at("PIN/VDD") == ilvs::ConnectType::kPower);
   assert(LVSUTIL.exist(netlist_data.get_instance_name_set(), std::string("u0")));
   assert(LVSUTIL.exist(netlist_data.get_net_map(), std::string("n1")));
   assert(netlist_data.get_net_map().at("n1").get_terminal_name_list() == std::vector<std::string>({"PIN/IN", "u0/A"}));
@@ -81,6 +97,7 @@ int main()
   assert(def_data.get_die().get_real_ur_x() == 1000);
   assert(def_data.get_die().get_real_ur_y() == 2000);
   assert(LVSUTIL.exist(def_data.get_net_map(), std::string("n1")));
+  assert(def_data.get_terminal_connect_type_map().at("PIN/VDD") == ilvs::ConnectType::kPower);
   assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("PIN/IN")));
   assert(!LVSUTIL.exist(def_data.get_terminal_connect_type_map(), std::string("u0/A")));
   ilvs::PhysicalGraph& physical_graph = def_data.get_physical_graph();
@@ -90,6 +107,16 @@ int main()
   assert(physical_graph.getNetRoutingGraph("VSS") != nullptr);
   assert(physical_graph.get_power_instance_pin_net_map().at("u0/VDD") == "VDD");
   assert(physical_graph.get_ground_instance_pin_net_map().at("u0/VSS") == "VSS");
+  ilvs::NetRoutingGraph* vdd_graph = physical_graph.getNetRoutingGraph("VDD");
+  assert(vdd_graph != nullptr);
+  bool found_io_wire = false;
+  for (const ilvs::RoutingShape& routing_shape : vdd_graph->get_routing_shape_list()) {
+    const ilvs::Shape& shape = routing_shape.get_shape();
+    if (shape.get_ll_x() == 100 && shape.get_ll_y() == -300 && shape.get_ur_x() == 300 && shape.get_ur_y() == 700) {
+      found_io_wire = true;
+    }
+  }
+  assert(found_io_wire);
   assert(vdd_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vss_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vdd_pin->get_special_net() == nullptr);
