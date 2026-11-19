@@ -92,13 +92,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PDK_RELEASE_TAG: ${{ matrix.release_tag }}
+          PDK_VARIANT: ${{ matrix.variant }}
         run: |
           git init icsprout55-pdk
           git -C icsprout55-pdk remote add origin https://github.com/openecos-projects/icsprout55-pdk.git
           git -C icsprout55-pdk fetch --depth 1 origin ${{ matrix.pdk_commit }}
           git -C icsprout55-pdk checkout --detach FETCH_HEAD
-          gh release download "$PDK_RELEASE_TAG" --repo openecos-projects/icsprout55-pdk \
-            --pattern '*.tar.bz2' --dir icsprout55-pdk
           python3 - <<'PY'
           import hashlib
           import json
@@ -107,12 +106,28 @@ jobs:
           from pathlib import Path
 
           tag = os.environ["PDK_RELEASE_TAG"]
+          variant = os.environ["PDK_VARIANT"]
           release = json.loads(subprocess.check_output([
               "gh", "release", "view", tag,
               "--repo", "openecos-projects/icsprout55-pdk", "--json", "assets"
           ], text=True))
+          required = []
           for asset in release["assets"]:
-              if not asset["name"].endswith(".tar.bz2"):
+              name = asset["name"]
+              if not name.endswith(".tar.bz2"):
+                  continue
+              if variant == "v1" or name.endswith("_liberty_nldm.tar.bz2") or name.endswith("_gds.tar.bz2"):
+                  required.append(asset)
+          if variant == "v2":
+              required = [asset for asset in required if "IO_0901_gds" in asset["name"] or "SC9T_BASIC_" in asset["name"]]
+          for asset in required:
+              subprocess.run([
+                  "gh", "release", "download", tag,
+                  "--repo", "openecos-projects/icsprout55-pdk",
+                  "--pattern", asset["name"], "--dir", "icsprout55-pdk",
+              ], check=True)
+          for asset in release["assets"]:
+              if asset not in required:
                   continue
               expected = asset.get("digest") or ""
               if not expected.startswith("sha256:"):
@@ -122,7 +137,18 @@ jobs:
               if actual != expected.removeprefix("sha256:"):
                   raise SystemExit(f"SHA-256 mismatch for {path}")
           PY
-          make -C icsprout55-pdk unzip
+          if [ "${{ matrix.variant }}" = v1 ]; then
+            make -C icsprout55-pdk unzip
+          else
+            for vt in HVT LVT SVT; do
+              base="ICsprout55_SC9T_BASIC_${vt}"
+              mkdir -p "icsprout55-pdk/IP/STD_cell/${base}"
+              tar -xjf "icsprout55-pdk/${base}_liberty_nldm.tar.bz2" -C "icsprout55-pdk/IP/STD_cell/${base}"
+              tar -xjf "icsprout55-pdk/${base}_gds.tar.bz2" -C "icsprout55-pdk/IP/STD_cell/${base}"
+            done
+            mkdir -p icsprout55-pdk/IP/IO
+            tar -xjf icsprout55-pdk/ICsprout_55LLULP1225_IO_0901_gds.tar.bz2 -C icsprout55-pdk/IP/IO
+          fi
 
       - name: Run Python API integration tests
         working-directory: test
