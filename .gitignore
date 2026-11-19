@@ -93,3 +93,7 @@ test/**
 !test/fixtures/gcd/spef/gcd_TYPICAL_25C.spef
 test/**/__pycache__/
 !src/operation/iCTS/test/data_manager/adapter/sdc/ClockTraceTest.cc
+!test/fixtures/gcd/v1/
+!test/fixtures/gcd/v1/**
+!test/fixtures/gcd/v2/
+!test/fixtures/gcd/v2/**

@@ -1,7 +1,7 @@
 {
     "ifp": {
         "temp_directory_path": "./output",
-        "thread_number": 16
+        "thread_number": 8
     },
     "macro_placer": {
         "file_path": "macro_locations.txt",
@@ -107,7 +107,7 @@
         "rail": [
             {
                 "routing_layer_name": "MET1",
-                "width_micron": 0.16
+                "width_micron": 0.3
             }
         ],
         "stripe": [

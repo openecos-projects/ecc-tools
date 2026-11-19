@@ -42,8 +42,11 @@ class TestRoots:
         repo_root = _required_directory("ECC_TOOLS_TEST_REPO_ROOT")
         pdk_root = _required_directory("ECC_TOOLS_TEST_PDK_ROOT")
         artifact_root = Path(_required_value("ECC_TOOLS_TEST_ARTIFACT_ROOT"))
+        variant = os.environ.get("ECC_TOOLS_TEST_PDK_VARIANT", "v2")
+        if variant not in {"v1", "v2"}:
+            raise ValueError(f"unsupported ICS55 PDK variant: {variant}")
         artifact_root.mkdir(parents=True, exist_ok=True)
-        fixture_root = repo_root / "test" / "fixtures" / "gcd"
+        fixture_root = repo_root / "test" / "fixtures" / "gcd" / variant
         if not fixture_root.is_dir():
             raise ValueError(f"GCD fixture directory does not exist: {fixture_root}")
         return cls(
@@ -137,6 +140,7 @@ def _prepare_manifest(
             "floorplan_ecc.json",
             "rcx_ecc.json",
             "route_ecc.json",
+            "sta_ecc.json",
         )
     }
     inputs = _materialize_inputs(roots, name, input_dir, input_overrides)
@@ -150,6 +154,7 @@ def _prepare_manifest(
         "name": name,
         "output_dir": str(output_dir),
         "pdk": {key: _stringify_paths(value) for key, value in pdk.items()},
+        "profile": json.loads((roots.fixture_root / "profile.json").read_text(encoding="utf-8")),
         "result_path": str(work_dir / "result.json"),
         "work_dir": str(work_dir),
     }
@@ -223,6 +228,8 @@ def _rewrite_value(
         return str(roots.fixture_root / value.removeprefix("./fixtures/gcd/"))
     if value == "./fixtures/gcd/config/gcd.sdc":
         return str(roots.fixture_root / "config" / "gcd.sdc")
+    if value == "./fixtures/gcd/config/cell_catalog.tsv":
+        return str(roots.fixture_root / "config" / "cell_catalog.tsv")
     if value == "./output":
         return str(output_dir)
     if value == "macro_locations.txt":

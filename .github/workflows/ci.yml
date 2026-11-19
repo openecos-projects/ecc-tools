@@ -43,6 +43,16 @@ jobs:
   test-python-api:
     name: Test Python API
     needs: build-wheel
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: v1
+            pdk_commit: 67fd9a90d631d7c6bacaf05307f252400e41a1c9
+            release_tag: v1.10.103
+          - variant: v2
+            pdk_commit: b021e8329b29a8407550563ed769f7f7a15a8683
+            release_tag: v2-2026.10.28
     runs-on: ubuntu-latest
     container: quay.io/pypa/manylinux_2_34_x86_64
     timeout-minutes: 45
@@ -78,24 +88,48 @@ jobs:
           cd test
           ../.venv-test/bin/python -c 'from ecc_tools_bin import ecc_py; print(ecc_py.__file__)'
 
-      - name: Setup PDK
+      - name: Setup ICS55 ${{ matrix.variant }} PDK
         env:
           GH_TOKEN: ${{ github.token }}
+          PDK_RELEASE_TAG: ${{ matrix.release_tag }}
         run: |
           git init icsprout55-pdk
           git -C icsprout55-pdk remote add origin https://github.com/openecos-projects/icsprout55-pdk.git
-          git -C icsprout55-pdk fetch --depth 1 origin b021e8329b29a8407550563ed769f7f7a15a8683
+          git -C icsprout55-pdk fetch --depth 1 origin ${{ matrix.pdk_commit }}
           git -C icsprout55-pdk checkout --detach FETCH_HEAD
-          gh release download v2-2026.10.28 --repo openecos-projects/icsprout55-pdk \
-            --pattern 'ICsprout*.tar.bz2' --dir icsprout55-pdk
+          gh release download "$PDK_RELEASE_TAG" --repo openecos-projects/icsprout55-pdk \
+            --pattern '*.tar.bz2' --dir icsprout55-pdk
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          tag = os.environ["PDK_RELEASE_TAG"]
+          release = json.loads(subprocess.check_output([
+              "gh", "release", "view", tag,
+              "--repo", "openecos-projects/icsprout55-pdk", "--json", "assets"
+          ], text=True))
+          for asset in release["assets"]:
+              if not asset["name"].endswith(".tar.bz2"):
+                  continue
+              expected = asset.get("digest") or ""
+              if not expected.startswith("sha256:"):
+                  raise SystemExit(f"GitHub release has no SHA-256 digest for {asset['name']}")
+              path = Path("icsprout55-pdk") / asset["name"]
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              if actual != expected.removeprefix("sha256:"):
+                  raise SystemExit(f"SHA-256 mismatch for {path}")
+          PY
           make -C icsprout55-pdk unzip
-          (cd icsprout55-pdk && sha256sum --check --quiet release-files.sha256)
 
       - name: Run Python API integration tests
         working-directory: test
         env:
           ECC_TOOLS_TEST_ARTIFACT_ROOT: ${{ github.workspace }}/test-artifacts
           ECC_TOOLS_TEST_PDK_ROOT: ${{ github.workspace }}/icsprout55-pdk
+          ECC_TOOLS_TEST_PDK_VARIANT: ${{ matrix.variant }}
           ECC_TOOLS_TEST_REPO_ROOT: ${{ github.workspace }}
           ECC_LOGGER_THROW_ON_ERROR: '1'
         run: ../.venv-test/bin/python -m pytest data operations -v --maxfail=1
@@ -104,7 +138,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ecc-tools-python-api-artifacts
+          name: ecc-tools-python-api-artifacts-${{ matrix.variant }}
           if-no-files-found: ignore
           path: test-artifacts/
 
