@@ -72,7 +72,7 @@ namespace {
 
 // Set up native Network objects for value-consumer tests. Parsing is exclusively
 // iSTA's frontend; the production loaded-iDB lifecycle has its own adapter tests.
-auto NativeConstraintFacts(const std::string& path) -> icts::SdcClockData
+auto NativeConstraintFacts(const std::string& path, const std::vector<std::string>& extra_pin_names = {}) -> icts::SdcClockData
 {
   EXPECT_FALSE(ista::DataManager::isInitialized());
   ista::DataManager::initInst();
@@ -90,6 +90,17 @@ auto NativeConstraintFacts(const std::string& path) -> icts::SdcClockData
     if (!pin.get_is_port()) {
       pin.set_instance_name(name == "inst/A" ? "inst" : "buf");
       pin.set_pin_name(name == "buf/Y" ? "Y" : "A");
+    }
+  }
+  for (const auto& name : extra_pin_names) {
+    auto& pin = database.network().pins()[name];
+    pin.set_full_name(name);
+    pin.set_pin_name(name);
+    pin.set_is_port(name.find('/') == std::string::npos);
+    const auto separator = name.find('/');
+    if (separator != std::string::npos) {
+      pin.set_instance_name(name.substr(0U, separator));
+      pin.set_pin_name(name.substr(separator + 1U));
     }
   }
   ista::SdcCommand interpreter;
@@ -382,27 +393,35 @@ TEST(FastSTAParsedInputTest, GeneratedClockSeedsBlackBoxTargetAndDownstreamClock
       "create_generated_clock -name PLL -source [get_ports ref] -master_clock REF -divide_by 2 [get_pins PLL/CKOUT]\n");
   ASSERT_TRUE(sdc.ready());
   icts::FastStaContext context;
-  context.constraints = icts::SdcClockReader(sdc.path()).readClockData();
+  context.constraints = NativeConstraintFacts(sdc.path(), {"ref", "PLL/CKOUT"});
   ASSERT_TRUE(context.constraints.ok());
   context.nodes = {
-      {.kind = icts::FastStaNodeKind::kSource, .name = "ref", .top_level = true, .domain = icts::FastStaNodeDomain::kLogic, .input = true},
-      {.kind = icts::FastStaNodeKind::kSink, .name = "PLL/CKOUT", .domain = icts::FastStaNodeDomain::kLogic, .output = true},
+      {.kind = icts::FastStaNodeKind::kSource,
+       .name = "ref",
+       .output_net_ids = {},
+       .top_level = true,
+       .domain = icts::FastStaNodeDomain::kLogic,
+       .input = true},
+      {.kind = icts::FastStaNodeKind::kSink, .name = "PLL/CKOUT", .output_net_ids = {}, .domain = icts::FastStaNodeDomain::kLogic, .output = true},
       {.kind = icts::FastStaNodeKind::kBufferInput,
        .name = "buf/A",
        .inst_name = "buf",
        .pin_name = "A",
+       .output_net_ids = {},
        .domain = icts::FastStaNodeDomain::kLogic,
        .input = true},
       {.kind = icts::FastStaNodeKind::kBufferOutput,
        .name = "buf/Y",
        .inst_name = "buf",
        .pin_name = "Y",
+       .output_net_ids = {},
        .domain = icts::FastStaNodeDomain::kLogic,
        .output = true},
       {.kind = icts::FastStaNodeKind::kSink,
        .name = "sink/CLK",
        .inst_name = "sink",
        .pin_name = "CLK",
+       .output_net_ids = {},
        .domain = icts::FastStaNodeDomain::kLogic,
        .input = true},
   };

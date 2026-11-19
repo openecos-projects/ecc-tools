@@ -117,8 +117,8 @@ auto toWrapperTransition(idb::LibArc* arc) -> WrapperTimingTransition
 }
 
 auto noteUnsupportedArc(WrapperTimingGraph& graph, const std::string& inst_name, const std::string& master_name, const std::string& source_port,
-                         const std::string& sink_port, const std::string& source_name, const std::string& sink_name,
-                         const std::unordered_map<std::string, std::size_t>& node_index) -> void
+                        const std::string& sink_port, const std::string& source_name, const std::string& sink_name,
+                        const std::unordered_map<std::string, std::size_t>& node_index) -> void
 {
   ++graph.unsupported_arc_count;
   if (graph.unsupported_arc_samples.size() >= 8U) {

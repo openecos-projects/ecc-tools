@@ -234,7 +234,7 @@ class ClockTopologySynthesis
         .log_context = makeLogContext(*_clock, sink_domain_label, "downstream_htree", context.domain_prefix),
     };
     Topology::Config synthesis_config{
-        .enable_sink_clustering = _clock->is_preclustered_sink_reuse() ? false : _config->is_enable_sink_clustering(),
+        .enable_sink_clustering = _config->is_enable_sink_clustering(),
     };
 
     std::string failure_reason;

@@ -500,14 +500,14 @@ TEST_F(ClockTraceFixtureInterface, AnUnpinnedStageStopsAGeneratedClock)
   EXPECT_EQ(findRecord(build, "generated", "mux_leaf", "accepted"), nullptr);
 }
 
-TEST_F(ClockTraceFixtureInterface, PreclusterReuseTreatsLeafDriversAsAnchorsNotPropagationArcs)
+TEST_F(ClockTraceFixtureInterface, LeafBufferDriversStayPropagationStepsAndTerminalNets)
 {
   auto* source_master = addMaster("CLK_SOURCE", {{"Y", idb::IdbConnectDirection::kOutput}});
   auto* buffer_master = addMaster("BUF_X1", {{"A"}, {"Y", idb::IdbConnectDirection::kOutput}}, LogicKind::kBuffer);
   auto* sink_master = addMaster("DFF_X1", {{"CLK", idb::IdbConnectDirection::kInput, idb::IdbConnectType::kClock, true}});
   auto* source = addInst("source", source_master);
-  auto* left = addInst("left_anchor", buffer_master);
-  auto* right = addInst("right_anchor", buffer_master);
+  auto* left = addInst("left_buffer", buffer_master);
+  auto* right = addInst("right_buffer", buffer_master);
   auto* left_sink = addInst("left_sink", sink_master, true);
   auto* right_sink = addInst("right_sink", sink_master, true);
   connect("root", {pin(source, "Y"), pin(left, "A"), pin(right, "A")});
@@ -518,12 +518,20 @@ TEST_F(ClockTraceFixtureInterface, PreclusterReuseTreatsLeafDriversAsAnchorsNotP
 
   ASSERT_EQ(build.output.clock_targets.size(), 1U);
   const auto& target = build.output.clock_targets.front();
-  EXPECT_TRUE(target.preclustered_sink_reuse);
-  ASSERT_EQ(target.preclustered_sink_anchors.size(), 2U);
-  EXPECT_TRUE(target.terminal_net_names.empty());
-  EXPECT_TRUE(target.propagation_steps.empty());
-  EXPECT_EQ(target.preclustered_sink_anchors[0].input_net_name, "root");
-  EXPECT_EQ(target.preclustered_sink_anchors[1].input_net_name, "root");
+  EXPECT_EQ(target.clock_net_name, "root");
+  ASSERT_EQ(target.propagation_steps.size(), 2U);
+  EXPECT_EQ(target.propagation_steps[0].inst_name, "left_buffer");
+  EXPECT_EQ(target.propagation_steps[0].input_net_name, "root");
+  EXPECT_EQ(target.propagation_steps[0].output_net_name, "left_leaf");
+  EXPECT_EQ(target.propagation_steps[0].kind, icts::ClockTracePropagationKind::kBuffer);
+  EXPECT_EQ(target.propagation_steps[1].inst_name, "right_buffer");
+  EXPECT_EQ(target.propagation_steps[1].input_net_name, "root");
+  EXPECT_EQ(target.propagation_steps[1].output_net_name, "right_leaf");
+  EXPECT_EQ(target.propagation_steps[1].kind, icts::ClockTracePropagationKind::kBuffer);
+  ASSERT_EQ(target.terminal_net_names.size(), 3U);
+  EXPECT_EQ(target.terminal_net_names[0], "left_leaf");
+  EXPECT_EQ(target.terminal_net_names[1], "right_leaf");
+  EXPECT_EQ(target.terminal_net_names[2], "root");
 }
 
 TEST_F(ClockTraceFixtureInterface, MultipleResolvedSeedsDoNotCreateCompatibilityClockTargets)

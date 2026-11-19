@@ -25,7 +25,6 @@
 #include <cstddef>
 #include <functional>
 #include <map>
-#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
@@ -43,12 +42,6 @@
 
 namespace icts {
 namespace {
-
-auto findIdbNet(idb::IdbDesign* idb_design, const std::string& net_name) -> idb::IdbNet*
-{
-  auto* net_list = idb_design == nullptr ? nullptr : idb_design->get_net_list();
-  return net_list == nullptr ? nullptr : net_list->find_net(net_name);
-}
 
 auto resolveSingleSeedNet(idb::IdbDesign* idb_design, const SdcClockDecl& clock) -> idb::IdbNet*
 {
@@ -69,8 +62,6 @@ auto makeDirectClockTarget(const std::string& clock_name, const std::string& sou
   ClockTraceClockTarget target{
       .clock_name = clock_name,
       .clock_net_name = source_net_name,
-      .preclustered_sink_reuse = false,
-      .preclustered_sink_anchors = {},
       .terminal_net_names = {},
       .propagation_steps = {},
   };
@@ -94,39 +85,6 @@ auto makeDirectClockTarget(const std::string& clock_name, const std::string& sou
     target.propagation_steps.push_back(step);
   }
   return target;
-}
-
-auto tryBuildPreclusteredClockTarget(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbDesign* idb_design, const SdcClockDecl& clock,
-                                     const std::vector<ClockTraceRecord>& accepted_records) -> std::optional<ClockTraceClockTarget>
-{
-  if (clock.kind != SdcClockDecl::Kind::kPrimary || accepted_records.size() < 2U) {
-    return std::nullopt;
-  }
-  auto* source_net = resolveSingleSeedNet(idb_design, clock);
-  if (source_net == nullptr) {
-    return std::nullopt;
-  }
-
-  std::vector<ClockTracePreclusteredSinkAnchor> anchors;
-  anchors.reserve(accepted_records.size());
-  std::set<std::string> anchor_input_pins;
-  for (const auto& record : accepted_records) {
-    auto* leaf_net = findIdbNet(idb_design, record.net_name);
-    auto anchor = clock_trace::BuildPreclusteredSinkAnchor(liberty_cell_lookup, leaf_net);
-    if (!anchor.has_value() || !anchor_input_pins.insert(anchor->driver_inst_name + "/" + anchor->input_pin_name).second) {
-      return std::nullopt;
-    }
-    anchors.push_back(std::move(*anchor));
-  }
-
-  return ClockTraceClockTarget{
-      .clock_name = clock.clock_name,
-      .clock_net_name = source_net->get_net_name(),
-      .preclustered_sink_reuse = true,
-      .preclustered_sink_anchors = std::move(anchors),
-      .terminal_net_names = {},
-      .propagation_steps = {},
-  };
 }
 
 }  // namespace
@@ -204,11 +162,6 @@ auto ClockTraceResolver::resolve(const SdcClockData& clock_data, idb::IdbDesign*
   for (const auto& [clock_name, accepted_records] : accepted_records_by_clock) {
     const auto decl_iter = clock_decl_by_name.find(clock_name);
     if (decl_iter != clock_decl_by_name.end()) {
-      auto preclustered_target = tryBuildPreclusteredClockTarget(liberty_cell_lookup, idb_design, *decl_iter->second, accepted_records);
-      if (preclustered_target.has_value()) {
-        build.output.clock_targets.push_back(std::move(*preclustered_target));
-        continue;
-      }
       auto* source_net = resolveSingleSeedNet(idb_design, *decl_iter->second);
       if (source_net != nullptr) {
         build.output.clock_targets.push_back(makeDirectClockTarget(clock_name, source_net->get_net_name(), accepted_records));

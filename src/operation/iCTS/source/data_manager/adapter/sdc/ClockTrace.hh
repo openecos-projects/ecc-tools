@@ -76,21 +76,10 @@ struct ClockTraceRecord
   std::vector<ClockTracePropagationStep> propagation_steps;
 };
 
-struct ClockTracePreclusteredSinkAnchor
-{
-  std::string leaf_net_name;
-  std::string driver_inst_name;
-  std::string input_pin_name;
-  std::string output_pin_name;
-  std::string input_net_name;
-};
-
 struct ClockTraceClockTarget
 {
   std::string clock_name;
   std::string clock_net_name;
-  bool preclustered_sink_reuse = false;
-  std::vector<ClockTracePreclusteredSinkAnchor> preclustered_sink_anchors;
   std::vector<std::string> terminal_net_names;
   std::vector<ClockTracePropagationStep> propagation_steps;
 };
