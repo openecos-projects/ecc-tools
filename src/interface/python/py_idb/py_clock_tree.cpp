@@ -117,10 +117,10 @@ ClockNodeKind node_kind_for(const std::string& kind, const std::string& role)
 
 ClockTreeStage stage_for(const std::string& stage)
 {
-  if (stage == "post_floorplan") {
+  if (stage == "post_floorplan" || stage == "postFloorplan") {
     return ClockTreeStage::kPostFloorplan;
   }
-  if (stage == "cts") {
+  if (stage == "cts" || stage == "CTS") {
     return ClockTreeStage::kCts;
   }
   if (stage == "filler") {

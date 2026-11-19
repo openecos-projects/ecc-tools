@@ -66,6 +66,9 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
       config_map[key] = int32_t(value == "1");
     }
   }
+  value = ecc::getJsonData(json, {"STA", "-cell_catalog"});
+  if (!value.empty())
+    config_map["-cell_catalog"] = value;
   value = ecc::getJsonData(json, {"STA", "-timing_corner"});
   if (!value.empty()) {
     config_map.insert(std::make_pair("-timing_corner", value));
@@ -126,6 +129,8 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
       config_map[key] = int32_t(value == "1");
     }
   }
+  if (config_dict.count("-cell_catalog") > 0)
+    config_map["-cell_catalog"] = config_dict["-cell_catalog"];
   if (config_dict.count("-timing_corner") > 0 && !config_dict["-timing_corner"].empty()) {
     config_map["-timing_corner"] = config_dict["-timing_corner"];
   }

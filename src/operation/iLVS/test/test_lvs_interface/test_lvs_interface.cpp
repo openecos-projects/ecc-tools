@@ -78,6 +78,28 @@ int main()
   io_wire->add_point(300, 200);
   io_wire->set_bounding_box();
 
+  idb::IdbLayer substrate;
+  substrate.set_type(idb::IdbLayerType::kLayerMasterslice);
+  idb::IdbLayer metal;
+  metal.set_type(idb::IdbLayerType::kLayerRouting);
+  auto add_supply_pin = [&](const std::string& name, idb::IdbLayer* layer) {
+    auto* pin = instance->addPin(name);
+    pin->set_term()->set_name(name);
+    auto* shape = new idb::IdbLayerShape();
+    shape->set_layer(layer);
+    shape->add_rect(0, 0, 10, 10);
+    pin->get_port_box_list().push_back(shape);
+    vdd_net->add_wildcard_instance_pin(name);
+    return pin;
+  };
+  add_supply_pin("VNW", &substrate);
+  add_supply_pin("UNKNOWN", nullptr);
+  auto* mixed_pin = add_supply_pin("MIXED", &substrate);
+  auto* metal_shape = new idb::IdbLayerShape();
+  metal_shape->set_layer(&metal);
+  metal_shape->add_rect(0, 0, 10, 10);
+  mixed_pin->get_port_box_list().push_back(metal_shape);
+
   ilvs::NetlistData netlist_data = LVSI.wrapNetlistData(&design);
   assert(netlist_data.get_design_name() == "top");
   assert(netlist_data.get_io_terminal_name_list() == std::vector<std::string>({"PIN/IN", "PIN/VDD"}));
@@ -117,6 +139,13 @@ int main()
     }
   }
   assert(found_io_wire);
+
+  assert(physical_graph.get_non_routing_supply_pin_net_map().at("u0/VNW") == "VDD");
+  assert(physical_graph.get_non_routing_supply_pin_net_map().size() == 1);
+  assert(physical_graph.get_power_instance_pin_net_map().count("u0/VNW") == 0);
+  assert(physical_graph.get_power_instance_pin_net_map().at("u0/UNKNOWN") == "VDD");
+  assert(physical_graph.get_power_instance_pin_net_map().at("u0/MIXED") == "VDD");
+  assert(def_data.get_terminal_connect_type_map().at("u0/VNW") == ilvs::ConnectType::kPower);
   assert(vdd_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vss_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vdd_pin->get_special_net() == nullptr);

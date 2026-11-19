@@ -280,7 +280,7 @@ endforeach()
 
 add_executable(test_ista_path_context EXCLUDE_FROM_ALL path_context_test.cpp)
 target_link_libraries(test_ista_path_context PRIVATE ista_timing_reporter ista_model_extractor ista_path_analyzer ista_delay_calculator)
-foreach(case query edge model uncertainty)
+foreach(case query edge model uncertainty constant_cell misleading_cell_name)
   add_test(NAME ista_path_context_${case} COMMAND test_ista_path_context ${case})
 endforeach()
 

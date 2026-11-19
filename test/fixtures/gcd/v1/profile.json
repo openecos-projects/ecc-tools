@@ -1,0 +1,10 @@
+{
+  "variant": "v1",
+  "site": "core7",
+  "sample_cell": "ADDFX1H7R",
+  "buffer_low": "BUFX7H7L",
+  "buffer_regular": "BUFX7H7R",
+  "buffer_large": "BUFX8H7L",
+  "buffer_larger": "BUFX12H7L",
+  "mux": "MUX2X0P5H7R"
+}
