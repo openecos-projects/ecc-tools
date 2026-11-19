@@ -92,6 +92,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PDK_RELEASE_TAG: ${{ matrix.release_tag }}
+          PDK_VARIANT: ${{ matrix.variant }}
         run: |
           git init icsprout55-pdk
           git -C icsprout55-pdk remote add origin https://github.com/openecos-projects/icsprout55-pdk.git
@@ -109,15 +110,22 @@ jobs:
               "gh", "release", "view", tag,
               "--repo", "openecos-projects/icsprout55-pdk", "--json", "assets"
           ], text=True))
-          required = [asset for asset in release["assets"] if asset["name"].endswith(".tar.bz2")]
-          subprocess.run([
-              "gh", "release", "download", tag,
-              "--repo", "openecos-projects/icsprout55-pdk",
-              "--pattern", "*.tar.bz2", "--dir", "icsprout55-pdk",
-          ], check=True)
-          for asset in release["assets"]:
-              if asset not in required:
-                  continue
+          variant = os.environ["PDK_VARIANT"]
+          if variant == "v1":
+              required = [asset for asset in release["assets"] if asset["name"].endswith(".tar.bz2")]
+          else:
+              required = [
+                  asset for asset in release["assets"]
+                  if asset["name"].endswith("_liberty_nldm.tar.bz2")
+                  or asset["name"].endswith("_gds.tar.bz2")
+                  or asset["name"] == "ICsprout_55LLULP1225_IO_0901_gds.tar.bz2"
+              ]
+          for asset in required:
+              subprocess.run([
+                  "gh", "release", "download", tag,
+                  "--repo", "openecos-projects/icsprout55-pdk",
+                  "--pattern", asset["name"], "--dir", "icsprout55-pdk",
+              ], check=True)
               expected = asset.get("digest") or ""
               if not expected.startswith("sha256:"):
                   raise SystemExit(f"GitHub release has no SHA-256 digest for {asset['name']}")
@@ -126,7 +134,25 @@ jobs:
               if actual != expected.removeprefix("sha256:"):
                   raise SystemExit(f"SHA-256 mismatch for {path}")
           PY
-          make -C icsprout55-pdk unzip
+          if [ "${{ matrix.variant }}" = v1 ]; then
+            make -C icsprout55-pdk unzip
+          else
+            for vt in HVT LVT SVT; do
+              base="ICsprout55_SC9T_BASIC_${vt}"
+              target="icsprout55-pdk/IP/STD_cell/${base}"
+              mkdir -p "$target"
+              tar -xjf "icsprout55-pdk/${base}_liberty_nldm.tar.bz2" -C "$target"
+              tar -xjf "icsprout55-pdk/${base}_gds.tar.bz2" -C "$target"
+            done
+            mkdir -p icsprout55-pdk/IP/IO
+            tar -xjf icsprout55-pdk/ICsprout_55LLULP1225_IO_0901_gds.tar.bz2 -C icsprout55-pdk/IP/IO
+            test -s icsprout55-pdk/prtech/techLEF/N551P6M_ecos.lef
+            for vt in HVT LVT SVT; do
+              test -s "icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_${vt}/liberty/ICsprout55_9T${vt}_ss_v1p08_125c_basic_nldm.lib"
+              test -s "icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_${vt}/gds/ICsprout55_9T${vt}_basic.gds"
+            done
+            test -s icsprout55-pdk/IP/IO/gds/IC055L_GPIO3P3V_CDG_6M_0901.gds
+          fi
 
       - name: Run Python API integration tests
         working-directory: test
