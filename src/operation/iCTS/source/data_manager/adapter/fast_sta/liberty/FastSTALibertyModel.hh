@@ -84,6 +84,8 @@ struct FastStaLibertyArc
   bool positive_unate = false;
   bool negative_unate = false;
   bool conditional = false;
+  bool rise_only = false;
+  bool fall_only = false;
   std::string when = "";
   bool edge_triggered = false;
   FastStaTransition trigger_transition = FastStaTransition::kRise;
