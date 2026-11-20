@@ -28,6 +28,7 @@
 #include <initializer_list>
 #include <limits>
 #include <optional>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -52,6 +53,7 @@
 #include "gtest/gtest.h"
 #include "liberty/FastSTACondition.hh"
 #include "liberty/FastSTALibertyModel.hh"
+#include "timing/FastSTAClockPropagation.hh"
 #include "timing/FastSTAClockTiming.hh"
 #include "timing/FastSTAConstraints.hh"
 
@@ -130,6 +132,34 @@ TEST(FastSTATest, ClockGateWithoutActivityModelHasUnknownActivity)
   EXPECT_EQ(icts::FastStaConstraints::gateActive(context, "u_gate", gate), icts::FastStaLogicValue::kUnknown);
   gate.output_expression = "CK & (";
   EXPECT_EQ(icts::FastStaConstraints::gateActive(context, "u_gate", gate), icts::FastStaLogicValue::kInvalid);
+}
+
+TEST(FastSTATest, ConditionalOneEdgeClockGateStopsOnlyTheDisabledBranch)
+{
+  for (const auto enable : std::array<std::optional<bool>, 3>{false, true, std::nullopt}) {
+    auto context = MakeTinyContext();
+    auto& cell = context.liberty_cell_by_master.at("BUF_X1");
+    cell.clock_gate.emplace();
+    cell.clock_gate->clock_port = "A";
+    cell.clock_gate->output_port = "Y";
+    auto active = cell.timing_arc;
+    active.when = "E";
+    auto disabled = cell.timing_arc;
+    disabled.when = "!E";
+    disabled.fall_only = true;
+    cell.timing_arcs = {active, disabled};
+    if (enable.has_value()) {
+      context.case_values["buf/E"] = *enable;
+    }
+    context.clock_source_node_ids = {context.source_node_id};
+    icts::fast_sta::SeedClockSources(context);
+    std::queue<icts::FastStaNodeId> ready;
+    ready.push(context.source_node_id);
+    icts::fast_sta::PropagateReadyQueue(context, ready);
+    const auto& sink = context.nodes.at(3U);
+    EXPECT_EQ(sink.clock_inactive, enable == false);
+    EXPECT_EQ(sink.timing.valid, enable != false);
+  }
 }
 
 class ScopedRootInputSlew
