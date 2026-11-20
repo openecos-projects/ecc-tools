@@ -25,14 +25,20 @@ def main():
     variant_marker = "ICsprout55_9TSVT_basic.lef" if args.variant == "v2" else "ics55_LLSC_H7CR_ecos.lef"
     if not any(variant_marker in path for path in db["INPUT"]["lef_paths"]):
         raise ValueError(f"Workspace does not use ICS55 {args.variant}")
+    stages = {step["name"].lower(): step for step in flow["steps"]}
+
+    def output(stage, suffix):
+        step = stages[stage]
+        return f"{step['directory']}/output/gcd_{step['name']}.{suffix}"
+
     inputs = {
-        "floorplan_in.v.gz": "Synthesis_yosys/output/gcd_Synthesis.v.gz",
-        "cts_in.def.gz": "diff_sizing_dreamplace/output/gcd_diff_sizing.def.gz",
-        "cts_in.v.gz": "diff_sizing_dreamplace/output/gcd_diff_sizing.v.gz",
-        "route_in.def.gz": "timing_optimization_sizer/output/gcd_timing_optimization.def.gz",
-        "route_in.v.gz": "timing_optimization_sizer/output/gcd_timing_optimization.v.gz",
-        "harden_in.def.gz": "filler_ecc/output/gcd_filler.def.gz",
-        "harden_in.v.gz": "filler_ecc/output/gcd_filler.v.gz",
+        "floorplan_in.v.gz": output("synthesis", "v.gz"),
+        "cts_in.def.gz": output("diff_sizing", "def.gz"),
+        "cts_in.v.gz": output("diff_sizing", "v.gz"),
+        "route_in.def.gz": output("timing_optimization", "def.gz"),
+        "route_in.v.gz": output("timing_optimization", "v.gz"),
+        "harden_in.def.gz": output("filler", "def.gz"),
+        "harden_in.v.gz": output("filler", "v.gz"),
     }
     for name, relative in inputs.items():
         data = gzip.decompress((workspace / relative).read_bytes())
@@ -40,19 +46,15 @@ def main():
             raise ValueError(f"Legacy cells in {relative}")
         (fixture / "input" / name).write_bytes(gzip.compress(data, mtime=0))
     shutil.copyfile(
-        workspace / "RCX_ecc/output/gcd_TYPICAL_25C.spef", fixture / "spef/gcd_TYPICAL_25C.spef"
+        workspace / stages["rcx"]["directory"] / "output/gcd_TYPICAL_25C.spef",
+        fixture / "spef/gcd_TYPICAL_25C.spef"
     )
     shutil.copyfile(pdk_root / "techfile/icsprout55.layermap", fixture / "config/gcd.gds.map")
-    catalog = workspace / "config/cell_catalog.tsv"
-    if catalog.is_file():
-        shutil.copyfile(catalog, fixture / "config/cell_catalog.tsv")
-    else:
-        description = json.loads((pdk_root / "ecc-pdk.json").read_text(encoding="utf-8"))
-        with (fixture / "config/cell_catalog.tsv").open("w", encoding="utf-8") as stream:
-            for entry in description["cell_catalog"]:
-                stream.write(
-                    f"{entry['master']}\t{entry['family']}\t{entry['vt']}\t{entry['drive_rank']}\n"
-                )
+    sta = json.loads((workspace / "config/sta_ecc.json").read_text())
+    catalog = Path(sta["STA"]["-cell_catalog"])
+    if not catalog.is_absolute():
+        catalog = workspace / catalog
+    shutil.copyfile(catalog, fixture / "config/cell_catalog.tsv")
 
     if args.variant == "v1":
         profile = {
@@ -88,13 +90,16 @@ def main():
         path = Path(value)
         if path.is_relative_to(workspace_pdk_root):
             return "./icsprout55-pdk/" + str(path.relative_to(workspace_pdk_root))
-        if path == workspace / "config/cell_catalog.tsv":
+        if path == catalog:
             return "./fixtures/gcd/config/cell_catalog.tsv"
         return "./output"
 
     configs = ["cts", "db", "drc", "floorplan", "rcx", "route", "sta"]
     for name in configs:
-        payload = portable(json.loads((workspace / f"config/{name}_ecc.json").read_text()))
+        source = workspace / f"config/{name}_ecc.json"
+        if name == "route" and not source.is_file():
+            source = workspace / "config/routing_ecc.json"
+        payload = portable(json.loads(source.read_text()))
         if name == "db":
             payload["INPUT"].update(
                 def_path="", verilog_path="", sdc_path="./fixtures/gcd/config/gcd.sdc", spef=""
