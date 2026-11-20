@@ -41,6 +41,7 @@ class Config
   int32_t small_rc_fanout_reduction = 1;
   int32_t check_constant_capacitance = 0;
   std::string timing_corner;
+  std::string cell_catalog_path;
   bool is_path_report_number_specified = false;
   bool has_timing_report_slack_lesser_than = false;
   bool has_timing_report_slack_greater_than = false;

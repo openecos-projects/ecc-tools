@@ -1,0 +1,25 @@
+{
+    "INPUT": {
+        "tech_lef_path": "./icsprout55-pdk/prtech/techLEF/N551P6M_ecos.lef",
+        "lef_paths": [
+            "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/lef/ICsprout55_9TSVT_basic.lef",
+            "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/lef/ICsprout55_9TLVT_basic.lef",
+            "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/lef/ICsprout55_9THVT_basic.lef"
+        ],
+        "def_path": "",
+        "verilog_path": "",
+        "lib_path": [
+            "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_SVT/liberty/ICsprout55_9TSVT_ss_v1p08_125c_basic_nldm.lib",
+            "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_LVT/liberty/ICsprout55_9TLVT_ss_v1p08_125c_basic_nldm.lib",
+            "./icsprout55-pdk/IP/STD_cell/ICsprout55_SC9T_BASIC_HVT/liberty/ICsprout55_9THVT_ss_v1p08_125c_basic_nldm.lib"
+        ],
+        "sdc_path": "./fixtures/gcd/config/gcd.sdc",
+        "spef": ""
+    },
+    "OUTPUT": {
+        "output_dir_path": "./output"
+    },
+    "LayerSettings": {
+        "routing_layer_1st": "MET1"
+    }
+}
