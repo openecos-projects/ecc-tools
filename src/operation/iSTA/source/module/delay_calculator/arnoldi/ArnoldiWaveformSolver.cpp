@@ -146,7 +146,7 @@ ParasiticArnoldiPoleResidue ArnoldiWaveformSolver::poleResidue(const ParasiticAr
   // reference treats rd as an external source impedance (report_driver_model,
   // Tool Commands U-2022.12 p.1483). iSTA instead folds rd*C_total into the
   // reduced Arnoldi [0][0], which is a rank-1 modification of the reduced
-  // matrix rather than of the original network (FINDINGS 286). Scaling this
+  // matrix rather than of the original network. Scaling this
   // term is the only knob that changes how rd enters the model, so sweep it to
   // test whether the fold-in is the residual slew error.
   static const double rdc_scale = [] {

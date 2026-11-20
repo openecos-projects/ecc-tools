@@ -50,7 +50,7 @@ bool DataSlewPropagator::constant_driven_arc_enabled()
   return enabled;
 }
 
-// reference keeps the arcs of a fanout cone that is driven by a logic constant:
+// The arcs of a fanout cone driven by a logic constant are kept:
 // the liberty delay/transition tables are read at input_slew = 0 and the result
 // reaches SDF.  iSTA instead marks those arcs is_disable_arc, so they are
 // dropped from slew propagation and from the SDF net list.  Measured on i2c:
@@ -89,7 +89,7 @@ void DataSlewPropagator::propagate()
   // indegree from it and the vertex order can place that sink before its own
   // driver.  Re-sweeping the constant cone picks up the driver slew produced by
   // the first sweep; without it a port behind a tied buffer keeps slew 0 while
-  // reference reports the driver slew unchanged.
+  // The driver slew is reported unchanged.
   if (!constant_driven_arc_enabled()) {
     return;
   }

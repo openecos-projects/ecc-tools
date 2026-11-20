@@ -121,7 +121,7 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
   db.sdc().timingDerates().set(mode, false, TransType::kFall, DerateDelay::kCheck, .1, DerateObject::kDesign, "", true);
   const auto incremented = checker.checkPath(path, "ff:D", mode);
   require(incremented && std::abs(incremented->check().check_time - 1.3) < 1e-9, "scoped check baseline lost global check increment");
-  // PrimeTime negative-check fixture: -0.2 at factor 1.3 becomes -0.14.
+  // Negative-check fixture: -0.2 at factor 1.3 becomes -0.14.
   for (auto& arc : instance.get_check_arc_list())
     for (auto& table : arc.get_timing_arc_list())
       for (auto& [edge, values] : table.get_check_table_map())

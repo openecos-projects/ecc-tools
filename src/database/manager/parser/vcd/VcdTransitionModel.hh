@@ -20,12 +20,11 @@ namespace vcd {
 
 // VCD 活动口径：一次"值变化"折算成多少次翻转，以及 x/z 怎么参与折算。
 //
-// 两套口径分别对齐 PrimeTime PX 的两种分析模式（规则不同，不要互相"统一"）：
-//   kAveraged  - 平均功耗（PTPX averaged，UG 第 5 章把 VCD 折算成 toggle rate /
-//                static probability）：x/z 只在"回到已知值"时折算，回到原值打
+// 平均功耗和逐窗峰值功耗采用不同的活动统计规则：
+//   kAveraged  - 平均功耗：将 VCD 折算成翻转率和静态概率。
+//                x/z 只在"回到已知值"时折算，回到原值打
 //                x_transition_derate_factor 折，回到不同值算一次完整翻转。
-//                这是 iPW 原有口径，已与 averaged golden 对齐（勿改）。
-//   kTimeBased - 逐窗/峰值（PTPX time_based，UG 6-8 ~ 6-9 "Modeling Special Conditions"）：
+//   kTimeBased - 逐窗/峰值功耗：
 //                · X：每个"进入或离开 X"的事件都记 x_transition_derate_factor 次（默认 0.5）；
 //                · Z：经过 Z 不耗功耗，0->Z->1 算 1 次完整跳变，1->Z->1 不算跳变；
 //                · 初始化阶段的 unknown->known 默认忽略（include_initial_x_transitions=false）。
@@ -35,12 +34,12 @@ enum class ActivityModel
   kTimeBased,
 };
 
-// 口径参数，与 PTPX 同名变量一一对应，便于文档、日志与调参。
+// 活动统计参数：选择统计模式、X 翻转折算系数和初始化处理方式。
 struct ActivityModelOptions
 {
   ActivityModel model = ActivityModel::kAveraged;
-  double x_transition_derate_factor = 0.5;     // PTPX power_x_transition_derate_factor
-  bool include_initial_x_transitions = false;  // PTPX power_include_initial_x_transitions
+  double x_transition_derate_factor = 0.5;
+  bool include_initial_x_transitions = false;
 };
 
 inline bool isUnknownValue(const char value)
@@ -66,7 +65,7 @@ inline double evaluateTransition(const ActivityModelOptions& options, const char
       return 0.0;
     }
     if (last_is_x || value_is_x) {
-      // 初始化阶段的 unknown -> known 默认忽略（PTPX power_include_initial_x_transitions）。
+      // include_initial_x_transitions 控制是否计入初始化阶段的 unknown -> known。
       if (last_is_x && !value_unknown && last_defined_value == '\0' && !options.include_initial_x_transitions) {
         return 0.0;
       }
@@ -82,7 +81,7 @@ inline double evaluateTransition(const ActivityModelOptions& options, const char
     return 1.0;
   }
 
-  // kAveraged：保持既有行为（averaged golden 就是靠这条规则对齐的）。
+  // kAveraged：只在回到已知值时计数，并按上一次已知值判断是否折算。
   if (value_unknown) {
     return 0.0;
   }

@@ -300,7 +300,7 @@ void PeakPowerEngine::mergeWorkerResults(
   );
 }
 
-// 峰值流程固定使用 time_based 口径；折算系数与初始 X 处理从配置读取，默认值与 PTPX 一致。
+// 峰值流程固定使用 time_based 口径；折算系数与初始 X 处理从配置读取。
 vcd::ActivityModelOptions PeakPowerEngine::buildActivityModelOptions() const
 {
   vcd::ActivityModelOptions options;
