@@ -103,7 +103,7 @@ void RTInterface::runERT(std::map<std::string, std::any> config_map)
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
-void RTInterface::runRT()
+bool RTInterface::runRT()
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
@@ -123,28 +123,36 @@ void RTInterface::runRT()
   initRegionRoute();
 
   GlobalRouter::initInst();
-  RTGR.route();
+  bool completed = RTGR.route();
   GlobalRouter::destroyInst();
 
-  TARouter::initInst();
-  RTTR.route();
-  TARouter::destroyInst();
-  // outputDef("irt_ta.def");
+  if (completed) {
+    TARouter::initInst();
+    RTTR.route();
+    TARouter::destroyInst();
+    // outputDef("irt_ta.def");
 
-  DetailedRouter::initInst();
-  RTDR.route();
-  DetailedRouter::destroyInst();
-  RTUTIL.releaseMemory("DetailedRouter");
+    DetailedRouter::initInst();
+    completed = RTDR.route();
+    DetailedRouter::destroyInst();
+    RTUTIL.releaseMemory("DetailedRouter");
+  }
 
-  ViolationReporter::initInst();
-  RTVR.report();
-  ViolationReporter::destroyInst();
+  if (completed) {
+    ViolationReporter::initInst();
+    RTVR.report();
+    ViolationReporter::destroyInst();
+  }
 
   RTTB.destroy();
   RTGP.destroy();
   RTDE.destroy();
 
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  RTLOG.info(Loc::current(), completed ? "Completed" : "Stopped early", monitor.getStatsInfo());
+  if (!completed) {
+    destroyRT(false);
+  }
+  return completed;
 }
 
 void RTInterface::outputDef(const std::string& def_name)
@@ -241,13 +249,23 @@ void RTInterface::initNetSteinerLengthMap()
 
 void RTInterface::destroyRT()
 {
+  destroyRT(true);
+}
+
+void RTInterface::destroyRT(bool write_result)
+{
+  if (!DataManager::hasInst()) {
+    return;
+  }
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
   GDSPlotter::destroyInst();
   DRCEngine::destroyInst();
   TOPOBuilder::destroyInst();
-  RTDM.output();
+  if (write_result) {
+    RTDM.output();
+  }
   DataManager::destroyInst();
   RTUTIL.releaseMemory("DataManager");
 

@@ -33,6 +33,7 @@ class DataManager
  public:
   static void initInst();
   static DataManager& getInst();
+  static bool hasInst() { return _dm_instance != nullptr; }
   static void destroyInst();
   // function
   void input(std::map<std::string, std::any>& config_map);
