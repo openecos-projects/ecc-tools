@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "SPEFWriter.hpp"
 
+#include "SPEFSanitizer.hpp"
 #include "Utility.hpp"
 
 namespace ircx {
@@ -222,21 +223,30 @@ void SPEFWriter::writeHeader(std::ofstream& spef_file_stream, int32_t corner_idx
 
 void SPEFWriter::writeNameMap(std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map)
 {
+  // IEEE 1481-1998 requires at least one entry in *NAME_MAP; omit when empty.
+  if (spef_name_map.get_idx_to_port_name_map().empty() && spef_name_map.get_idx_to_instance_name_map().empty()
+      && spef_name_map.get_idx_to_net_name_map().empty()) {
+    return;
+  }
   spef_file_stream << "\n*NAME_MAP\n";
   for (auto& [port_idx, port_name] : spef_name_map.get_idx_to_port_name_map()) {
-    spef_file_stream << "*" << port_idx << " " << port_name << "\n";
+    spef_file_stream << "*" << port_idx << " " << escapeSPEFName(port_name) << "\n";
   }
   for (auto& [instance_idx, instance_name] : spef_name_map.get_idx_to_instance_name_map()) {
-    spef_file_stream << "*" << instance_idx << " " << instance_name << "\n";
+    spef_file_stream << "*" << instance_idx << " " << escapeSPEFName(instance_name) << "\n";
   }
   for (auto& [net_idx, net_name] : spef_name_map.get_idx_to_net_name_map()) {
-    spef_file_stream << "*" << net_idx << " " << net_name << "\n";
+    spef_file_stream << "*" << net_idx << " " << escapeSPEFName(net_name) << "\n";
   }
 }
 
 void SPEFWriter::writePortList(std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map)
 {
   SPEFNameData& spef_name_data = RCXDM.getDatabase().get_spef_name_data();
+  // IEEE 1481-1998 requires *PORTS to contain at least one port entry.
+  if (spef_name_data.get_port_name_list().empty()) {
+    return;
+  }
   spef_file_stream << "\n*PORTS\n\n";
   for (int32_t port_idx = 0; port_idx < static_cast<int32_t>(spef_name_data.get_port_name_list().size()); ++port_idx) {
     std::string& port_name = spef_name_data.get_port_name_list()[port_idx];
@@ -299,6 +309,8 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
   std::string net_spef_name = net.get_net_name();
   if (spef_name_map.get_net_name_to_idx_map().count(net_spef_name) != 0) {
     net_spef_name = RCXUTIL.getString("*", spef_name_map.get_net_name_to_idx_map()[net_spef_name]);
+  } else {
+    net_spef_name = escapeSPEFName(net_spef_name);
   }
 
   int32_t node_offset = topo_pool.get_net_node_range(net_idx).get_offset();
@@ -340,47 +352,57 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
 
   double micron_per_dbu = 1 / 1.0 / database.get_layout_data().get_dbu_per_micron();
   spef_file_stream << "\n*D_NET " << net_spef_name << " " << std::fixed << std::setprecision(6) << total_capacitance << "\n\n";
-  spef_file_stream << "*CONN\n";
-  for (TopoNode& node : node_list) {
-    if (!node.get_is_pin_node() || node.get_pin_name().find(':') != std::string::npos) {
-      continue;
-    }
-    double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
-    double y = RCXUTIL.y(node.get_point()) * micron_per_dbu;
-    Direction port_direction = Direction::kNone;
-    for (int32_t port_idx = 0; port_idx < static_cast<int32_t>(database.get_spef_name_data().get_port_name_list().size()); ++port_idx) {
-      if (database.get_spef_name_data().get_port_name_list()[port_idx] == node.get_pin_name()) {
-        port_direction = database.get_spef_name_data().get_port_direction_list()[port_idx];
-        break;
-      }
-    }
-    spef_file_stream << "*P " << getNodeSPEFName(spef_name_map, node) << " " << getSPEFDirection(port_direction) << " *C " << std::fixed << std::setprecision(3)
-                     << x << " " << y;
-    writeNodeGeometry(sw_model, spef_file_stream, node, micron_per_dbu);
-    spef_file_stream << "\n";
-  }
-
-  for (TopoNode& node : node_list) {
-    if (!node.get_is_pin_node() || node.get_pin_name().find(':') == std::string::npos) {
-      continue;
-    }
-    double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
-    double y = RCXUTIL.y(node.get_point()) * micron_per_dbu;
-    spef_file_stream << "*I " << getNodeSPEFName(spef_name_map, node) << " " << getSPEFDirection(getPinDirection(net, node.get_pin_name())) << " *C "
-                     << std::fixed << std::setprecision(3) << x << " " << y;
-    writeNodeGeometry(sw_model, spef_file_stream, node, micron_per_dbu);
-    spef_file_stream << "\n";
-  }
-
-  for (TopoNode& node : node_list) {
+  // IEEE 1481-1998 requires *CONN to contain at least one *P or *I connection; omit *CONN on pinless nets.
+  bool has_pin_node = false;
+  for (const TopoNode& node : node_list) {
     if (node.get_is_pin_node()) {
-      continue;
+      has_pin_node = true;
+      break;
     }
-    double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
-    double y = RCXUTIL.y(node.get_point()) * micron_per_dbu;
-    spef_file_stream << "*N " << getNodeSPEFName(spef_name_map, node) << " *C " << std::fixed << std::setprecision(3) << x << " " << y;
-    writeNodeGeometry(sw_model, spef_file_stream, node, micron_per_dbu);
-    spef_file_stream << "\n";
+  }
+  if (has_pin_node) {
+    spef_file_stream << "*CONN\n";
+    for (TopoNode& node : node_list) {
+      if (!node.get_is_pin_node() || node.get_pin_name().find(':') != std::string::npos) {
+        continue;
+      }
+      double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
+      double y = RCXUTIL.y(node.get_point()) * micron_per_dbu;
+      Direction port_direction = Direction::kNone;
+      for (int32_t port_idx = 0; port_idx < static_cast<int32_t>(database.get_spef_name_data().get_port_name_list().size()); ++port_idx) {
+        if (database.get_spef_name_data().get_port_name_list()[port_idx] == node.get_pin_name()) {
+          port_direction = database.get_spef_name_data().get_port_direction_list()[port_idx];
+          break;
+        }
+      }
+      spef_file_stream << "*P " << getNodeSPEFName(spef_name_map, node) << " " << getSPEFDirection(port_direction) << " *C " << std::fixed << std::setprecision(3)
+                       << x << " " << y;
+      writeNodeGeometry(sw_model, spef_file_stream, node, micron_per_dbu);
+      spef_file_stream << "\n";
+    }
+
+    for (TopoNode& node : node_list) {
+      if (!node.get_is_pin_node() || node.get_pin_name().find(':') == std::string::npos) {
+        continue;
+      }
+      double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
+      double y = RCXUTIL.y(node.get_point()) * micron_per_dbu;
+      spef_file_stream << "*I " << getNodeSPEFName(spef_name_map, node) << " " << getSPEFDirection(getPinDirection(net, node.get_pin_name())) << " *C "
+                       << std::fixed << std::setprecision(3) << x << " " << y;
+      writeNodeGeometry(sw_model, spef_file_stream, node, micron_per_dbu);
+      spef_file_stream << "\n";
+    }
+
+    for (TopoNode& node : node_list) {
+      if (node.get_is_pin_node()) {
+        continue;
+      }
+      double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
+      double y = RCXUTIL.y(node.get_point()) * micron_per_dbu;
+      spef_file_stream << "*N " << getNodeSPEFName(spef_name_map, node) << " *C " << std::fixed << std::setprecision(3) << x << " " << y;
+      writeNodeGeometry(sw_model, spef_file_stream, node, micron_per_dbu);
+      spef_file_stream << "\n";
+    }
   }
 
   spef_file_stream << "\n*CAP\n";
@@ -447,22 +469,22 @@ std::string SPEFWriter::getNodeSPEFName(SPEFNameMap& spef_name_map, TopoNode& no
       if (spef_name_map.get_port_name_to_idx_map().count(pin_name) != 0) {
         return RCXUTIL.getString("*", spef_name_map.get_port_name_to_idx_map()[pin_name]);
       }
-      return pin_name;
+      return escapeSPEFName(pin_name);
     }
 
     std::string instance_name = pin_name.substr(0, delimiter_pos);
     std::string instance_pin_name = pin_name.substr(delimiter_pos + 1);
     if (spef_name_map.get_instance_name_to_idx_map().count(instance_name) != 0) {
-      return RCXUTIL.getString("*", spef_name_map.get_instance_name_to_idx_map()[instance_name], ":", instance_pin_name);
+      return RCXUTIL.getString("*", spef_name_map.get_instance_name_to_idx_map()[instance_name], ":", escapeSPEFName(instance_pin_name));
     }
-    return pin_name;
+    return escapeSPEFName(pin_name);
   }
 
   Net& node_net = RCXDM.getDatabase().get_layout_data().get_net_list()[node.get_net_idx()];
   if (spef_name_map.get_net_name_to_idx_map().count(node_net.get_net_name()) != 0) {
     return RCXUTIL.getString("*", spef_name_map.get_net_name_to_idx_map()[node_net.get_net_name()], ":", node.get_node_idx() + 1);
   }
-  return RCXUTIL.getString("*", node_net.get_net_name(), ":", node.get_node_idx() + 1);
+  return RCXUTIL.getString("*", escapeSPEFName(node_net.get_net_name()), ":", node.get_node_idx() + 1);
 }
 
 Direction SPEFWriter::getPinDirection(Net& net, const std::string& pin_name)
