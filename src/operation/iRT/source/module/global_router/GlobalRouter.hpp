@@ -41,7 +41,7 @@ class GlobalRouter
   static void initInst();
   static GlobalRouter& getInst();
   static void destroyInst();
-  void route();
+  bool route();
 
  private:
   static GlobalRouter* gr_instance_;
@@ -80,7 +80,7 @@ class GlobalRouter
   void uploadGRResult();
   void reportDetourStat(const std::string& stage);
   void reportSupplyReserve(const std::string& stage) const;
-  void printSummary() const;
+  bool reportAndCheckRoutingOverflow() const;
   bool isLayerInRange(int32_t layer_idx) const;
   void debugPlot(const std::string& flag) const;
   void debugExport(const std::string& flag) const;

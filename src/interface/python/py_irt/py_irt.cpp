@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include "py_irt.h"
 
+#include <stdexcept>
 #include <string>
 
 #include "py_path_utils.h"
@@ -58,7 +59,9 @@ bool runERT(const std::optional<std::filesystem::path>& config, std::map<std::st
 
 bool runRT()
 {
-  RTI.runRT();
+  if (!RTI.runRT()) {
+    throw std::runtime_error("Routing stopped early. See the iRT log for details.");
+  }
   return true;
 }
 

@@ -60,13 +60,14 @@ void DetailedRouter::destroyInst()
 
 // function
 
-void DetailedRouter::route()
+bool DetailedRouter::route()
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
   DRModel dr_model = initDRModel();
-  routeDRModel(dr_model);
-  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  bool completed = routeDRModel(dr_model);
+  RTLOG.info(Loc::current(), completed ? "Completed" : "Stopped early", monitor.getStatsInfo());
+  return completed;
 }
 
 // private
@@ -98,7 +99,7 @@ DRModel DetailedRouter::initDRModel()
   return dr_model;
 }
 
-void DetailedRouter::routeDRModel(DRModel& dr_model)
+bool DetailedRouter::routeDRModel(DRModel& dr_model)
 {
   int32_t cost_unit = RTDM.getOnlyPitch();
   double prefer_wire_unit = 1;
@@ -146,6 +147,8 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
   final_repair_param_list.push_back(repair_param_10);
   final_repair_param_list.push_back(repair_param_20);
 
+  constexpr int32_t kRepairAbortViolationLimit = 5000;
+  constexpr int32_t kFinalRepairViolationLimit = 100;
   std::vector<DRStep> step_list;
   int32_t normal_iter = 0;
   for (DRIterParam& normal_param : normal_param_list) {
@@ -183,6 +186,12 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
     }
 
     int32_t violation_num = getRouteViolationNum(dr_model);
+    if (violation_num > kRepairAbortViolationLimit) {
+      RTLOG.warn(Loc::current(), "Stopping DR before repair after normal iteration ", normal_iter, ", violation_num=", violation_num,
+                 " exceeds ", kRepairAbortViolationLimit);
+      abort_routing = true;
+      break;
+    }
     if (violation_num == 0 || violation_num >= step.max_violation_num) {
       RTLOG.info(Loc::current(), "Skip repair after normal_iter=", normal_iter, " violation_num=", violation_num, " limit=", step.max_violation_num);
       continue;
@@ -201,12 +210,19 @@ void DetailedRouter::routeDRModel(DRModel& dr_model)
       if (stopIteration(dr_model)) {
         break;
       }
+      int32_t violation_num = getRouteViolationNum(dr_model);
+      if (violation_num > kFinalRepairViolationLimit) {
+        RTLOG.info(Loc::current(), "Skipping remaining final repair iterations, violation_num=", violation_num, " exceeds ",
+                   kFinalRepairViolationLimit);
+        break;
+      }
       ++step_iter;
       runRepairIteration(dr_model, repair_param, step_iter);
     }
   }
   reportDetourStat(dr_model, "DR final");
   uploadDRModel(dr_model);
+  return !abort_routing;
 }
 
 void DetailedRouter::runNormalIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t normal_iter, int32_t normal_iter_num, int32_t step_iter)
