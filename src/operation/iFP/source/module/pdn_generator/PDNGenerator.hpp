@@ -60,6 +60,7 @@ class PDNGenerator
   void pruneDeadEndStripes();
   void trimStripeEnds(bool preserve_io_core_ends = true, const std::string& report_name = "stripe_trim.rpt");
   void trimDanglingFollowPins();
+  void pruneUnneededMacroGapStripes(PGModel& pg_model);
 
   void buildPGNet(PGModel& pg_model);
   void resolveIOCoreConnectDefaults(PGModel& pg_model);
@@ -71,14 +72,15 @@ class PDNGenerator
   void mergeOverlappingViaStacks();
   RoutingLayer* findRoutingLayer(std::string layer_name);
   void addLineSegment(std::string net_name, std::string layer_name, PGSegmentType segment_type, int32_t width, int32_t start_x, int32_t start_y, int32_t end_x,
-                      int32_t end_y);
+                      int32_t end_y, bool mark_macro_gap_candidates = false);
   void addUnblockedLineSegment(std::string net_name, std::string layer_name, PGSegmentType segment_type, int32_t width, int32_t start_x, int32_t start_y,
-                               int32_t end_x, int32_t end_y);
+                               int32_t end_x, int32_t end_y, bool macro_gap_candidate = false);
   std::vector<std::pair<int32_t, int32_t>> getMacroBlockageIntervalList(std::string layer_name, int32_t width, int32_t start_x, int32_t start_y, int32_t end_x,
                                                                         int32_t end_y);
   int32_t getMacroTopLayerOrder(Instance& instance);
 
   void buildStripe(PGModel& pg_model);
+  void reserveRailChannels(size_t first_stripe);
   void addUncoveredEdgeStripes(PGModel& pg_model);
   void alignStripeSegmentList();
   void alignStripeSegment(PGSegment& stripe_segment);
@@ -100,21 +102,20 @@ class PDNGenerator
   std::string getRepairTopLayerName(const std::string& repair_layer_name);
   bool isLayerPairConfigured(const std::string& first_layer_name, const std::string& second_layer_name) const;
   int32_t getRepairStripeWidth(const std::string& layer_name);
-  std::vector<PGRepairGroup> buildRepairGroupList(int32_t repair_width);
-  std::vector<const PGSegment*> getIsolatedRailList(const std::string& net_name);
-  bool isRailConnectedToStripe(const PGSegment& rail);
+  using SupplyStripes = std::map<std::string, std::vector<PlanarRect>>;
+  std::vector<PGRepairGroup> buildRepairGroupList(int32_t repair_width, const std::string& repair_layer, const std::vector<bool>& supplied);
   void buildRepairCandidateList(PGRepairGroup& group, const std::string& repair_layer_name, const std::string& top_layer_name, int32_t repair_width,
-                                const std::vector<int32_t>& inherited_x_list = {});
-  std::vector<int32_t> getRepairTopStripeYList(const std::string& net_name, const std::string& top_layer_name, int32_t x, int32_t y1, int32_t y2);
+                                const SupplyStripes& supplies, const std::vector<int32_t>& inherited_x_list = {});
   bool isRepairSegmentLegal(const std::string& net_name, const std::string& layer_name, int32_t width, int32_t x, int32_t y1, int32_t y2);
   std::vector<std::vector<int32_t>> buildRepairComponentList(const std::vector<PGRepairGroup>& group_list, int32_t spacing);
   bool isRepairRectConflict(const PlanarRect& first, const PlanarRect& second, int32_t spacing);
   bool selectRepairCandidateList(std::vector<PGRepairGroup>& group_list, const std::vector<int32_t>& group_idx_list, int32_t spacing);
   bool isRepairCandidateCompatible(const PGSegment& candidate, const std::vector<PGRepairGroup>& group_list,
                                    const std::vector<int32_t>& group_idx_list, int32_t spacing);
-  void splitRepairGroupList(std::vector<PGRepairGroup>& group_list, const std::set<int32_t>& split_group_idx_set,
-                            const std::string& repair_layer_name, const std::string& top_layer_name, int32_t repair_width);
+  void splitRepairGroupList(std::vector<PGRepairGroup>& group_list, const std::set<int32_t>& split_group_idx_set, const std::string& repair_layer_name,
+                            const std::string& top_layer_name, int32_t repair_width, const SupplyStripes& supplies);
   void validatePGConnectivity(PGModel& pg_model);
+  std::vector<bool> getSupplyReachability(const PGModel& pg_model);
   PGConnectivity buildPGConnectivity();
 
 #if 1  // output
