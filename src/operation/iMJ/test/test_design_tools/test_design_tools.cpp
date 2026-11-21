@@ -128,6 +128,8 @@ class DesignToolsTest
     idb::IdbTerm* spare_term = source->get_io_pin_list()->find_pin("spare[0]")->get_term();
     spare_term->set_antenna_gate_area(0.25);
     spare_term->set_antenna_diff_area(0.5);
+    spare_term->add_antenna_gate_area_layer("M2", 0.75);
+    spare_term->add_antenna_diff_area_layer("M2", 1.25);
     spare_term->add_antenna_partial_metal_area("M1", 0.125);
     idb::IdbVia* pin_via = source->get_via_list()->find_via("VDEF")->clone();
     pin_via->set_coordinate(0, 0);
@@ -150,6 +152,12 @@ class DesignToolsTest
     require(spare_pin->get_term()->get_antenna_gate_area() == 0.25 && spare_pin->get_term()->get_antenna_diff_area() == 0.5,
             "retained IO antenna data changed");
     require(spare_pin->get_term()->get_antenna_partial_metal_area().find("M1")->second == 0.125, "retained IO layer antenna data changed");
+    require(spare_pin->get_term()->has_antenna_gate_area_by_layer()
+                && spare_pin->get_term()->get_antenna_gate_area_by_layer().at("M2") == 0.75,
+            "retained IO layer-qualified gate area lost");
+    require(spare_pin->get_term()->has_antenna_diff_area_by_layer()
+                && spare_pin->get_term()->get_antenna_diff_area_by_layer().at("M2") == 1.25,
+            "retained IO layer-qualified diff area lost");
     require(spare_pin->get_term()->get_port_list().front()->get_via_list().size() == 1, "retained IO via lost");
     require(spare_pin->get_via_list().size() == 1, "retained IO via geometry not rebuilt");
     require(source->get_bus_list()->findBus("spare").has_value(), "IO bus not rebuilt");

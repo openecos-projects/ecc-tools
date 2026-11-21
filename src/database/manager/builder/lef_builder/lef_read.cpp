@@ -1124,8 +1124,13 @@ int LefRead::parse_pin(lefiPin* lef_pin)
 
     if (gate_model != nullptr && gate_model->hasAntennaGateArea()) {
       for (int i = 0; i < gate_model->numAntennaGateArea(); ++i) {
-        gate_area += gate_model->antennaGateArea(i);
-        has_gate = true;
+        const char* layer_name = gate_model->antennaGateAreaLayer(i);
+        if (layer_name != nullptr && layer_name[0] != '\0') {
+          term->add_antenna_gate_area_layer(layer_name, gate_model->antennaGateArea(i));
+        } else {
+          gate_area += gate_model->antennaGateArea(i);
+          has_gate = true;
+        }
       }
     }
   }
@@ -1134,8 +1139,13 @@ int LefRead::parse_pin(lefiPin* lef_pin)
   bool has_diff = false;
   if (lef_pin->hasAntennaDiffArea()) {
     for (int i = 0; i < lef_pin->numAntennaDiffArea(); ++i) {
-      diff_area += lef_pin->antennaDiffArea(i);
-      has_diff = true;
+      const char* layer_name = lef_pin->antennaDiffAreaLayer(i);
+      if (layer_name != nullptr && layer_name[0] != '\0') {
+        term->add_antenna_diff_area_layer(layer_name, lef_pin->antennaDiffArea(i));
+      } else {
+        diff_area += lef_pin->antennaDiffArea(i);
+        has_diff = true;
+      }
     }
   }
 

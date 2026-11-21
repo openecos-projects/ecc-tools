@@ -13,6 +13,8 @@
 // MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
+#include <chrono>
+
 #include "ACModel.hpp"
 #include "ACUnionFind.hpp"
 #include "AntennaChecker.hpp"
@@ -59,6 +61,39 @@ int main()
   if (imj::GetACViolationTypeName()(imj::ACViolationType::kNone) != "None"
       || imj::GetACViolationTypeName()(imj::ACViolationType::kAntennaDiffCutCar) != "DiffCutCAR") {
     return 1;
+  }
+
+  // Scaling regression for high-fanout nets with LAYER-qualified pins and conductor unions.
+  {
+    constexpr int kFanout = 16000;
+    std::vector<imj::ACGraphNode> hf_nodes(static_cast<size_t>(2 * kFanout + 1));
+    hf_nodes[0].is_conductor = true;
+    for (int i = 0; i < kFanout; ++i) {
+      auto& g = hf_nodes[static_cast<size_t>(1 + i)];
+      g.pin_id = i;
+      g.layer_order = 1;
+      g.gate_area = 1.0;
+
+      auto& c = hf_nodes[static_cast<size_t>(1 + kFanout + i)];
+      c.is_conductor = true;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    imj::ACUnionFind hf_uf(static_cast<int>(hf_nodes.size()), hf_nodes);
+    for (int i = 0; i < kFanout; ++i) {
+      hf_uf.merge(0, 1 + i);
+    }
+    for (int i = 0; i < kFanout; ++i) {
+      hf_uf.merge(0, 1 + kFanout + i);
+    }
+    const auto elapsed_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    const int root = hf_uf.find(0);
+    if (!imj::Utility::equalDoubleByError(hf_uf.d[root].gate_area, static_cast<double>(kFanout), MJ_ERROR)) {
+      return 1;
+    }
+    if (elapsed_ms > 500) {
+      return 1;
+    }
   }
 
   imj::AntennaChecker::initInst();
