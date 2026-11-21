@@ -93,6 +93,7 @@ class MJInterface
   void insertFiller(std::map<std::string, std::any> config_map);
   void insertMetal(std::map<std::string, std::any> config_map);
   void checkAntenna(std::map<std::string, std::any> config_map);
+  bool repairAntenna(std::map<std::string, std::any> config_map);
   void flattenDef(std::map<std::string, std::any> config_map);
   void analyzeDriver();
   void cutDEF(std::map<std::string, std::any> config_map);

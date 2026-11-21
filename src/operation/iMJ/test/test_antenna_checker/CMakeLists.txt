@@ -22,6 +22,20 @@ target_link_libraries(test_imj_antenna_reporting
 
 add_test(NAME test_imj_antenna_reporting COMMAND test_imj_antenna_reporting)
 
+add_executable(test_imj_antenna_repair
+    ${IMJ_TEST}/test_antenna_checker/test_antenna_repair.cpp
+)
+
+target_link_libraries(test_imj_antenna_repair
+    PRIVATE
+    imj_interface
+    imj_antenna_checker
+    imj_antenna_repairer
+    idm
+)
+
+add_test(NAME test_imj_antenna_repair COMMAND test_imj_antenna_repair)
+
 add_test(NAME test_imj_antenna_command
     COMMAND ecc_bin -script ${IMJ_TEST}/test_antenna_checker/data/test_check_antenna.tcl
 )

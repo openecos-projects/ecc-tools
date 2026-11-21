@@ -83,6 +83,100 @@ void AntennaChecker::check(std::map<std::string, std::any> config_map)
   MJLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }
 
+namespace {
+
+void sortViolationsDeterministic(std::vector<ACViolation>& violations)
+{
+  std::sort(violations.begin(), violations.end(), [](const ACViolation& a, const ACViolation& b) {
+    return std::tie(a.net_name, a.layer_name, a.type, a.ratio, a.threshold, a.lx, a.ly, a.hx, a.hy) <
+           std::tie(b.net_name, b.layer_name, b.type, b.ratio, b.threshold, b.lx, b.ly, b.hx, b.hy);
+  });
+}
+
+void resetACRunCounters(ACModel& ac_model)
+{
+  ac_model.get_signal_net_cnt() = 0;
+  ac_model.get_violation_list().clear();
+  ac_model.set_violation_num(0);
+  ac_model.get_pins_missing_antenna_info().store(0, std::memory_order_relaxed);
+  ac_model.get_pins_with_gate_area().store(0, std::memory_order_relaxed);
+  ac_model.get_comps_without_gate().store(0, std::memory_order_relaxed);
+  ac_model.get_skipped_segments().store(0, std::memory_order_relaxed);
+  ac_model.get_conductors_out_of_range().store(0, std::memory_order_relaxed);
+  ac_model.get_partial_areas_dropped().store(0, std::memory_order_relaxed);
+}
+
+}  // namespace
+
+ACModel AntennaChecker::buildModelForDesign(idb::IdbDesign* design)
+{
+  ACModel ac_model;
+  if (!design || !design->get_layout()) {
+    return ac_model;
+  }
+  int dbu = 0;
+  if (design->get_units() != nullptr && design->get_units()->get_micron_dbu() > 0) {
+    dbu = design->get_units()->get_micron_dbu();
+  } else if (design->get_layout()->get_units() != nullptr && design->get_layout()->get_units()->get_micron_dbu() > 0) {
+    dbu = design->get_layout()->get_units()->get_micron_dbu();
+  }
+  if (dbu > 0) {
+    ac_model.get_micron_dbu() = dbu;
+  }
+  initLayers(ac_model, design);
+  return ac_model;
+}
+
+std::vector<ACViolation> AntennaChecker::collectDesignViolations(idb::IdbDesign* design, ACModel& ac_model)
+{
+  resetACRunCounters(ac_model);
+  if (!design || !design->get_layout() || ac_model.get_rule_list().empty()) {
+    return {};
+  }
+  idb::IdbNetList* net_list = design->get_net_list();
+  if (!net_list) {
+    return {};
+  }
+
+  // Analyze all non-PDN nets (signal, clock, reset, scan, tie-off, and unspecified USE).
+  std::vector<idb::IdbNet*> signal_nets;
+  for (idb::IdbNet* net : net_list->get_net_list()) {
+    if (net && !net->is_pdn()) {
+      signal_nets.push_back(net);
+    }
+  }
+  ac_model.get_signal_net_cnt() = static_cast<int64_t>(signal_nets.size());
+
+  const int nthreads = std::max(1u, std::thread::hardware_concurrency());
+  std::vector<std::vector<ACViolation>> local_violations(nthreads);
+
+#pragma omp parallel for schedule(dynamic, 16) num_threads(nthreads)
+  for (long long i = 0; i < static_cast<long long>(signal_nets.size()); ++i) {
+    const int tid = omp_get_thread_num();
+    checkNet(ac_model, design, signal_nets[static_cast<size_t>(i)], local_violations[tid]);
+  }
+
+  std::vector<ACViolation>& violation_list = ac_model.get_violation_list();
+  for (auto& v : local_violations) {
+    violation_list.insert(violation_list.end(), std::make_move_iterator(v.begin()), std::make_move_iterator(v.end()));
+  }
+
+  sortViolationsDeterministic(violation_list);
+  ac_model.set_violation_num(static_cast<int32_t>(violation_list.size()));
+  return violation_list;
+}
+
+std::vector<ACViolation> AntennaChecker::collectNetViolations(idb::IdbDesign* design, ACModel& ac_model, idb::IdbNet* net)
+{
+  std::vector<ACViolation> out;
+  if (!design || !net || net->is_pdn() || ac_model.get_rule_list().empty()) {
+    return out;
+  }
+  checkNet(ac_model, design, net, out);
+  sortViolationsDeterministic(out);
+  return out;
+}
+
 // private
 
 ACModel AntennaChecker::initACModel(std::map<std::string, std::any>& config_map)
@@ -110,23 +204,7 @@ void AntennaChecker::runACModel(ACModel& ac_model)
       design = def_service->get_design();
     }
   }
-  int64_t& signal_net_cnt = ac_model.get_signal_net_cnt();
-  std::vector<ACViolation>& violation_list = ac_model.get_violation_list();
-  std::atomic<int64_t>& pins_missing_antenna_info = ac_model.get_pins_missing_antenna_info();
-  std::atomic<int64_t>& pins_with_gate_area = ac_model.get_pins_with_gate_area();
-  std::atomic<int64_t>& comps_without_gate = ac_model.get_comps_without_gate();
-  std::atomic<int64_t>& skipped_segments = ac_model.get_skipped_segments();
-  std::atomic<int64_t>& conductors_out_of_range = ac_model.get_conductors_out_of_range();
-  std::atomic<int64_t>& partial_areas_dropped = ac_model.get_partial_areas_dropped();
-
-  signal_net_cnt = 0;
-  violation_list.clear();
-  pins_missing_antenna_info.store(0, std::memory_order_relaxed);
-  pins_with_gate_area.store(0, std::memory_order_relaxed);
-  comps_without_gate.store(0, std::memory_order_relaxed);
-  skipped_segments.store(0, std::memory_order_relaxed);
-  conductors_out_of_range.store(0, std::memory_order_relaxed);
-  partial_areas_dropped.store(0, std::memory_order_relaxed);
+  resetACRunCounters(ac_model);
 
   if (!design || !design->get_layout()) {
     return;
@@ -139,47 +217,27 @@ void AntennaChecker::runACModel(ACModel& ac_model)
     return;
   }
 
-  idb::IdbNetList* net_list = design->get_net_list();
-  if (!net_list) {
+  if (!design->get_net_list()) {
     return;
   }
 
-  // Analyze all non-PDN nets (signal, clock, reset, scan, tie-off, and unspecified USE).
-  std::vector<idb::IdbNet*> signal_nets;
-  for (idb::IdbNet* net : net_list->get_net_list()) {
-    if (net && !net->is_pdn()) {
-      signal_nets.push_back(net);
-    }
-  }
+  collectDesignViolations(design, ac_model);
 
-  signal_net_cnt = static_cast<int64_t>(signal_nets.size());
-
-  const int nthreads = std::max(1u, std::thread::hardware_concurrency());
-  std::vector<std::vector<ACViolation>> local_violations(nthreads);
-
-#pragma omp parallel for schedule(dynamic, 16) num_threads(nthreads)
-  for (long long i = 0; i < static_cast<long long>(signal_nets.size()); ++i) {
-    const int tid = omp_get_thread_num();
-    checkNet(ac_model, design, signal_nets[static_cast<size_t>(i)], local_violations[tid]);
-  }
-
-  for (auto& v : local_violations) {
-    violation_list.insert(violation_list.end(), std::make_move_iterator(v.begin()), std::make_move_iterator(v.end()));
-  }
-
-  std::sort(violation_list.begin(), violation_list.end(), [](const ACViolation& a, const ACViolation& b) {
-    return std::tie(a.net_name, a.layer_name, a.type, a.ratio, a.threshold, a.lx, a.ly, a.hx, a.hy) <
-           std::tie(b.net_name, b.layer_name, b.type, b.ratio, b.threshold, b.lx, b.ly, b.hx, b.hy);
-  });
-  ac_model.set_violation_num(static_cast<int32_t>(violation_list.size()));
+  const int64_t signal_net_cnt = ac_model.get_signal_net_cnt();
+  const auto& pins_missing_antenna_info = ac_model.get_pins_missing_antenna_info();
+  const auto& pins_with_gate_area = ac_model.get_pins_with_gate_area();
+  const auto& comps_without_gate = ac_model.get_comps_without_gate();
+  const auto& skipped_segments = ac_model.get_skipped_segments();
+  const auto& conductors_out_of_range = ac_model.get_conductors_out_of_range();
+  const auto& partial_areas_dropped = ac_model.get_partial_areas_dropped();
 
   if (pins_missing_antenna_info.load() > 0) {
     MJLOG.warn(Loc::current(), pins_missing_antenna_info.load(),
                " instance pins have no antenna gate/diffusion area annotation; affected nets may be under-checked");
   }
 
-  if (!signal_nets.empty() && pins_with_gate_area.load() == 0) {
-    MJLOG.warn(Loc::current(), "No instance pin in ", signal_nets.size(),
+  if (signal_net_cnt > 0 && pins_with_gate_area.load() == 0) {
+    MJLOG.warn(Loc::current(), "No instance pin in ", signal_net_cnt,
                " signal nets provided ANTENNAGATEAREA, so no antenna ratio could be evaluated. "
                "A zero violation count here means the check did not run, not that the design is clean.");
   }
@@ -707,65 +765,141 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
     readPinAntennaInfo(ac_model, pin, instance_pin, gate_area, diff_area, provides_diff);
     int gate_node = createGateNode(gate_area, diff_area, provides_diff, pin, instance_pin);
 
+    idb::IdbTerm* term = pin->get_term();
+    const auto& port_boxes = pin->get_port_box_list();
+    std::vector<int> shape_port_indices(port_boxes.size(), 0);
+    if (term != nullptr && !term->get_port_list().empty()) {
+      size_t total_port_shapes = 0;
+      for (idb::IdbPort* port : term->get_port_list()) {
+        if (port != nullptr) {
+          total_port_shapes += port->get_layer_shape().size();
+        }
+      }
+      if (total_port_shapes == port_boxes.size()) {
+        size_t flat_idx = 0;
+        int p_idx = 0;
+        for (idb::IdbPort* port : term->get_port_list()) {
+          if (port != nullptr) {
+            for (size_t s = 0; s < port->get_layer_shape().size(); ++s) {
+              shape_port_indices[flat_idx++] = p_idx;
+            }
+          }
+          ++p_idx;
+        }
+      }
+    }
+
     std::vector<ACPinShape> pin_shapes;
 
-    for (idb::IdbLayerShape* shape : pin->get_port_box_list()) {
+    auto pushPinShape = [&](idb::IdbLayerShape* shape, int port_idx) {
       if (shape == nullptr || shape->get_layer() == nullptr) {
-        continue;
+        return;
       }
-
       idb::IdbLayer* layer = shape->get_layer();
       int order = static_cast<int>(layer->get_order());
 
       if (order < 0 || order > max_layer_order) {
         conductors_out_of_range.fetch_add(1, std::memory_order_relaxed);
-        continue;
+        return;
       }
 
       bool routing = isRoutingLike(layer, order);
       bool cut = layer->is_cut();
-
       for (idb::IdbRect* r : shape->get_rect_list()) {
         if (r != nullptr) {
-          pin_shapes.push_back({order, routing, cut, *r});
+          pin_shapes.push_back({port_idx, order, routing, cut, *r});
         }
+      }
+    };
+
+    for (size_t shape_i = 0; shape_i < port_boxes.size(); ++shape_i) {
+      pushPinShape(port_boxes[shape_i], shape_port_indices[shape_i]);
+    }
+
+    const auto& pin_vias = pin->get_via_list();
+    if (!pin_vias.empty()) {
+      std::vector<int> via_port_indices(pin_vias.size(), 0);
+      if (term != nullptr && !term->get_port_list().empty()) {
+        size_t total_port_vias = 0;
+        for (idb::IdbPort* port : term->get_port_list()) {
+          if (port != nullptr) {
+            total_port_vias += port->get_via_list().size();
+          }
+        }
+        if (total_port_vias == pin_vias.size()) {
+          size_t flat_idx = 0;
+          int p_idx = 0;
+          for (idb::IdbPort* port : term->get_port_list()) {
+            if (port != nullptr) {
+              for (size_t v = 0; v < port->get_via_list().size(); ++v) {
+                via_port_indices[flat_idx++] = p_idx;
+              }
+            }
+            ++p_idx;
+          }
+        }
+      }
+      for (size_t via_i = 0; via_i < pin_vias.size(); ++via_i) {
+        idb::IdbVia* via = pin_vias[via_i];
+        if (via == nullptr) {
+          continue;
+        }
+        const int port_idx = via_port_indices[via_i];
+        idb::IdbLayerShape bottom_shape = via->get_bottom_layer_shape();
+        idb::IdbLayerShape cut_shape = via->get_cut_layer_shape();
+        idb::IdbLayerShape top_shape = via->get_top_layer_shape();
+        pushPinShape(&bottom_shape, port_idx);
+        pushPinShape(&cut_shape, port_idx);
+        pushPinShape(&top_shape, port_idx);
       }
     }
 
     int first_shape_node = -1;
     std::map<int, int> shape_node_by_order;
+    std::vector<std::pair<int, int>> all_shape_nodes;
 
     if (!pin_shapes.empty()) {
       std::sort(pin_shapes.begin(), pin_shapes.end(), [](const ACPinShape& a, const ACPinShape& b) {
-        return a.order < b.order;
+        return std::tie(a.port_idx, a.order) < std::tie(b.port_idx, b.order);
       });
 
       size_t i = 0;
       while (i < pin_shapes.size()) {
-        int order = pin_shapes[i].order;
+        const int port_idx = pin_shapes[i].port_idx;
+        int prev_port_shape = -1;
 
-        bool routing = false;
-        bool cut = false;
-        std::vector<idb::IdbRect> rects;
+        while (i < pin_shapes.size() && pin_shapes[i].port_idx == port_idx) {
+          int order = pin_shapes[i].order;
 
-        while (i < pin_shapes.size() && pin_shapes[i].order == order) {
-          routing = routing || pin_shapes[i].routing;
-          cut = cut || pin_shapes[i].cut;
-          rects.push_back(pin_shapes[i].rect);
-          ++i;
-        }
+          bool routing = false;
+          bool cut = false;
+          std::vector<idb::IdbRect> rects;
 
-        int shape_node = createConductorNode(order, routing, cut, rects);
-
-        if (shape_node >= 0) {
-          shape_node_by_order[order] = shape_node;
-          if (first_shape_node < 0) {
-            first_shape_node = shape_node;
+          while (i < pin_shapes.size() && pin_shapes[i].port_idx == port_idx && pin_shapes[i].order == order) {
+            routing = routing || pin_shapes[i].routing;
+            cut = cut || pin_shapes[i].cut;
+            rects.push_back(pin_shapes[i].rect);
+            ++i;
           }
-        }
 
-        if (gate_node >= 0 && shape_node >= 0) {
-          addEdge(gate_node, shape_node, order);
+          int shape_node = createConductorNode(order, routing, cut, rects);
+
+          if (shape_node >= 0) {
+            all_shape_nodes.emplace_back(order, shape_node);
+            shape_node_by_order.emplace(order, shape_node);
+            if (first_shape_node < 0) {
+              first_shape_node = shape_node;
+            }
+            if (prev_port_shape >= 0) {
+              // Shapes of the same LEF PORT are internally connected at the higher layer stage.
+              addEdge(prev_port_shape, shape_node, order);
+            }
+            prev_port_shape = shape_node;
+          }
+
+          if (gate_node >= 0 && shape_node >= 0) {
+            addEdge(gate_node, shape_node, order);
+          }
         }
       }
     }
@@ -791,7 +925,6 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
       return first_shape_node;
     };
 
-    idb::IdbTerm* term = pin->get_term();
     idb::IdbLayers* layers = (design && design->get_layout()) ? design->get_layout()->get_layers() : nullptr;
 
     std::map<int, double> qualified_gate_by_order;
@@ -876,8 +1009,8 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
         }
       };
 
-      if (!shape_node_by_order.empty()) {
-        for (const auto& [port_order, shape_node] : shape_node_by_order) {
+      if (!all_shape_nodes.empty()) {
+        for (const auto& [port_order, shape_node] : all_shape_nodes) {
           attachQualifiedToAnchor(shape_node, port_order);
         }
       } else if (gate_node >= 0) {
@@ -978,7 +1111,7 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
           continue;
         }
 
-        if (seg->is_wire()) {
+        if (seg->is_wire() || (seg->is_rect() && seg->get_delta_rect() != nullptr)) {
           idb::IdbLayer* layer = seg->get_layer();
 
           if (layer != nullptr) {
@@ -1067,7 +1200,7 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
           }
         }
 
-        if (!seg->is_wire() && !seg->is_via()) {
+        if (!seg->is_wire() && !(seg->is_rect() && seg->get_delta_rect() != nullptr) && !seg->is_via()) {
           skipped_segments.fetch_add(1, std::memory_order_relaxed);
         }
       }
@@ -1558,7 +1691,7 @@ void AntennaChecker::readPinAntennaInfo(ACModel& ac_model, idb::IdbPin* pin, con
   }
 }
 
-const ACAntennaRule* AntennaChecker::pickRule(const ACModel& ac_model, const int layer_order, const bool routing) const
+const ACAntennaRule* AntennaChecker::pickRule(const ACModel& ac_model, const int layer_order, const bool routing)
 {
   const std::vector<std::vector<const ACAntennaRule*>>& rule_map = ac_model.get_rule_map();
   if (layer_order < 0 || static_cast<size_t>(layer_order) >= rule_map.size()) {

@@ -36,6 +36,8 @@ class Config
   std::string dm_temp_directory_path;  // building
   // **********  AntennaChecker   ********** //
   std::string ac_temp_directory_path;  // building
+  // **********  AntennaRepairer  ********** //
+  std::string ar_temp_directory_path;  // building
   // **********   DefFlattener    ********** //
   std::string df_temp_directory_path;  // building
   // **********  DriverAnalyzer  ********** //

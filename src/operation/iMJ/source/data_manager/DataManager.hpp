@@ -28,6 +28,7 @@ class DataManager
 {
  public:
   static void initInst();
+  static bool isInitialized() { return _dm_instance != nullptr; }
   static DataManager& getInst();
   static void destroyInst();
 

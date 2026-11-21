@@ -38,6 +38,9 @@ class AntennaChecker
 
   // function
   void check(std::map<std::string, std::any> config_map);
+  static ACModel buildModelForDesign(idb::IdbDesign* design);
+  static std::vector<ACViolation> collectDesignViolations(idb::IdbDesign* design, ACModel& ac_model);
+  static std::vector<ACViolation> collectNetViolations(idb::IdbDesign* design, ACModel& ac_model, idb::IdbNet* net);
 
  private:
   // self
@@ -56,11 +59,11 @@ class AntennaChecker
   void runACModel(ACModel& ac_model);
   void reportACModel(const ACModel& ac_model);
   void initDatabaseInfo(ACModel& ac_model);
-  void initLayers(ACModel& ac_model, idb::IdbDesign* design);
-  void checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::IdbNet* net, std::vector<ACViolation>& out_violations);
-  void readPinAntennaInfo(ACModel& ac_model, idb::IdbPin* pin, bool instance_pin, double& gate_area, double& diff_area,
-                          bool& provides_diff);
-  const ACAntennaRule* pickRule(const ACModel& ac_model, int layer_order, bool routing) const;
+  static void initLayers(ACModel& ac_model, idb::IdbDesign* design);
+  static void checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::IdbNet* net, std::vector<ACViolation>& out_violations);
+  static void readPinAntennaInfo(ACModel& ac_model, idb::IdbPin* pin, bool instance_pin, double& gate_area, double& diff_area,
+                                 bool& provides_diff);
+  static const ACAntennaRule* pickRule(const ACModel& ac_model, int layer_order, bool routing);
   static void unionArea(const std::vector<idb::IdbRect>& rects, int micron_dbu, double& area_um);
   static void unionAreaPerimeter(const std::vector<idb::IdbRect>& rects, int micron_dbu, double& area_um, double& perimeter_um);
   static ACThresholdPick pickThreshold(double plain_ratio, double diff_ratio, const std::vector<std::pair<double, double>>& diff_pwl,

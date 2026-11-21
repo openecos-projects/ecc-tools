@@ -12,6 +12,7 @@ namespace imj {
 class ACPinShape
 {
  public:
+  int port_idx = 0;
   int order = -1;
   bool routing = false;
   bool cut = false;
