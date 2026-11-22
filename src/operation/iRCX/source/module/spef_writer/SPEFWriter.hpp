@@ -18,7 +18,7 @@
 
 #include "DataManager.hpp"
 #include "Direction.hpp"
-#include "GeometryDisplayWriter.h"
+#include <memory>
 #include "Logger.hpp"
 #include "Monitor.hpp"
 #include "Net.hpp"
@@ -28,6 +28,10 @@
 #include "SWNodeCouplingKey.hpp"
 #include "TopoEdge.hpp"
 #include "TopoNode.hpp"
+
+namespace ecc::geometry {
+class GeometryDisplayWriter;
+}
 
 namespace ircx {
 
@@ -64,9 +68,9 @@ class SPEFWriter
   void writePortList(std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map);
   char getSPEFDirection(Direction direction);
   void writeLayerMap(SWModel& sw_model, std::ofstream& spef_file_stream);
-  void writeDNetList(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+  void writeDNetList(std::unique_ptr<ecc::geometry::GeometryDisplayWriter>& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
                      int32_t corner_idx);
-  void writeDNet(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+  void writeDNet(std::unique_ptr<ecc::geometry::GeometryDisplayWriter>& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
                  int32_t corner_idx, int32_t net_idx);
   void getNearestNodePair(TopoEdge& self_edge, TopoEdge& other_edge, int32_t& self_node_idx, int32_t& other_node_idx);
   std::string getNodeSPEFName(SPEFNameMap& spef_name_map, TopoNode& node);

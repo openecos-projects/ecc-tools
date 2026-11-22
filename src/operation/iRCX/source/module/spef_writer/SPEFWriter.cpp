@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "SPEFWriter.hpp"
 
+#include "GeometryDisplayWriter.h"
+#include "ReplayCapture.h"
 #include "SPEFSanitizer.hpp"
 #include "Utility.hpp"
 
@@ -134,18 +136,23 @@ void SPEFWriter::writeSPEF(SWModel& sw_model, SPEFNameMap& spef_name_map, int32_
   writeNameMap(*spef_file_stream, spef_name_map);
   writePortList(*spef_file_stream, spef_name_map);
   writeLayerMap(sw_model, *spef_file_stream);
-  auto display_path = spef_file_path;
-  display_path.replace_extension(".gdisplay");
-  ecc::geometry::GeometryDisplayWriter display(display_path,
-                                               {{"kind", "rcx"},
-                                                {"key", "rcx:" + corner_data.get_corner_name()},
-                                                {"label", spef_file_path.stem().string() + " · SPEF extraction"},
-                                                {"corner", corner_data.get_corner_name()},
-                                                {"unit", "fF"}},
-                                               ecc::geometry::GeometryDisplayWriter::Encoding::kRecords);
+  using Display = ecc::geometry::GeometryDisplayWriter;
+  std::unique_ptr<Display> display;
+  ecc::replay::guarded([&] {
+    auto display_path = spef_file_path;
+    display_path.replace_extension(".gdisplay");
+    display = std::make_unique<Display>(display_path,
+                                        nlohmann::json{{"kind", "rcx"},
+                                                       {"key", "rcx:" + corner_data.get_corner_name()},
+                                                       {"label", spef_file_path.stem().string() + " · SPEF extraction"},
+                                                       {"corner", corner_data.get_corner_name()},
+                                                       {"unit", "fF"}},
+                                        Display::Encoding::kRecords);
+  });
   writeDNetList(display, sw_model, *spef_file_stream, spef_name_map, corner_idx);
-  display.finish();
   RCXUTIL.closeFileStream(spef_file_stream);
+  if (display)
+    ecc::replay::guarded([&] { display->finish(); });
   RCXLOG.info(Loc::current(), "Wrote SPEF: ", spef_file_path.string());
 }
 
@@ -313,7 +320,7 @@ void SPEFWriter::writeLayerMap(SWModel& sw_model, std::ofstream& spef_file_strea
   }
 }
 
-void SPEFWriter::writeDNetList(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+void SPEFWriter::writeDNetList(std::unique_ptr<ecc::geometry::GeometryDisplayWriter>& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
                                int32_t corner_idx)
 {
   int32_t net_num = RCXDM.getDatabase().get_layout_data().get_regular_net_num();
@@ -322,7 +329,7 @@ void SPEFWriter::writeDNetList(ecc::geometry::GeometryDisplayWriter& display, SW
   }
 }
 
-void SPEFWriter::writeDNet(ecc::geometry::GeometryDisplayWriter& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
+void SPEFWriter::writeDNet(std::unique_ptr<ecc::geometry::GeometryDisplayWriter>& display, SWModel& sw_model, std::ofstream& spef_file_stream, SPEFNameMap& spef_name_map,
                            int32_t corner_idx, int32_t net_idx)
 {
   Database& database = RCXDM.getDatabase();
@@ -378,7 +385,14 @@ void SPEFWriter::writeDNet(ecc::geometry::GeometryDisplayWriter& display, SWMode
     total_capacitance += coupling_capacitance;
   }
 
-  display.record({{"label", net.get_net_name()}, {"nets", {net.get_net_name()}}, {"value", total_capacitance}});
+  if (display) {
+    try {
+      display->record({{"label", net.get_net_name()}, {"nets", {net.get_net_name()}}, {"value", total_capacitance}});
+    } catch (const std::exception& error) {
+      ecc::replay::failure(error.what());
+      display.reset();
+    }
+  }
   double micron_per_dbu = 1 / 1.0 / database.get_layout_data().get_dbu_per_micron();
   spef_file_stream << "\n*D_NET " << net_spef_name << " " << std::fixed << std::setprecision(6) << total_capacitance << "\n\n";
   // IEEE 1481-1998 requires *CONN to contain at least one *P or *I connection; omit *CONN on pinless nets.

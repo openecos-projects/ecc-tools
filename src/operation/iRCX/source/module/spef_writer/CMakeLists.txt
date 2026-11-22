@@ -17,6 +17,8 @@ target_link_libraries(ircx_spef_writer
     ircx_data_manager
     ircx_module
     ircx_toolkit
+    PRIVATE
+    geometry_builder
 )
 
 target_include_directories(ircx_spef_writer
