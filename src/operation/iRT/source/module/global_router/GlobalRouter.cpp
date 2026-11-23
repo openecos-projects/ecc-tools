@@ -112,12 +112,11 @@ void GlobalRouter::destroyInst()
   }
 }
 
-void GlobalRouter::route()
+bool GlobalRouter::route()
 {
   Monitor monitor;
   RTLOG.info(Loc::current(), "Starting...");
 
-  RTDM.getDatabase().get_net_global_result_map().clear();
   initGridGraph();
 
   analyzeSupply();
@@ -139,11 +138,15 @@ void GlobalRouter::route()
   // debugPlot("after_route");
   // debugExport("after_route");
 
+  if (!reportAndCheckRoutingOverflow()) {
+    return false;
+  }
+  RTDM.getDatabase().get_net_global_result_map().clear();
   uploadGRResult();
   RTDM.rebuildGlobalResultRTree();
-  printSummary();
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+  return true;
 }
 
 void GlobalRouter::initGridGraph()
@@ -758,8 +761,10 @@ void GlobalRouter::reportDetourStat(const std::string& stage)
   DetourStat::report(routed_length_map, RTDM.getDatabase().get_net_steiner_length_map(), RTDM.getDatabase().get_net_list(), stage);
 }
 
-void GlobalRouter::printSummary() const
+bool GlobalRouter::reportAndCheckRoutingOverflow() const
 {
+  constexpr double kMaxEdgeOverflow = 4.0;
+  constexpr double kMaxTotalOverflowRatio = 0.01;
   std::vector<RoutingLayer>& routing_layer_list = RTDM.getDatabase().get_routing_layer_list();
 
   double total_supply = 0.0;
@@ -790,6 +795,15 @@ void GlobalRouter::printSummary() const
   summary_table << fort::header << "Total" << total_supply << total_demand << total_overflow << max_overflow << overflow_edge_num << fort::endr;
 
   RTUTIL.printTableList({summary_table});
+
+  double total_overflow_limit = kMaxTotalOverflowRatio * total_supply;
+  if (max_overflow >= kMaxEdgeOverflow || total_overflow > total_overflow_limit) {
+    RTLOG.warn(Loc::current(), "Routing stopped after global routing due to congestion. Max edge overflow: ", max_overflow, " (must be < ",
+               kMaxEdgeOverflow, "), total overflow: ", total_overflow, " (must be <= ", total_overflow_limit, ", ", 100.0 * kMaxTotalOverflowRatio,
+               "% of total usable supply ", total_supply, ").");
+    return false;
+  }
+  return true;
 }
 
 void GlobalRouter::reportSupplyReserve(const std::string& stage) const

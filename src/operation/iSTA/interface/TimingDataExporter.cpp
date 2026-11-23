@@ -296,7 +296,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     snapshot.pins.push_back(std::move(exported));
   }
 
-  snapshot.lib_cells = LibertyDataExporter::exportCells(library, time_unit, cap_unit);
+  snapshot.lib_cells = LibertyDataExporter::exportCells(library, time_unit, cap_unit, config.cell_catalog_path);
   std::map<std::string, int32_t> cell_ids;
   for (std::size_t cell_id = 0; cell_id < snapshot.lib_cells.size(); ++cell_id) {
     cell_ids.emplace(snapshot.lib_cells[cell_id].name, static_cast<int32_t>(cell_id));
