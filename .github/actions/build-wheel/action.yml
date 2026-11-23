@@ -9,6 +9,7 @@ runs:
       run: |
         dnf install -y epel-release
         dnf config-manager --set-enabled crb || true
+        dnf update -y curl libcurl
         dnf install -y \
           cmake ninja-build pkgconfig patchelf mold lld curl gcc-c++ \
           cairo-devel gflags-devel glog-devel \
