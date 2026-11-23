@@ -303,7 +303,6 @@ void PDNGenerator::generatePDN(PGModel& pg_model)
   buildStripe(pg_model);
   addUncoveredEdgeStripes(pg_model);
   alignStripeSegmentList();
-  buildRing(pg_model);
   initPowerLayerPair(pg_model);
   pruneDeadEndStripes();
   buildLayerConnect(pg_model);
@@ -540,7 +539,6 @@ void PDNGenerator::trimStripeEnds(bool preserve_io_core_ends, const std::string&
       candidate.end = true;
     } else {
       const auto& core = database.get_core();
-      // Ring-connected stripes extend outside the core and are not selected here.
       bool core_start = horizontal ? stripe.get_start_x() == core.get_ll_x() : stripe.get_start_y() == core.get_ll_y();
       bool core_end = horizontal ? stripe.get_end_x() == core.get_ur_x() : stripe.get_end_y() == core.get_ur_y();
       if (keep_io_core_ends
@@ -2577,98 +2575,12 @@ void PDNGenerator::initPowerLayerPair(PGModel& pg_model)
   pg_model.get_power_layer_pair().set_first_layer_name(layer_iter->second);
 }
 
-void PDNGenerator::buildRing(PGModel& pg_model)
-{
-  auto& database = FPDM.getDatabase();
-  const auto& ring = FPDM.getConfig().pg_ring;
-  if (ring.nets.empty()) {
-    return;
-  }
-  auto* horizontal = findRoutingLayer(ring.horizontal_layer);
-  auto* vertical = findRoutingLayer(ring.vertical_layer);
-  const int32_t dbu = database.get_micron_dbu();
-  const int32_t grid = std::max(1, database.get_manufacture_grid());
-  const int32_t width = FPUTIL.transMicronToDBU(ring.width_micron, dbu);
-  const int32_t spacing = FPUTIL.transMicronToDBU(ring.spacing_micron, dbu);
-  const int32_t offset = FPUTIL.transMicronToDBU(ring.offset_micron, dbu);
-  if (horizontal == nullptr || vertical == nullptr || horizontal == vertical || horizontal->get_prefer_direction() != Direction::kHorizontal
-      || vertical->get_prefer_direction() != Direction::kVertical || width <= 0 || offset < 0 || spacing <= 0
-      || width < std::max(horizontal->get_min_width(), vertical->get_min_width())
-      || spacing < std::max(horizontal->get_spacing(), vertical->get_spacing()) || width % (2 * grid) || spacing % grid || offset % grid) {
-    FPLOG.error(Loc::current(), "Invalid PG ring layers, width, spacing, offset or manufacturing grid.");
-  }
-  const auto& core = database.get_core();
-  const auto& die = database.get_die();
-  std::set<std::string> names;
-  std::vector<PGSegment> ring_segments;
-  for (size_t index = 0; index < ring.nets.size(); ++index) {
-    const auto& net = ring.nets[index];
-    if (!database.get_pg_net_name_to_idx_map().contains(net) || !names.insert(net).second) {
-      FPLOG.error(Loc::current(), "Unknown or duplicate PG ring net '", net, "'.");
-    }
-    const int32_t distance = offset + width / 2 + index * (width + spacing);
-    const int32_t lx = core.get_ll_x() - distance;
-    const int32_t ly = core.get_ll_y() - distance;
-    const int32_t ux = core.get_ur_x() + distance;
-    const int32_t uy = core.get_ur_y() + distance;
-    if (lx - width / 2 < die.get_ll_x() || ly - width / 2 < die.get_ll_y() || ux + width / 2 > die.get_ur_x()
-        || uy + width / 2 > die.get_ur_y()) {
-      FPLOG.error(Loc::current(), "PG ring '", net, "' does not fit between core and die.");
-    }
-    for (auto [x, y] : {std::pair{lx, ly}, {lx, uy}, {ux, ly}, {ux, uy}}) {
-      if (!addViaSegment(pg_model, net, ring.horizontal_layer, ring.vertical_layer, "", x, y, width, width)) {
-        FPLOG.error(Loc::current(), "Incomplete PG ring corner via for '", net, "'.");
-      }
-    }
-    const size_t begin = database.get_pg_segment_list().size();
-    addUnblockedLineSegment(net, ring.horizontal_layer, PGSegmentType::kRing, width, lx, ly, ux, ly);
-    addUnblockedLineSegment(net, ring.horizontal_layer, PGSegmentType::kRing, width, lx, uy, ux, uy);
-    addUnblockedLineSegment(net, ring.vertical_layer, PGSegmentType::kRing, width, lx, ly, lx, uy);
-    addUnblockedLineSegment(net, ring.vertical_layer, PGSegmentType::kRing, width, ux, ly, ux, uy);
-    ring_segments.insert(ring_segments.end(), database.get_pg_segment_list().begin() + begin, database.get_pg_segment_list().end());
-  }
-  // Extend only mesh ends reaching the core boundary; retain macro clearance at internal ends.
-  for (auto& stripe : database.get_pg_segment_list()) {
-    if (stripe.get_type() != PGSegmentType::kStripe) {
-      continue;
-    }
-    for (const auto& side : ring_segments) {
-      if (stripe.get_net_name() != side.get_net_name() || stripe.is_horizontal() == side.is_horizontal()) {
-        continue;
-      }
-      if (stripe.is_horizontal() && stripe.get_layer_name() == ring.horizontal_layer) {
-        if (stripe.get_start_x() <= core.get_ll_x() && side.get_start_x() < core.get_ll_x()) {
-          stripe.set_start_x(side.get_start_x());
-        }
-        if (stripe.get_end_x() >= core.get_ur_x() && side.get_start_x() > core.get_ur_x()) {
-          stripe.set_end_x(side.get_start_x());
-        }
-      } else if (stripe.is_vertical() && stripe.get_layer_name() == ring.vertical_layer) {
-        if (stripe.get_start_y() <= core.get_ll_y() && side.get_start_y() < core.get_ll_y()) {
-          stripe.set_start_y(side.get_start_y());
-        }
-        if (stripe.get_end_y() >= core.get_ur_y() && side.get_start_y() > core.get_ur_y()) {
-          stripe.set_end_y(side.get_start_y());
-        }
-      }
-    }
-  }
-}
-
 void PDNGenerator::buildLayerConnect(PGModel& pg_model)
 {
   Monitor monitor;
   FPLOG.info(Loc::current(), "Starting...");
 
   Database& database = FPDM.getDatabase();
-  auto layer_pairs = FPDM.getConfig().pg_layer_pair_list;
-  const auto& ring = FPDM.getConfig().pg_ring;
-  if (!ring.nets.empty()) {
-    PGLayerPair pair;
-    pair.set_first_layer_name(ring.horizontal_layer);
-    pair.set_second_layer_name(ring.vertical_layer);
-    layer_pairs.push_back(pair);
-  }
   // Index line segments once.  Store indices: addViaSegment() appends vias to
   // the same vector, so raw pointers could be invalidated by reallocation.
   auto& pg_segments = database.get_pg_segment_list();
@@ -2689,7 +2601,7 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
   }
 
   std::set<std::pair<std::string, std::string>> seen_pairs;
-  for (PGLayerPair& pg_layer_pair : layer_pairs) {
+  for (const PGLayerPair& pg_layer_pair : FPDM.getConfig().pg_layer_pair_list) {
     RoutingLayer* first_layer = findRoutingLayer(pg_layer_pair.get_first_layer_name());
     RoutingLayer* second_layer = findRoutingLayer(pg_layer_pair.get_second_layer_name());
     if (first_layer == nullptr || second_layer == nullptr || first_layer->get_prefer_direction() == second_layer->get_prefer_direction()) {

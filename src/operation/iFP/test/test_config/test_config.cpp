@@ -29,9 +29,9 @@ bool check(bool condition, const std::string& message)
   return condition;
 }
 
-bool testLegacyMacroConfig(const std::string& directory)
+nlohmann::json makeTestConfig()
 {
-  nlohmann::json config = nlohmann::json::parse(R"({
+  return nlohmann::json::parse(R"({
     "ifp": {"temp_directory_path": "output", "thread_number": 1},
     "macro_placer": {"file_path": "macro.tcl", "macro_placement_halo": 3.0, "macro_routing_halo": 3.0},
     "die_builder": {"mode": "die_size", "site_name": "SITE",
@@ -45,6 +45,11 @@ bool testLegacyMacroConfig(const std::string& directory)
       "boundary_tap": {"top_cell_name_list": ["EDGE"], "bottom_cell_name_list": ["EDGE"], "rule_micron": 5.0}},
     "pdn_generator": {}
   })");
+}
+
+bool testLegacyMacroConfig(const std::string& directory)
+{
+  auto config = makeTestConfig();
   std::string path = directory + "/config.json";
   std::map<std::string, std::any> config_map{{"-config", path}};
   bool passed = true;
@@ -70,6 +75,27 @@ bool testLegacyMacroConfig(const std::string& directory)
     if (!expected_rejection) {
       passed = check(FPDM.getConfig().input_macro_path == directory + "/macro.tcl", "file_path must remain the macro placement source") && passed;
     }
+  }
+  return passed;
+}
+
+bool testRemovedRingConfig(const std::string& directory)
+{
+  auto config = makeTestConfig();
+  const std::string path = directory + "/ring.json";
+  std::map<std::string, std::any> config_map{{"-config", path}};
+  bool passed = true;
+  for (const auto& nets : {nlohmann::json::array(), nlohmann::json::array({"VDD", "VSS"})}) {
+    config["pdn_generator"]["ring"] = {{"nets", nets}, {"horizontal_layer", "MET5"}, {"vertical_layer", "MET4"},
+                                      {"width_micron", 2.0}, {"spacing_micron", 2.0}, {"offset_micron", 5.0}};
+    std::ofstream(path) << config.dump();
+    bool rejected = false;
+    try {
+      FPI.wrapConfig(config_map);
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("Unknown config key 'pdn_generator.ring'.") != std::string::npos;
+    }
+    passed = check(rejected, "Expected pdn_generator.ring to be rejected for nets=" + nets.dump()) && passed;
   }
   return passed;
 }
@@ -105,6 +131,7 @@ int main(int argc, char* argv[])
   ifp::DataManager::initInst();
   FPUTIL.createDir(directory);
   bool passed = ifp::testLegacyMacroConfig(directory);
+  passed = ifp::testRemovedRingConfig(directory) && passed;
   passed = ifp::testFailedRunCleanup() && passed;
   ifp::Utility::destroyInst();
   ifp::Logger::destroyInst();

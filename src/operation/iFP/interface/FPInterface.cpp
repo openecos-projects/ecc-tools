@@ -455,7 +455,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.pg_connect_list.clear();
   config.core_power_net.clear();
   config.core_ground_net.clear();
-  config.pg_ring = {};
   config.pg_io_core_connect = {};
   config.pg_required_net_list.clear();
   config.pg_connect_pads = false;
@@ -614,8 +613,8 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
 
   nlohmann::json& pdn_generator_json = config_json["pdn_generator"];
   checkKeys(pdn_generator_json,
-            {"global_connect", "rail", "stripe", "connect_layers", "core_power_net", "core_ground_net", "ring",
-             "io_core_connect", "required_nets", "connect_pads", "require_connected_pins", "access_layers"},
+            {"global_connect", "rail", "stripe", "connect_layers", "core_power_net", "core_ground_net", "io_core_connect",
+             "required_nets", "connect_pads", "require_connected_pins", "access_layers"},
             "pdn_generator");
   config.core_power_net = pdn_generator_json.value("core_power_net", "");
   config.core_ground_net = pdn_generator_json.value("core_ground_net", "");
@@ -623,16 +622,6 @@ void FPInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.pg_connect_pads = pdn_generator_json.value("connect_pads", false);
   config.pg_require_connected_pins = pdn_generator_json.value("require_connected_pins", true);
   config.pg_access_layer_list = pdn_generator_json.value("access_layers", std::vector<std::string>{});
-  if (pdn_generator_json.contains("ring")) {
-    const auto& ring = pdn_generator_json["ring"];
-    checkKeys(ring, {"nets", "horizontal_layer", "vertical_layer", "width_micron", "spacing_micron", "offset_micron"}, "pdn_generator.ring");
-    config.pg_ring.nets = ring.at("nets").get<std::vector<std::string>>();
-    config.pg_ring.horizontal_layer = ring.at("horizontal_layer").get<std::string>();
-    config.pg_ring.vertical_layer = ring.at("vertical_layer").get<std::string>();
-    config.pg_ring.width_micron = ring.at("width_micron").get<double>();
-    config.pg_ring.spacing_micron = ring.at("spacing_micron").get<double>();
-    config.pg_ring.offset_micron = ring.at("offset_micron").get<double>();
-  }
   if (pdn_generator_json.contains("io_core_connect")) {
     const auto& io_core = pdn_generator_json["io_core_connect"];
     checkKeys(io_core, {"enable", "nets", "pin_layers", "min_contacts_per_port", "bridge_min_spacing_micron", "fail_on_unresolved"},
@@ -1659,7 +1648,6 @@ void FPInterface::outputPGSegmentList()
     idb::IdbWireShapeType shape = idb::IdbWireShapeType::kStripe;
     switch (pg_segment.get_type()) {
       case PGSegmentType::kFollowPin: shape = idb::IdbWireShapeType::kFollowPin; break;
-      case PGSegmentType::kRing: shape = idb::IdbWireShapeType::kRing; break;
       case PGSegmentType::kBlockWire: shape = idb::IdbWireShapeType::kBlockWire; break;
       case PGSegmentType::kIoWire: shape = idb::IdbWireShapeType::kIoWire; break;
       default: break;
