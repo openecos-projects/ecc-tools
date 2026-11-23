@@ -1,22 +1,25 @@
 # Explicit PDK inputs
 
-STA accepts `STA.-cell_catalog` in its JSON configuration (or `-cell_catalog`
-in the dictionary interface). The file is whitespace-separated TSV with one
-`master family vt drive_rank` row per cell. Comment lines begin with `#`.
-Names must be single tokens; ranks must be finite and nonnegative. Duplicate
-masters and malformed rows are errors. ECC generates this file from its frozen
-PDK description.
+Cell equivalence families, their VT (voltage-threshold) axis and their drive-strength
+axis are derived entirely from the loaded Liberty libraries, not from cell naming
+conventions or an external catalog file.
 
-Family labels are candidate equivalence groups, not proof of equivalence. The
-exporter additionally compares pin directions, output Boolean expressions and
-arc signatures. Sequential cells, macros and entries without output functions
-remain singleton families. Without a catalog, names are not parsed to guess a
-process, VT or drive family.
+A family groups cells with the same output Boolean function, the same pin directions
+and the same arc signature (sense, trigger, check type). Sequential cells, macros and
+cells without an output function each stay in their own singleton family: this
+interface cannot prove equivalence of state or reset behavior from Liberty alone.
 
-Timing path constant sources are recognized through constant Liberty output
-functions, not TIEHI/TIELO name prefixes. EM limits refer to metal or via rules
-already declared in the technology model; their names do not determine type.
+Within a family, the VT axis is the cell's source Liberty library
+(`LibertyCell::get_library_name()`), ranked by that library's lowest leakage in the
+family. The drive axis is the cell's footprint (area) plus a strength rank among
+same-library, same-area cells, ranked by the fastest (lowest-resistance) variant's
+drive resistance; drive resistance is the delay-table slope over the load axis at the
+median input slew, taken as the maximum over the cell's non-check delay arcs.
 
-RC extraction still has distinct native and ICS55-specific adapters. Selecting
-an adapter does not qualify it for arbitrary technology; callers must provide
-the matching model. The ICS55-specific binary is not a generic process model.
+Timing path constant sources are recognized through constant Liberty output functions,
+not TIEHI/TIELO name prefixes. EM limits refer to metal or via rules already declared in
+the technology model; their names do not determine type.
+
+RC extraction still has distinct native and ICS55-specific adapters. Selecting an
+adapter does not qualify it for arbitrary technology; callers must provide the matching
+model. The ICS55-specific binary is not a generic process model.

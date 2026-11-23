@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <cstdint>
-#include <fstream>
-#include <filesystem>
-#include <unistd.h>
+#include <map>
 #include <set>
 #include <stdexcept>
+#include <string>
+#include <tuple>
 #include <vector>
 
 #include "Config.hpp"
@@ -108,53 +108,72 @@ void checkTransitionCapacitanceExport()
   pin.get_trans_capacitance_map()[AnalysisType::kMin] = {{TransType::kRise, 0.0018}, {TransType::kFall, 0.0017}};
   const auto cells = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF);
   const auto& port = cells.at(0).ports.at(0);
-  require(std::vector<double>{port.capacitance_pf, port.rise_capacitance_pf, port.fall_capacitance_pf,
-                              port.min_rise_capacitance_pf, port.min_fall_capacitance_pf}
-              == std::vector<double>{0.002, 0.006, 0.007, 0.0018, 0.0017},
-          "min pin capacitance was substituted with the max transition range");
+  require(
+      std::vector<double>{port.capacitance_pf, port.rise_capacitance_pf, port.fall_capacitance_pf, port.min_rise_capacitance_pf, port.min_fall_capacitance_pf}
+          == std::vector<double>{0.002, 0.006, 0.007, 0.0018, 0.0017},
+      "min pin capacitance was substituted with the max transition range");
 }
 
-void checkV2CellFamilies()
+void addCell(LibertyLibrary& library, const std::string& name, const std::string& library_name, double area, double leakage, double resistance, bool inverting)
 {
-  LibertyLibrary library;
-  const std::vector<std::string> names{"vendor_slow", "vendor_normal", "vendor_fast", "vendor_strong", "vendor_inverter"};
-  double leakage = 1.0;
-  for (const auto& name : names) {
-    auto& cell = library.get_cell_map()[name];
-    cell.set_cell_name(name);
-    cell.set_leakage_power(leakage++);
-    auto& input = cell.get_port_map()["A"];
-    input.set_port_name("A");
-    input.set_is_input(true);
-    auto& output = cell.get_port_map()["Y"];
-    output.set_port_name("Y");
-    output.set_is_output(true);
-    LogicExpressionTerm term;
-    term.set_operation_type(LogicOperationType::kPort);
-    term.set_port_name("A");
+  auto& cell = library.get_cell_map()[name];
+  cell.set_cell_name(name);
+  cell.set_library_name(library_name);
+  cell.set_area(area);
+  cell.set_leakage_power(leakage);
+  auto& input = cell.get_port_map()["A"];
+  input.set_port_name("A");
+  input.set_is_input(true);
+  auto& output = cell.get_port_map()["Y"];
+  output.set_port_name("Y");
+  output.set_is_output(true);
+  LogicExpressionTerm term;
+  term.set_operation_type(LogicOperationType::kPort);
+  term.set_port_name("A");
+  output.get_function_expression().get_term_list().push_back(term);
+  if (inverting) {
+    term.set_operation_type(LogicOperationType::kNot);
     output.get_function_expression().get_term_list().push_back(term);
-    if (name == names.back()) {
-      term.set_operation_type(LogicOperationType::kNot);
-      output.get_function_expression().get_term_list().push_back(term);
-    }
   }
-  const auto unclassified = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF);
-  require(unclassified.front().main_id != unclassified.back().main_id, "missing catalog guessed a shared family");
-  const auto catalog = std::filesystem::temp_directory_path() / ("ista-catalog-" + std::to_string(getpid()) + ".tsv");
-  {
-    std::ofstream file(catalog);
-    file << "vendor_slow buffer slow 0.5\nvendor_normal buffer normal 0.5\nvendor_fast buffer fast 0.5\n"
-            "vendor_strong buffer fast 24\nvendor_inverter buffer normal 1\n";
-  }
-  const auto cells = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF, catalog.string());
-  std::filesystem::remove(catalog);
-  std::map<std::string, LibertyCellData> by_name;
-  for (const auto& cell : cells)
-    by_name.emplace(cell.name, cell);
-  require(by_name.at(names[0]).main_id == by_name.at(names[3]).main_id, "explicit catalog did not group buffers");
-  require(by_name.at(names[0]).main_id != by_name.at(names[4]).main_id, "catalog grouped cells with incompatible logic");
-  require(by_name.at(names[0]).size_index < by_name.at(names[3]).size_index, "explicit drive rank was ignored");
-  require(by_name.at(names[2]).vt_index == by_name.at(names[3]).vt_index, "explicit VT group was ignored");
+  TimingTable table;
+  table.set_variable_type1(TimingTableVariableType::kInputTransition);
+  table.set_variable_type2(TimingTableVariableType::kOutputCapacitance);
+  table.set_axis_list({{0.1}, {0.0, 1.0}});
+  table.set_value_list({0.0, resistance});
+  TimingArc arc;
+  arc.set_time_unit_scale(1.0);
+  arc.set_cap_unit_scale(1.0);
+  arc.set_sense(inverting ? TimingArcSense::kNegative : TimingArcSense::kPositive);
+  arc.get_delay_table_map()[TransType::kRise] = table;
+  TimingCellArc cell_arc;
+  cell_arc.set_source_port("A");
+  cell_arc.set_sink_port("Y");
+  cell_arc.get_timing_arc_list().push_back(arc);
+  cell.get_cell_arc_list().push_back(cell_arc);
+}
+
+void checkLibertyCellFamilies()
+{
+  // Names carry no process convention: families, drives and VTs come from
+  // functions, footprints, delay slopes, source libraries and leakage only.
+  LibertyLibrary library;
+  addCell(library, "slow_weak", "slow_lib", 1.0, 1.0, 8.0, false);
+  addCell(library, "slow_mid", "slow_lib", 1.0, 1.0, 4.0, false);
+  addCell(library, "slow_strong", "slow_lib", 2.0, 2.0, 2.0, false);
+  addCell(library, "fast_weak", "fast_lib", 1.0, 3.0, 6.0, false);
+  addCell(library, "fast_mid", "fast_lib", 1.0, 3.0, 3.0, false);
+  addCell(library, "fast_strong", "fast_lib", 2.0, 6.0, 1.5, false);
+  addCell(library, "inverter", "slow_lib", 1.0, 1.0, 4.0, true);
+  std::map<std::string, std::tuple<int32_t, int32_t, int32_t>> coordinates;
+  for (const auto& cell : LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF))
+    coordinates.emplace(cell.name, std::make_tuple(cell.main_id, cell.size_index, cell.vt_index));
+  const int32_t buffer = std::get<0>(coordinates.at("slow_weak"));
+  const int32_t inverter = std::get<0>(coordinates.at("inverter"));
+  require(buffer != inverter, "cells with different logic shared a family");
+  const std::map<std::string, std::tuple<int32_t, int32_t, int32_t>> expected{
+      {"slow_weak", {buffer, 1, 0}}, {"slow_mid", {buffer, 2, 0}},    {"slow_strong", {buffer, 3, 0}}, {"fast_weak", {buffer, 1, 1}},
+      {"fast_mid", {buffer, 2, 1}},  {"fast_strong", {buffer, 3, 1}}, {"inverter", {inverter, 1, 0}}};
+  require(coordinates == expected, "Liberty-derived family coordinates changed");
 }
 
 void checkEndpointIdentity()
@@ -224,10 +243,10 @@ void checkDiagnosticOrder()
   for (const auto* name : {"z", "a", "m"})
     database.network().nets()[name].set_net_name(name);
   const auto result = TimingDataExporter::exportData(database, config);
-  require(result.diagnostics == std::vector<std::string>{
-              "unsupported arc with missing pin identity", "net without a resolved driver: a",
-              "net without a resolved driver: m", "net without a resolved driver: z",
-              "no constrained start points exported", "no constrained end points exported", "no sequential clock pins exported"},
+  require(result.diagnostics
+              == std::vector<std::string>{"unsupported arc with missing pin identity", "net without a resolved driver: a", "net without a resolved driver: m",
+                                          "net without a resolved driver: z", "no constrained start points exported", "no constrained end points exported",
+                                          "no sequential clock pins exported"},
           "diagnostic deduplication lost first-occurrence order or distinct messages");
 }
 }  // namespace
@@ -238,6 +257,6 @@ int main()
   checkUnreadyExport();
   checkRectangularTableExport();
   checkTransitionCapacitanceExport();
-  checkV2CellFamilies();
+  checkLibertyCellFamilies();
   checkDiagnosticOrder();
 }

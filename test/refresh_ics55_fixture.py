@@ -50,11 +50,6 @@ def main():
         fixture / "spef/gcd_TYPICAL_25C.spef"
     )
     shutil.copyfile(pdk_root / "techfile/icsprout55.layermap", fixture / "config/gcd.gds.map")
-    sta = json.loads((workspace / "config/sta_ecc.json").read_text())
-    catalog = Path(sta["STA"]["-cell_catalog"])
-    if not catalog.is_absolute():
-        catalog = workspace / catalog
-    shutil.copyfile(catalog, fixture / "config/cell_catalog.tsv")
 
     if args.variant == "v1":
         profile = {
@@ -90,8 +85,6 @@ def main():
         path = Path(value)
         if path.is_relative_to(workspace_pdk_root):
             return "./icsprout55-pdk/" + str(path.relative_to(workspace_pdk_root))
-        if path == catalog:
-            return "./fixtures/gcd/config/cell_catalog.tsv"
         return "./output"
 
     configs = ["cts", "db", "drc", "floorplan", "rcx", "route", "sta"]
@@ -106,8 +99,6 @@ def main():
             )
         if name == "floorplan":
             payload["macro_placer"]["file_path"] = "macro_locations.txt"
-        if name == "sta":
-            payload.setdefault("STA", {})["-cell_catalog"] = "./fixtures/gcd/config/cell_catalog.tsv"
         (fixture / f"config/{name}_ecc.json").write_text(json.dumps(payload, indent=4) + "\n")
     if args.variant == "v1":
         shutil.copyfile(

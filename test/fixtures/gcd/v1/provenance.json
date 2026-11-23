@@ -20,7 +20,6 @@
     "input/route_in.def.gz": "29a9148d3642430adce8428fde188f5fc9042d3d2d85e686a1bb629a0d6efad7",
     "input/route_in.v.gz": "8c94c7461dfb5d9172707644acb4ead5630655e09a7ada8a7553ae4144096669",
     "spef/gcd_TYPICAL_25C.spef": "dc5b1dae0959ff072a70ef2492385b1dfde466f9a1932876400a7fd27a3de9e2",
-    "config/cell_catalog.tsv": "9c518ac46c112f9e8b329fd7d71f7a2a649643a556cf455cfee2d2761f1abd09",
     "config/cts_ecc.json": "d2fef1eeb6b09cb38ac99343961757ebbcf8a13ac3761269f2469a01685d5516",
     "config/db_ecc.json": "8f0d83f31c4f1f4fca42121632e97b68d15723bac7bb398789bcf95f47fc817c",
     "config/drc_ecc.json": "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356",
@@ -29,7 +28,7 @@
     "config/gcd.sdc": "49364b34e49ad48034de45e4136b9c7a4b30bf23abe482fbd12880fec266671f",
     "config/rcx_ecc.json": "e398cc9f37aab4e0eda062a86ad349a57c99422141befe3682383191f913fe59",
     "config/route_ecc.json": "5ca1ab6fb392c86b273898636ac95640f384ef51e8099265c8bbf939a6908ce6",
-    "config/sta_ecc.json": "fcd514f92e5f128164a39ad6b9d73781263e43f4c9bd240d683e506cc76db84a"
+    "config/sta_ecc.json": "a9676981dbd06b2af7ac8d3bba35542903295a11d464285783f5c7fb0dc78175"
   },
   "note": "Generated from completed ECC v1 flow; GCD SDC retains the native API test's 50 MHz unconstrained-I/O contract."
 }
