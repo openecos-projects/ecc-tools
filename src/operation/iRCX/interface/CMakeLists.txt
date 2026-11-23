@@ -11,7 +11,7 @@ add_library(ircx_interface
 )
 
 add_subdirectory(${IRCX_INTERFACE}/ics55)
-add_subdirectory(${IRCX_INTERFACE}/aux)
+add_subdirectory(${IRCX_INTERFACE}/spef_tools)
 
 target_link_libraries(ircx_interface
     PRIVATE
