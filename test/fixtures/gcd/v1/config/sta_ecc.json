@@ -60,7 +60,5 @@
             ]
         }
     ],
-    "STA": {
-        "-cell_catalog": "./fixtures/gcd/config/cell_catalog.tsv"
-    }
+    "STA": {}
 }
