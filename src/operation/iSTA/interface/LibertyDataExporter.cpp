@@ -17,6 +17,7 @@
 #include "liberty/LibertyLibrary.hpp"
 #include "liberty/LibertyPort.hpp"
 #include "liberty/LibertyUnits.hpp"
+#include "liberty/LogicExpression.hpp"
 #include "liberty/TimingArc.hpp"
 #include "liberty/TimingArcSense.hpp"
 #include "liberty/TimingCellArc.hpp"
@@ -100,10 +101,19 @@ void copyArcTables(TimingArc& arc, LibertyArcData& result)
   copy(arc.get_check_table_map(), result.rise_check, result.fall_check);
 }
 
-// Logic signature shared by interchangeable masters: output functions, pin
-// directions and arc kinds. Macros, sequential cells and cells without an
-// output function stay singletons; this interface cannot prove equivalence of
-// state or reset behavior.
+// Flattened form of a Liberty logic expression, for signature comparison.
+std::string expressionSignature(const LogicExpression& expression)
+{
+  std::string result;
+  for (const auto& term : expression.get_term_list())
+    result += ":" + std::to_string(static_cast<int>(term.get_operation_type())) + ":" + term.get_port_name();
+  return result;
+}
+
+// Logic signature shared by interchangeable masters: output functions and
+// their tri-state enables, pin directions and arc kinds. Macros, sequential
+// cells and cells without an output function stay singletons; this interface
+// cannot prove equivalence of state or reset behavior.
 std::optional<std::string> logicSignature(const LibertyCellData& cell, const LibertyLibrary& library)
 {
   const auto liberty = library.get_cell_map().find(cell.name);
@@ -115,9 +125,13 @@ std::optional<std::string> logicSignature(const LibertyCellData& cell, const Lib
       continue;
     if (port.get_function_expression().get_is_empty())
       return std::nullopt;
-    signature += "|function:" + name;
-    for (const auto& term : port.get_function_expression().get_term_list())
-      signature += ":" + std::to_string(static_cast<int>(term.get_operation_type())) + ":" + term.get_port_name();
+    signature += "|function:" + name + expressionSignature(port.get_function_expression());
+    // Output enable is part of what the cell computes: masters agreeing on the
+    // data function but disabling on opposite conditions are not substitutes,
+    // and a plain driver is not a substitute for a tri-state one.
+    const auto& enable = port.get_three_state_expression();
+    if (!enable.get_is_empty())
+      signature += "|three_state:" + name + expressionSignature(enable);
   }
   if (signature.empty())
     return std::nullopt;

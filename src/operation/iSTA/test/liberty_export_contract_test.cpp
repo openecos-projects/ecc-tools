@@ -152,6 +152,42 @@ void addCell(LibertyLibrary& library, const std::string& name, const std::string
   cell.get_cell_arc_list().push_back(cell_arc);
 }
 
+// Give a cell's output an enable condition, optionally inverted, so two
+// otherwise identical masters can differ only in enable polarity.
+void setOutputEnable(LibertyLibrary& library, const std::string& name, const std::string& enable_port, bool active_low)
+{
+  auto& port = library.get_cell_map().at(name).get_port_map().at("Y");
+  LogicExpressionTerm term;
+  term.set_operation_type(LogicOperationType::kPort);
+  term.set_port_name(enable_port);
+  port.get_three_state_expression().get_term_list().push_back(term);
+  if (active_low) {
+    term.set_operation_type(LogicOperationType::kNot);
+    port.get_three_state_expression().get_term_list().push_back(term);
+  }
+  auto& enable = library.get_cell_map().at(name).get_port_map()[enable_port];
+  enable.set_port_name(enable_port);
+  enable.set_is_input(true);
+}
+
+void checkTriStateEnableSplitsFamilies()
+{
+  // Equal data functions are not equivalence: a master that disables on the
+  // opposite condition, or does not tri-state at all, is not a substitute.
+  LibertyLibrary library;
+  addCell(library, "plain_driver", "lib", 1.0, 1.0, 4.0, false);
+  addCell(library, "enable_high", "lib", 1.0, 1.0, 4.0, false);
+  addCell(library, "enable_low", "lib", 1.0, 1.0, 4.0, false);
+  setOutputEnable(library, "enable_high", "OE", false);
+  setOutputEnable(library, "enable_low", "OE", true);
+  std::map<std::string, int32_t> family;
+  for (const auto& cell : LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF))
+    family.emplace(cell.name, cell.main_id);
+  require(family.at("enable_high") != family.at("enable_low"), "opposite tri-state enables shared a family");
+  require(family.at("plain_driver") != family.at("enable_high"), "a plain driver shared a family with a tri-state master");
+  require(family.at("plain_driver") != family.at("enable_low"), "a plain driver shared a family with a tri-state master");
+}
+
 void checkLibertyCellFamilies()
 {
   // Names carry no process convention: families, drives and VTs come from
@@ -258,5 +294,6 @@ int main()
   checkRectangularTableExport();
   checkTransitionCapacitanceExport();
   checkLibertyCellFamilies();
+  checkTriStateEnableSplitsFamilies();
   checkDiagnosticOrder();
 }
