@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <cstdint>
+#include <fstream>
+#include <filesystem>
+#include <unistd.h>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -111,6 +114,49 @@ void checkTransitionCapacitanceExport()
           "min pin capacitance was substituted with the max transition range");
 }
 
+void checkV2CellFamilies()
+{
+  LibertyLibrary library;
+  const std::vector<std::string> names{"vendor_slow", "vendor_normal", "vendor_fast", "vendor_strong", "vendor_inverter"};
+  double leakage = 1.0;
+  for (const auto& name : names) {
+    auto& cell = library.get_cell_map()[name];
+    cell.set_cell_name(name);
+    cell.set_leakage_power(leakage++);
+    auto& input = cell.get_port_map()["A"];
+    input.set_port_name("A");
+    input.set_is_input(true);
+    auto& output = cell.get_port_map()["Y"];
+    output.set_port_name("Y");
+    output.set_is_output(true);
+    LogicExpressionTerm term;
+    term.set_operation_type(LogicOperationType::kPort);
+    term.set_port_name("A");
+    output.get_function_expression().get_term_list().push_back(term);
+    if (name == names.back()) {
+      term.set_operation_type(LogicOperationType::kNot);
+      output.get_function_expression().get_term_list().push_back(term);
+    }
+  }
+  const auto unclassified = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF);
+  require(unclassified.front().main_id != unclassified.back().main_id, "missing catalog guessed a shared family");
+  const auto catalog = std::filesystem::temp_directory_path() / ("ista-catalog-" + std::to_string(getpid()) + ".tsv");
+  {
+    std::ofstream file(catalog);
+    file << "vendor_slow buffer slow 0.5\nvendor_normal buffer normal 0.5\nvendor_fast buffer fast 0.5\n"
+            "vendor_strong buffer fast 24\nvendor_inverter buffer normal 1\n";
+  }
+  const auto cells = LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF, catalog.string());
+  std::filesystem::remove(catalog);
+  std::map<std::string, LibertyCellData> by_name;
+  for (const auto& cell : cells)
+    by_name.emplace(cell.name, cell);
+  require(by_name.at(names[0]).main_id == by_name.at(names[3]).main_id, "explicit catalog did not group buffers");
+  require(by_name.at(names[0]).main_id != by_name.at(names[4]).main_id, "catalog grouped cells with incompatible logic");
+  require(by_name.at(names[0]).size_index < by_name.at(names[3]).size_index, "explicit drive rank was ignored");
+  require(by_name.at(names[2]).vt_index == by_name.at(names[3]).vt_index, "explicit VT group was ignored");
+}
+
 void checkEndpointIdentity()
 {
   for (bool reverse : {false, true}) {
@@ -192,5 +238,6 @@ int main()
   checkUnreadyExport();
   checkRectangularTableExport();
   checkTransitionCapacitanceExport();
+  checkV2CellFamilies();
   checkDiagnosticOrder();
 }

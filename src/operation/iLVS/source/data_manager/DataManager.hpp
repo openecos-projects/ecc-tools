@@ -43,6 +43,8 @@ class DataManager
   Database& getDatabase() { return _database; }
 
  private:
+  friend struct DataManagerTestAccess;
+
   static DataManager* _dm_instance;
   // config & database
   Config _config;
@@ -61,8 +63,7 @@ class DataManager
   void buildNetlistData();
   void buildDefData();
   void buildPhysicalGraph();
-  void buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, int32_t net_id, const NetRoutingGraph& routing_graph,
-                              bool build_terminal_shape);
+  void buildPhysicalGraphNode(PhysicalGraphBuildData& physical_graph_build_data, int32_t net_id, const NetRoutingGraph& routing_graph);
   void buildPhysicalGraphComponent(PhysicalGraphBuildData& physical_graph_build_data);
   BGRectInt convertToBGRectInt(const Shape& shape);
   void printConfig();

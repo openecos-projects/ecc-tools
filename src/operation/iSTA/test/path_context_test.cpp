@@ -44,6 +44,27 @@ int main(int argc, char** argv)
   path.set_launch_clock_pin_transition(TransType::kFall);
   path.set_clock_name("launch");
   ReportPathContext context(db);
+  if (mode == "constant_cell" || mode == "misleading_cell_name") {
+    const std::string master = mode == "constant_cell" ? "vendor_constant" : "TIEHI_buffer";
+    auto& source = db.network().instances()["source"];
+    source.set_instance_name("source");
+    source.set_cell_name(master);
+    auto& output = db.network().pins()["source:Z"];
+    output.set_instance_name("source");
+    output.set_pin_name("Z");
+    output.set_net_name("data_net");
+    db.network().pins()["ff:D"].set_net_name("data_net");
+    db.network().nets()["data_net"].get_driver_pin_list().push_back("source:Z");
+    auto& liberty_port = db.liberty().get_cell_map()[master].get_port_map()["Z"];
+    liberty_port.set_is_output(true);
+    LogicExpressionTerm term;
+    term.set_operation_type(mode == "constant_cell" ? LogicOperationType::kOne : LogicOperationType::kPort);
+    term.set_port_name("A");
+    liberty_port.get_function_expression().get_term_list().push_back(term);
+    const bool internal = context.startPoint(path).description.find("internal path startpoint") != std::string::npos;
+    require(internal == (mode == "constant_cell"), "constant recognition must follow the output function, not the cell name");
+    return 0;
+  }
   if (mode == "query" || mode == "edge") {
     const auto pins = db.network().pins().size(), nets = db.network().nets().size(), instances = db.network().instances().size();
     const auto description = context.startPoint(path).description;

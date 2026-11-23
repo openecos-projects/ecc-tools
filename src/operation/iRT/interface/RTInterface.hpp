@@ -79,7 +79,7 @@ class RTInterface
 #if 1  // iRT
   void initRT(std::map<std::string, std::any> config_map);
   void runERT(std::map<std::string, std::any> config_map);
-  void runRT();
+  bool runRT();
   void destroyRT();
 #endif
 
@@ -160,6 +160,7 @@ class RTInterface
   // function
   void initRegionRoute();
   void initNetSteinerLengthMap();
+  void destroyRT(bool write_result);
   void outputDef(const std::string& def_name);
 };
 

@@ -158,6 +158,65 @@ void buildDefData(ilvs::Database& database)
   database.set_def_data(std::move(def_data));
 }
 
+void test_io_supply_ring_waiver(ilvs::Database& database)
+{
+  database.reset();
+
+  ilvs::DefData def_data;
+  def_data.set_design_name("io_supply");
+  def_data.get_die().set_real_ll(0, 0);
+  def_data.get_die().set_real_ur(1000, 1000);
+  ilvs::PhysicalGraph& physical_graph = def_data.get_physical_graph();
+  physical_graph.get_power_net_name_set() = {"VDD", "VDDIO"};
+  physical_graph.get_ground_net_name_set() = {"VSS", "VSSIO"};
+
+  ilvs::NetRoutingGraph& power_graph = physical_graph.getOrCreateNetRoutingGraph("VDD");
+  int32_t power_net_id = physical_graph.getNetId("VDD");
+  std::vector<int32_t>& power_component_id_list = physical_graph.getOrCreateNetRoutingShapeComponentIdList(power_net_id);
+  int32_t power_routing_shape_idx = 0;
+  addSupplyVia(power_graph, power_component_id_list, power_routing_shape_idx, 100, 490, 490, 510, 510);
+
+  ilvs::NetRoutingGraph& ground_graph = physical_graph.getOrCreateNetRoutingGraph("VSS");
+  int32_t ground_net_id = physical_graph.getNetId("VSS");
+  std::vector<int32_t>& ground_component_id_list = physical_graph.getOrCreateNetRoutingShapeComponentIdList(ground_net_id);
+  int32_t ground_routing_shape_idx = 0;
+  addSupplyVia(ground_graph, ground_component_id_list, ground_routing_shape_idx, 200, 490, 490, 510, 510);
+
+  physical_graph.get_power_instance_pin_net_map()["U1/VDD"] = "VDD";
+  physical_graph.get_power_instance_pin_net_map()["U2/VDD"] = "VDD";
+  physical_graph.get_power_instance_pin_net_map()["IO_POWER_vddio_left_0/VDDIO"] = "VDDIO";
+  physical_graph.get_power_instance_pin_net_map()["g_iocell_x/VDDIO"] = "VDDIO";
+  physical_graph.get_ground_instance_pin_net_map()["U1/VSS"] = "VSS";
+  physical_graph.get_ground_instance_pin_net_map()["U2/VSS"] = "VSS";
+  physical_graph.get_ground_instance_pin_net_map()["IO_POWER_vssio_left_0/VSSIO"] = "VSSIO";
+  physical_graph.get_ground_instance_pin_net_map()["IO_POWER_vssio_right_0/VSSIO"] = "VSSIO";
+
+  physical_graph.get_terminal_component_map()["U1/VDD"] = 100;
+  physical_graph.get_terminal_component_map()["U2/VDD"] = 101;
+  physical_graph.get_terminal_component_map()["IO_POWER_vddio_left_0/VDDIO"] = 400;
+  physical_graph.get_terminal_component_map()["g_iocell_x/VDDIO"] = 400;
+  physical_graph.get_terminal_component_map()["U1/VSS"] = 200;
+  physical_graph.get_terminal_component_map()["U2/VSS"] = 201;
+  physical_graph.get_terminal_component_map()["IO_POWER_vssio_left_0/VSSIO"] = 500;
+  physical_graph.get_terminal_component_map()["IO_POWER_vssio_right_0/VSSIO"] = 501;
+
+  database.set_def_data(std::move(def_data));
+
+  ilvs::PDNChecker::initInst();
+  LVSPC.check();
+  ilvs::PDNChecker::destroyInst();
+
+  ilvs::Summary& summary = database.get_summary();
+  assert(summary.pc_summary.open_vdd_num == 1);
+  assert(summary.pc_summary.open_vss_num == 3);
+  std::map<ilvs::ViolationType, int32_t> violation_type_num_map;
+  for (ilvs::Violation& violation : summary.pc_summary.violation_list) {
+    violation_type_num_map[violation.get_violation_type()]++;
+  }
+  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVDD] == 1);
+  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVSS] == 3);
+}
+
 std::string getFileContent(const std::filesystem::path& file_path)
 {
   std::ifstream* file = LVSUTIL.getInputFileStream(file_path.string());
@@ -275,6 +334,8 @@ int main()
   assert(json_content.find("\"total\"") != std::string::npos);
   assert(json_content.find("33.33") != std::string::npos);
   assert(json_content.find("\"violations\"") != std::string::npos);
+
+  test_io_supply_ring_waiver(database);
 
   ilvs::DataManager::destroyInst();
   ilvs::LVSInterface::destroyInst();

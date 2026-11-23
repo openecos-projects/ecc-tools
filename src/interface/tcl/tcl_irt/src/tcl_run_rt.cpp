@@ -31,7 +31,11 @@ unsigned TclRunRT::exec()
   if (!check()) {
     return 0;
   }
-  RTI.runRT();
+  if (!RTI.runRT()) {
+    Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(),
+                     Tcl_NewStringObj("Routing stopped early. See the iRT log for details.", -1));
+    return 0;
+  }
   return 1;
 }
 

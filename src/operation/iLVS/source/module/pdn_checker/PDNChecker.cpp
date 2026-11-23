@@ -23,7 +23,28 @@
 #include "PhysicalGraph.hpp"
 #include "Utility.hpp"
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 namespace ilvs {
+
+namespace {
+
+bool is_io_supply_terminal(const std::string& terminal_name)
+{
+  const std::string::size_type slash = terminal_name.rfind('/');
+  if (slash == std::string::npos) {
+    return false;
+  }
+  const std::string pin_name = terminal_name.substr(slash + 1);
+  return pin_name == "VDDIO" || pin_name == "VSSIO";
+}
+
+}  // namespace
 
 // public
 
@@ -266,8 +287,37 @@ void PDNChecker::checkSupplyConnectivity(PCModel& pc_model, const ConnectType co
     return;
   }
 
+  std::unordered_map<std::string, std::vector<std::string>> net_terminal_map;
+  net_terminal_map.reserve(instance_pin_net_map.size());
+  for (const auto& [terminal_name, net_name] : instance_pin_net_map) {
+    net_terminal_map[net_name].push_back(terminal_name);
+  }
+  std::unordered_set<std::string> waived_io_nets;
+  std::map<std::string, int32_t>& terminal_component_map = physical_graph.get_terminal_component_map();
+  for (const auto& [net_name, terminal_name_list] : net_terminal_map) {
+    if (std::none_of(terminal_name_list.begin(), terminal_name_list.end(), is_io_supply_terminal)) {
+      continue;
+    }
+    std::set<int32_t> component_id_set;
+    bool complete = true;
+    for (const std::string& terminal_name : terminal_name_list) {
+      auto component_iter = terminal_component_map.find(terminal_name);
+      if (component_iter == terminal_component_map.end() || component_iter->second < 0) {
+        complete = false;
+        break;
+      }
+      component_id_set.insert(component_iter->second);
+    }
+    if (complete && component_id_set.size() == 1) {
+      waived_io_nets.insert(net_name);
+    }
+  }
+
   std::map<std::pair<std::string, int32_t>, std::vector<std::string>> disconnected_terminal_map;
   for (auto& [terminal_name, net_name] : instance_pin_net_map) {
+    if (waived_io_nets.find(net_name) != waived_io_nets.end()) {
+      continue;
+    }
     std::map<std::string, int32_t>::iterator component_iter = physical_graph.get_terminal_component_map().find(terminal_name);
     if (component_iter != physical_graph.get_terminal_component_map().end() && LVSUTIL.exist(supply_component_id_set, component_iter->second)) {
       continue;
