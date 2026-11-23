@@ -18,6 +18,7 @@
 #include "FPInterface.hpp"
 #include "Logger.hpp"
 #include "Utility.hpp"
+#include "idm.h"
 
 namespace ifp {
 
@@ -100,6 +101,51 @@ bool testRemovedRingConfig(const std::string& directory)
   return passed;
 }
 
+bool testIOCellSupplyNets(const std::string& directory)
+{
+  auto config = makeTestConfig();
+  config["macro_placer"]["file_path"] = "";
+  config["pdn_generator"]["global_connect"] = nlohmann::json::parse(R"([
+    {"net_name":"CORE_PWR", "instance_pin_name":"PWR", "is_power":true},
+    {"net_name":"CORE_PWR", "instance_pin_name":"PWR2", "is_power":true},
+    {"net_name":"CORE_GND", "instance_pin_name":"GND", "is_power":false},
+    {"net_name":"IO_PWR", "instance_pin_name":"PWRIO", "is_power":true},
+    {"net_name":"IO_GND", "instance_pin_name":"GNDIO", "is_power":false}
+  ])");
+  const std::string path = directory + "/supply.json";
+  std::map<std::string, std::any> config_map{{"-config", path}};
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  auto* previous_lef = dmInst->get_idb_lef_service();
+  auto* previous_def = dmInst->get_idb_def_service();
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  auto* design = def.get_design();
+  design->createOrFindNet("IO_PWR", idb::IdbConnectType::kSignal);
+  design->createOrFindSpecialNet("IO_GND", idb::IdbConnectType::kGround);
+
+  bool passed = true;
+  for (const std::string mode : {"io_pin", "io_cell", "io_cell"}) {
+    config["io_placer"]["mode"] = mode;
+    std::ofstream(path) << config.dump();
+    FPI.input(config_map);
+    std::map<std::string, idb::IdbConnectType> expected{{"IO_PWR", idb::IdbConnectType::kSignal}};
+    if (mode == "io_cell") {
+      expected.emplace("CORE_PWR", idb::IdbConnectType::kPower);
+      expected.emplace("CORE_GND", idb::IdbConnectType::kGround);
+    }
+    std::map<std::string, idb::IdbConnectType> actual;
+    for (auto* net : design->get_net_list()->get_net_list()) {
+      actual.emplace(net->get_net_name(), net->get_connect_type());
+    }
+    passed = check(actual == expected && FPDM.getDatabase().get_net_list().size() == expected.size(),
+                   "Unexpected supply nets after " + mode + " input") && passed;
+  }
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
 bool testFailedRunCleanup()
 {
   FPDM.getConfig() = Config();
@@ -132,6 +178,7 @@ int main(int argc, char* argv[])
   FPUTIL.createDir(directory);
   bool passed = ifp::testLegacyMacroConfig(directory);
   passed = ifp::testRemovedRingConfig(directory) && passed;
+  passed = ifp::testIOCellSupplyNets(directory) && passed;
   passed = ifp::testFailedRunCleanup() && passed;
   ifp::Utility::destroyInst();
   ifp::Logger::destroyInst();

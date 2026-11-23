@@ -427,6 +427,21 @@ void FPInterface::inputMacroPlacement(const std::string& macro_place_file_path)
 void FPInterface::input(std::map<std::string, std::any>& config_map)
 {
   wrapConfig(config_map);
+  const Config& config = FPDM.getConfig();
+  if (config.io_placer_mode == IOPlacerMode::kIOCell) {
+    idb::IdbDesign* design = dmInst->get_idb_design();
+    for (const PGGlobalConnect& rule : config.pg_connect_list) {
+      const std::string& name = rule.get_net_name();
+      if (design->get_net_list()->find_net(name) != nullptr || design->get_special_net_list()->find_net(name) != nullptr) {
+        continue;
+      }
+      const auto type = rule.get_net_type() == PGNetType::kPower ? idb::IdbConnectType::kPower : idb::IdbConnectType::kGround;
+      if (design->createOrFindNet(name, type) == nullptr) {
+        FPLOG.error(Loc::current(), "Cannot create IO supply net '", name, "'.");
+      }
+      FPLOG.info(Loc::current(), "Created missing IO supply net '", name, "'.");
+    }
+  }
   wrapDatabase();
 }
 
