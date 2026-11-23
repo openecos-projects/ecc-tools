@@ -15,6 +15,8 @@ class ACGraphNode
  public:
   int id = -1;
   int time = 0;
+  int pin_id = -1;
+  int layer_order = -1;
   bool is_conductor = false;
   bool is_routing = false;
   bool is_cut = false;
