@@ -66,7 +66,7 @@ class NameExpander
   auto expand(const std::string& name) -> std::string
   {
     if (!startsWithNameIndex(name)) {
-      return name;
+      return spef::removeEscapes(name);
     }
 
     const Size begin = 1;
@@ -82,8 +82,9 @@ class NameExpander
     }
 
     std::string expanded = *base_name;
-    expanded.reserve(base_name->size() + name.size() - colon);
-    expanded += name.substr(colon);
+    const std::string suffix = spef::removeEscapes(name.substr(colon));
+    expanded.reserve(base_name->size() + suffix.size());
+    expanded += suffix;
     return expanded;
   }
 
