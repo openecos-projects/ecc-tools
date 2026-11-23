@@ -51,6 +51,7 @@ class DataManager
   std::map<int32_t, std::set<EXTLayerRect*>> getNetDetailedPatchMap(EXTPlanarRect& region);
   std::vector<Violation> getViolationList(EXTPlanarRect& region);
   std::vector<Violation> getViolationList(EXTLayerRect& region);
+  std::vector<MacroObsLayer*> getMacroObsLayerList(EXTPlanarRect& region);
 #endif
 
 #if 1  // 获得NetShapeList
@@ -103,6 +104,8 @@ class DataManager
   void buildMacroList();
   void makeMacroList();
   void checkMacroList();
+  void buildMacroObsList();
+  void transMacroObsList();
   void buildLayerViaMasterList();
   void transLayerViaMasterList();
   void makeLayerViaMasterList();

@@ -118,6 +118,8 @@ void RTInterface::runRT()
   RTUTIL.releaseMemory("PinAccessor");
   // outputDef("irt_pa.def");
 
+  initNetSteinerLengthMap();
+
   initRegionRoute();
 
   GlobalRouter::initInst();
@@ -192,6 +194,51 @@ void RTInterface::initRegionRoute()
              real_rect.get_ur_y(), " for ", region_route.get_net_idx_set().size(), " complete nets across the die");
 }
 
+void RTInterface::initNetSteinerLengthMap()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  int32_t micron_dbu = RTDM.getDatabase().get_micron_dbu();
+  std::vector<Net>& net_list = RTDM.getDatabase().get_net_list();
+  std::map<int32_t, double>& net_steiner_length_map = RTDM.getDatabase().get_net_steiner_length_map();
+  net_steiner_length_map.clear();
+
+  std::vector<double> steiner_length_list(net_list.size(), 0.0);
+#pragma omp parallel for schedule(dynamic, 1)
+  for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(net_list.size()); net_idx++) {
+    Net& net = net_list[net_idx];
+    if (net.get_pin_list().size() < 2) {
+      continue;
+    }
+    std::vector<PlanarCoord> coord_list;
+    coord_list.reserve(net.get_pin_list().size());
+    for (Pin& pin : net.get_pin_list()) {
+      coord_list.push_back(pin.get_access_point().get_real_coord());
+    }
+    std::ranges::sort(coord_list, CmpPlanarCoordByXASC());
+    coord_list.erase(std::unique(coord_list.begin(), coord_list.end()), coord_list.end());
+    if (coord_list.size() < 2) {
+      continue;
+    }
+    TBTask tb_task;
+    tb_task.set_topo_mode(TBTopoMode::kGeometry);
+    tb_task.set_planar_coord_list(coord_list);
+    double steiner_length = 0;
+    for (Segment<PlanarCoord>& segment : RTTB.getPlanarTopoList(tb_task)) {
+      steiner_length += RTUTIL.getManhattanDistance(segment);
+    }
+    steiner_length_list[net_idx] = steiner_length / micron_dbu;
+  }
+  for (int32_t net_idx = 0; net_idx < static_cast<int32_t>(net_list.size()); net_idx++) {
+    if (steiner_length_list[net_idx] > 0) {
+      net_steiner_length_map[net_idx] = steiner_length_list[net_idx];
+    }
+  }
+  RTLOG.info(Loc::current(), "Net steiner length num: ", net_steiner_length_map.size());
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
 void RTInterface::destroyRT()
 {
   Monitor monitor;
@@ -259,6 +306,7 @@ void RTInterface::wrapDatabase()
   wrapLayerViaMasterList();
   wrapObstacleList();
   wrapMacroList();
+  wrapMacroObsList();
   wrapNetList();
 }
 
@@ -893,10 +941,40 @@ void RTInterface::wrapObstacleList()
       if (idb_routing_blockage == nullptr || idb_routing_blockage->get_layer() == nullptr || !idb_routing_blockage->get_layer()->is_routing()) {
         continue;
       }
+      GTLPolySetInt blockage_polyset;
       for (idb::IdbRect* rect : idb_routing_blockage->get_rect_list()) {
+        blockage_polyset += GTLRectInt(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+      idb::IdbInstance* idb_instance = idb_routing_blockage->get_instance();
+      if (idb_instance != nullptr) {
+        GTLPolySetInt pin_polyset;
+        for (idb::IdbPin* idb_pin : idb_instance->get_pin_list()->get_pin_list()) {
+          for (idb::IdbLayerShape* port_box : idb_pin->get_port_box_list()) {
+            if (port_box->get_layer() != idb_routing_blockage->get_layer()) {
+              continue;
+            }
+            for (idb::IdbRect* rect : port_box->get_rect_list()) {
+              pin_polyset += GTLRectInt(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+            }
+          }
+          for (idb::IdbVia* idb_via : idb_pin->get_via_list()) {
+            for (idb::IdbLayerShape via_shape : {idb_via->get_top_layer_shape(), idb_via->get_bottom_layer_shape()}) {
+              if (via_shape.get_layer() != idb_routing_blockage->get_layer()) {
+                continue;
+              }
+              idb::IdbRect via_box = via_shape.get_bounding_box();
+              pin_polyset += GTLRectInt(via_box.get_low_x(), via_box.get_low_y(), via_box.get_high_x(), via_box.get_high_y());
+            }
+          }
+        }
+        blockage_polyset -= pin_polyset;
+      }
+      std::vector<GTLRectInt> blockage_rect_list;
+      gtl::get_max_rectangles(blockage_rect_list, blockage_polyset);
+      for (GTLRectInt& rect : blockage_rect_list) {
         Obstacle obstacle;
-        obstacle.set_real_ll(rect->get_low_x(), rect->get_low_y());
-        obstacle.set_real_ur(rect->get_high_x(), rect->get_high_y());
+        obstacle.set_real_ll(gtl::xl(rect), gtl::yl(rect));
+        obstacle.set_real_ur(gtl::xh(rect), gtl::yh(rect));
         obstacle.set_layer_idx(idb_routing_blockage->get_layer()->get_id());
         routing_obstacle_list.push_back(obstacle);
       }
@@ -946,7 +1024,60 @@ void RTInterface::wrapMacroList()
     Macro macro;
     macro.set_inst_name(idb_instance->get_name());
     macro.set_body_rect(body_rect);
+    macro.set_is_placed(idb_instance->is_fixed() || idb_instance->is_cover() || idb_instance->is_placed());
+    macro.set_placement_body_rect(body_rect);
     macro_list.push_back(std::move(macro));
+  }
+
+  RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
+}
+
+void RTInterface::wrapMacroObsList()
+{
+  Monitor monitor;
+  RTLOG.info(Loc::current(), "Starting...");
+
+  std::vector<MacroObs>& macro_obs_list = RTDM.getDatabase().get_macro_obs_list();
+  auto* idb_design = dmInst->get_idb_def_service()->get_design();
+  std::vector<idb::IdbInstance*>& idb_instance_list = idb_design->get_instance_list()->get_instance_list();
+
+  for (idb::IdbInstance* idb_instance : idb_instance_list) {
+    if (idb_instance == nullptr || idb_instance->get_cell_master() == nullptr || !idb_instance->get_cell_master()->is_block()) {
+      continue;
+    }
+    idb::IdbCellMaster* idb_cell_master = idb_instance->get_cell_master();
+    if (!idb_cell_master->has_macro_property()) {
+      continue;
+    }
+    idb::macro::MacroProperty* macro_property = idb_cell_master->get_macro_property();
+    MacroObs macro_obs;
+    for (idb::IdbLayerShape* obs_box : idb_instance->get_obs_box_list()) {
+      if (obs_box->get_layer() == nullptr) {
+        continue;
+      }
+      if (!obs_box->get_layer()->is_routing() && !obs_box->get_layer()->is_cut()) {
+        continue;
+      }
+      idb::macro::ObsSpacing* obs_spacing = macro_property->find_obs_spacing(obs_box->get_layer());
+      if (obs_spacing == nullptr || obs_spacing->get_min_spacing() <= 0) {
+        continue;
+      }
+      MacroObsLayer macro_obs_layer;
+      macro_obs_layer.layer_idx = obs_box->get_layer()->get_id();
+      macro_obs_layer.is_routing = obs_box->get_layer()->is_routing();
+      macro_obs_layer.min_spacing = obs_spacing->get_min_spacing();
+      idb::IdbRect bounding_box = obs_box->get_bounding_box();
+      macro_obs_layer.bounding_box
+          = PlanarRect(bounding_box.get_low_x(), bounding_box.get_low_y(), bounding_box.get_high_x(), bounding_box.get_high_y());
+      for (idb::IdbRect* rect : obs_box->get_rect_list()) {
+        macro_obs_layer.obs_rect_list.emplace_back(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+      }
+      macro_obs.obs_layer_list.push_back(std::move(macro_obs_layer));
+    }
+    if (macro_obs.obs_layer_list.empty()) {
+      continue;
+    }
+    macro_obs_list.push_back(std::move(macro_obs));
   }
 
   RTLOG.info(Loc::current(), "Completed", monitor.getStatsInfo());

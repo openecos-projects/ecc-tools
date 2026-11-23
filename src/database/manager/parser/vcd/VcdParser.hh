@@ -115,7 +115,7 @@ class VcdReader
 // get_window_activity() 取（reader 持有，下一次 advance_window() 覆盖）。
 // window_length 单位为 ns，窗口是从文件第一个时间戳起算的
 // [k * window_length, (k + 1) * window_length)，正好落在边界上的事件归右窗，
-// 与 PrimeTime PX time_based 波形的 cycle 定义对齐（采样点 t 覆盖 [t, t+cycle)）。
+// 采样点 t 覆盖 [t, t + window_length)。
 // 活动口径由 open() 的 ActivityModelOptions 决定（峰值流程用 kTimeBased）。
 class VcdWindowReader
 {

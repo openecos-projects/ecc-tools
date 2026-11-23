@@ -36,7 +36,7 @@ namespace
 // that still holds the Arc publishes it here for the dump below.
 thread_local const std::string* g_dump_source_pin = nullptr;
 
-// Diagnostic: reference's converged slew per (pin, edge). Loaded once.
+// Diagnostic: converged slew per (pin, edge). Loaded once.
 const std::unordered_map<std::string, double>& forcedPtSlew()
 {
   static const auto values = [] {
@@ -295,7 +295,7 @@ double CellDelayCalculator::calcTimingCellArcSlew(Arc& arc, TimingCellArc& timin
   double result = analysis_type == AnalysisType::kMin ? slew_list.back() : slew_list.front();
   {
     // Diagnostic: quantify how much of the cell-arc residual comes from the
-    // slew the network solve produced. Overrides with reference's converged
+    // slew the network solve produced. Overrides with the converged
     // slew for the same sink pin and edge.
     if (const auto forced = forcedPtSlewFor(arc.get_sink_pin(), output_trans_type))
       result = *forced;

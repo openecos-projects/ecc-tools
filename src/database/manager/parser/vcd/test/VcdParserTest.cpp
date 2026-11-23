@@ -54,8 +54,8 @@ int main()
   assert(std::fabs(signal_activity_map["top/lead_x"].get_transition_density() - 1.0 / 35.0) < 1E-9);
 
   // Activity models: the same value change is weighted differently by the averaged
-  // and the time_based rule (PrimeTime PX UG 6-8 ~ 6-9 defines the X/Z handling in
-  // the time_based chapter).  (last_value, value, last_defined_value) -> weight.
+  // and time_based rules. Each X/Z case maps
+  // (last_value, value, last_defined_value) -> weight.
   {
     vcd::ActivityModelOptions averaged;
     vcd::ActivityModelOptions time_based;
