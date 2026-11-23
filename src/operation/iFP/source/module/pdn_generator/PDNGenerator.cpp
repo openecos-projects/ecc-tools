@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <fnmatch.h>
+#include <numeric>
 #include <queue>
 
 #include "DataManager.hpp"
@@ -3787,6 +3788,14 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         }
         const auto& start = points.front();
         const auto& end = points.back();
+        const int32_t pad_x = std::midpoint(start.get_x(), expected_io_inner.get_x());
+        const int32_t pad_y = std::midpoint(start.get_y(), expected_io_inner.get_y());
+        const auto& box = instance.get_bounding_rect();
+        const int64_t center_distance = std::abs(2LL * pad_x - box.get_ll_x() - box.get_ur_x())
+                                        + std::abs(2LL * pad_y - box.get_ll_y() - box.get_ur_y());
+        const IOPowerLocation candidate{net_name, layer_name, layer->get_order(), pad_x, pad_y, center_distance};
+        auto [best, inserted] = pg_model.get_io_power_locations().try_emplace(instance.get_name(), candidate);
+        if (!inserted && candidate.preferredTo(best->second)) best->second = candidate;
         const auto& pin_box = pin_contact_box;
         const auto& stripe_box = stripe_contact_box;
         contact_details.push_back(FPUTIL.getString(instance.get_name(), "/", instance.get_io_cell_pin_name(), " PORT ", port,
@@ -5139,6 +5148,15 @@ void PDNGenerator::outputPowerLocation(PGModel& pg_model)
   FPLOG.info(Loc::current(), "Starting...");
 
   int32_t micron_dbu = FPDM.getDatabase().get_micron_dbu();
+  const auto& io_connect = FPDM.getConfig().pg_io_core_connect;
+  const auto& pads = pg_model.get_io_power_locations();
+  if (io_connect.enabled) {
+    for (const auto& net : io_connect.nets) {
+      if (std::none_of(pads.begin(), pads.end(), [&](const auto& entry) { return entry.second.net_name == net; })) {
+        FPLOG.error(Loc::current(), "Cannot write power.ploc: no connected IO power cell for net '", net, "'.");
+      }
+    }
+  }
   std::ofstream* power_file = FPUTIL.getOutputFileStream(FPUTIL.getString(FPDM.getConfig().pg_temp_directory_path, "power.ploc"));
   power_file->precision(std::numeric_limits<double>::max_digits10);
   FPUTIL.pushStream(power_file, "# name x_um y_um layer net\n");
@@ -5147,6 +5165,13 @@ void PDNGenerator::outputPowerLocation(PGModel& pg_model)
     for (const auto& [x, y] : coord_set) {
       FPUTIL.pushStream(power_file, net_name, "_", source_idx++, " ", x / 1.0 / micron_dbu, " ", y / 1.0 / micron_dbu, " ",
                         pg_model.get_power_layer_pair().get_second_layer_name(), " ", net_name, "\n");
+    }
+  }
+  if (io_connect.enabled) {
+    power_file->precision(std::numeric_limits<double>::digits10);
+    for (const auto& [name, pad] : pads) {
+      FPUTIL.pushStream(power_file, name, " ", static_cast<double>(pad.x) / micron_dbu, " ", static_cast<double>(pad.y) / micron_dbu, " ", pad.layer_name,
+                        " ", pad.net_name, "\n");
     }
   }
   FPUTIL.closeFileStream(power_file);
