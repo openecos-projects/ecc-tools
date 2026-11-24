@@ -27,6 +27,15 @@ bool feature_summary(const std::filesystem::path& path)
 
 bool feature_tool(const std::filesystem::path& path, const std::string& step)
 {
+  if (step == "place") {
+    return featureInst->save_tools(path.string(), "placement");
+  }
+  if (step == "CTS") {
+    return featureInst->save_tools(path.string(), "cts");
+  }
+  if (step == "route") {
+    return featureInst->save_tools(path.string(), "routing");
+  }
   return featureInst->save_tools(path.string(), step);
 }
 

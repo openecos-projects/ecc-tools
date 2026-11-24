@@ -7,6 +7,7 @@ else()
 endif()
 
 add_library(ircx_spef_writer
+    ${IRCX_MODULE}/spef_writer/SPEFSanitizer.cpp
     ${IRCX_MODULE}/spef_writer/SPEFWriter.cpp
 )
 

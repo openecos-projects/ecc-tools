@@ -4,6 +4,7 @@ target_link_libraries(test_ifp_config
     PRIVATE
     ifp_interface
     ifp_toolkit
+    idm
 )
 
 add_test(NAME test_ifp_config COMMAND test_ifp_config ${CMAKE_CURRENT_BINARY_DIR}/config)

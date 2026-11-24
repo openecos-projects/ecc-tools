@@ -7,7 +7,6 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <regex>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -18,6 +17,7 @@
 #include "liberty/LibertyLibrary.hpp"
 #include "liberty/LibertyPort.hpp"
 #include "liberty/LibertyUnits.hpp"
+#include "liberty/LogicExpression.hpp"
 #include "liberty/TimingArc.hpp"
 #include "liberty/TimingArcSense.hpp"
 #include "liberty/TimingCellArc.hpp"
@@ -101,24 +101,40 @@ void copyArcTables(TimingArc& arc, LibertyArcData& result)
   copy(arc.get_check_table_map(), result.rise_check, result.fall_check);
 }
 
-struct FamilyClass
+// Flattened form of a Liberty logic expression, for signature comparison.
+std::string expressionSignature(const LogicExpression& expression)
 {
-  std::string key;
-  std::string drive;
-  std::string vt;
-};
+  std::string result;
+  for (const auto& term : expression.get_term_list())
+    result += ":" + std::to_string(static_cast<int>(term.get_operation_type())) + ":" + term.get_port_name();
+  return result;
+}
 
-FamilyClass classifyFamily(const LibertyCellData& cell)
+// Logic signature shared by interchangeable masters: output functions and
+// their tri-state enables, pin directions and arc kinds. Macros, sequential
+// cells and cells without an output function stay singletons; this interface
+// cannot prove equivalence of state or reset behavior.
+std::optional<std::string> logicSignature(const LibertyCellData& cell, const LibertyLibrary& library)
 {
-  // Only classify the characterized ICS55 X<drive>H7<VT> masters. Other
-  // libraries remain singleton families until their naming contract is known.
-  static const std::regex master_name(R"(^(.+)X([0-9]+(?:P[0-9]+)?)(H7[HRL])$)");
-  std::smatch match;
-  if (cell.is_macro || !std::regex_match(cell.name, match, master_name)) {
-    return {cell.name, cell.name, cell.name};
+  const auto liberty = library.get_cell_map().find(cell.name);
+  if (cell.is_macro || cell.is_sequential || liberty == library.get_cell_map().end())
+    return std::nullopt;
+  std::string signature;
+  for (const auto& [name, port] : liberty->second.get_port_map()) {
+    if (!port.get_is_output())
+      continue;
+    if (port.get_function_expression().get_is_empty())
+      return std::nullopt;
+    signature += "|function:" + name + expressionSignature(port.get_function_expression());
+    // Output enable is part of what the cell computes: masters agreeing on the
+    // data function but disabling on opposite conditions are not substitutes,
+    // and a plain driver is not a substitute for a tri-state one.
+    const auto& enable = port.get_three_state_expression();
+    if (!enable.get_is_empty())
+      signature += "|three_state:" + name + expressionSignature(enable);
   }
-  std::string signature = match[1].str();
-  signature += cell.is_sequential ? "|sequential" : "|combinational";
+  if (signature.empty())
+    return std::nullopt;
   for (const auto& port : cell.ports) {
     signature += "|" + port.name + ":" + std::to_string(port.is_input) + std::to_string(port.is_output) + std::to_string(port.is_clock);
   }
@@ -126,7 +142,30 @@ FamilyClass classifyFamily(const LibertyCellData& cell)
     signature += "|" + arc.source_port + ":" + arc.sink_port + ":" + std::to_string(arc.sense) + ":" + std::to_string(arc.trigger) + ":"
                  + std::to_string(arc.check_type);
   }
-  return {signature, match[2].str(), match[3].str()};
+  return signature;
+}
+
+// Drive resistance (ps/pF) of the weakest delay arc: the delay slope over the
+// load axis at the median input slew. Cells without a delay table rank last.
+double driveResistance(const LibertyCellData& cell)
+{
+  double result = -1.0;
+  for (const auto& arc : cell.arcs) {
+    if (!arc.rise_check.values.empty() || !arc.fall_check.values.empty())
+      continue;
+    for (const auto* table : {&arc.rise_delay, &arc.fall_delay}) {
+      if (table->axes.size() != 2)
+        continue;
+      const auto& loads = table->axes[1];
+      const std::size_t columns = loads.size();
+      const std::size_t rows = table->axes[0].empty() ? 1 : table->axes[0].size();
+      if (columns < 2 || table->values.size() != rows * columns || !(loads.back() > loads.front()))
+        continue;
+      const std::size_t row = rows / 2 * columns;
+      result = std::max(result, (table->values[row + columns - 1] - table->values[row]) / (loads.back() - loads.front()));
+    }
+  }
+  return result < 0.0 ? std::numeric_limits<double>::infinity() : result;
 }
 
 double leakageRank(const LibertyCellData& cell)
@@ -161,23 +200,60 @@ bool isBuffer(LibertyCell& cell)
          && function.evaluate_constant({{input->get_port_name(), true}}) == std::optional<bool>(true);
 }
 
-std::map<std::string, int32_t> rankAxis(const std::vector<LibertyCellData>& cells, bool drive)
+// Dense ranks of keys ordered by value, ties broken by key.
+template <typename Key>
+std::map<Key, int32_t> rank(const std::map<Key, double>& values)
 {
-  std::map<std::string, double> rank_by_name;
-  for (const auto& cell : cells) {
-    const auto classification = classifyFamily(cell);
-    const std::string& key = drive ? classification.drive : classification.vt;
-    auto [it, inserted] = rank_by_name.emplace(key, leakageRank(cell));
-    if (!inserted)
-      it->second = std::min(it->second, leakageRank(cell));
-  }
-  std::vector<std::pair<std::string, double>> ranked(rank_by_name.begin(), rank_by_name.end());
-  std::sort(ranked.begin(), ranked.end(), [](const auto& lhs, const auto& rhs) { return std::tie(lhs.second, lhs.first) < std::tie(rhs.second, rhs.first); });
-  std::map<std::string, int32_t> result;
-  for (std::size_t index = 0; index < ranked.size(); ++index) {
-    result.emplace(ranked[index].first, static_cast<int32_t>(index));
-  }
+  std::vector<std::pair<double, Key>> ordered;
+  for (const auto& [key, value] : values)
+    ordered.emplace_back(value, key);
+  std::sort(ordered.begin(), ordered.end());
+  std::map<Key, int32_t> result;
+  for (std::size_t index = 0; index < ordered.size(); ++index)
+    result.emplace(ordered[index].second, static_cast<int32_t>(index));
   return result;
+}
+
+// Assigns size and VT coordinates within one logic family from Liberty data.
+// The VT axis is the source library, ranked by its lowest leakage in the
+// family. VT variants of one drive share their footprint, so the drive axis is
+// the area plus the strength rank among same-area cells of one library,
+// ranked by the strongest variant's drive resistance.
+void assignCoordinates(std::vector<LibertyCellData>& family, const LibertyLibrary& library)
+{
+  using Drive = std::pair<double, std::size_t>;
+  std::vector<std::string> vts(family.size());
+  std::vector<double> resistances(family.size());
+  std::map<std::pair<std::string, double>, std::vector<std::size_t>> footprints;
+  for (std::size_t index = 0; index < family.size(); ++index) {
+    vts[index] = library.get_cell_map().at(family[index].name).get_library_name();
+    resistances[index] = driveResistance(family[index]);
+    footprints[{vts[index], family[index].area}].push_back(index);
+  }
+  std::vector<Drive> drives(family.size());
+  for (auto& [footprint, members] : footprints) {
+    std::sort(members.begin(), members.end(), [&](std::size_t lhs, std::size_t rhs) {
+      return std::make_tuple(-resistances[lhs], family[lhs].name) < std::make_tuple(-resistances[rhs], family[rhs].name);
+    });
+    for (std::size_t position = 0; position < members.size(); ++position)
+      drives[members[position]] = {footprint.second, position};
+  }
+  std::map<Drive, double> drive_values;
+  std::map<std::string, double> vt_values;
+  for (std::size_t index = 0; index < family.size(); ++index) {
+    auto [drive, inserted] = drive_values.emplace(drives[index], -resistances[index]);
+    if (!inserted)
+      drive->second = std::max(drive->second, -resistances[index]);
+    auto [vt, vt_inserted] = vt_values.emplace(vts[index], leakageRank(family[index]));
+    if (!vt_inserted)
+      vt->second = std::min(vt->second, leakageRank(family[index]));
+  }
+  const auto drive_ranks = rank(drive_values);
+  const auto vt_ranks = rank(vt_values);
+  for (std::size_t index = 0; index < family.size(); ++index) {
+    family[index].size_index = drive_ranks.at(drives[index]) + 1;
+    family[index].vt_index = vt_ranks.at(vts[index]);
+  }
 }
 
 }  // namespace
@@ -250,23 +326,21 @@ std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& li
     cells.push_back(std::move(exported));
   }
   std::map<std::string, std::vector<LibertyCellData>> families;
-  for (auto& cell : cells)
-    families[classifyFamily(cell).key].push_back(std::move(cell));
+  for (auto& cell : cells) {
+    const auto signature = logicSignature(cell, library);
+    families[signature ? "logic" + *signature : "cell:" + cell.name].push_back(std::move(cell));
+  }
 
   std::vector<LibertyCellData> ordered;
   ordered.reserve(cells.size());
   for (auto& entry : families) {
     auto& family = entry.second;
-    const auto drives = rankAxis(family, true);
-    const auto vts = rankAxis(family, false);
+    assignCoordinates(family, library);
     std::sort(family.begin(), family.end(),
               [](const auto& lhs, const auto& rhs) { return std::make_tuple(leakageRank(lhs), lhs.name) < std::make_tuple(leakageRank(rhs), rhs.name); });
     const auto main_id = static_cast<int32_t>(ordered.empty() ? 0 : ordered.back().main_id + 1);
     for (auto& cell : family) {
-      const auto classification = classifyFamily(cell);
       cell.main_id = main_id;
-      cell.size_index = drives.at(classification.drive) + 1;
-      cell.vt_index = vts.at(classification.vt);
       ordered.push_back(std::move(cell));
     }
   }

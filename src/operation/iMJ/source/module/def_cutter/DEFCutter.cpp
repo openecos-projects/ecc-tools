@@ -925,6 +925,12 @@ void DEFCutter::copyPin(idb::IdbPin* source, idb::IdbPin* pin)
   if (source_term->has_antenna_diff_area()) {
     term->set_antenna_diff_area(source_term->get_antenna_diff_area());
   }
+  for (const auto& [layer, area] : source_term->get_antenna_gate_area_by_layer()) {
+    term->add_antenna_gate_area_layer(layer, area);
+  }
+  for (const auto& [layer, area] : source_term->get_antenna_diff_area_by_layer()) {
+    term->add_antenna_diff_area_layer(layer, area);
+  }
   for (const auto& [layer, area] : source_term->get_antenna_partial_metal_area()) {
     term->add_antenna_partial_metal_area(layer, area);
   }

@@ -16,10 +16,28 @@
 // ***************************************************************************************
 #pragma once
 
+#include <tuple>
+
 #include "FPHeader.hpp"
 #include "PGLayerPair.hpp"
 
 namespace ifp {
+
+struct IOPowerLocation
+{
+  std::string net_name;
+  std::string layer_name;
+  int32_t layer_order;
+  int32_t x;
+  int32_t y;
+  int64_t center_distance;
+
+  bool preferredTo(const IOPowerLocation& other) const
+  {
+    if (layer_order != other.layer_order) return layer_order > other.layer_order;
+    return std::tie(center_distance, x, y) < std::tie(other.center_distance, other.x, other.y);
+  }
+};
 
 class PGModel
 {
@@ -31,6 +49,7 @@ class PGModel
   std::string& get_default_ground_net_name() { return _default_ground_net_name; }
   std::set<std::string>& get_via_key_set() { return _via_key_set; }
   PGLayerPair& get_power_layer_pair() { return _power_layer_pair; }
+  std::map<std::string, IOPowerLocation>& get_io_power_locations() { return _io_power_locations; }
   std::map<std::string, std::set<std::pair<int32_t, int32_t>>>& get_power_net_coord_map() { return _power_net_coord_map; }
 
   // const getter
@@ -51,6 +70,7 @@ class PGModel
   std::string _default_ground_net_name;
   std::set<std::string> _via_key_set;
   PGLayerPair _power_layer_pair;
+  std::map<std::string, IOPowerLocation> _io_power_locations;
   std::map<std::string, std::set<std::pair<int32_t, int32_t>>> _power_net_coord_map;
 };
 

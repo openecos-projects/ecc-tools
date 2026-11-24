@@ -44,7 +44,7 @@ class DetailedRouter
   static DetailedRouter& getInst();
   static void destroyInst();
   // function
-  void route();
+  bool route();
 
  private:
   // self
@@ -66,7 +66,7 @@ class DetailedRouter
 
   // function
   DRModel initDRModel();
-  void routeDRModel(DRModel& dr_model);
+  bool routeDRModel(DRModel& dr_model);
   void runNormalIteration(DRModel& dr_model, DRIterParam& iter_param, int32_t normal_iter, int32_t normal_iter_num, int32_t step_iter);
   void setDRIterParam(DRModel& dr_model, int32_t iter, DRIterParam& dr_iter_param);
   void initDRBoxMap(DRModel& dr_model);

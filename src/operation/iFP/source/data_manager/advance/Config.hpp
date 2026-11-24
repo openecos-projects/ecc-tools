@@ -28,16 +28,6 @@
 
 namespace ifp {
 
-struct PGRingConfig
-{
-  std::vector<std::string> nets;
-  std::string horizontal_layer;
-  std::string vertical_layer;
-  double width_micron = 0.0;
-  double spacing_micron = 0.0;
-  double offset_micron = 0.0;
-};
-
 struct PGIOCoreConnectConfig
 {
   // IO-core routes stay on the target stripe layer. Normal IO cells use
@@ -99,7 +89,6 @@ class Config
   std::vector<PGGlobalConnect> pg_connect_list;            // optional
   std::string core_power_net;
   std::string core_ground_net;
-  PGRingConfig pg_ring;
   PGIOCoreConnectConfig pg_io_core_connect;
   std::vector<std::string> pg_required_net_list;
   bool pg_connect_pads = false;
