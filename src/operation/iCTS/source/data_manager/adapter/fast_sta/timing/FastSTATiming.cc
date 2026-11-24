@@ -113,8 +113,8 @@ auto propagateTiming(FastStaContext& context, std::queue<FastStaNodeId>& ready_n
 
 }  // namespace
 
-auto FastStaTiming::collectAffectedLogicNodes(const FastStaContext& context,
-                                              const FastStaDirtyRegion& dirty_region) -> std::optional<std::vector<FastStaNodeId>>
+auto FastStaTiming::collectAffectedLogicNodes(const FastStaContext& context, const FastStaDirtyRegion& dirty_region)
+    -> std::optional<std::vector<FastStaNodeId>>
 {
   if (!HasTimingPropagationState(context)) {
     return std::vector<FastStaNodeId>{};
@@ -285,8 +285,7 @@ auto FastStaTiming::updateClockTopology(FastStaContext& context, const FastStaDi
     std::string invalid_sample;
     const auto valid_point
         = [](const auto& point) -> bool { return point.valid && std::isfinite(point.arrival_ns) && std::isfinite(point.slew_ns) && point.slew_ns >= 0.0; };
-    for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
-      const auto& node = context.nodes.at(node_id);
+    for (const auto& node : context.nodes) {
       if (node.domain != FastStaNodeDomain::kClock || node.clock_inactive) {
         continue;
       }
@@ -302,7 +301,7 @@ auto FastStaTiming::updateClockTopology(FastStaContext& context, const FastStaDi
         invalid_sample += " -> ";
       }
       invalid_sample += node.name + "[kind=" + std::to_string(static_cast<int>(node.kind)) + ",clock=" + node.clock_name
-                        + ",timing_valid=" + std::to_string(node.timing.valid) + ",arrival_ns=" + std::to_string(node.timing.arrival_ns)
+                        + ",timing_valid=" + std::to_string(static_cast<int>(node.timing.valid)) + ",arrival_ns=" + std::to_string(node.timing.arrival_ns)
                         + ",slew_ns=" + std::to_string(node.timing.slew_ns) + ",early=" + std::to_string(node.early_timing.size())
                         + ",late=" + std::to_string(node.late_timing.size()) + "]";
     }

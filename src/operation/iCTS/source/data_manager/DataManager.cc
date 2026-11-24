@@ -244,6 +244,22 @@ auto logClockTraceSummary(const SdcClockData& clock_data, const ClockTraceBuild&
                {"Clock", "Kind", "Master", "Period (ns)", "Resolved", "Targets", "Sources", "Trace", "Accepted", "Nets", "Virtual"}, ownership_rows);
 }
 
+// A dissolved stage is gone from iDB, so the rows are the only record of what the input
+// netlist carried and what placement forbade touching.
+auto logClockTreeDissolve(const WrapperClockTreeDissolveResult& dissolve) -> void
+{
+  if (dissolve.clocks.empty()) {
+    return;
+  }
+  LogTableRows dissolve_rows;
+  dissolve_rows.reserve(dissolve.clocks.size() + 1U);
+  for (const auto& clock : dissolve.clocks) {
+    dissolve_rows.push_back({clock.clock_name, ToLogTableCell(clock.dissolved), ToLogTableCell(clock.preserved), ToLogTableCell(clock.skipped)});
+  }
+  dissolve_rows.push_back({"TOTAL", ToLogTableCell(dissolve.dissolved), ToLogTableCell(dissolve.preserved), ToLogTableCell(dissolve.skipped)});
+  EmitLogTable(Loc::current(), "Clock Tree Dissolve", {"Clock", "Dissolved", "Preserved", "Skipped"}, dissolve_rows);
+}
+
 auto logDesignDistribution(const Design& design) -> void
 {
   std::map<InstType, std::size_t> inst_type_counts;
@@ -301,14 +317,12 @@ auto logDesignDistribution(const Design& design) -> void
                                  clock->get_clock_period_source(), ToLogTableCell(clock->get_nets().size()), ToLogTableCell(clock->get_insts().size()),
                                  ToLogTableCell(clock->get_loads().size()), ToLogTableCell(sequential_sinks),
                                  ToLogTableCell(sink_type_counts[InstType::kMacroBlock]), ToLogTableCell(boundary_sinks), ToLogTableCell(propagation_sinks),
-                                 ToLogTableCell(ignore_load_count), ToLogTableCell(clock->is_preclustered_sink_reuse()),
-                                 ToLogTableCell(clock->get_preclustered_anchor_input_net_names().size())});
+                                 ToLogTableCell(ignore_load_count)});
   }
   distribution_rows.push_back({"TOTAL", "-", "-", "-", ToLogTableCell(design.get_nets().size()), ToLogTableCell(design.get_insts().size()),
-                               ToLogTableCell(total_sinks), "-", "-", "-", "-", "-", "-", "-"});
+                               ToLogTableCell(total_sinks), "-", "-", "-", "-", "-"});
   EmitLogTable(Loc::current(), "Clock Distribution Overview",
-               {"Clock", "Net", "Period", "Source", "Nets", "Insts", "Sinks", "Seq", "Macro", "Boundary", "Propagation", "Ignore", "Reuse", "Anchors"},
-               distribution_rows);
+               {"Clock", "Net", "Period", "Source", "Nets", "Insts", "Sinks", "Seq", "Macro", "Boundary", "Propagation", "Ignore"}, distribution_rows);
 }
 
 }  // namespace
@@ -470,6 +484,19 @@ auto DataManager::readClockData() -> DataManagerStatus
         .clock_data = &sdc_clock_data,
         .max_fanout = _config.get_max_fanout(),
     });
+    // A fanout scaffold is not a clock tree. Bypass every stage the trace crossed that
+    // placement does not pin, then trace again so the targets, the materialized clocks and
+    // the tree CTS builds all describe the netlist CTS owns.
+    if (trace.ok()) {
+      const auto dissolve = _wrapper.dissolveSynthesisClockBuffers(trace.output.clock_targets);
+      logClockTreeDissolve(dissolve);
+      if (dissolve.dissolved > 0U) {
+        trace = _wrapper.traceSdcClocks(SdcClockTraceInput{
+            .clock_data = &sdc_clock_data,
+            .max_fanout = _config.get_max_fanout(),
+        });
+      }
+    }
     // A stage whose select is not pinned can be driven by more than one declared clock.
     // Ownership stays with the primary clock, but the tree downstream of that stage must
     // satisfy the tightest clock that can reach it, so its budget is taken from the

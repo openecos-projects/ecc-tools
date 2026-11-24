@@ -501,7 +501,7 @@ auto PropagateReadyQueue(FastStaContext& context, std::queue<FastStaNodeId>& rea
   // prepare() has proved the active clock graph acyclic; no empirical cutoff.
   while (!current_nodes.empty()) {
     std::vector<std::vector<FastStaNodeId>> next_nodes(current_nodes.size());
-#pragma omp parallel for schedule(static) num_threads(static_cast <int>(context.worker_count)) if (current_nodes.size() > 1U && context.worker_count > 1U)
+#pragma omp parallel for schedule(static) num_threads(static_cast<int>(context.worker_count)) if (current_nodes.size() > 1U && context.worker_count > 1U)
     for (auto index = std::ptrdiff_t{0}; index < std::ssize(current_nodes); ++index) {
       const auto node_id = current_nodes.at(static_cast<std::size_t>(index));
       auto& node_ready = next_nodes.at(static_cast<std::size_t>(index));

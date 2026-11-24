@@ -132,7 +132,7 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
       diagnostic = "timing_arc_node_id_out_of_range";
       return {};
     }
-    if (context.nodes.at(arc.to_node_id).domain == FastStaNodeDomain::kClock) {
+    if (context.nodes.at(arc.to_node_id).domain != FastStaNodeDomain::kLogic) {
       continue;
     }
     outgoing.at(arc.from_node_id).push_back(LogicEdge{.to_node_id = arc.to_node_id, .model_index = index, .net = false});
@@ -153,6 +153,9 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
         diagnostic = "logic_net_node_id_out_of_range:" + net.name;
         return {};
       }
+      if (context.nodes.at(load_id).domain != FastStaNodeDomain::kLogic) {
+        continue;
+      }
       outgoing.at(net.driver_node_id).push_back(LogicEdge{.to_node_id = load_id, .model_index = index, .load_index = load_index, .net = true});
       ++indegree.at(load_id);
     }
@@ -166,12 +169,17 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
   auto remaining = indegree;
   std::vector<FastStaNodeId> order;
   order.reserve(logic_node_count);
+  std::size_t logic_ordered_count = 0U;
   std::set<std::pair<FastStaNodeId, std::size_t>> disabled_edges;
   while (true) {
     while (!ready.empty()) {
       const auto node_id = ready.top();
       ready.pop();
+      if (context.nodes.at(node_id).domain != FastStaNodeDomain::kLogic) {
+        continue;
+      }
       order.push_back(node_id);
+      ++logic_ordered_count;
       const auto& edges = outgoing.at(node_id);
       for (std::size_t edge_index = 0U; edge_index < edges.size(); ++edge_index) {
         if (disabled_edges.contains(std::make_pair(node_id, edge_index))) {
@@ -183,7 +191,7 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
         }
       }
     }
-    if (order.size() == logic_node_count) {
+    if (logic_ordered_count == logic_node_count) {
       disabled_loop_edge_count = disabled_edges.size();
       return order;
     }
@@ -192,8 +200,42 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
     const auto disabled_before = disabled_edges.size();
     CollectLoopClosingEdges(context, outgoing, disabled_edges);
     if (disabled_edges.size() == disabled_before) {
-      // No back edge could be identified; report the loop instead of spinning.
-      diagnostic = "logic_timing_graph_contains_cycle";
+      // No back edge could be identified. A stall without a closing edge means
+      // an unprocessed edge still feeds a node that can never be released; that
+      // is a domain-crossing edge, not a loop, so report which one it is.
+      std::size_t mixed_domain_edges = 0U;
+      std::string mixed_domain_samples;
+      for (FastStaNodeId source_id = 0U; source_id < context.nodes.size(); ++source_id) {
+        const auto& source = context.nodes.at(source_id);
+        const auto& edges = outgoing.at(source_id);
+        for (std::size_t edge_index = 0U; edge_index < edges.size(); ++edge_index) {
+          const auto to_node_id = edges.at(edge_index).to_node_id;
+          if (disabled_edges.contains(std::make_pair(source_id, edge_index)) || remaining.at(to_node_id) == 0U) {
+            continue;
+          }
+          const auto& sink = context.nodes.at(to_node_id);
+          if (source.domain == sink.domain) {
+            continue;
+          }
+          if (mixed_domain_edges < 4U) {
+            mixed_domain_samples += ':';
+            mixed_domain_samples += source.name;
+            mixed_domain_samples += "->";
+            mixed_domain_samples += sink.name;
+          }
+          ++mixed_domain_edges;
+        }
+      }
+      if (mixed_domain_edges > 0U) {
+        diagnostic = "logic_ordering_stalled_on_mixed_domain_edges:";
+        diagnostic += std::to_string(mixed_domain_edges);
+        diagnostic += mixed_domain_samples;
+      } else {
+        diagnostic = "logic_timing_graph_contains_cycle:";
+        diagnostic += std::to_string(logic_ordered_count);
+        diagnostic += '/';
+        diagnostic += std::to_string(logic_node_count);
+      }
       return {};
     }
     std::ranges::fill(remaining, 0U);
@@ -210,6 +252,7 @@ auto makeLogicOrder(const FastStaContext& context, std::vector<std::vector<Logic
       }
     }
     order.clear();
+    logic_ordered_count = 0U;
     for (FastStaNodeId node_id = 0U; node_id < context.nodes.size(); ++node_id) {
       if (context.nodes.at(node_id).domain == FastStaNodeDomain::kLogic && remaining.at(node_id) == 0U) {
         ready.push(node_id);
