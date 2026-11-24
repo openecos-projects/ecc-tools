@@ -17,3 +17,14 @@ target_link_libraries(ecc_symbol_tests
 )
 
 add_test(NAME ecc_symbol_tests COMMAND ecc_symbol_tests)
+
+add_executable(ecc_named_table_tests
+    test/NamedTableTests.cpp
+)
+
+target_link_libraries(ecc_named_table_tests
+    PRIVATE
+        ecc_symbol
+)
+
+add_test(NAME ecc_named_table_tests COMMAND ecc_named_table_tests)
