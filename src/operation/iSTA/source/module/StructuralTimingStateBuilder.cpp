@@ -136,11 +136,11 @@ void StructuralTimingStateBuilder::build(Database& database, DelayCalculator& de
 {
   database.graph().clearTiming();
   ClockNetworkBuilder(database).build();
-  for (auto& [name, point] : database.graph().points())
-    for (auto& [clock, state] : point.get_clock_state_map())
+  for (const auto& id : database.graph().points().sortedIds())
+    for (auto& [clock, state] : database.graph().points().get(id).get_clock_state_map())
       state.is_structural = true;
-  for (auto& [name, point] : database.graph().driverPoints())
-    for (auto& [clock, state] : point.get_clock_state_map())
+  for (const auto& id : database.graph().driverPoints().sortedIds())
+    for (auto& [clock, state] : database.graph().driverPoints().get(id).get_clock_state_map())
       state.is_structural = true;
   ClockGatingChecker(database).infer();
   ExceptionThroughIndex through_index(database.sdc(), database.network());

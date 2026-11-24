@@ -154,8 +154,8 @@ int main()
           "missing clock acquired a predecessor");
   for (const auto* clock : {"launch_clock", "capture_clock"}) {
     database.sdc().get_clock_map()[clock].set_source_list({"source"});
-    for (auto& [name, point] : graph.points()) {
-      auto& state = point.get_clock_state(clock);
+    for (const auto& id : graph.points().sortedIds()) {
+      auto& state = graph.points().get(id).get_clock_state(clock);
       state.physical_predecessor_map = state.predecessor_map;
       state.physical_predecessor_trans_type_map = state.predecessor_trans_type_map;
     }

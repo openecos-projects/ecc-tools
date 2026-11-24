@@ -45,6 +45,24 @@ class NamedTable
     return _storage[id - 1];
   }
 
+  // std::map::try_emplace equivalent: inserts a default-constructed (or
+  // arg-constructed) T only if the name is absent. Returns the slot's id and
+  // whether an insertion happened.
+  template <typename... Args>
+  std::pair<IdType, bool> try_emplace(std::string_view name, Args&&... args)
+  {
+    const auto existing = _symbols.find(name);
+    if (existing) {
+      return {IdType{*existing}, false};
+    }
+    const uint32_t id = _symbols.intern(name);
+    if (id > _storage.size()) {
+      _storage.emplace_back();
+    }
+    _storage[id - 1] = T(std::forward<Args>(args)...);
+    return {IdType{id}, true};
+  }
+
   T* find(std::string_view name)
   {
     const auto id = _symbols.find(name);

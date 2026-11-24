@@ -185,12 +185,14 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
   DelayCalculator delay(db, config);
   StartpointInitializer(db, delay).seed(starts);
   Database exhaustive = db;
-  for (auto& [name, point] : exhaustive.graph().points())
+  for (const auto& pid : exhaustive.graph().points().sortedIds()) {
+    auto& point = exhaustive.graph().points().get(pid);
     for (auto& [mode, sources] : point.get_path_state_map())
       for (auto& [source, edges] : sources)
         for (auto& [edge, paths] : edges)
           for (auto& [tag, path] : paths)
             path.setClockPathBound(std::numeric_limits<double>::infinity());
+  }
   DelayCalculator exhaustive_delay(exhaustive, config);
   DataArrivalPropagator(exhaustive).propagate();
   PathChecker exhaustive_check(exhaustive, exhaustive_delay);
@@ -220,7 +222,9 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
   for (const auto& endpoint : graph.endpoints())
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       near(worst(db, checker, endpoint, mode), worst(exhaustive, exhaustive_check, endpoint, mode), "bounded/exhaustive setup or hold slack differ");
-  for (const auto& [name, point] : graph.points()) {
+  for (const auto& pid : graph.points().sortedIds()) {
+    const std::string name(graph.points().nameOf(pid));
+    const auto& point = graph.points().get(pid);
     const auto& reference = exhaustive.graph().points().at(name);
     near(point.get_required(), reference.get_required(), "bounded/exhaustive pin required differ");
     near(point.get_slack(), reference.get_slack(), "bounded/exhaustive pin slack differ");
@@ -253,7 +257,9 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
           throw std::runtime_error("opposite-edge fixture has no retained launch path");
       }
     }
-    for (const auto& [name, point] : graph.points()) {
+    for (const auto& pid : graph.points().sortedIds()) {
+      const std::string name(graph.points().nameOf(pid));
+      const auto& point = graph.points().get(pid);
       const auto& reference = exhaustive.graph().points().at(name);
       near(point.get_required(), reference.get_required(), "clock update retained a stale required correction");
       near(point.get_slack(), reference.get_slack(), "clock update retained a stale slack correction");
@@ -345,12 +351,14 @@ static void cumulativeMergeTolerance(bool hold)
   DelayCalculator delay(db, config);
   StartpointInitializer(db, delay).seed(starts);
   Database exhaustive = db;
-  for (auto& [name, point] : exhaustive.graph().points())
+  for (const auto& pid : exhaustive.graph().points().sortedIds()) {
+    auto& point = exhaustive.graph().points().get(pid);
     for (auto& [mode, sources] : point.get_path_state_map())
       for (auto& [source, edges] : sources)
         for (auto& [edge, paths] : edges)
           for (auto& [tag, path] : paths)
             path.setClockPathBound(std::numeric_limits<double>::infinity());
+  }
   DataArrivalPropagator(db).propagate();
   DataArrivalPropagator(exhaustive).propagate();
   DelayCalculator exhaustive_delay(exhaustive, config);

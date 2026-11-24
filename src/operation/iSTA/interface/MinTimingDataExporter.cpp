@@ -43,7 +43,7 @@ bool hasMinCaptureState(Database& database, const std::string& pin_name, TransTy
   const auto point = database.graph().points().find(pin_name);
   if (point == database.graph().points().end())
     return false;
-  for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
+  for (const auto& [clock_name, state] : point->get_clock_state_map()) {
     if (state.is_source_path_only || !database.sdc().get_clock_map().contains(clock_name))
       continue;
     if (state.is_structural && !clockPinValues(database, pin_name, clock_name, AnalysisType::kMin, transition).propagated)
@@ -273,11 +273,15 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
     }
   };
 
-  for (auto& [name, point] : database.graph().points())
-    exportPoint(name, point);
-  for (auto& [name, point] : database.graph().driverPoints())
+  for (const auto& id : database.graph().points().sortedIds()) {
+    const std::string name(database.graph().points().nameOf(id));
+    exportPoint(name, database.graph().points().get(id));
+  }
+  for (const auto& id : database.graph().driverPoints().sortedIds()) {
+    const std::string name(database.graph().driverPoints().nameOf(id));
     if (!database.graph().points().contains(name))
-      exportPoint(name, point);
+      exportPoint(name, database.graph().driverPoints().get(id));
+  }
 
   // Contexts are now complete and immutable: borrowed strings remain valid.
   // A LUT and capture clock alone do not qualify a check whose min paths were

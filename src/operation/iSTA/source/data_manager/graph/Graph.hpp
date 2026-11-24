@@ -10,12 +10,18 @@
 #include <string>
 #include <vector>
 
+#include "NamedTable.h"
 #include "graph/Arc.hpp"
 #include "graph/SimValues.hpp"
 #include "graph/TimingPoint.hpp"
 #include "liberty/TimingCheckArc.hpp"
 
 namespace ista {
+
+// Declared in network/Network.hpp; redeclared here so Graph's point tables
+// are keyed by the same domain as Network::pins() without including it.
+struct PinTag;
+using PointTable = ecc::symbol::NamedTable<TimingPoint, PinTag>;
 
 // A bidirectional physical pin has separate receiving and driving vertices.
 class GraphVertex
@@ -94,8 +100,8 @@ class Graph
   const std::vector<GraphVertex>& vertices() const { return _vertices; }
   std::vector<int32_t>& vertexOrder() { return _vertex_order; }
   const std::vector<int32_t>& vertexOrder() const { return _vertex_order; }
-  std::map<std::string, TimingPoint>& driverPoints() { return _driver_points; }
-  const std::map<std::string, TimingPoint>& driverPoints() const { return _driver_points; }
+  PointTable& driverPoints() { return _driver_points; }
+  const PointTable& driverPoints() const { return _driver_points; }
   std::vector<Arc>& arcs() { return _arcs; }
   const std::vector<Arc>& arcs() const { return _arcs; }
   std::map<std::string, std::vector<std::size_t>>& outgoingArcs() { return _outgoing_arcs; }
@@ -123,19 +129,19 @@ class Graph
     _clock_gating_checks.clear();
     _clock_gating_endpoints.clear();
   }
-  std::map<std::string, TimingPoint>& points() { return _points; }
-  const std::map<std::string, TimingPoint>& points() const { return _points; }
+  PointTable& points() { return _points; }
+  const PointTable& points() const { return _points; }
   TimingPoint& driverPoint(const std::string& pin_name)
   {
     auto iter = _driver_points.find(pin_name);
-    return iter == _driver_points.end() ? _points.at(pin_name) : iter->second;
+    return iter == nullptr ? _points.at(pin_name) : *iter;
   }
   TimingPoint& sourcePoint(const Arc& arc) { return arc.get_type() == ArcType::kNet ? driverPoint(arc.get_source_pin()) : _points.at(arc.get_source_pin()); }
   TimingPoint& sinkPoint(const Arc& arc) { return arc.get_type() == ArcType::kCell ? driverPoint(arc.get_sink_pin()) : _points.at(arc.get_sink_pin()); }
   const TimingPoint& driverPoint(const std::string& pin_name) const
   {
     auto iter = _driver_points.find(pin_name);
-    return iter == _driver_points.end() ? _points.at(pin_name) : iter->second;
+    return iter == nullptr ? _points.at(pin_name) : *iter;
   }
   const TimingPoint& sourcePoint(const Arc& arc) const
   {
@@ -180,7 +186,7 @@ class Graph
   SimValues _sim_values;
   std::vector<GraphVertex> _vertices;
   std::vector<int32_t> _vertex_order;
-  std::map<std::string, TimingPoint> _driver_points;
+  PointTable _driver_points;
   std::vector<Arc> _arcs;
   std::map<std::string, std::vector<std::size_t>> _outgoing_arcs;
   std::map<std::string, std::vector<std::size_t>> _incoming_arcs;
@@ -188,7 +194,7 @@ class Graph
   std::vector<std::string> _endpoints;
   std::map<std::string, std::vector<TimingCheckArc>> _clock_gating_checks;
   std::set<std::string> _clock_gating_endpoints;
-  std::map<std::string, TimingPoint> _points;
+  PointTable _points;
   bool _path_states_pruned = false;
   std::map<std::string, std::set<std::string>> _capture_required_clocks;
   bool _exhaustive_required = false;

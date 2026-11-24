@@ -242,7 +242,9 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   std::map<std::string, std::map<StateKey, int32_t>> pin_states;
   std::vector<PathPair> paths;
   auto collectStates = [&](auto& point_map, int32_t role) {
-    for (auto& [name, point] : point_map) {
+    for (const auto& id : point_map.sortedIds()) {
+      const std::string name(point_map.nameOf(id));
+      auto& point = point_map.get(id);
       for (auto& [clock, clock_state] : point.get_clock_state_map()) {
         if (domains.contains(clock)) {
           ++view.clock_reached_pins[domains.at(clock)];

@@ -58,7 +58,7 @@ std::vector<ClockCheck> ClockChecker::check()
       const auto logic = _database.graph().simValues().value(pin);
       if (logic && (*logic == TimingCaseValue::kZero || *logic == TimingCaseValue::kOne))
         continue;
-      for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
+      for (const auto& [clock_name, state] : point->get_clock_state_map()) {
         const auto definition = _database.sdc().get_clock_map().find(clock_name);
         if (state.is_source_path_only || definition == _database.sdc().get_clock_map().end())
           continue;

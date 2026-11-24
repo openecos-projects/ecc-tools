@@ -105,11 +105,11 @@ void DelayCalculator::completeCellArcDelays(Graph& graph)
           continue;
         std::set<double> slews;
         if (source != graph.points().end()) {
-          const auto& data = source->second.get_data_slew_map();
+          const auto& data = source->get_data_slew_map();
           const auto lane = data.find(mode);
           if (lane != data.end() && lane->second.contains(input))
             slews.insert(lane->second.at(input));
-          for (const auto& [clock, state] : source->second.get_clock_state_map())
+          for (const auto& [clock, state] : source->get_clock_state_map())
             for (const auto& [edge, wave] : state.waveforms)
               if (const auto slew = wave.physicalSlew(mode, input))
                 slews.insert(*slew);

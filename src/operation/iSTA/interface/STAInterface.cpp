@@ -107,7 +107,7 @@ void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
       continue;
     double rise = 0.0;
     double fall = 0.0;
-    for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
+    for (const auto& [clock_name, state] : point->get_clock_state_map()) {
       (void) state;
       const auto clock = database.sdc().get_clock_map().find(clock_name);
       if (clock == database.sdc().get_clock_map().end())

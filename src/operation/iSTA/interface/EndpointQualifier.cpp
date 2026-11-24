@@ -38,7 +38,7 @@ bool hasCaptureClock(Database& database, const std::string& pin_name, TransType 
   if (point == database.graph().points().end())
     return false;
   const auto& clocks = database.sdc().get_clock_map();
-  for (const auto& [name, state] : point->second.get_clock_state_map()) {
+  for (const auto& [name, state] : point->get_clock_state_map()) {
     if (state.is_source_path_only || !clocks.contains(name))
       continue;
     const auto analysis = state.arrival_map.find(AnalysisType::kMin);

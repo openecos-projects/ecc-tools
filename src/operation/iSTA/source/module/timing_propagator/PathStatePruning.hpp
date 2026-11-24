@@ -76,7 +76,7 @@ class PathStatePruning
               if (point == graph.points().end())
                 return false;
               bool clock_found = false;
-              for (const auto& [clock, state] : point->second.get_clock_state_map())
+              for (const auto& [clock, state] : point->get_clock_state_map())
                 if (!state.is_source_path_only) {
                   clock_found = true;
                   if (!admit(arc.get_clock_port(), clock, arc.get_clock_trans_type()))

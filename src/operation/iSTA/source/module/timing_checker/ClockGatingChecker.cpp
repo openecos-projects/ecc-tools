@@ -20,7 +20,7 @@ void ClockGatingChecker::infer()
   auto has_clock = [&](const std::string& pin) {
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
-      for (const auto& [clock, state] : point->second.get_clock_state_map())
+      for (const auto& [clock, state] : point->get_clock_state_map())
         if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
           return true;
     return false;
@@ -32,7 +32,7 @@ void ClockGatingChecker::infer()
   auto seed = [&](const std::string& pin) {
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
-      for (const auto& [clock, state] : point->second.get_clock_state_map())
+      for (const auto& [clock, state] : point->get_clock_state_map())
         if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
           pending.emplace_back(pin, clock);
   };

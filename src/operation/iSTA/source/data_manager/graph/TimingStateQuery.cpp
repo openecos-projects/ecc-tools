@@ -50,7 +50,7 @@ bool TimingStateQuery::shouldStopDataPropagation(Arc& arc)
     return false;
   const auto point = _database.graph().points().find(enable);
   if (point != _database.graph().points().end())
-    for (const auto& [clock, state] : point->second.get_clock_state_map())
+    for (const auto& [clock, state] : point->get_clock_state_map())
       if (!state.is_source_path_only && _database.sdc().get_clock_map().contains(clock))
         return false;
   // An ordinary data arrival at the gate pin is not a latch opening clock.
@@ -134,10 +134,10 @@ double TimingStateQuery::getClockSlew(const std::string& pin_name, std::string_v
 const TimingPoint* clockPoint(const Database& database, const std::string& pin, std::string_view clock)
 {
   const auto receiver = database.graph().points().find(pin);
-  if (receiver != database.graph().points().end() && receiver->second.find_clock_state(clock))
-    return &receiver->second;
+  if (receiver != database.graph().points().end() && receiver->find_clock_state(clock))
+    return receiver;
   const auto driver = database.graph().driverPoints().find(pin);
-  return driver != database.graph().driverPoints().end() && driver->second.find_clock_state(clock) ? &driver->second : nullptr;
+  return driver != database.graph().driverPoints().end() && driver->find_clock_state(clock) ? &*driver : nullptr;
 }
 
 const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, std::string_view clock, std::optional<TransType> source)
@@ -181,7 +181,7 @@ bool isIdealClockPin(const Database& database, const std::string& pin)
   };
   const auto receiver = database.graph().points().find(pin);
   const auto driver = database.graph().driverPoints().find(pin);
-  return (receiver != database.graph().points().end() && ideal(receiver->second)) || (driver != database.graph().driverPoints().end() && ideal(driver->second));
+  return (receiver != database.graph().points().end() && ideal(*receiver)) || (driver != database.graph().driverPoints().end() && ideal(*driver));
 }
 
 std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::vector<const TimingIoDelay*>& definitions)
@@ -197,7 +197,7 @@ std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::
       const auto point = points->find(delay->get_reference_pin());
       if (point == points->end())
         continue;
-      for (const auto& [clock, state] : point->second.get_clock_state_map()) {
+      for (const auto& [clock, state] : point->get_clock_state_map()) {
         if (state.is_source_path_only || (!delay->get_clock_name().empty() && clock != delay->get_clock_name()))
           continue;
         clocks.insert(clock);

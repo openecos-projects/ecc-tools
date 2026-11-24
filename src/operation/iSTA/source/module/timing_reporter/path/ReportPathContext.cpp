@@ -106,7 +106,7 @@ bool ReportPathContext::isRegisterEndPoint(const std::string& name)
 bool ReportPathContext::hasClockPoint(const std::string& name)
 {
   const auto point = _database.graph().points().find(name);
-  return point != _database.graph().points().end() && point->second.get_is_clock_point();
+  return point != _database.graph().points().end() && point->get_is_clock_point();
 }
 
 bool ReportPathContext::isClockSourceStartPoint(const std::string& name)

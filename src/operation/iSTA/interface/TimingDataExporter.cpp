@@ -269,7 +269,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     exported.min_fall_rat_ps = kUnconstrainedRequiredPs;
     const auto point_it = database.graph().points().find(name);
     if (point_it != database.graph().points().end()) {
-      TimingPoint& point = point_it->second;
+      TimingPoint& point = *point_it;
       exported.level = point.get_level();
       exported.max_rise_aat_ps = normalizedTime(point.get_arrival(), time_unit, kUnconstrainedArrivalPs, used_non_finite_fallback);
       exported.max_fall_aat_ps = exported.max_rise_aat_ps;

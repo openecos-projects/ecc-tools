@@ -41,14 +41,14 @@ std::string_view PathChecker::getClockName(const std::string& pin_name)
   const auto pin = pins.find(pin_name);
   const auto& points = _database.graph().points();
   const auto point = points.find(pin_name);
-  if (point != points.end() && point->second.get_is_clock_point() && !point->second.launchClock().empty())
-    return point->second.launchClock();
+  if (point != points.end() && point->get_is_clock_point() && !point->launchClock().empty())
+    return point->launchClock();
   if (pin != pins.end() && !pin->get_is_port()) {
     const auto instance = _database.network().instances().find(pin->get_instance_name());
     if (instance != _database.network().instances().end() && instance->get_is_sequential()) {
       const auto clock_point = points.find(instance->get_clock_pin_name());
-      if (clock_point != points.end() && !clock_point->second.launchClock().empty())
-        return clock_point->second.launchClock();
+      if (clock_point != points.end() && !clock_point->launchClock().empty())
+        return clock_point->launchClock();
     }
   }
   if (pin != pins.end() && pin->get_is_port()) {
@@ -68,7 +68,7 @@ std::vector<std::string> PathChecker::getCaptureClockNames(const std::string& cl
   std::vector<std::string> names;
   const auto point = _database.graph().points().find(clock_pin);
   if (point != _database.graph().points().end()) {
-    for (const auto& [clock_name, state] : point->second.get_clock_state_map())
+    for (const auto& [clock_name, state] : point->get_clock_state_map())
       if (!state.is_source_path_only)
         names.push_back(clock_name);
   }
@@ -220,8 +220,8 @@ PathChecker::CheckTimeResult PathChecker::checkTime(const TimingPathState& path,
   const auto clock_point = _database.graph().points().find(arc.get_clock_port());
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
     if (data_point != _database.graph().points().end()) {
-      const auto slews = data_point->second.get_data_slew_map().find(mode);
-      if (slews != data_point->second.get_data_slew_map().end() && slews->second.contains(path.get_trans_type()))
+      const auto slews = data_point->get_data_slew_map().find(mode);
+      if (slews != data_point->get_data_slew_map().end() && slews->second.contains(path.get_trans_type()))
         data_slews.push_back(slews->second.at(path.get_trans_type()));
     }
     if (clock_point != _database.graph().points().end())

@@ -75,15 +75,15 @@ const TimingPoint* timingPointFor(const Graph& graph, const Pin& pin)
   if (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout) {
     const auto driver = graph.driverPoints().find(pin.get_full_name());
     if (driver != graph.driverPoints().end()) {
-      return &driver->second;
+      return driver;
     }
   }
   const auto point = graph.points().find(pin.get_full_name());
   if (point != graph.points().end()) {
-    return &point->second;
+    return point;
   }
   const auto driver = graph.driverPoints().find(pin.get_full_name());
-  return driver == graph.driverPoints().end() ? nullptr : &driver->second;
+  return driver == graph.driverPoints().end() ? nullptr : driver;
 }
 
 const ClockState* clockStateFor(const Graph& graph, const Pin& pin, const std::string& clock)
