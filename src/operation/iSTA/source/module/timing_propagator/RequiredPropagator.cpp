@@ -32,6 +32,7 @@
 #include "ClockReconvergenceCalculator.hpp"
 #include "TimingTolerance.hpp"
 #include "data/TransitionFilter.hpp"
+#include "graph/PathTagTable.hpp"
 
 namespace ista {
 
@@ -268,8 +269,14 @@ void RequiredPropagator::propagateRequiredArc(Arc& arc)
             continue;
           const auto progress = matcher.advanceState(_through_index, state.get_exception_state_list(), arc.get_sink_pin(), output_edge,
                                                      arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
-          const auto target_tag = matcher.makePathStateTag(state.get_clock_name(), state.get_launch_clock_trans_type(), progress,
-                                                           state.get_is_clock_source_path(), state.crprPathTag(), state.get_launch_clock_edge_index());
+          PathTagTable::Key target_tag_key;
+          target_tag_key.clock_name = state.get_clock_name();
+          target_tag_key.launch_transition = state.get_launch_clock_trans_type();
+          target_tag_key.exception_state_list = progress;
+          target_tag_key.clock_source_path = state.get_is_clock_source_path();
+          target_tag_key.crpr_path = state.crprPathTag();
+          target_tag_key.launch_clock_edge_index = state.get_launch_clock_edge_index();
+          const uint32_t target_tag = database.pathTags().intern(target_tag_key);
           const auto target = sink_edge->second.find(target_tag);
           if (target == sink_edge->second.end())
             continue;

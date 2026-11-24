@@ -540,14 +540,14 @@ bool TimingStateQuery::hasPathState(TimingPoint& timing_point, AnalysisType anal
          && !timing_point.get_path_state_map()[analysis_type][source_type][trans_type].empty();
 }
 
-std::map<std::string, TimingPathState>& TimingStateQuery::getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
+std::map<uint32_t, TimingPathState>& TimingStateQuery::getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
                                                                           TransType trans_type)
 {
   return timing_point.get_path_state_map()[analysis_type][source_type][trans_type];
 }
 
 TimingPathState& TimingStateQuery::getPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type,
-                                                const std::string& path_state_tag)
+                                                uint32_t path_state_tag)
 {
   return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][path_state_tag];
 }
@@ -574,8 +574,8 @@ TimingPathState* TimingStateQuery::getWorstPathState(TimingPoint& timing_point, 
   }
 
   TimingPathState* best_path_state = nullptr;
-  std::map<std::string, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
-  for (std::pair<const std::string, TimingPathState>& path_state_pair : path_state_map) {
+  std::map<uint32_t, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
+  for (auto& path_state_pair : path_state_map) {
     TimingPathState& path_state = path_state_pair.second;
     if (!isFinite(path_state.get_arrival())) {
       continue;

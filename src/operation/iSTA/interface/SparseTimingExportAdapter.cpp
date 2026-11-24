@@ -131,7 +131,7 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
   return -1;
 }
 
-std::map<StateKey, PathPair> pathStates(TimingPoint& point, int32_t role, AnalysisType analysis_type)
+std::map<StateKey, PathPair> pathStates(Database& database, TimingPoint& point, int32_t role, AnalysisType analysis_type)
 {
   std::map<StateKey, PathPair> result;
   auto analysis = point.get_path_state_map().find(analysis_type);
@@ -146,7 +146,10 @@ std::map<StateKey, PathPair> pathStates(TimingPoint& point, int32_t role, Analys
       const int edge = transition == TransType::kRise ? 0 : 1;
       for (auto& [tag, path] : paths) {
         if (std::isfinite(path.get_arrival())) {
-          result[{static_cast<int32_t>(source), path.get_clock_name(), tag, role}][edge] = &path;
+          // Resolve the interned tag id back to its canonical string here, at
+          // the export boundary, so StateKey ordering (and therefore the
+          // snapshot digest) is unchanged from the string-keyed map era.
+          result[{static_cast<int32_t>(source), path.get_clock_name(), std::string(database.pathTags().view(tag)), role}][edge] = &path;
         }
       }
     }
@@ -254,7 +257,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
             view.clock_pin_sample.push_back(clock + ":" + name);
         }
       }
-      for (auto& [key, pair] : pathStates(point, role, analysis)) {
+      for (auto& [key, pair] : pathStates(database, point, role, analysis)) {
         auto* representative = pair[0] != nullptr ? pair[0] : pair[1];
         if (!domains.contains(representative->get_clock_name())) {
           view.unsupported.push_back("unknown launch clock at " + name);
@@ -424,9 +427,15 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
               continue;
             const auto progress = matcher.advanceState(through_index, path->get_exception_state_list(), arc.sink_pin,
                                                        output == 0 ? TransType::kRise : TransType::kFall, cell ? "" : arc.source_pin);
+            PathTagTable::Key sink_tag_key;
+            sink_tag_key.clock_name = path->get_clock_name();
+            sink_tag_key.launch_transition = path->get_launch_clock_trans_type();
+            sink_tag_key.exception_state_list = progress;
+            sink_tag_key.clock_source_path = path->get_is_clock_source_path();
+            sink_tag_key.crpr_path = path->crprPathTag();
+            sink_tag_key.launch_clock_edge_index = path->get_launch_clock_edge_index();
             StateKey sink_key = key;
-            std::get<2>(sink_key) = matcher.makePathStateTag(path->get_clock_name(), path->get_launch_clock_trans_type(), progress,
-                                                             path->get_is_clock_source_path(), path->crprPathTag(), path->get_launch_clock_edge_index());
+            std::get<2>(sink_key) = std::string(database.pathTags().view(database.pathTags().intern(sink_tag_key)));
             std::get<3>(sink_key) = sink_role;
             auto sink = sinks->second.find(sink_key);
             if (sink == sinks->second.end())

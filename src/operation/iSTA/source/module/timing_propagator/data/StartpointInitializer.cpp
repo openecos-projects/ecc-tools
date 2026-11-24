@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "graph/PathTagTable.hpp"
 #include "sdc/ClockEdges.hpp"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
@@ -606,9 +607,15 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   const std::string crpr_pin = reference_pin.empty() ? getStartPointCrprClockPin(start_point) : std::string(reference_pin);
   const double crpr_bound = _path_query.clockPathBound(crpr_pin, clock_name, clock_trans_type, launch_transition);
   const bool preserve_crpr = crpr_bound > 0.;
-  const std::string path_state_tag
-      = matcher.makePathStateTag(clock_name, launch_transition, exception_state_list, clock_source_path, preserve_crpr ? crpr_pin : "", edge_index);
-  std::map<std::string, TimingPathState>& path_state_map = _path_query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
+  PathTagTable::Key tag_key;
+  tag_key.clock_name = clock_name;
+  tag_key.launch_transition = launch_transition;
+  tag_key.exception_state_list = exception_state_list;
+  tag_key.clock_source_path = clock_source_path;
+  tag_key.crpr_path = preserve_crpr ? crpr_pin : "";
+  tag_key.launch_clock_edge_index = edge_index;
+  const uint32_t path_state_tag = database.pathTags().intern(tag_key);
+  std::map<uint32_t, TimingPathState>& path_state_map = _path_query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
   if (path_state_map.count(path_state_tag) > 0 && !_path_query.isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
     return;
   }
@@ -635,7 +642,7 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   path_state.set_preserve_crpr_path(preserve_crpr);
   path_state.setClockPathBound(crpr_bound);
   path_state.set_path_state_tag(path_state_tag);
-  path_state.set_predecessor_path_state_tag("");
+  path_state.set_predecessor_path_state_tag(0);
   path_state.set_exception_state_list(exception_state_list);
   path_state.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
   path_state.set_predecessor_arc_delay(0.0);

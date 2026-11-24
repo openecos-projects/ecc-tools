@@ -50,7 +50,7 @@ class TimingPoint
   std::size_t get_predecessor_arc_idx() const { return _predecessor_arc_idx; }
   std::map<AnalysisType, std::map<TransType, double>>& get_data_slew_map() { return _data_slew_map; }
   // Path tags retain startpoint, launch clock and ordered exception-match state.
-  std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<std::string, TimingPathState>>>>& get_path_state_map()
+  std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<uint32_t, TimingPathState>>>>& get_path_state_map()
   {
     return _path_state_map;
   }
@@ -90,7 +90,7 @@ class TimingPoint
   void setLaunchClock(std::string_view clock) { _launch_clock = clock; }
   void set_predecessor_arc_idx(const std::size_t predecessor_arc_idx) { _predecessor_arc_idx = predecessor_arc_idx; }
   void set_data_slew_map(const std::map<AnalysisType, std::map<TransType, double>>& data_slew_map) { _data_slew_map = data_slew_map; }
-  void set_path_state_map(const std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<std::string, TimingPathState>>>>& path_state_map)
+  void set_path_state_map(const std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<uint32_t, TimingPathState>>>>& path_state_map)
   {
     _path_state_map = path_state_map;
   }
@@ -108,7 +108,7 @@ class TimingPoint
   std::string _launch_clock;
   std::size_t _predecessor_arc_idx = std::numeric_limits<std::size_t>::max();
   std::map<AnalysisType, std::map<TransType, double>> _data_slew_map;
-  std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<std::string, TimingPathState>>>> _path_state_map;
+  std::map<AnalysisType, std::map<PathSourceType, std::map<TransType, std::map<uint32_t, TimingPathState>>>> _path_state_map;
   bool _is_clock_point = false;
   std::map<std::string, ClockState> _clock_state_map;
 };

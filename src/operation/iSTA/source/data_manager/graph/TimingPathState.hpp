@@ -55,8 +55,9 @@ class TimingPathState
   const std::string& get_start_point() const { return _start_point; }
   const std::string& get_clock_name() const { return _clock_name; }
   const std::string& get_crpr_clock_pin() const { return _crpr_clock_pin; }
-  const std::string& get_path_state_tag() const { return _path_state_tag; }
-  const std::string& get_predecessor_path_state_tag() const { return _predecessor_path_state_tag; }
+  // Tag ids index Database::pathTags(); 0 means no tag.
+  uint32_t get_path_state_tag() const { return _path_state_tag; }
+  uint32_t get_predecessor_path_state_tag() const { return _predecessor_path_state_tag; }
   const std::vector<int32_t>& get_exception_state_list() const { return _exception_state_list; }
   std::size_t get_predecessor_arc_idx() const { return _predecessor_arc_idx; }
   double get_predecessor_arc_delay() const { return _predecessor_arc_delay; }
@@ -75,8 +76,8 @@ class TimingPathState
   void set_start_point(const std::string_view start_point) { _start_point = start_point; }
   void set_clock_name(const std::string_view clock_name) { _clock_name = clock_name; }
   void set_crpr_clock_pin(const std::string_view crpr_clock_pin) { _crpr_clock_pin = crpr_clock_pin; }
-  void set_path_state_tag(const std::string_view path_state_tag) { _path_state_tag = path_state_tag; }
-  void set_predecessor_path_state_tag(const std::string_view path_state_tag) { _predecessor_path_state_tag = path_state_tag; }
+  void set_path_state_tag(uint32_t path_state_tag) { _path_state_tag = path_state_tag; }
+  void set_predecessor_path_state_tag(uint32_t path_state_tag) { _predecessor_path_state_tag = path_state_tag; }
   void set_exception_state_list(const std::vector<int32_t>& state_list) { _exception_state_list = state_list; }
   void set_predecessor_arc_idx(const std::size_t predecessor_arc_idx) { _predecessor_arc_idx = predecessor_arc_idx; }
   void set_predecessor_arc_delay(const double predecessor_arc_delay) { _predecessor_arc_delay = predecessor_arc_delay; }
@@ -100,8 +101,8 @@ class TimingPathState
   std::string _start_point;
   std::string _clock_name;
   std::string _crpr_clock_pin;
-  std::string _path_state_tag;
-  std::string _predecessor_path_state_tag;
+  uint32_t _path_state_tag = 0;
+  uint32_t _predecessor_path_state_tag = 0;
   std::vector<int32_t> _exception_state_list;
   std::size_t _predecessor_arc_idx = std::numeric_limits<std::size_t>::max();
   double _predecessor_arc_delay = 0.0;

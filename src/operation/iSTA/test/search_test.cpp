@@ -6,6 +6,7 @@
 #include <type_traits>
 
 #include "DelayCalculator.hpp"
+#include "graph/PathTagTable.hpp"
 #include "Logger.hpp"
 #include "PathSearcher.hpp"
 #include "RequiredPropagator.hpp"
@@ -57,12 +58,18 @@ void testCaptureClocks()
   check.set_check_type(TimingCheckType::kHold);
   check.set_check_time(0.25);
   ff.get_check_arc_list().push_back(check);
+  auto tagId = [&](const std::string& text) {
+    PathTagTable::Key tag_key;
+    tag_key.clock_name = text;
+    return db.pathTags().intern(tag_key);
+  };
   for (auto analysis : {AnalysisType::kMax, AnalysisType::kMin}) {
     for (const auto* tag : {"a_path", "b_path"}) {
-      auto& path = db.graph().points()[endpoint].get_path_state_map()[analysis][PathSourceType::kInput][TransType::kRise][tag];
+      const uint32_t tag_id = tagId(tag);
+      auto& path = db.graph().points()[endpoint].get_path_state_map()[analysis][PathSourceType::kInput][TransType::kRise][tag_id];
       path.set_start_point("in");
       path.set_clock_name("launch");
-      path.set_path_state_tag(tag);
+      path.set_path_state_tag(tag_id);
       path.set_trans_type(TransType::kRise);
       path.set_arrival(analysis == AnalysisType::kMax ? 3.0 : 1.0);
     }
@@ -128,12 +135,12 @@ void testCaptureClocks()
   db.sdc().get_path_exception_list().clear();
   db.sdc().get_clock_map()["b"].set_setup_uncertainty(0.0);
   auto& states = db.graph().points()[endpoint].get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise];
-  states.at("b_path").set_arrival(3.0 + ista::kTimingTolerance / 4);
+  states.at(tagId("b_path")).set_arrival(3.0 + ista::kTimingTolerance / 4);
   paths = find_paths();
   require(paths[0].get_path_delay() == 3.0 && paths[0].get_capture_clock_name() == "a", "near-equal slack must preserve ordered path/capture selection");
   // Each inner reduction sees only a 0.75 * ista::kTimingTolerance difference. A flattened
   // reduction would incorrectly accumulate two such differences and select b.
-  states.at("b_path").set_arrival(3.0 + 0.75 * ista::kTimingTolerance);
+  states.at(tagId("b_path")).set_arrival(3.0 + 0.75 * ista::kTimingTolerance);
   db.sdc().get_clock_map()["b"].set_setup_uncertainty(0.75 * ista::kTimingTolerance);
   paths = find_paths();
   require(paths[0].get_path_delay() == 3.0 && paths[0].get_capture_clock_name() == "a" && paths[0].get_slack() == 6.0,
@@ -144,7 +151,7 @@ void testCaptureClocks()
   cut.set_hold(true);
   db.sdc().get_path_exception_list().push_back(cut);
   require(find_paths().empty(), "all-false paths retained a previous endpoint result");
-  const auto& path = states.at("a_path");
+  const auto& path = states.at(tagId("a_path"));
   PathCheck check_a, check_b;
   check_a.capture_clock = "a";
   check_a.required = 9.0;
@@ -203,11 +210,14 @@ int main()
   constraint.set_output_delays(delays, false);
   for (auto analysis : {ista::AnalysisType::kMax, ista::AnalysisType::kMin}) {
     for (auto source : {ista::PathSourceType::kInput, ista::PathSourceType::kRegister}) {
-      auto& state = first.graph().points()[end].get_path_state_map()[analysis][source][ista::TransType::kRise]["root"];
+      PathTagTable::Key root_key;
+      root_key.clock_name = "root";
+      const uint32_t root_tag = first.pathTags().intern(root_key);
+      auto& state = first.graph().points()[end].get_path_state_map()[analysis][source][ista::TransType::kRise][root_tag];
       state.set_start_point(end);
       state.set_clock_name("clk");
       state.set_trans_type(ista::TransType::kRise);
-      state.set_path_state_tag("root");
+      state.set_path_state_tag(root_tag);
       state.set_arrival(analysis == ista::AnalysisType::kMax ? 3.0 : 1.0);
     }
   }

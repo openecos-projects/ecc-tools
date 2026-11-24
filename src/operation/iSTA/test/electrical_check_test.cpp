@@ -13,6 +13,7 @@
 #include "Config.hpp"
 #include "Database.hpp"
 #include "DelayCalculator.hpp"
+#include "graph/PathTagTable.hpp"
 #include "ElectricalChecker.hpp"
 #include "ElectricalReportWriter.hpp"
 #include "FanoutChecker.hpp"
@@ -329,7 +330,10 @@ int main(int argc, char** argv)
   TimingAnalyzer(db, delay).analyze();
   db.sdc().electricalLimits() = ElectricalLimits{};
   auto& input = db.graph().driverPoint("in");
-  input.get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise]["core"].set_clock_name("core");
+  PathTagTable::Key core_key;
+  core_key.clock_name = "core";
+  const uint32_t core_tag = db.pathTags().intern(core_key);
+  input.get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise][core_tag].set_clock_name("core");
   input.get_clock_state("core").waveforms[TransType::kRise].physical_slew_map[AnalysisType::kMax][TransType::kRise] = .15;
   input.get_clock_state("core").summarize();
   db.sdc().electricalLimits().set({ElectricalRule::kTransition, LimitObject::kClock, "core", true, TransType::kRise, .1});

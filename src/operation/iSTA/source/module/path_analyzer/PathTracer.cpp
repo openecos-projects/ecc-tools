@@ -33,7 +33,7 @@ TimingPath PathTracer::buildTimingPath(const std::string& end_point, AnalysisTyp
   const TransType trans_type = end_path_state.get_trans_type();
   std::vector<std::string> path_pin_name_list;
   std::vector<TransType> path_trans_type_list;
-  std::vector<std::string> path_state_tag_list;
+  std::vector<uint32_t> path_state_tag_list;
   std::vector<std::size_t> path_arc_idx_list;
   buildPathTrace(end_point, analysis_type, source_type, end_path_state, path_pin_name_list, path_trans_type_list, path_state_tag_list, path_arc_idx_list);
   const double required_time = path_end.required();
@@ -79,7 +79,7 @@ TimingPath PathTracer::buildTimingPath(const std::string& end_point, AnalysisTyp
 
 void PathTracer::buildPathTrace(const std::string& end_point, AnalysisType analysis_type, PathSourceType source_type, const TimingPathState& end_path_state,
                                 std::vector<std::string>& path_pin_name_list, std::vector<TransType>& path_trans_type_list,
-                                std::vector<std::string>& path_state_tag_list, std::vector<std::size_t>& path_arc_idx_list)
+                                std::vector<uint32_t>& path_state_tag_list, std::vector<std::size_t>& path_arc_idx_list)
 {
   Database& database = _database;
   std::string pin_name = end_point;
@@ -144,7 +144,7 @@ void PathTracer::updateClockInfo(TimingPath& timing_path, const TimingPathState&
 }
 
 TimingPathPoint PathTracer::makeTimingPathPoint(const std::string& pin_name, Arc* arc, AnalysisType analysis_type, PathSourceType source_type,
-                                                TransType input_trans_type, TransType trans_type, const std::string& path_state_tag)
+                                                TransType input_trans_type, TransType trans_type, uint32_t path_state_tag)
 {
   Database& database = _database;
   Pin& pin = database.network().pins()[pin_name];

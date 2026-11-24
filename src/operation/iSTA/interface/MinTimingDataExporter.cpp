@@ -170,14 +170,15 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             }
           }
           if (start_points.contains(name)) {
-            const auto key = std::make_tuple(name, path.get_clock_name(), path.get_path_state_tag(), static_cast<int32_t>(source_type),
+            const auto key = std::make_tuple(name, path.get_clock_name(), std::string(database.pathTags().view(path.get_path_state_tag())),
+                                             static_cast<int32_t>(source_type),
                                              transitionCode(transition), transitionCode(path.get_launch_clock_trans_type()));
             if (launch_keys.insert(key).second) {
               TimingMinLaunchData launch;
               launch.start_point = name;
               launch.launch_clock = path.get_clock_name();
               launch.launch_pin = path.get_crpr_clock_pin();
-              launch.path_tag = path.get_path_state_tag();
+              launch.path_tag = database.pathTags().view(path.get_path_state_tag());
               launch.source_type = static_cast<int32_t>(source_type);
               launch.data_transition = transitionCode(transition);
               launch.launch_transition = transitionCode(path.get_launch_clock_trans_type());
@@ -214,7 +215,7 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             context.launch_pin = path.get_crpr_clock_pin();
             context.capture_clock = check.capture_clock;
             context.capture_pin = check.capture_pin;
-            context.path_tag = path.get_path_state_tag();
+            context.path_tag = database.pathTags().view(path.get_path_state_tag());
             context.source_type = static_cast<int32_t>(source_type);
             context.check_type = static_cast<int32_t>(check.type);
             context.data_transition = transitionCode(path.get_trans_type());

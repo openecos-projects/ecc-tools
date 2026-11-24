@@ -26,6 +26,7 @@
 #include <string_view>
 #include <vector>
 
+#include "graph/PathTagTable.hpp"
 #include "network/Instance.hpp"
 #include "network/Network.hpp"
 #include "network/Pin.hpp"
@@ -210,22 +211,17 @@ std::vector<int32_t> ExceptionMatcher::advanceState(const ExceptionThroughIndex&
 std::string ExceptionMatcher::makePathStateTag(std::string_view clock, TransType launch_transition, const std::vector<int32_t>& exception_state_list,
                                                bool clock_source_path, std::string_view crpr_path, std::optional<std::size_t> launch_edge_index) const
 {
-  std::string tag(clock);
-  if (launch_edge_index && *launch_edge_index >= 2)
-    tag += "\x1b" + std::to_string(*launch_edge_index);
-  if (clock_source_path)
-    tag += "\x1d";
-  if (launch_transition == TransType::kFall) {
-    tag += "\x1e";
-  }
-  for (const int32_t state : exception_state_list) {
-    tag += "\x1f" + std::to_string(state);
-  }
-  if (!crpr_path.empty()) {
-    tag += "\x1c" + std::to_string(crpr_path.size()) + ":";
-    tag += crpr_path;
-  }
-  return tag;
+  // The canonical string form is owned by PathTagTable::canonical so the tag
+  // format has exactly one definition; producers intern through the
+  // Database-level table instead of building this string per arc traversal.
+  PathTagTable::Key key;
+  key.clock_name = clock;
+  key.launch_transition = launch_transition;
+  key.exception_state_list = exception_state_list;
+  key.clock_source_path = clock_source_path;
+  key.crpr_path = crpr_path;
+  key.launch_clock_edge_index = launch_edge_index;
+  return PathTagTable::canonical(key);
 }
 
 bool ExceptionMatcher::isFalsePath(std::string_view start, std::string_view launch_clock, std::string_view end, std::string_view capture_clock,

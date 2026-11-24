@@ -8,6 +8,7 @@
 #include "check/FanoutCheck.hpp"
 #include "common/TimingExecutionStats.hpp"
 #include "graph/Graph.hpp"
+#include "graph/PathTagTable.hpp"
 #include "liberty/LibertyLibrary.hpp"
 #include "network/Network.hpp"
 #include "parasitics/Parasitics.hpp"
@@ -45,6 +46,11 @@ class Database
   TimingExecutionStats& timingExecutionStats() { return _timing_execution_stats; }
   const TimingExecutionStats& timingExecutionStats() const { return _timing_execution_stats; }
 
+  // Path-state tag interning; tag ids index the innermost level of every
+  // TimingPoint's path-state map.
+  PathTagTable& pathTags() { return _path_tags; }
+  const PathTagTable& pathTags() const { return _path_tags; }
+
  private:
   Network _network;
   Graph _graph;
@@ -57,5 +63,6 @@ class Database
   std::vector<ElectricalCheck> _electrical_checks;
   std::vector<ClockCheck> _clock_checks;
   TimingExecutionStats _timing_execution_stats;
+  PathTagTable _path_tags;
 };
 }  // namespace ista

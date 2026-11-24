@@ -93,10 +93,10 @@ class TimingStateQuery
   double deratedDelay(double nominal, AnalysisType analysis, bool clock_path, TransType edge, DerateDelay kind, const std::string& pin_name) const;
   bool hasPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type);
   bool hasPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type);
-  std::map<std::string, TimingPathState>& getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
-                                                          TransType trans_type);
+  std::map<uint32_t, TimingPathState>& getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
+                                                       TransType trans_type);
   TimingPathState& getPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type,
-                                const std::string& path_state_tag);
+                                uint32_t path_state_tag);
   TimingPathState* getWorstPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type);
   TimingPathState* getWorstPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type);
   bool isBetterArrival(double candidate_arrival, double current_arrival, AnalysisType analysis_type);

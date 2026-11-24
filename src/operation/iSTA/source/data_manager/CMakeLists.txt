@@ -16,7 +16,10 @@ target_include_directories(ista_data_manager
 )
 
 # Connectivity queries do not depend on constraint evaluation or analysis.
-add_library(ista_network ${ISTA_DATA_MANAGER}/network/Network.cpp)
+# PathTagTable lives here rather than ista_graph_query because ista_sdc's
+# ExceptionMatcher calls into it (canonical tag formatting) and ista_sdc may
+# only link ista_(model|network|common|logger) per Architecture.cmake.
+add_library(ista_network ${ISTA_DATA_MANAGER}/network/Network.cpp ${ISTA_DATA_MANAGER}/graph/PathTagTable.cpp)
 target_link_libraries(ista_network PUBLIC ista_model)
 
 # Queries of stored graph/clock/path state; no graph-construction dependency.
