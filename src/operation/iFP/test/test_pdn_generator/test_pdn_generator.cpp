@@ -1310,6 +1310,64 @@ void addIDBViaRule(idb::IdbLefService& lef, std::string bottom_name, std::string
   cut->set_via_rule(rule);
 }
 
+bool testMacroCrossingViaLandings(const std::string& directory)
+{
+  auto* previous_lef = dmInst->get_idb_lef_service();
+  auto* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  addIDBViaRule(lef, "M99", "VIA_MACRO_TEST", "M10");
+  auto* cut = static_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("VIA_MACRO_TEST"));
+  auto* rule = cut->get_via_rule();
+  rule->set_cut_rect(-360, -360, 360, 360);
+  rule->set_spacing(2000, 2000);
+  rule->get_enclosure_bottom()->set_overhang_1(200);
+  rule->get_enclosure_bottom()->set_overhang_2(100);
+  rule->get_enclosure_top()->set_overhang_1(1000);
+  rule->get_enclosure_top()->set_overhang_2(40);
+
+  initFixture(directory);
+  FPDM.getConfig().pg_require_connected_pins = false;
+  addConnect("M99", "M10");
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 10000, 3000, 10000, 25000, 12000);
+
+  Instance macro;
+  macro.set_name("macro");
+  macro.set_macro(true);
+  macro.set_placed(true);
+  macro.set_bounding_rect(13500, 9000, 21000, 17000);
+  InstancePinShape pin;
+  pin.set_pin_name("PWR");
+  pin.set_layer_name("M99");
+  pin.set_rect(13800, 9500, 19000, 11500);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(1);
+  pin.set_rect(13800, 13000, 19000, 13600);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(2);
+  pin.set_rect(15400, 15000, 20500, 17000);
+  macro.get_pin_shape_list().push_back(pin);
+  FPDM.getDatabase().get_instance_list().push_back(macro);
+
+  FPPG.generate();
+  bool passed = check(hasVia("VDD_A", "M99", "M10", 14640, 10500), "A narrow macro pin must connect where both via enclosures fit");
+  const auto& segments = FPDM.getDatabase().get_pg_segment_list();
+  passed = check(std::count_if(segments.begin(), segments.end(), [](const PGSegment& segment) {
+                   return segment.get_type() == PGSegmentType::kVia;
+                 }) == 1,
+                 "Only the macro port with room for both enclosures may receive a via")
+           && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
 bool testStripeEndKeepsCollinearIoWire(const std::string& directory)
 {
   idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
@@ -1644,6 +1702,7 @@ int main(int argc, char* argv[])
   passed = ifp::testUncoveredEdgeStripe(directory, 8800, true) && passed;
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
+  passed = ifp::testMacroCrossingViaLandings(directory) && passed;
   passed = ifp::testStripeEndKeepsCollinearIoWire(directory) && passed;
   passed = ifp::testIoWireSkipsLayerVia(directory) && passed;
   passed = ifp::testConfiguredRailWidth(directory) && passed;
