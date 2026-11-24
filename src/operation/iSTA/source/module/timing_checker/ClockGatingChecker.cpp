@@ -63,7 +63,7 @@ void ClockGatingChecker::infer()
     const auto incoming = graph.incomingArcs().find(name);
     if (incoming == graph.incomingArcs().end())
       continue;
-    for (auto index : incoming->second) {
+    for (auto index : *incoming) {
       auto& arc = graph.arcs()[index];
       if (arc.get_type() != ArcType::kNet || query.isDisableArc(arc))
         continue;
@@ -82,7 +82,7 @@ void ClockGatingChecker::infer()
     const auto incoming = graph.incomingArcs().find(pin);
     if (incoming == graph.incomingArcs().end())
       continue;
-    for (auto index : incoming->second) {
+    for (auto index : *incoming) {
       auto& arc = graph.arcs()[index];
       const auto* point = clockPoint(_database, arc.get_source_pin(), clock);
       const auto* state = point ? point->find_clock_state(clock) : nullptr;
@@ -121,7 +121,7 @@ void ClockGatingChecker::infer()
     const auto incoming = graph.incomingArcs().find(output);
     if (incoming == graph.incomingArcs().end())
       continue;
-    for (auto clock_index : incoming->second) {
+    for (auto clock_index : *incoming) {
       auto& clock_arc = graph.arcs()[clock_index];
       const auto& clock_pin = clock_arc.get_source_pin();
       if (clock_arc.get_type() != ArcType::kCell || query.isDisableArc(clock_arc) || !clock_fanin.contains(clock_pin))
@@ -138,7 +138,7 @@ void ClockGatingChecker::infer()
         continue;
       const bool active_high = low_constant;
       values[clock_port] = active_high;
-      for (auto enable_index : incoming->second) {
+      for (auto enable_index : *incoming) {
         auto& enable_arc = graph.arcs()[enable_index];
         const auto& enable = enable_arc.get_source_pin();
         if (enable_arc.get_type() != ArcType::kCell || query.isDisableArc(enable_arc) || has_clock(enable))

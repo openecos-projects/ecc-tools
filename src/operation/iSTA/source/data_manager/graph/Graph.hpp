@@ -22,6 +22,9 @@ namespace ista {
 // are keyed by the same domain as Network::pins() without including it.
 struct PinTag;
 using PointTable = ecc::symbol::NamedTable<TimingPoint, PinTag>;
+// Construction-window adjacency (populated by addArc before vertex indices
+// resolve); tests also push into it by pin name directly.
+using ArcAdjacencyTable = ecc::symbol::NamedTable<std::vector<std::size_t>, PinTag>;
 
 // A bidirectional physical pin has separate receiving and driving vertices.
 class GraphVertex
@@ -104,10 +107,10 @@ class Graph
   const PointTable& driverPoints() const { return _driver_points; }
   std::vector<Arc>& arcs() { return _arcs; }
   const std::vector<Arc>& arcs() const { return _arcs; }
-  std::map<std::string, std::vector<std::size_t>>& outgoingArcs() { return _outgoing_arcs; }
-  const std::map<std::string, std::vector<std::size_t>>& outgoingArcs() const { return _outgoing_arcs; }
-  std::map<std::string, std::vector<std::size_t>>& incomingArcs() { return _incoming_arcs; }
-  const std::map<std::string, std::vector<std::size_t>>& incomingArcs() const { return _incoming_arcs; }
+  ArcAdjacencyTable& outgoingArcs() { return _outgoing_arcs; }
+  const ArcAdjacencyTable& outgoingArcs() const { return _outgoing_arcs; }
+  ArcAdjacencyTable& incomingArcs() { return _incoming_arcs; }
+  const ArcAdjacencyTable& incomingArcs() const { return _incoming_arcs; }
   std::vector<std::string>& startpoints() { return _startpoints; }
   const std::vector<std::string>& startpoints() const { return _startpoints; }
   std::vector<std::string>& endpoints() { return _endpoints; }
@@ -188,8 +191,8 @@ class Graph
   std::vector<int32_t> _vertex_order;
   PointTable _driver_points;
   std::vector<Arc> _arcs;
-  std::map<std::string, std::vector<std::size_t>> _outgoing_arcs;
-  std::map<std::string, std::vector<std::size_t>> _incoming_arcs;
+  ArcAdjacencyTable _outgoing_arcs;
+  ArcAdjacencyTable _incoming_arcs;
   std::vector<std::string> _startpoints;
   std::vector<std::string> _endpoints;
   std::map<std::string, std::vector<TimingCheckArc>> _clock_gating_checks;
