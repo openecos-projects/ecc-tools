@@ -53,7 +53,7 @@ std::string clockEndpointPin(const std::vector<ClockPathPointInfo>& clock_path)
 bool isVirtualClock(Database& database, const std::string& clock_name)
 {
   const auto clock = database.sdc().get_clock_map().find(clock_name);
-  return clock != database.sdc().get_clock_map().end() && clock->second.get_source_list().empty();
+  return clock != database.sdc().get_clock_map().end() && clock->get_source_list().empty();
 }
 
 TransType localClockTransition(TransType transition)

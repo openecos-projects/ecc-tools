@@ -113,9 +113,11 @@ bool ReportPathContext::isClockSourceStartPoint(const std::string& name)
 {
   if (!isPort(name))
     return false;
-  for (const auto& [clock_name, clock] : _database.sdc().get_clock_map())
+  for (const auto& id : _database.sdc().get_clock_map().sortedIds()) {
+    const TimingClock& clock = _database.sdc().get_clock_map().get(id);
     if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), name) != clock.get_source_list().end())
       return true;
+  }
   return false;
 }
 
@@ -246,9 +248,9 @@ std::string ReportPathContext::getClockName(TimingPath& timing_path)
   if (!timing_path.get_clock_name().empty()) {
     return timing_path.get_clock_name();
   }
-  const std::map<std::string, TimingClock>& clock_map = database.sdc().get_clock_map();
+  const ClockTable& clock_map = database.sdc().get_clock_map();
   if (!clock_map.empty()) {
-    return clock_map.begin()->first;
+    return std::string(clock_map.nameOf(clock_map.sortedIds().front()));
   }
   return "clk";
 }
@@ -267,12 +269,12 @@ std::string_view ReportPathContext::getClockNetworkDelayLabel(TimingPath& path, 
 double ReportPathContext::getClockPeriod(const std::string& clock_name)
 {
   const Database& database = _database;
-  const std::map<std::string, TimingClock>& clock_map = database.sdc().get_clock_map();
+  const ClockTable& clock_map = database.sdc().get_clock_map();
   if (clock_map.count(clock_name) > 0) {
     return clock_map.at(clock_name).get_period();
   }
   if (!clock_map.empty()) {
-    return clock_map.begin()->second.get_period();
+    return clock_map.get(clock_map.sortedIds().front()).get_period();
   }
   return 0.0;
 }

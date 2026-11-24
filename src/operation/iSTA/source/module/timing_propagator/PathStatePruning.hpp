@@ -43,7 +43,7 @@ class PathStatePruning
             // Empty exception progress deliberately evaluates only clock groups.
             if (_matcher.isFalsePath("", launch, endpoint, clock, mode, edge, origin, {}))
               continue;
-            if (definition->second.edgeCount() != 2 || hasPathDelay(launch, endpoint, clock, mode, edge, origin) || ++count > 1)
+            if (definition->edgeCount() != 2 || hasPathDelay(launch, endpoint, clock, mode, edge, origin) || ++count > 1)
               return false;
           }
           return true;

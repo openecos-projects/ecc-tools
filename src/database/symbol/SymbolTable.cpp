@@ -83,11 +83,23 @@ void SymbolTable::rekey(std::string_view old_name, std::string_view new_name)
   removeSlot(old_slot);
   const uint32_t offset = static_cast<uint32_t>(_arena.size());
   _arena.insert(_arena.end(), new_name.begin(), new_name.end());
-  _entries[id - 1] = Entry{offset, static_cast<uint32_t>(new_name.size())};
+  _entries[id - 1] = Entry{offset, static_cast<uint32_t>(new_name.size()), true};
   const uint32_t new_hash = hashOf(new_name);
   const std::size_t new_slot = locate(new_name, new_hash);
   _index[new_slot] = Slot{new_hash, id};
   ++_used;
+}
+
+bool SymbolTable::remove(std::string_view name)
+{
+  const uint32_t hash = hashOf(name);
+  const std::size_t slot = locate(name, hash);
+  if (_index[slot].id == 0) {
+    return false;
+  }
+  _entries[_index[slot].id - 1].live = false;
+  removeSlot(slot);
+  return true;
 }
 
 uint32_t SymbolTable::intern(std::string_view name)
@@ -128,9 +140,12 @@ std::string_view SymbolTable::view(uint32_t id) const
 
 std::vector<uint32_t> SymbolTable::sorted_ids() const
 {
-  std::vector<uint32_t> ids(_entries.size());
-  for (std::size_t i = 0; i < ids.size(); ++i) {
-    ids[i] = static_cast<uint32_t>(i) + 1;
+  std::vector<uint32_t> ids;
+  ids.reserve(_used);
+  for (std::size_t i = 0; i < _entries.size(); ++i) {
+    if (_entries[i].live) {
+      ids.push_back(static_cast<uint32_t>(i) + 1);
+    }
   }
   std::sort(ids.begin(), ids.end(), [this](uint32_t lhs, uint32_t rhs) { return view(lhs) < view(rhs); });
   return ids;

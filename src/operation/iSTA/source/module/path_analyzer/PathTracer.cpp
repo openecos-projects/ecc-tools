@@ -128,7 +128,7 @@ void PathTracer::updateClockInfo(TimingPath& timing_path, const TimingPathState&
   const auto clock = _database.sdc().get_clock_map().find(state.get_clock_name());
   const double edge = clock == _database.sdc().get_clock_map().end()
                           ? 0.0
-                          : clock->second.edge(state.get_launch_clock_edge_index().value_or(launch_transition == TransType::kFall ? 1 : 0)).time;
+                          : clock->edge(state.get_launch_clock_edge_index().value_or(launch_transition == TransType::kFall ? 1 : 0)).time;
   timing_path.set_launch_clock_source_latency(state.get_launch_source_latency());
   timing_path.set_launch_clock_network_delay(state.get_launch_time() - edge - state.get_launch_source_latency());
   timing_path.set_capture_clock_name(check.capture_clock);

@@ -62,7 +62,7 @@ std::vector<ClockCheck> ClockChecker::check()
         const auto definition = _database.sdc().get_clock_map().find(clock_name);
         if (state.is_source_path_only || definition == _database.sdc().get_clock_map().end())
           continue;
-        const auto& clock = definition->second;
+        const auto& clock = *definition;
         if (!(clock.get_period() > 0.))
           continue;
         for (auto edge : {TransType::kRise, TransType::kFall}) {

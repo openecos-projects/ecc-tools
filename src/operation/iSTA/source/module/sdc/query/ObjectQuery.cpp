@@ -486,7 +486,9 @@ std::set<std::string> findClocksFromObjects(Tcl_Interp* interp, Database& databa
       continue;
     }
     for (const std::string& source : findClockSources(interp, database, {object})) {
-      for (auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+      for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+        const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+        TimingClock& clock = database.sdc().get_clock_map().get(id);
         if (std::find(clock.get_source_objects().begin(), clock.get_source_objects().end(), source) != clock.get_source_objects().end()) {
           result.insert(clock_name);
         }

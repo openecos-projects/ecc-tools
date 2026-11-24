@@ -221,7 +221,7 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
   const auto definition = database.sdc().get_clock_map().find(std::string(clock_name));
   if (definition == database.sdc().get_clock_map().end())
     return result;
-  const auto& clock = definition->second;
+  const auto& clock = *definition;
   result.propagated = clock.get_is_propagated();
   result.source_latency = clock.get_source_latency(analysis, clockVariation(analysis), source_edge.value_or(transition));
   result.network_latency = clock.get_network_latency(analysis, source_edge.value_or(transition));
@@ -689,10 +689,11 @@ bool TimingStateQuery::isTimingCheckEndPoint(const std::string& end_point)
 TimingClock* TimingStateQuery::getStartPointClock(const std::string& start_point)
 {
   Database& database = _database;
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.sdc().get_clock_map()) {
-    for (std::string& clock_source : clock_pair.second.get_source_list()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& clock_pair = database.sdc().get_clock_map().get(id);
+    for (std::string& clock_source : clock_pair.get_source_list()) {
       if (clock_source == start_point) {
-        return &clock_pair.second;
+        return &clock_pair;
       }
     }
   }

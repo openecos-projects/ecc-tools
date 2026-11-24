@@ -236,8 +236,8 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
     ClockTreeClockData exported;
     exported.name = std::string(source.get_clock_name());
     const auto definition = database.sdc().get_clock_map().find(exported.name);
-    if (definition != database.sdc().get_clock_map().end() && definition->second.get_is_generated()) {
-      exported.master_clock_name = definition->second.get_master_clock_name();
+    if (definition != database.sdc().get_clock_map().end() && definition->get_is_generated()) {
+      exported.master_clock_name = definition->get_master_clock_name();
     }
 
     std::vector<std::string> point_names;

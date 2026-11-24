@@ -38,10 +38,10 @@ double ClockReconvergenceCalculator::correction(const std::string& launch_pin, T
   if (!_database.sdc().clockPinConstraints().empty()) {
     auto unsupported_local = [&](const std::string& pin, std::string_view name, AnalysisType mode, TransType edge, std::optional<TransType> source) {
       const auto clock = _database.sdc().get_clock_map().find(std::string(name));
-      if (clock == _database.sdc().get_clock_map().end() || clock->second.get_is_propagated())
+      if (clock == _database.sdc().get_clock_map().end() || clock->get_is_propagated())
         return false;
       const auto& values = _clock_pin_values.values(pin, name, mode, edge, AnalysisType::kNone, source);
-      const auto& sources = clock->second.get_source_list();
+      const auto& sources = clock->get_source_list();
       return !values.propagated || (!values.propagated_pin.empty() && std::find(sources.begin(), sources.end(), values.propagated_pin) == sources.end());
     };
     // PT supports local propagated-clock CRPR only at common clock sources.

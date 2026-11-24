@@ -97,7 +97,9 @@ bool Sdc::clockAllowsNetArc(const Network& network, const std::string& name, con
   }
   // Only a boundary downstream of this clock's declared source replaces it.
   // Multiple clocks created with -add at the same boundary coexist.
-  for (const auto& [other_name, other] : _clock_map) {
+  for (const auto& id : _clock_map.sortedIds()) {
+    const std::string other_name(_clock_map.nameOf(id));
+    const TimingClock& other = _clock_map.get(id);
     if (other_name == name)
       continue;
     for (const auto& object : other.get_source_objects()) {
@@ -243,10 +245,14 @@ void Sdc::setClockGroups(TimingClockGroup relation)
     if (existing.get_type() != TimingClockGroupType::kAsynchronous || relation.get_type() != TimingClockGroupType::kAsynchronous
         || existing.get_allow_paths() == relation.get_allow_paths())
       continue;
-    for (auto first = _clock_map.begin(); first != _clock_map.end(); ++first)
-      for (auto second = std::next(first); second != _clock_map.end(); ++second)
-        if (separates(existing, first->first, second->first) && separates(relation, first->first, second->first))
+    const auto clock_ids = _clock_map.sortedIds();
+    for (std::size_t i = 0; i < clock_ids.size(); ++i)
+      for (std::size_t j = i + 1; j < clock_ids.size(); ++j) {
+        const std::string first(_clock_map.nameOf(clock_ids[i]));
+        const std::string second(_clock_map.nameOf(clock_ids[j]));
+        if (separates(existing, first, second) && separates(relation, first, second))
           throw std::invalid_argument("conflicting asynchronous clock groups with and without -allow_paths");
+      }
   }
   auto updated = _clock_group_list;
   if (!relation.get_name().empty())

@@ -32,9 +32,15 @@ class SymbolTable
   // copying or moving the mapped value. Throws std::invalid_argument if
   // old_name is not interned or new_name already is.
   void rekey(std::string_view old_name, std::string_view new_name);
+  // Removes a name's binding. The id stays allocated (ids are never reused —
+  // anything already holding it, e.g. a NamedTable storage slot, keeps its
+  // identity) but becomes unreachable by name; view() on it still returns its
+  // last interned bytes. Returns true if the name was interned.
+  bool remove(std::string_view name);
   std::optional<uint32_t> find(std::string_view name) const;
   std::string_view view(uint32_t id) const;
-  std::size_t size() const { return _entries.size(); }
+  // Number of live (name-resolvable) entries.
+  std::size_t size() const { return _used; }
   std::vector<uint32_t> sorted_ids() const;
 
  private:
@@ -42,6 +48,7 @@ class SymbolTable
   {
     uint32_t offset = 0;
     uint32_t size = 0;
+    bool live = true;
   };
   // id == 0 marks an empty slot.
   struct Slot

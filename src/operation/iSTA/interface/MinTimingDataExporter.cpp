@@ -62,7 +62,7 @@ bool hasLaunchClockState(Database& database, const TimingPathState& path)
   if (path.get_clock_name().empty() || path.get_crpr_clock_pin().empty())
     return false;
   const auto clock = database.sdc().get_clock_map().find(path.get_clock_name());
-  if (clock == database.sdc().get_clock_map().end() || clock->second.get_source_list().empty())
+  if (clock == database.sdc().get_clock_map().end() || clock->get_source_list().empty())
     return false;
   return true;
 }

@@ -197,7 +197,7 @@ double StartpointInitializer::getClockEdge(std::string_view clock_name, TransTyp
   if (clock == database.sdc().get_clock_map().end()) {
     return 0.0;
   }
-  return trans_type == TransType::kFall ? clock->second.get_fall_edge() : clock->second.get_rise_edge();
+  return trans_type == TransType::kFall ? clock->get_fall_edge() : clock->get_rise_edge();
 }
 
 double StartpointInitializer::getInputDelayClockTime(const TimingIoDelay& delay, AnalysisType analysis_type, std::optional<TransType> source)
@@ -215,10 +215,10 @@ double StartpointInitializer::getInputDelayClockTime(const TimingIoDelay& delay,
   const auto clock = clocks.find(delay.get_clock_name());
   if (clock != clocks.end()) {
     if (!delay.get_source_latency_included()) {
-      clock_time += clock->second.get_source_latency(analysis_type, clockVariation(analysis_type), delay.get_clock_trans_type());
+      clock_time += clock->get_source_latency(analysis_type, clockVariation(analysis_type), delay.get_clock_trans_type());
     }
-    if (!delay.get_network_latency_included() && !clock->second.get_is_propagated()) {
-      clock_time += clock->second.get_network_latency(analysis_type, delay.get_clock_trans_type());
+    if (!delay.get_network_latency_included() && !clock->get_is_propagated()) {
+      clock_time += clock->get_network_latency(analysis_type, delay.get_clock_trans_type());
     }
   }
   return clock_time;
@@ -239,10 +239,11 @@ bool StartpointInitializer::isClockSourceStartPoint(std::string& start_point)
 TimingClock* StartpointInitializer::getStartPointClock(std::string& start_point)
 {
   Database& database = _database;
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.sdc().get_clock_map()) {
-    for (std::string& clock_source : clock_pair.second.get_source_list()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
+    for (std::string& clock_source : clock.get_source_list()) {
       if (clock_source == start_point) {
-        return &clock_pair.second;
+        return &clock;
       }
     }
   }
@@ -472,7 +473,9 @@ std::vector<std::string> StartpointInitializer::getStartPointClockNames(std::str
 {
   Database& database = _database;
   std::set<std::string> names;
-  for (const auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
     if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), start_point) != clock.get_source_list().end())
       names.insert(clock_name);
   }
@@ -532,13 +535,13 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
       const auto definition = database.sdc().get_clock_map().find(clock_name);
       for (auto origin : origins) {
         const auto first = origin == TransType::kFall ? 1u : 0u;
-        const auto count = definition == database.sdc().get_clock_map().end() ? 2 : definition->second.edgeCount();
+        const auto count = definition == database.sdc().get_clock_map().end() ? 2 : definition->edgeCount();
         const double arrival = getStartPointArrival(start_point, clock_name, analysis_type, trans_type, origin);
         const double slew = getStartPointSlew(start_point, clock_name, analysis_type, trans_type, origin);
         const double launch = getStartPointLaunchTime(start_point, clock_name, analysis_type, trans_type, origin);
         for (size_t index = first; index < count; index += 2) {
           const double offset
-              = definition == database.sdc().get_clock_map().end() ? 0. : definition->second.edge(index).time - definition->second.edge(first).time;
+              = definition == database.sdc().get_clock_map().end() ? 0. : definition->edge(index).time - definition->edge(first).time;
           seedPathState(start_point, analysis_type, trans_type, clock_name, arrival + offset, slew, launch + offset, local, clock_source, std::nullopt, 0.,
                         index);
         }
@@ -561,9 +564,9 @@ void StartpointInitializer::seedInputPathState(std::string& start_point, Analysi
     if (!delay.get_source_latency_included() && clock != _database.sdc().get_clock_map().end())
       source_latency = clockPinValues(_database, delay.get_reference_pin(), clock_name, analysis_type, local, AnalysisType::kNone, source).source_latency;
     const size_t first = source == TransType::kFall ? 1 : 0;
-    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
+    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->edgeCount();
     for (size_t index = first; index < count; index += 2) {
-      const double offset = clock == _database.sdc().get_clock_map().end() ? 0. : clock->second.edge(index).time - clock->second.edge(first).time;
+      const double offset = clock == _database.sdc().get_clock_map().end() ? 0. : clock->edge(index).time - clock->edge(first).time;
       seedPathState(start_point, analysis_type, trans_type, clock_name, launch + offset + delay.get_delay() + (driver ? driver->get_delay() : 0.0),
                     getStartPointSlew(start_point, analysis_type, trans_type), launch + offset, local, false, delay.get_delay(), source_latency, index,
                     delay.get_reference_pin());
@@ -580,9 +583,9 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
     const auto transition = clock_source_path ? trans_type : clock_trans_type;
     const auto clock = _database.sdc().get_clock_map().find(std::string(clock_name));
     const size_t first = transition == TransType::kFall ? 1 : 0;
-    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
+    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->edgeCount();
     for (size_t index = first; index < count; index += 2) {
-      const double offset = clock == _database.sdc().get_clock_map().end() ? 0 : clock->second.edge(index).time - clock->second.edge(first).time;
+      const double offset = clock == _database.sdc().get_clock_map().end() ? 0 : clock->edge(index).time - clock->edge(first).time;
       seedPathState(start_point, analysis_type, trans_type, clock_name, arrival + offset, slew, launch_time + offset, clock_trans_type, clock_source_path,
                     input_delay, input_source_latency, index, reference_pin);
     }

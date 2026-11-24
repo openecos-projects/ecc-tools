@@ -35,7 +35,8 @@ unsigned TclAllInputs::exec()
   Database& database = STADM.getDatabase();
   std::set<std::string> sources;
   if (getOptionOrArg("-no_clocks")->is_set_val()) {
-    for (auto& [name, clock] : database.sdc().get_clock_map()) {
+    for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+      TimingClock& clock = database.sdc().get_clock_map().get(id);
       sources.insert(clock.get_source_list().begin(), clock.get_source_list().end());
     }
   }

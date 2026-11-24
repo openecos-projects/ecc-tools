@@ -345,7 +345,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (!instance.get_output_pin_name().empty())
       snapshot.ff_output_pins.push_back(instance.get_output_pin_name());
   }
-  for (auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
     snapshot.clock_names.push_back(clock_name);
     TimingClockData exported_clock;
     exported_clock.name = clock_name;

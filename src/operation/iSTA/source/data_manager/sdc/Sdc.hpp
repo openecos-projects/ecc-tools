@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "NamedTable.h"
 #include "common/TimingCaseValue.hpp"
 #include "sdc/ElectricalLimits.hpp"
 #include "sdc/TimingClock.hpp"
@@ -34,6 +35,11 @@
 #include "sdc/TimingPortConstraint.hpp"
 
 namespace ista {
+
+// Domain tag for the SDC clock name space.
+struct ClockTag;
+using ClockTable = ecc::symbol::NamedTable<TimingClock, ClockTag>;
+
 
 class Network;
 class LibertyLibrary;
@@ -119,8 +125,8 @@ class Sdc
   // getter
   std::string& get_sdc_file_path() { return _sdc_file_path; }
   const std::string& get_sdc_file_path() const { return _sdc_file_path; }
-  std::map<std::string, TimingClock>& get_clock_map() { return _clock_map; }
-  const std::map<std::string, TimingClock>& get_clock_map() const { return _clock_map; }
+  ClockTable& get_clock_map() { return _clock_map; }
+  const ClockTable& get_clock_map() const { return _clock_map; }
   std::map<std::string, TimingPortConstraint>& get_port_constraint_map() { return _port_constraint_map; }
   const std::map<std::string, TimingPortConstraint>& get_port_constraint_map() const { return _port_constraint_map; }
   std::map<std::string, TimingCaseValue>& get_case_analysis_map() { return _case_analysis_map; }
@@ -147,7 +153,7 @@ class Sdc
   const std::set<std::string>& get_path_break_end_points() const { return _path_break_end_points; }
   // setter
   void set_sdc_file_path(const std::string& sdc_file_path) { _sdc_file_path = sdc_file_path; }
-  void set_clock_map(const std::map<std::string, TimingClock>& clock_map) { _clock_map = clock_map; }
+  void set_clock_map(const ClockTable& clock_map) { _clock_map = clock_map; }
   void set_port_constraint_map(const std::map<std::string, TimingPortConstraint>& port_constraint_map) { _port_constraint_map = port_constraint_map; }
   void set_case_analysis_map(const std::map<std::string, TimingCaseValue>& case_analysis_map) { _case_analysis_map = case_analysis_map; }
   std::optional<double> resolve_clock_uncertainty_value(std::string_view from_clock, TransType from_trans_type, std::string_view to_clock,
@@ -196,7 +202,7 @@ class Sdc
   std::vector<TimingException> _path_exception_list;
   std::vector<TimingClockGroup> _clock_group_list;
   std::string _sdc_file_path;
-  std::map<std::string, TimingClock> _clock_map;
+  ClockTable _clock_map;
   std::map<std::string, std::map<std::string, ClockPinConstraint>> _clock_pin_constraints;
   std::map<std::string, TimingPortConstraint> _port_constraint_map;
   std::map<std::string, TimingCaseValue> _case_analysis_map;

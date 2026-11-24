@@ -100,8 +100,20 @@ class NamedTable
   bool contains(std::string_view name) const { return _symbols.find(name).has_value(); }
   std::size_t count(std::string_view name) const { return contains(name) ? 1 : 0; }
 
-  std::size_t size() const { return _storage.size(); }
-  bool empty() const { return _storage.empty(); }
+  // Removes a name's binding. The storage slot and id stay allocated but the
+  // name becomes unreachable (find/contains report absent). std::map::erase
+  // semantics for the callers that need them (e.g. Sdc::defineClock's
+  // remove-then-rebuild transaction).
+  std::size_t erase(std::string_view name) { return _symbols.remove(name) ? 1 : 0; }
+
+  void swap(NamedTable& other) noexcept
+  {
+    std::swap(_symbols, other._symbols);
+    _storage.swap(other._storage);
+  }
+
+  std::size_t size() const { return _symbols.size(); }
+  bool empty() const { return _symbols.size() == 0; }
 
   void clear()
   {

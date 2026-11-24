@@ -72,7 +72,8 @@ bool GraphEndpointClassifier::isClockPin(const std::string& pin_name, Pin& pin)
 bool GraphEndpointClassifier::isClockSource(const std::string& pin_name)
 {
   Database& database = _database;
-  for (auto& [clock_name, timing_clock] : database.sdc().get_clock_map()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& timing_clock = database.sdc().get_clock_map().get(id);
     if (STAUTIL.exist(timing_clock.get_source_list(), pin_name)) {
       return true;
     }

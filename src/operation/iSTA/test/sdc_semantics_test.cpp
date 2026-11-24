@@ -71,7 +71,9 @@ static void testClockStageFiles()
         const char* completed = Tcl_GetVar(interpreter.getInterp(), "clock_stage_loaded", TCL_GLOBAL_ONLY);
         require(completed && std::string(completed) == "1", "script stopped at set_propagated_clock");
         require(constraints.get_clock_map().size() == (has_virtual && has_physical ? 2u : 1u), "clock collection changed");
-        for (auto& [name, clock] : constraints.get_clock_map()) {
+        for (const auto& id : constraints.get_clock_map().sortedIds()) {
+          const std::string name(constraints.get_clock_map().nameOf(id));
+          TimingClock& clock = constraints.get_clock_map().get(id);
           const bool physical = name == "clk";
           require(clock.get_is_propagated() == (post_cts && physical), "incorrect pre/post-CTS clock mode");
           require(clock.get_source_list().empty() == !physical, "virtual clock acquired a physical source");

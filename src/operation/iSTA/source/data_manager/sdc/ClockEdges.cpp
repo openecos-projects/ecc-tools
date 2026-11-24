@@ -15,7 +15,7 @@ double launchClockEdge(Database& database, std::string_view start, std::string_v
   if (definition == database.sdc().get_clock_map().end()) {
     return 0.0;
   }
-  return database.network().launchClockTransition(start) == TransType::kFall ? definition->second.get_fall_edge() : definition->second.get_rise_edge();
+  return database.network().launchClockTransition(start) == TransType::kFall ? definition->get_fall_edge() : definition->get_rise_edge();
 }
 
 double clockEdgeSeparation(double launch_period, double capture_period, double launch_edge, double capture_edge, AnalysisType type, bool allow_coincident_setup)

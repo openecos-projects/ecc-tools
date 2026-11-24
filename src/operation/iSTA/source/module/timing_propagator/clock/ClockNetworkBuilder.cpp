@@ -58,15 +58,15 @@ void ClockNetworkBuilder::orderSources(std::vector<ClockSource>& sources)
     if (clock_iter == clock_map.end())
       return;
     visiting.insert(name);
-    const TimingClock& clock = clock_iter->second;
+    const TimingClock& clock = *clock_iter;
     if (clock.get_is_generated())
       append_clock(clock.get_master_clock_name());
     visiting.erase(name);
     visited.insert(name);
     sources.emplace_back(name, clock.get_source_list(), clock.get_is_propagated());
   };
-  for (const auto& [name, clock] : clock_map)
-    append_clock(name);
+  for (const auto& id : clock_map.sortedIds())
+    append_clock(std::string(clock_map.nameOf(id)));
 }
 
 void ClockNetworkBuilder::markClockPoints(std::vector<ClockSource>& sources)
@@ -107,7 +107,9 @@ void ClockNetworkBuilder::markClock(ClockSource& clock)
       continue;
     }
     bool another_root = false;
-    for (auto& [name, definition] : database.sdc().get_clock_map()) {
+    for (const auto& cid : database.sdc().get_clock_map().sortedIds()) {
+      const std::string name(database.sdc().get_clock_map().nameOf(cid));
+      TimingClock& definition = database.sdc().get_clock_map().get(cid);
       if (name != clock.get_clock_name()
           && std::find(definition.get_source_objects().begin(), definition.get_source_objects().end(), pin_name) != definition.get_source_objects().end()
           && std::find(clock.get_source_list().begin(), clock.get_source_list().end(), pin_name) == clock.get_source_list().end()) {

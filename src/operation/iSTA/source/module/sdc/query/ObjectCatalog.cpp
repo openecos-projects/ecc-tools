@@ -156,7 +156,9 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
     }
   }
   if (type == QueryObjectType::kClock || type == QueryObjectType::kAny) {
-    for (auto& [name, clock] : database.sdc().get_clock_map()) {
+    for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+      const std::string name(database.sdc().get_clock_map().nameOf(id));
+      TimingClock& clock = database.sdc().get_clock_map().get(id);
       addObjectMatch(matches, name, name, "clock",
                      {{"period", std::to_string(clock.get_period())},
                       {"is_generated", clock.get_is_generated() ? "true" : "false"},
@@ -313,7 +315,9 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       if (target == QueryObjectType::kNet)
         addPinNets(object_name);
       if (target == QueryObjectType::kClock) {
-        for (const auto& [name, clock] : database.sdc().get_clock_map()) {
+        for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+          const std::string name(database.sdc().get_clock_map().nameOf(id));
+          TimingClock& clock = database.sdc().get_clock_map().get(id);
           const auto& sources = clock.get_source_objects();
           if (std::find(sources.begin(), sources.end(), object_name) != sources.end())
             result.insert(name);
@@ -398,7 +402,9 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       }
     }
     if (target == QueryObjectType::kClock && (source == QueryObjectType::kPin || source == QueryObjectType::kPort)) {
-      for (auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+      for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+        const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+        TimingClock& clock = database.sdc().get_clock_map().get(id);
         if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), object_name) != clock.get_source_list().end())
           result.insert(clock_name);
       }

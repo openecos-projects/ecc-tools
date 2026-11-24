@@ -112,8 +112,8 @@ void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
       const auto clock = database.sdc().get_clock_map().find(clock_name);
       if (clock == database.sdc().get_clock_map().end())
         continue;
-      rise = std::max(rise, modelTransitionPs(clock->second, TransType::kRise, snapshot.time_unit_ps));
-      fall = std::max(fall, modelTransitionPs(clock->second, TransType::kFall, snapshot.time_unit_ps));
+      rise = std::max(rise, modelTransitionPs(*clock, TransType::kRise, snapshot.time_unit_ps));
+      fall = std::max(fall, modelTransitionPs(*clock, TransType::kFall, snapshot.time_unit_ps));
     }
     exported->second->max_rise_slew_ps = rise;
     exported->second->max_fall_slew_ps = fall;

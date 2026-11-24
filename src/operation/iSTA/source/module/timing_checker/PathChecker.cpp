@@ -108,7 +108,7 @@ std::vector<PathEnd> PathChecker::checkPathCandidates(const TimingPathState& pat
         if (!arc->captureClock().empty() && arc->captureClock() != clock)
           continue;
         const auto definition = _database.sdc().get_clock_map().find(clock);
-        const size_t count = definition == _database.sdc().get_clock_map().end() ? 2 : definition->second.edgeCount();
+        const size_t count = definition == _database.sdc().get_clock_map().end() ? 2 : definition->edgeCount();
         for (auto source : clockSourceTransitions(_database, arc->get_clock_port(), clock, getCaptureAnalysisType(analysis), arc->get_clock_trans_type()))
           for (size_t index = source == TransType::kFall ? 1 : 0; index < count; index += 2) {
             auto check = evaluateRegister(path, *arc, analysis, clock, index, include_reconvergence);
@@ -308,26 +308,26 @@ double PathChecker::getEndPointCaptureTime(const TimingPathState& path, std::str
   if (launch == clocks.end() || capture == clocks.end())
     return 0.0;
   const double launch_edge
-      = launch->second.edge(path.get_launch_clock_edge_index().value_or(path.get_launch_clock_trans_type() == TransType::kFall ? 1 : 0)).time;
-  const double capture_edge = capture->second.edge(capture_index).time;
+      = launch->edge(path.get_launch_clock_edge_index().value_or(path.get_launch_clock_trans_type() == TransType::kFall ? 1 : 0)).time;
+  const double capture_edge = capture->edge(capture_index).time;
   if (gating_hold) {
     // Pair the launch with the preceding opening, then add the active width.
     // The minimum launch offset after an opening repeats modulo gcd(periods),
     // so this selects the worst hold window across unequal clock periods too.
     // Ordinary hold against the trailing edge instead misses an active pulse.
     const auto next_index = capture_index + 1;
-    const auto count = capture->second.edgeCount();
-    const double opening = capture->second.edge((capture_index + count - 1) % count).time - (capture_index == 0 ? capture->second.get_period() : 0.);
-    const double next_open = capture->second.edge(next_index % count).time + (next_index / count) * capture->second.get_period();
-    const double offset = -clockEdgeSeparation(launch->second.get_period(), capture->second.get_period(), launch_edge, opening, AnalysisType::kMin);
+    const auto count = capture->edgeCount();
+    const double opening = capture->edge((capture_index + count - 1) % count).time - (capture_index == 0 ? capture->get_period() : 0.);
+    const double next_open = capture->edge(next_index % count).time + (next_index / count) * capture->get_period();
+    const double offset = -clockEdgeSeparation(launch->get_period(), capture->get_period(), launch_edge, opening, AnalysisType::kMin);
     // A multi-pulse waveform can have no launch in this opening-to-opening
     // interval. Its neighboring window owns that launch instead.
-    if (offset >= next_open - opening - capture->second.get_period() * 1e-10)
+    if (offset >= next_open - opening - capture->get_period() * 1e-10)
       return std::numeric_limits<double>::quiet_NaN();
     return launch_edge + capture_edge - opening - offset;
   }
   return launch_edge
-         + clockEdgeSeparation(launch->second.get_period(), capture->second.get_period(), launch_edge, capture_edge, analysis_type, level_sensitive);
+         + clockEdgeSeparation(launch->get_period(), capture->get_period(), launch_edge, capture_edge, analysis_type, level_sensitive);
 }
 
 double PathChecker::getClockEdge(std::string_view clock_name, TransType trans_type)
@@ -337,7 +337,7 @@ double PathChecker::getClockEdge(std::string_view clock_name, TransType trans_ty
   if (clock == database.sdc().get_clock_map().end()) {
     return 0.0;
   }
-  return trans_type == TransType::kFall ? clock->second.get_fall_edge() : clock->second.get_rise_edge();
+  return trans_type == TransType::kFall ? clock->get_fall_edge() : clock->get_rise_edge();
 }
 
 std::vector<TimingIoDelay> PathChecker::getOutputDelayList(const std::string& end_point, AnalysisType analysis_type, TransType trans_type)
@@ -399,13 +399,13 @@ std::vector<PathCheck> PathChecker::evaluateOutput(const TimingPathState& path, 
         if (clock != database.sdc().get_clock_map().end()) {
           const auto mode = getCaptureAnalysisType(analysis_type);
           if (!delay->get_source_latency_included())
-            candidate.source_latency = clock->second.get_source_latency(mode, clockVariation(mode), candidate.capture_transition);
-          if (!delay->get_network_latency_included() && !clock->second.get_is_propagated())
-            candidate.network_delay = clock->second.get_network_latency(mode, candidate.capture_transition);
+            candidate.source_latency = clock->get_source_latency(mode, clockVariation(mode), candidate.capture_transition);
+          if (!delay->get_network_latency_included() && !clock->get_is_propagated())
+            candidate.network_delay = clock->get_network_latency(mode, candidate.capture_transition);
         }
       }
       const auto clock = database.sdc().get_clock_map().find(candidate.capture_clock);
-      const size_t count = clock == database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
+      const size_t count = clock == database.sdc().get_clock_map().end() ? 2 : clock->edgeCount();
       for (size_t index = candidate.capture_transition == TransType::kFall ? 1 : 0; index < count; index += 2) {
         auto indexed = candidate;
         indexed.capture_edge_index = index;
@@ -520,7 +520,7 @@ double PathChecker::calcPathDelayRequiredTime(const std::string& end_point, cons
     const auto clock = database.sdc().get_clock_map().find(end_path_state.get_clock_name());
     const double edge = clock == database.sdc().get_clock_map().end()
                             ? 0.0
-                            : clock->second.edge(end_path_state.get_launch_clock_edge_index().value_or(launch_trans_type == TransType::kFall ? 1 : 0)).time;
+                            : clock->edge(end_path_state.get_launch_clock_edge_index().value_or(launch_trans_type == TransType::kFall ? 1 : 0)).time;
     anchor = edge + capture_arrival;
   }
   return _query.roundTime(anchor + exception.get_delay() + endpoint_margin);
@@ -546,7 +546,7 @@ double PathChecker::exceptionClockShift(const TimingPathState& path, const PathC
   const auto found = _database.sdc().get_clock_map().find(std::string(name));
   if (found == _database.sdc().get_clock_map().end())
     return 0.;
-  const auto& clock = found->second;
+  const auto& clock = *found;
   const int64_t index = use_end_clock ? check.capture_edge_index.value_or(check.capture_transition == TransType::kFall ? 1 : 0)
                                       : path.get_launch_clock_edge_index().value_or(path.get_launch_clock_trans_type() == TransType::kFall ? 1 : 0);
   // Setup moves capture forward or launch backward. Hold moves in the

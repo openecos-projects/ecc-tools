@@ -56,14 +56,16 @@ bool masterReachesSource(const Network& network, const TimingClock& master, cons
   return false;
 }
 
-TimingClock evaluateGeneratedClock(const std::map<std::string, TimingClock>& clocks, const std::string& name, GeneratedClockDefinition definition,
+TimingClock evaluateGeneratedClock(const ClockTable& clocks, const std::string& name, GeneratedClockDefinition definition,
                                    const std::string& comment)
 {
   std::string master_name;
   if (definition.master_clock.has_value()) {
     master_name = *definition.master_clock;
   } else {
-    for (auto& [candidate, clock] : clocks) {
+    for (const auto& cid : clocks.sortedIds()) {
+      const std::string candidate(clocks.nameOf(cid));
+      const TimingClock& clock = clocks.get(cid);
       if (std::find(clock.get_source_objects().begin(), clock.get_source_objects().end(), definition.master_source) != clock.get_source_objects().end()) {
         if (!master_name.empty()) {
           throw std::invalid_argument("ambiguous master; specify -master_clock");
@@ -72,7 +74,7 @@ TimingClock evaluateGeneratedClock(const std::map<std::string, TimingClock>& clo
       }
     }
     if (master_name.empty() && clocks.size() == 1) {
-      master_name = clocks.begin()->first;
+      master_name = clocks.nameOf(clocks.sortedIds().front());
     }
   }
   if (name.empty() || !clocks.contains(master_name)) {
@@ -205,28 +207,31 @@ void Sdc::defineClock(const Network& network, TimingClock clock, const std::vect
   setClockSources(network, clock, sources);
   auto updated = _clock_map;
   if (const auto previous = updated.find(name); previous != updated.end())
-    clock.copyAnnotations(previous->second);
+    clock.copyAnnotations(*previous);
   if (!add && !sources.empty()) {
-    for (auto iter = updated.begin(); iter != updated.end();) {
-      auto& [other_name, other] = *iter;
+    std::vector<std::string> to_erase;
+    for (const auto& id : updated.sortedIds()) {
+      const std::string other_name(updated.nameOf(id));
+      TimingClock& other = updated.get(id);
       if (other_name == name || other.get_source_objects().empty()) {
-        ++iter;
         continue;
       }
       auto remaining = other.get_source_objects();
       std::erase_if(remaining, [&](const auto& source) { return std::find(sources.begin(), sources.end(), source) != sources.end(); });
       if (remaining.empty())
-        iter = updated.erase(iter);
-      else {
+        to_erase.push_back(other_name);
+      else
         setClockSources(network, other, remaining);
-        ++iter;
-      }
     }
+    for (const auto& other_name : to_erase)
+      updated.erase(other_name);
   }
   updated[name] = std::move(clock);
   std::map<std::string, std::vector<std::string>> children;
   std::vector<std::string> ready;
-  for (const auto& [id, value] : updated) {
+  for (const auto& cid : updated.sortedIds()) {
+    const std::string id(updated.nameOf(cid));
+    TimingClock& value = updated.get(cid);
     if (!value.get_is_generated()) {
       ready.push_back(id);
       continue;
@@ -236,14 +241,14 @@ void Sdc::defineClock(const Network& network, TimingClock clock, const std::vect
     const auto old_master = _clock_map.find(value.get_master_clock_name());
     const auto& master = updated.at(value.get_master_clock_name());
     if (old_master != _clock_map.end()) {
-      const auto& old_sources = old_master->second.get_source_objects();
+      const auto& old_sources = old_master->get_source_objects();
       const auto& sources = master.get_source_objects();
       if (std::find(old_sources.begin(), old_sources.end(), value.get_master_source()) != old_sources.end()
           && std::find(sources.begin(), sources.end(), value.get_master_source()) == sources.end())
         throw std::invalid_argument("clock replacement would remove generated clock master source: " + id);
       if (old_sources != sources) {
         std::set<std::string> displaced;
-        for (const auto& root : old_master->second.get_source_list())
+        for (const auto& root : old_master->get_source_list())
           if (std::find(master.get_source_list().begin(), master.get_source_list().end(), root) == master.get_source_list().end())
             displaced.insert(root);
         if (!masterReachesSource(network, master, value.get_master_source(), displaced))
@@ -267,9 +272,11 @@ void Sdc::defineClock(const Network& network, TimingClock clock, const std::vect
   if (ready.size() != updated.size())
     throw std::invalid_argument("generated clock dependency cycle");
   std::vector<std::string> removed;
-  for (const auto& [id, value] : _clock_map)
+  for (const auto& cid : _clock_map.sortedIds()) {
+    const std::string id(_clock_map.nameOf(cid));
     if (!updated.contains(id))
       removed.push_back(id);
+  }
   if (removed.empty())
     _clock_map.swap(updated);
   else {

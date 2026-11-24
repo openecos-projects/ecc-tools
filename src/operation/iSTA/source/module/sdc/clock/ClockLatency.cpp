@@ -67,7 +67,9 @@ unsigned TclSetClockLatency::exec()
         if (kind == QueryObjectType::kClock)
           continue;
         bool is_source = false;
-        for (const auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+        for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+          const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+          TimingClock& clock = database.sdc().get_clock_map().get(id);
           if (!selectors.contains("") && !selectors.contains(clock_name))
             continue;
           const bool matches = std::find(clock.get_source_list().begin(), clock.get_source_list().end(), name) != clock.get_source_list().end();

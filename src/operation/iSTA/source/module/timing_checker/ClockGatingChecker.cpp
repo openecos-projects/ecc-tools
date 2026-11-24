@@ -44,20 +44,24 @@ void ClockGatingChecker::infer()
     for (const auto& check : instance.get_check_arc_list())
       seed(check.get_clock_port());
   }
-  for (const auto& [name, definition] : _database.sdc().get_clock_map())
+  for (const auto& id : _database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& definition = _database.sdc().get_clock_map().get(id);
     if (definition.get_is_generated())
       for (const auto& target : definition.get_source_list())
         pending.emplace_back(target, definition.get_master_clock_name());
+  }
   for (const auto& id : network.pins().sortedIds()) {
     const std::string name(network.pins().nameOf(id));
     const Pin& pin = network.pins().get(id);
     if (!pin.get_is_port() || (pin.get_direction() != PinDirection::kOutput && pin.get_direction() != PinDirection::kInout))
       continue;
     bool primary_root = false;
-    for (const auto& [clock, definition] : _database.sdc().get_clock_map())
+    for (const auto& clock_id : _database.sdc().get_clock_map().sortedIds()) {
+      TimingClock& definition = _database.sdc().get_clock_map().get(clock_id);
       if (!definition.get_is_generated())
         for (const auto& source : definition.get_source_objects())
           primary_root |= source == name;
+    }
     if (primary_root)
       continue;
     const auto incoming = graph.incomingArcs().find(name);
