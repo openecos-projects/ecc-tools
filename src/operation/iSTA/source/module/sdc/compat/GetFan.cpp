@@ -106,8 +106,8 @@ PinDirection TclGetFan::getDirection(Pin& pin)
   if (!pin.get_is_port() && instance != database.network().instances().end()) {
     auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
     if (cell != database.liberty().get_cell_map().end()) {
-      auto port = cell->second.get_port_map().find(pin.get_pin_name());
-      if (port != cell->second.get_port_map().end()) {
+      auto port = cell->get_port_map().find(pin.get_pin_name());
+      if (port != cell->get_port_map().end()) {
         if (port->second.get_is_input() && port->second.get_is_output()) {
           return PinDirection::kInout;
         }
@@ -168,7 +168,7 @@ bool TclGetFan::isRegisterBoundary(Pin& pin)
     }
     auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
     if (cell != database.liberty().get_cell_map().end()) {
-      for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
+      for (TimingCellArc& arc : cell->get_cell_arc_list()) {
         if (arc.get_is_clock_arc() && pin.get_pin_name() == arc.get_source_port()) {
           return true;
         }
@@ -211,7 +211,7 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
   if (cell == database.liberty().get_cell_map().end()) {
     return adjacent;
   }
-  for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
+  for (TimingCellArc& arc : cell->get_cell_arc_list()) {
     // Fanin includes clock-to-Q up to the register clock pin. Fanout never
     // crosses a sequential element; reset and check arcs are not data paths.
     if (!arc.get_is_timing_graph_arc() || arc.get_is_disable_arc() || arc.get_is_clear_preset_arc() || (!_is_fanin && arc.get_is_clock_arc())) {

@@ -21,11 +21,16 @@
 #include <string>
 #include <vector>
 
+#include "NamedTable.h"
 #include "liberty/LibertyArcId.hpp"
 #include "liberty/LibertyCell.hpp"
 #include "liberty/LibertyUnits.hpp"
 
 namespace ista {
+
+// Domain tag for the Liberty cell name space.
+struct LibCellTag;
+using LibertyCellTable = ecc::symbol::NamedTable<LibertyCell, LibCellTag>;
 
 class LibertyLibrary
 {
@@ -34,18 +39,18 @@ class LibertyLibrary
   ~LibertyLibrary() = default;
   TimingCellArc* findCellArc(const LibertyArcId& id)
   {
-    auto cell = _cell_map.find(id.cell);
-    if (cell == _cell_map.end())
+    auto* cell = _cell_map.find(id.cell);
+    if (cell == nullptr)
       return nullptr;
-    auto& arcs = cell->second.get_cell_arc_list();
+    auto& arcs = cell->get_cell_arc_list();
     return id.index < arcs.size() ? &arcs[id.index] : nullptr;
   }
   const TimingCellArc* findCellArc(const LibertyArcId& id) const
   {
-    auto cell = _cell_map.find(id.cell);
-    if (cell == _cell_map.end())
+    const auto* cell = _cell_map.find(id.cell);
+    if (cell == nullptr)
       return nullptr;
-    const auto& arcs = cell->second.get_cell_arc_list();
+    const auto& arcs = cell->get_cell_arc_list();
     return id.index < arcs.size() ? &arcs[id.index] : nullptr;
   }
   // getter
@@ -80,8 +85,8 @@ class LibertyLibrary
   double get_input_threshold_pct_fall() const { return _input_threshold_pct_fall; }
   double get_output_threshold_pct_fall() const { return _output_threshold_pct_fall; }
   double get_slew_derate_from_library() const { return _slew_derate_from_library; }
-  std::map<std::string, LibertyCell>& get_cell_map() { return _cell_map; }
-  const std::map<std::string, LibertyCell>& get_cell_map() const { return _cell_map; }
+  LibertyCellTable& get_cell_map() { return _cell_map; }
+  const LibertyCellTable& get_cell_map() const { return _cell_map; }
   // setter
   void set_has_library_info(const bool has_library_info) { _has_library_info = has_library_info; }
   void set_comment(const std::optional<std::string>& comment) { _comment = comment; }
@@ -110,7 +115,7 @@ class LibertyLibrary
   void set_input_threshold_pct_fall(const double input_threshold_pct_fall) { _input_threshold_pct_fall = input_threshold_pct_fall; }
   void set_output_threshold_pct_fall(const double output_threshold_pct_fall) { _output_threshold_pct_fall = output_threshold_pct_fall; }
   void set_slew_derate_from_library(const double slew_derate_from_library) { _slew_derate_from_library = slew_derate_from_library; }
-  void set_cell_map(const std::map<std::string, LibertyCell>& cell_map) { _cell_map = cell_map; }
+  void set_cell_map(const LibertyCellTable& cell_map) { _cell_map = cell_map; }
   // function
 
  private:
@@ -141,7 +146,7 @@ class LibertyLibrary
   double _input_threshold_pct_fall = 0.5;
   double _output_threshold_pct_fall = 0.5;
   double _slew_derate_from_library = 1.0;
-  std::map<std::string, LibertyCell> _cell_map;
+  LibertyCellTable _cell_map;
 };
 
 }  // namespace ista

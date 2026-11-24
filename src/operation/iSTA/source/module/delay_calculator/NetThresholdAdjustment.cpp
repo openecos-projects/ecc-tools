@@ -34,7 +34,7 @@ Thresholds pinThresholds(Database& database, const std::string& name)
     auto& instance = database.network().instances().at(pin.get_instance_name());
     const auto cell = database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell != database.liberty().get_cell_map().end())
-      return thresholds(cell->second, cell->second.get_library_name());
+      return thresholds(*cell, cell->get_library_name());
   }
   // Top-level ports and uncharacterized black boxes use the reference library.
   return thresholds(database.liberty(), "");

@@ -193,7 +193,7 @@ TimingArc* SdfValueExtractor::findSetupArc(TimingCheckArc& setup_timing_check_ar
 LibertyCell* SdfValueExtractor::timingCell(Instance& instance)
 {
   Database& database = _database;
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return nullptr;
   }

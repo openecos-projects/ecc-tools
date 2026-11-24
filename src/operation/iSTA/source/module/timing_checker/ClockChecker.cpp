@@ -45,8 +45,8 @@ std::vector<ClockCheck> ClockChecker::check()
     auto cell = _database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell == _database.liberty().get_cell_map().end())
       continue;
-    const DerateContext context{instance_name, cell->second.get_library_name() + "/" + cell->first, {}};
-    for (auto& arc : cell->second.get_sdf_check_arc_list()) {
+    const DerateContext context{instance_name, cell->get_library_name() + "/" + instance.get_cell_name(), {}};
+    for (auto& arc : cell->get_sdf_check_arc_list()) {
       const auto type = arc.get_check_type();
       if (type != TimingCheckType::kWidth && type != TimingCheckType::kPeriod)
         continue;

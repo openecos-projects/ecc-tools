@@ -48,7 +48,7 @@ double PinCapacitanceCalculator::pinCapacitance(std::string& pin_name, AnalysisT
     return 0.0;
   }
   Instance& instance = database.network().instances()[pin.get_instance_name()];
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return 0.0;
   }

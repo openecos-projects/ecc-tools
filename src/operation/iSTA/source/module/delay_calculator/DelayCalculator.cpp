@@ -52,7 +52,7 @@ std::optional<DelayResult> DelayCalculator::inputPortTiming(std::string& start_p
   if (driving_cell == nullptr) {
     return std::nullopt;
   }
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (!timing_cell_map.contains(driving_cell->get_cell_name())) {
     return std::nullopt;
   }

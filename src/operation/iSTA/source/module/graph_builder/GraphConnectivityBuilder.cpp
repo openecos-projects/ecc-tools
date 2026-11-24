@@ -76,7 +76,7 @@ void GraphConnectivityBuilder::buildCellArcs()
 bool GraphConnectivityBuilder::buildLibraryCellArcs(Instance& instance)
 {
   Database& database = _database;
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return false;
   }
@@ -318,7 +318,7 @@ bool GraphConnectivityBuilder::shouldDisableNetArc(const std::string& source_pin
   }
   Instance& source_instance = database.network().instances()[source_pin_inst.get_instance_name()];
   Instance& sink_instance = database.network().instances()[sink_pin_inst.get_instance_name()];
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(source_instance.get_cell_name()) == 0) {
     return false;
   }

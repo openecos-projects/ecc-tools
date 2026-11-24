@@ -110,7 +110,7 @@ bool isClockGate(const Database& database, const Instance* instance)
     return true;
   }
   const auto cell = database.liberty().get_cell_map().find(instance == nullptr ? std::string{} : instance->get_cell_name());
-  return cell != database.liberty().get_cell_map().end() && cell->second.get_is_clock_gating();
+  return cell != database.liberty().get_cell_map().end() && cell->get_is_clock_gating();
 }
 
 std::string nodeKind(const Database& database, const Pin& pin, bool root, bool sink)
@@ -141,7 +141,7 @@ std::string nodeKind(const Database& database, const Pin& pin, bool root, bool s
     return output ? "buffer_output" : "buffer_input";
   }
   const auto cell = database.liberty().get_cell_map().find(master);
-  if (cell != database.liberty().get_cell_map().end() && cell->second.get_is_macro()) {
+  if (cell != database.liberty().get_cell_map().end() && cell->get_is_macro()) {
     return "macro_boundary";
   }
   return "other_boundary";
@@ -164,7 +164,7 @@ std::string cellRole(const Database& database, const Pin& pin)
     return "buffer";
   }
   const auto cell = database.liberty().get_cell_map().find(master);
-  return cell != database.liberty().get_cell_map().end() && cell->second.get_is_macro() ? "macro" : "other";
+  return cell != database.liberty().get_cell_map().end() && cell->get_is_macro() ? "macro" : "other";
 }
 
 bool isNegativeUnate(const Database& database, const Arc& arc)

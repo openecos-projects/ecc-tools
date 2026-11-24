@@ -51,8 +51,8 @@ std::optional<double> ElectricalChecker::limit(ElectricalRule rule, const Pin& p
   if (!pin.get_is_port() && instance != db.network().instances().end()) {
     const auto found = db.liberty().get_cell_map().find(instance->get_cell_name());
     if (found != db.liberty().get_cell_map().end()) {
-      cell = &found->second;
-      lib_pin = cell->get_library_name() + "/" + found->first + "/" + pin.get_pin_name();
+      cell = found;
+      lib_pin = cell->get_library_name() + "/" + instance->get_cell_name() + "/" + pin.get_pin_name();
     }
   }
   auto result = db.sdc().electricalLimits().limit(rule, pin.get_full_name(), pin.get_is_port(), lib_pin, clock, clock_path, edge);

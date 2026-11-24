@@ -178,8 +178,8 @@ const LibertyPort* Network::libertyPort(const LibertyLibrary& liberty, const Pin
   const auto cell = cells.find(instance->get_cell_name());
   if (cell == cells.end())
     return nullptr;
-  const auto port = cell->second.get_port_map().find(pin.get_pin_name());
-  return port == cell->second.get_port_map().end() ? nullptr : &port->second;
+  const auto port = cell->get_port_map().find(pin.get_pin_name());
+  return port == cell->get_port_map().end() ? nullptr : &port->second;
 }
 
 TransType Network::launchClockTransition(std::string_view start) const

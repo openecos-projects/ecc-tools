@@ -123,9 +123,9 @@ std::vector<std::pair<const LibertyCell*, const LibertyPort*>> Sdc::drivingCellP
       const auto cell = liberty.get_cell_map().find(drive.get_cell_name());
       if (cell == liberty.get_cell_map().end())
         continue;
-      const auto port = cell->second.get_port_map().find(drive.get_to_pin());
-      if (port != cell->second.get_port_map().end())
-        result.emplace_back(&cell->second, &port->second);
+      const auto port = cell->get_port_map().find(drive.get_to_pin());
+      if (port != cell->get_port_map().end())
+        result.emplace_back(cell, &port->second);
     }
   return result;
 }

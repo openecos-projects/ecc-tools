@@ -112,7 +112,7 @@ void LogicSimulator::propagateCaseValues()
       if (cell == _liberty.get_cell_map().end())
         continue;
       const auto values = constantInputs(instance);
-      for (const auto& [port_name, port] : cell->second.get_port_map()) {
+      for (const auto& [port_name, port] : cell->get_port_map()) {
         if (!port.get_is_output())
           continue;
         const std::string output_pin = instance_name + ":" + port_name;
@@ -183,8 +183,8 @@ void LogicSimulator::disableInsensitiveArcs()
     // define both clock-to-Q and transparent latch data-to-Q sensitivity.
     if (arc.get_is_clock_arc() || (cell_arc != nullptr && cell_arc->get_is_latch_data_arc()))
       continue;
-    const auto output = cell->second.get_port_map().find(arc.get_library_sink_port());
-    if (output == cell->second.get_port_map().end())
+    const auto output = cell->get_port_map().find(arc.get_library_sink_port());
+    if (output == cell->get_port_map().end())
       continue;
     const auto& expression
         = cell_arc != nullptr && cell_arc->isThreeStateArc() ? output->second.get_three_state_expression() : output->second.get_function_expression();

@@ -46,7 +46,7 @@ bool isRegisterOutput(const Database& database, const ExceptionObject& object)
   auto cell = cells.find(instance->get_cell_name());
   if (cell == cells.end())
     return false;
-  const auto& ports = cell->second.get_port_map();
+  const auto& ports = cell->get_port_map();
   auto port = ports.find(pin->get_pin_name());
   return port != ports.end() && port->second.get_is_output() && !port->second.get_is_input();
 }

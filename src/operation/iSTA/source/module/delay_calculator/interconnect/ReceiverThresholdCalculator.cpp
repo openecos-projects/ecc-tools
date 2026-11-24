@@ -49,7 +49,7 @@ LibertyCell* ReceiverThresholdCalculator::sourceCell(std::string& source, Analys
       if (driving) {
         auto cell = _database.liberty().get_cell_map().find(driving->get_cell_name());
         if (cell != _database.liberty().get_cell_map().end())
-          from = &cell->second;
+          from = cell;
       }
     }
   }

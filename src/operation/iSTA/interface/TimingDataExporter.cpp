@@ -320,8 +320,8 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (cell_it == library.get_cell_map().end()) {
       continue;
     }
-    const auto port_it = cell_it->second.get_port_map().find(pin_it->get_pin_name());
-    if (port_it == cell_it->second.get_port_map().end()) {
+    const auto port_it = cell_it->get_port_map().find(pin_it->get_pin_name());
+    if (port_it == cell_it->get_port_map().end()) {
       continue;
     }
     exported_pin.capacitance_pf = port_it->second.get_capacitance();
@@ -393,7 +393,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
         std::size_t index = 0;
         bool matched_cell_arc = false;
         if (library_cell != library.get_cell_map().end()) {
-          for (TimingCellArc& candidate : library_cell->second.get_cell_arc_list()) {
+          for (TimingCellArc& candidate : library_cell->get_cell_arc_list()) {
             if (&candidate == cell_arc) {
               matched_cell_arc = true;
               for (TimingArc& timing_arc : candidate.get_timing_arc_list()) {

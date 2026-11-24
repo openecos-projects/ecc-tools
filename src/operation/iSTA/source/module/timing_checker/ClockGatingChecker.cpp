@@ -104,8 +104,8 @@ void ClockGatingChecker::infer()
     const auto cell = _database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell == _database.liberty().get_cell_map().end())
       continue;
-    const auto port = cell->second.get_port_map().find(pin->get_pin_name());
-    if (port == cell->second.get_port_map().end() || !port->second.get_is_output())
+    const auto port = cell->get_port_map().find(pin->get_pin_name());
+    if (port == cell->get_port_map().end() || !port->second.get_is_output())
       continue;
     const auto& function = port->second.get_function_expression();
     if (function.get_is_empty())

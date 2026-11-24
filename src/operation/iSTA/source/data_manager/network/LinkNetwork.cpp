@@ -40,7 +40,7 @@ void LinkNetwork::linkInstances()
 
 void LinkNetwork::linkInstance(Instance& instance)
 {
-  std::map<std::string, LibertyCell>& timing_cell_map = _liberty.get_cell_map();
+  auto& timing_cell_map = _liberty.get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return;
   }

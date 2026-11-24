@@ -67,8 +67,8 @@ bool isBidirectionalCellPin(Database& database, const std::string& pin_name)
   const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end())
     return false;
-  const auto port = cell->second.get_port_map().find(pin->get_pin_name());
-  return port != cell->second.get_port_map().end() && port->second.get_is_input() && port->second.get_is_output();
+  const auto port = cell->get_port_map().find(pin->get_pin_name());
+  return port != cell->get_port_map().end() && port->second.get_is_input() && port->second.get_is_output();
 }
 
 bool isTopLevelInoutNet(Database& database, const std::unordered_set<std::string>& inout_nets, const std::string& pin_name)
@@ -116,11 +116,11 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
     return -1;
 
   int32_t flat_id = 0;
-  for (const auto& arc : cell->second.get_cell_arc_list())
+  for (const auto& arc : cell->get_cell_arc_list())
     flat_id += static_cast<int32_t>(arc.get_timing_arc_list().size());
   const std::string local_data = localPortName(data_pin);
   const std::string local_clock = localPortName(clock_pin);
-  for (const auto& check : cell->second.get_check_arc_list()) {
+  for (const auto& check : cell->get_check_arc_list()) {
     for (const auto& arc : check.get_timing_arc_list()) {
       if (check.get_check_type() == check_type && check.get_clock_port() == local_clock && check.get_data_port() == local_data
           && check.get_clock_trans_type() == clock_transition && arc.get_arc_idx() == selected_arc_idx)

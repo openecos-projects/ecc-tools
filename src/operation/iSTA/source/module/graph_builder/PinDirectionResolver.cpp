@@ -137,7 +137,7 @@ LibertyPort* PinDirectionResolver::libertyPort(Pin& pin)
     return nullptr;
   }
   Instance& instance = database.network().instances()[pin.get_instance_name()];
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return nullptr;
   }

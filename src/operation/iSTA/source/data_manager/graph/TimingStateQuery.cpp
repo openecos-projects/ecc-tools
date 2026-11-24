@@ -498,7 +498,7 @@ DerateContext TimingStateQuery::derateContext(const std::string& pin_name) const
     const auto& cells = _database.liberty().get_cell_map();
     const auto cell = cells.find(instance->get_cell_name());
     if (cell != cells.end())
-      context.lib_cell = cell->second.get_library_name() + "/" + cell->first;
+      context.lib_cell = cell->get_library_name() + "/" + instance->get_cell_name();
   }
   return context;
 }

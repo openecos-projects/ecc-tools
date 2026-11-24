@@ -186,10 +186,10 @@ std::optional<bool> ReportPathContext::getTieDriverValue(const std::string& name
     if (instance == _database.network().instances().end())
       continue;
     const auto cell = _database.liberty().get_cell_map().find(instance->get_cell_name());
-    if (cell == _database.liberty().get_cell_map().end() || cell->second.get_is_sequential())
+    if (cell == _database.liberty().get_cell_map().end() || cell->get_is_sequential())
       continue;
-    const auto port = cell->second.get_port_map().find(driver->get_pin_name());
-    if (port == cell->second.get_port_map().end() || !port->second.get_is_output())
+    const auto port = cell->get_port_map().find(driver->get_pin_name());
+    if (port == cell->get_port_map().end() || !port->second.get_is_output())
       continue;
     const auto value = port->second.get_function_expression().evaluate_constant({});
     if (value.has_value())

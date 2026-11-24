@@ -132,8 +132,8 @@ double getLibraryPinCapacitance(Database& database, const std::string& pin_name,
   if (cell_iter == database.liberty().get_cell_map().end()) {
     return 0.0;
   }
-  const auto port_iter = cell_iter->second.get_port_map().find(pin.get_pin_name());
-  if (port_iter == cell_iter->second.get_port_map().end()) {
+  const auto port_iter = cell_iter->get_port_map().find(pin.get_pin_name());
+  if (port_iter == cell_iter->get_port_map().end()) {
     return 0.0;
   }
   LibertyPort& cell_port = port_iter->second;

@@ -69,7 +69,7 @@ int32_t QorSummaryBuilder::getQorCellArea()
   double cell_area = 0.0;
   for (const auto& id : database.network().instances().sortedIds()) {
     Instance& instance = database.network().instances().get(id);
-    std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+    auto& timing_cell_map = database.liberty().get_cell_map();
     if (timing_cell_map.count(instance.get_cell_name()) > 0) {
       cell_area += timing_cell_map[instance.get_cell_name()].get_area();
     }
