@@ -26,6 +26,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "IdbLayer.h"
@@ -148,7 +149,7 @@ auto definedOrZero(double value, idb::IdbLayerRouting* layer, const char* attrib
   static std::set<std::string> reported;
   const std::string name = layer != nullptr ? layer->get_name() : std::string{"<unknown>"};
   {
-    std::lock_guard<std::mutex> lock(mutex);
+    const std::scoped_lock lock(mutex);
     if (!reported.insert(name + "/" + attribute).second) {
       return 0.0;
     }

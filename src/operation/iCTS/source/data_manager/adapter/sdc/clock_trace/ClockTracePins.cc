@@ -21,7 +21,6 @@
  * @brief Pin, liberty, and transition helpers for SDC clock tracing.
  */
 
-#include <optional>
 #include <string>
 #include <unordered_set>
 #include <utility>
@@ -328,42 +327,6 @@ auto ResolveInstPinByLibPort(idb::IdbInstance* inst, idb::LibPort* lib_port) -> 
     }
   }
   return nullptr;
-}
-
-auto BuildPreclusteredSinkAnchor(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* leaf_net) -> std::optional<ClockTracePreclusteredSinkAnchor>
-{
-  if (leaf_net == nullptr || !IsClockTarget(CountDirectClockSinks(liberty_cell_lookup, leaf_net))) {
-    return std::nullopt;
-  }
-
-  const auto net_pins = CollectNetPins(leaf_net);
-  auto* output_pin = net_pins.driver;
-  auto* driver_inst = output_pin == nullptr ? nullptr : output_pin->get_instance();
-  auto* lib_cell = FindLibCell(liberty_cell_lookup, driver_inst);
-  if (driver_inst == nullptr || lib_cell == nullptr || !(lib_cell->isBuffer() || lib_cell->isInverter())) {
-    return std::nullopt;
-  }
-
-  idb::LibPort* input_port = nullptr;
-  idb::LibPort* output_port = nullptr;
-  lib_cell->bufferPorts(input_port, output_port);
-  if (input_port == nullptr || output_port == nullptr) {
-    return std::nullopt;
-  }
-
-  auto* input_pin = ResolveInstPinByLibPort(driver_inst, input_port);
-  auto* resolved_output_pin = ResolveInstPinByLibPort(driver_inst, output_port);
-  if (input_pin == nullptr || resolved_output_pin == nullptr || resolved_output_pin != output_pin || input_pin->get_net() == nullptr) {
-    return std::nullopt;
-  }
-
-  return ClockTracePreclusteredSinkAnchor{
-      .leaf_net_name = leaf_net->get_net_name(),
-      .driver_inst_name = driver_inst->get_name(),
-      .input_pin_name = TermName(input_pin),
-      .output_pin_name = TermName(output_pin),
-      .input_net_name = input_pin->get_net()->get_net_name(),
-  };
 }
 
 }  // namespace icts::clock_trace

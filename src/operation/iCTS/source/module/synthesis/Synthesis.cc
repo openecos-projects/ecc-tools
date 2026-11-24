@@ -307,11 +307,9 @@ auto ClockSynthesisRun::runClockTree() -> ClockSynthesisSummary
   _counters->hard_macro_sinks += terminal_partition.macro_sinks.size();
   _counters->regular_sinks += terminal_partition.regular_sinks.size();
   const auto active_domains = static_cast<unsigned>(!terminal_partition.macro_sinks.empty()) + static_cast<unsigned>(!terminal_partition.regular_sinks.empty());
-  EmitLogTable(Loc::current(), "CTS Sink Domain Overview",
-               {"Clock", "Net", "Valid Sinks", "Hard Macro", "Regular", "Synthesis Frontier", "Active Domains", "Preclustered Reuse"},
+  EmitLogTable(Loc::current(), "CTS Sink Domain Overview", {"Clock", "Net", "Valid Sinks", "Hard Macro", "Regular", "Synthesis Frontier", "Active Domains"},
                {{_clock->get_clock_name(), _clock->get_clock_net_name(), ToLogTableCell(valid_sinks), ToLogTableCell(terminal_partition.macro_sinks.size()),
-                 ToLogTableCell(terminal_partition.regular_sinks.size()), ToLogTableCell(synthesis_frontier.pins.size()), ToLogTableCell(active_domains),
-                 ToLogTableCell(_clock->is_preclustered_sink_reuse())}});
+                 ToLogTableCell(terminal_partition.regular_sinks.size()), ToLogTableCell(synthesis_frontier.pins.size()), ToLogTableCell(active_domains)}});
   if (valid_sinks == 0U) {
     _status_recorder.appendNoDomain(*_clock, DomainStatus::kSkipped, 0U, 0U, "no valid sinks");
     CTSLOG.warn(Loc::current(), "Synthesis: skip clock \"", _clock->get_clock_name(), "\" because no valid sinks are available.");

@@ -215,10 +215,6 @@ auto Design::clone() const -> std::unique_ptr<Design>
         CTSLOG.error(Loc::current(), "Design: failed to clone a clock propagation arc for clock \"", clock->get_clock_name(), "\": ", status.message, ".");
       }
     }
-    cloned_clock->set_preclustered_sink_reuse(clock->is_preclustered_sink_reuse());
-    for (const auto& net_name : clock->get_preclustered_anchor_input_net_names()) {
-      cloned_clock->add_preclustered_anchor_input_net_name(net_name);
-    }
   }
 
   if (_clock_dag.is_built()) {
@@ -497,7 +493,6 @@ auto Design::clearTopologyObjects() -> void
     clock->set_clock_source_net(nullptr);
     clock->clear_loads();
     clock->clearMembership();
-    clock->clear_preclustered_anchor_input_net_names();
   }
   _insts.clear();
   _pins.clear();

@@ -64,6 +64,24 @@ struct SdcClockTraceInput;
 struct ClockTraceBuild;
 struct ClockTraceClockTarget;
 struct ClockRouteSegmentRc;
+
+// What the input clock network carried before CTS rebuilt it. `preserved` counts stages
+// placement pins (FIXED/COVER), `skipped` counts stages the dissolve could not act on.
+struct WrapperClockTreeDissolveClock
+{
+  std::string clock_name;
+  std::size_t dissolved = 0U;
+  std::size_t preserved = 0U;
+  std::size_t skipped = 0U;
+};
+
+struct WrapperClockTreeDissolveResult
+{
+  std::vector<WrapperClockTreeDissolveClock> clocks;
+  std::size_t dissolved = 0U;
+  std::size_t preserved = 0U;
+  std::size_t skipped = 0U;
+};
 struct WrapperCellGeometry
 {
   std::string name;
@@ -406,6 +424,10 @@ class Wrapper
   auto readClocks(Design& design, const std::vector<std::pair<std::string, std::string>>& clock_net_pairs) -> bool;
   auto readTraceClockTargets(Design& design, const std::vector<ClockTraceClockTarget>& clock_targets) -> bool;
   auto traceSdcClocks(const SdcClockTraceInput& input) const -> ClockTraceBuild;
+  // Bypass the combinational BUF/INV stages the trace crossed on the clock network, except
+  // the ones placement pins (FIXED/COVER), so the tree CTS synthesizes is built from the
+  // real clock sinks instead of from a synthesis fanout scaffold.
+  auto dissolveSynthesisClockBuffers(const std::vector<ClockTraceClockTarget>& clock_targets) -> WrapperClockTreeDissolveResult;
   auto writeClock(Design& design, Clock& clock) -> bool;
   auto writeClocksDetailed(Design& design, const std::vector<Clock*>& clocks) -> WrapperWriteSummary;
   auto writeClocks(Design& design, const std::vector<Clock*>& clocks) -> bool;

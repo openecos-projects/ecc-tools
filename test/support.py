@@ -228,8 +228,6 @@ def _rewrite_value(
         return str(roots.fixture_root / value.removeprefix("./fixtures/gcd/"))
     if value == "./fixtures/gcd/config/gcd.sdc":
         return str(roots.fixture_root / "config" / "gcd.sdc")
-    if value == "./fixtures/gcd/config/cell_catalog.tsv":
-        return str(roots.fixture_root / "config" / "cell_catalog.tsv")
     if value == "./output":
         return str(output_dir)
     if value == "macro_locations.txt":

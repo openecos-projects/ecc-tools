@@ -144,9 +144,10 @@ void AntennaChecker::runACModel(ACModel& ac_model)
     return;
   }
 
+  // Analyze all non-PDN nets (signal, clock, reset, scan, tie-off, and unspecified USE).
   std::vector<idb::IdbNet*> signal_nets;
   for (idb::IdbNet* net : net_list->get_net_list()) {
-    if (net && net->is_signal()) {
+    if (net && !net->is_pdn()) {
       signal_nets.push_back(net);
     }
   }
@@ -611,7 +612,8 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
     all_edges.push_back({a, b, t});
   };
 
-  auto createGateNode = [&](double gate_area, double diff_area, bool provides_diff) -> int {
+  auto createGateNode = [&](double gate_area, double diff_area, bool provides_diff, idb::IdbPin* pin, bool instance_pin, int pin_id = -1,
+                            int layer_order = -1) -> int {
     if (Utility::equalDoubleByError(gate_area, 0.0, MJ_ERROR) &&
         Utility::equalDoubleByError(diff_area, 0.0, MJ_ERROR) && !provides_diff) {
       return -1;
@@ -620,11 +622,19 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
     ACGraphNode n;
     n.id = static_cast<int>(nodes.size());
     n.time = 0;
+    n.pin_id = pin_id;
+    n.layer_order = layer_order;
     n.is_conductor = false;
 
     n.gate_area = gate_area;
     n.diff_area = diff_area;
     n.provides_diff = provides_diff || !Utility::equalDoubleByError(diff_area, 0.0, MJ_ERROR);
+    if (pin != nullptr) {
+      n.pin_name = pin->get_pin_name();
+      if (instance_pin && pin->get_instance() != nullptr) {
+        n.instance_name = pin->get_instance()->get_name();
+      }
+    }
 
     nodes.push_back(std::move(n));
     return static_cast<int>(nodes.size()) - 1;
@@ -683,23 +693,19 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
     return static_cast<int>(nodes.size()) - 1;
   };
 
+  int next_pin_id = 0;
   auto processPin = [&](idb::IdbPin* pin, bool instance_pin) {
     if (pin == nullptr) {
       return;
     }
 
+    const int pin_id = next_pin_id++;
     double gate_area = 0.0;
     double diff_area = 0.0;
     bool provides_diff = false;
 
     readPinAntennaInfo(ac_model, pin, instance_pin, gate_area, diff_area, provides_diff);
-    int gate_node = createGateNode(gate_area, diff_area, provides_diff);
-    if (gate_node >= 0) {
-      nodes[gate_node].pin_name = pin->get_pin_name();
-      if (instance_pin && pin->get_instance() != nullptr) {
-        nodes[gate_node].instance_name = pin->get_instance()->get_name();
-      }
-    }
+    int gate_node = createGateNode(gate_area, diff_area, provides_diff, pin, instance_pin);
 
     std::vector<ACPinShape> pin_shapes;
 
@@ -727,6 +733,7 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
     }
 
     int first_shape_node = -1;
+    std::map<int, int> shape_node_by_order;
 
     if (!pin_shapes.empty()) {
       std::sort(pin_shapes.begin(), pin_shapes.end(), [](const ACPinShape& a, const ACPinShape& b) {
@@ -750,8 +757,11 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
 
         int shape_node = createConductorNode(order, routing, cut, rects);
 
-        if (shape_node >= 0 && first_shape_node < 0) {
-          first_shape_node = shape_node;
+        if (shape_node >= 0) {
+          shape_node_by_order[order] = shape_node;
+          if (first_shape_node < 0) {
+            first_shape_node = shape_node;
+          }
         }
 
         if (gate_node >= 0 && shape_node >= 0) {
@@ -760,16 +770,126 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
       }
     }
 
+    auto resolvePinAnchor = [&](int order, int& anchor_order) -> int {
+      anchor_order = order;
+      if (gate_node >= 0) {
+        return gate_node;
+      }
+      if (auto exact = shape_node_by_order.find(order); exact != shape_node_by_order.end()) {
+        return exact->second;
+      }
+      auto it = shape_node_by_order.lower_bound(order);
+      if (it != shape_node_by_order.begin()) {
+        auto below = std::prev(it);
+        anchor_order = below->first;
+        return below->second;
+      }
+      if (it != shape_node_by_order.end()) {
+        anchor_order = it->first;
+        return it->second;
+      }
+      return first_shape_node;
+    };
+
     idb::IdbTerm* term = pin->get_term();
+    idb::IdbLayers* layers = (design && design->get_layout()) ? design->get_layout()->get_layers() : nullptr;
+
+    std::map<int, double> qualified_gate_by_order;
+    std::map<int, double> qualified_diff_by_order;
+    if (term != nullptr && layers != nullptr) {
+      for (const auto& [layer_name, area] : term->get_antenna_gate_area_by_layer()) {
+        int order = layers->get_layer_order(layer_name);
+        if (order >= 0 && order <= max_layer_order) {
+          qualified_gate_by_order[order] = area;
+        }
+      }
+      for (const auto& [layer_name, area] : term->get_antenna_diff_area_by_layer()) {
+        int order = layers->get_layer_order(layer_name);
+        if (order >= 0 && order <= max_layer_order) {
+          qualified_diff_by_order[order] = area;
+        }
+      }
+    }
+
+    auto emitQualifiedNode = [&](double g_area, int g_order, double d_area, int d_order, int anchor, int edge_time) {
+      const bool has_g = g_order >= 0 && !Utility::equalDoubleByError(g_area, 0.0, MJ_ERROR);
+      const bool has_d = d_order >= 0 && !Utility::equalDoubleByError(d_area, 0.0, MJ_ERROR);
+      if (has_g && has_d && g_order == d_order) {
+        int q_node = createGateNode(g_area, d_area, true, pin, instance_pin, pin_id, g_order);
+        if (q_node >= 0) {
+          addEdge(q_node, anchor, edge_time);
+        }
+        return;
+      }
+      if (has_g) {
+        int q_node = createGateNode(g_area, 0.0, false, pin, instance_pin, pin_id, g_order);
+        if (q_node >= 0) {
+          addEdge(q_node, anchor, edge_time);
+        }
+      }
+      if (has_d) {
+        int q_node = createGateNode(0.0, d_area, true, pin, instance_pin, pin_id, d_order);
+        if (q_node >= 0) {
+          addEdge(q_node, anchor, edge_time);
+        }
+      }
+    };
+
+    // LAYER-qualified gate/diffusion area: attach to every exposed PORT shape of the pin
+    // (activating already-reached lower/equal annotations at port_order and higher-stage ones
+    // at their annotated order, even without an exposed PORT shape on that higher layer).
+    if (!qualified_gate_by_order.empty() || !qualified_diff_by_order.empty()) {
+      auto attachQualifiedToAnchor = [&](int anchor, int anchor_order) {
+        int best_gate_order = -1;
+        double best_gate_area = 0.0;
+        for (const auto& [q_order, area] : qualified_gate_by_order) {
+          if (q_order <= anchor_order && !Utility::equalDoubleByError(area, 0.0, MJ_ERROR)) {
+            best_gate_order = q_order;
+            best_gate_area = area;
+          }
+        }
+        int best_diff_order = -1;
+        double best_diff_area = 0.0;
+        for (const auto& [q_order, area] : qualified_diff_by_order) {
+          if (q_order <= anchor_order && !Utility::equalDoubleByError(area, 0.0, MJ_ERROR)) {
+            best_diff_order = q_order;
+            best_diff_area = area;
+          }
+        }
+        emitQualifiedNode(best_gate_area, best_gate_order, best_diff_area, best_diff_order, anchor, anchor_order);
+
+        std::map<int, std::pair<double, double>> above_by_order;
+        for (const auto& [q_order, area] : qualified_gate_by_order) {
+          if (q_order > anchor_order) {
+            above_by_order[q_order].first = area;
+          }
+        }
+        for (const auto& [q_order, area] : qualified_diff_by_order) {
+          if (q_order > anchor_order) {
+            above_by_order[q_order].second = area;
+          }
+        }
+        for (const auto& [q_order, areas] : above_by_order) {
+          int g_ord = !Utility::equalDoubleByError(areas.first, 0.0, MJ_ERROR) ? q_order : -1;
+          int d_ord = !Utility::equalDoubleByError(areas.second, 0.0, MJ_ERROR) ? q_order : -1;
+          emitQualifiedNode(areas.first, g_ord, areas.second, d_ord, anchor, q_order);
+        }
+      };
+
+      if (!shape_node_by_order.empty()) {
+        for (const auto& [port_order, shape_node] : shape_node_by_order) {
+          attachQualifiedToAnchor(shape_node, port_order);
+        }
+      } else if (gate_node >= 0) {
+        attachQualifiedToAnchor(gate_node, 0);
+      }
+    }
+
     if (term != nullptr && (term->has_antenna_partial_metal_area() ||
                             term->has_antenna_partial_metal_side_area() ||
                             term->has_antenna_partial_cut_area())) {
-      int anchor = (gate_node >= 0) ? gate_node : first_shape_node;
-
-      idb::IdbLayers* layers = (design && design->get_layout()) ? design->get_layout()->get_layers() : nullptr;
-
       auto addPartialArea = [&](const std::string& layer_name, double area, bool is_routing, bool is_side, bool is_cut) {
-        if (anchor < 0 || layers == nullptr) {
+        if (layers == nullptr) {
           partial_areas_dropped.fetch_add(1, std::memory_order_relaxed);
           return;
         }
@@ -780,8 +900,47 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
           return;
         }
 
+        int anchor_order = order;
+        int anchor = resolvePinAnchor(order, anchor_order);
+        if (anchor < 0) {
+          partial_areas_dropped.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+
         int vnode = createVirtualConductorNode(order, area, is_routing, is_side, is_cut);
-        addEdge(anchor, vnode, order);
+        addEdge(anchor, vnode, std::max(order, anchor_order));
+        if (anchor_order > order &&
+            (!qualified_gate_by_order.empty() || !qualified_diff_by_order.empty())) {
+          // If the pin has no port on `order` (first reachable PORT is on `anchor_order`),
+          // connect internal metal/cut at `order` to the applicable qualified gate/diff area.
+          auto findForPartial = [&](const std::map<int, double>& by_order, int& out_order, double& out_area) {
+            out_order = -1;
+            out_area = 0.0;
+            for (const auto& [q_order, q_area] : by_order) {
+              if (q_order <= order && !Utility::equalDoubleByError(q_area, 0.0, MJ_ERROR)) {
+                out_order = q_order;
+                out_area = q_area;
+              }
+            }
+            if (out_order >= 0) {
+              return;
+            }
+            for (const auto& [q_order, q_area] : by_order) {
+              if (q_order > order && q_order <= anchor_order && !Utility::equalDoubleByError(q_area, 0.0, MJ_ERROR)) {
+                out_order = q_order;
+                out_area = q_area;
+                return;
+              }
+            }
+          };
+          int p_gate_order = -1;
+          double p_gate_area = 0.0;
+          int p_diff_order = -1;
+          double p_diff_area = 0.0;
+          findForPartial(qualified_gate_by_order, p_gate_order, p_gate_area);
+          findForPartial(qualified_diff_by_order, p_diff_order, p_diff_area);
+          emitQualifiedNode(p_gate_area, p_gate_order, p_diff_area, p_diff_order, vnode, order);
+        }
       };
 
       for (const auto& [layer_name, area] : term->get_antenna_partial_metal_area()) {
@@ -1081,14 +1240,16 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
     if (routing_rule == nullptr && cut_rule == nullptr) {
       for (int root : active_roots) {
         ACUFNode& root_data = uf.d[root];
-        for (int u : comps_by_root[root]) {
-          if (nodes[u].is_conductor && nodes[u].declared_area > 0.0) {
-            if (nodes[u].is_cut) {
-              root_data.cum_cut_num += nodes[u].declared_area;
-            } else if (nodes[u].is_side) {
-              root_data.cum_side_num += nodes[u].declared_area;
-            } else if (nodes[u].is_routing) {
-              root_data.cum_area_num += nodes[u].declared_area;
+        if (!Utility::equalDoubleByError(root_data.gate_area, 0.0, MJ_ERROR)) {
+          for (int u : comps_by_root[root]) {
+            if (nodes[u].is_conductor && nodes[u].declared_area > 0.0) {
+              if (nodes[u].is_cut) {
+                root_data.cum_cut_num += nodes[u].declared_area;
+              } else if (nodes[u].is_side) {
+                root_data.cum_side_num += nodes[u].declared_area;
+              } else if (nodes[u].is_routing) {
+                root_data.cum_area_num += nodes[u].declared_area;
+              }
             }
           }
         }
@@ -1157,12 +1318,14 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
         }
       }
 
-      if (routing_rule == nullptr) {
-        root_data.cum_area_num += declared_routing_area;
-        root_data.cum_side_num += declared_side_area;
-      }
-      if (cut_rule == nullptr) {
-        root_data.cum_cut_num += declared_cut_area;
+      if (!Utility::equalDoubleByError(root_data.gate_area, 0.0, MJ_ERROR)) {
+        if (routing_rule == nullptr) {
+          root_data.cum_area_num += declared_routing_area;
+          root_data.cum_side_num += declared_side_area;
+        }
+        if (cut_rule == nullptr) {
+          root_data.cum_cut_num += declared_cut_area;
+        }
       }
 
       double cut_area_um = declared_cut_area;
@@ -1196,15 +1359,15 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
         continue;
       }
 
-      if (Utility::equalDoubleByError(root_data.gate_area, 0.0, MJ_ERROR) &&
-          Utility::equalDoubleByError(root_data.diff_area, 0.0, MJ_ERROR) && !root_data.diff_connected) {
-        comps_without_gate.fetch_add(1, std::memory_order_relaxed);
-        comps_by_root[root].clear();
-        continue;
-      }
-
       const bool diff_active = root_data.diff_connected ||
                                !Utility::equalDoubleByError(root_data.diff_area, 0.0, MJ_ERROR);
+
+      auto factor = [&](double f, bool diffuse_only) {
+        if (f >= 0.0 && (!diffuse_only || diff_active)) {
+          return f;
+        }
+        return 1.0;
+      };
 
       if (!has_bbox) {
         for (int u : comp_nodes) {
@@ -1244,120 +1407,104 @@ void AntennaChecker::checkNet(ACModel& ac_model, idb::IdbDesign* design, idb::Id
         }
       };
 
+      bool checked_any_gate = false;
+
       // Cut layer PAR/CAR
-      if (has_cut && cut_rule != nullptr) {
-        if (!Utility::equalDoubleByError(cut_area_um, 0.0, MJ_ERROR)) {
-          const double gate_plus_diff_factor = (cut_rule->gate_plus_diff >= 0.0) ? cut_rule->gate_plus_diff : 0.0;
-          const double eff_gate = root_data.gate_area + gate_plus_diff_factor * root_data.diff_area;
+      if (has_cut && cut_rule != nullptr && !Utility::equalDoubleByError(cut_area_um, 0.0, MJ_ERROR)) {
+        const double gate_plus_diff_factor = (cut_rule->gate_plus_diff >= 0.0) ? cut_rule->gate_plus_diff : 0.0;
+        const double eff_gate = root_data.gate_area + gate_plus_diff_factor * root_data.diff_area;
 
-          if (!Utility::equalDoubleByError(eff_gate, 0.0, MJ_ERROR)) {
-            auto factor = [&](double f, bool diffuse_only) {
-              if (f >= 0.0 && (!diffuse_only || diff_active)) {
-                return f;
-              }
-              return 1.0;
-            };
+        if (!Utility::equalDoubleByError(root_data.gate_area, 0.0, MJ_ERROR) &&
+            !Utility::equalDoubleByError(eff_gate, 0.0, MJ_ERROR)) {
+          checked_any_gate = true;
+          const double cut_scale = factor(cut_rule->area_factor, cut_rule->area_factor_diffuse_only);
+          const double reduce_factor = Utility::getPWLValue(cut_rule->area_diff_reduce_pwl, root_data.diff_area, 1.0);
+          const double minus_diff = (cut_rule->area_minus_diff >= 0.0) ? cut_rule->area_minus_diff * root_data.diff_area : 0.0;
+          const double par_cut_num = (cut_scale * cut_area_um) * reduce_factor - minus_diff;
+          const double prev_cut_num = cut_rule->cum_routing_plus_cut ? root_data.cum_area_num : root_data.cum_cut_num;
+          root_data.cum_cut_num = std::max(0.0, prev_cut_num + par_cut_num);
 
-            const double cut_scale = factor(cut_rule->area_factor, cut_rule->area_factor_diffuse_only);
-            const double reduce_factor = Utility::getPWLValue(cut_rule->area_diff_reduce_pwl, root_data.diff_area, 1.0);
-            const double minus_diff = (cut_rule->area_minus_diff >= 0.0) ? cut_rule->area_minus_diff * root_data.diff_area : 0.0;
+          const double par_cut_check = std::max(0.0, Utility::getRatio(par_cut_num, eff_gate));
+          const double cut_car = Utility::getRatio(root_data.cum_cut_num, eff_gate);
 
-            const double par_cut_num = (cut_scale * cut_area_um) * reduce_factor - minus_diff;
-            const double par_cut_check = std::max(0.0, Utility::getRatio(par_cut_num, eff_gate));
+          ACThresholdPick p = pickThreshold(cut_rule->area_ratio, cut_rule->diff_area_ratio, cut_rule->diff_area_ratio_pwl,
+                                             root_data.diff_area, root_data.diff_connected);
 
-            const double prev_cut_num = cut_rule->cum_routing_plus_cut ? root_data.cum_area_num : root_data.cum_cut_num;
-            root_data.cum_cut_num = std::max(0.0, prev_cut_num + par_cut_num);
-            const double cut_car = Utility::getRatio(root_data.cum_cut_num, eff_gate);
+          if (p.available) {
+            emit(cut_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCutPar : ACViolationType::kAntennaCutPar, par_cut_check,
+                 p.threshold);
+          }
 
-            ACThresholdPick p = pickThreshold(cut_rule->area_ratio, cut_rule->diff_area_ratio, cut_rule->diff_area_ratio_pwl,
-                                               root_data.diff_area, root_data.diff_connected);
+          p = pickThreshold(cut_rule->cum_area_ratio, cut_rule->cum_diff_area_ratio, cut_rule->cum_diff_area_ratio_pwl,
+                            root_data.diff_area, root_data.diff_connected);
 
-            if (p.available) {
-              emit(cut_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCutPar : ACViolationType::kAntennaCutPar, par_cut_check,
-                   p.threshold);
-            }
-
-            p = pickThreshold(cut_rule->cum_area_ratio, cut_rule->cum_diff_area_ratio, cut_rule->cum_diff_area_ratio_pwl,
-                              root_data.diff_area, root_data.diff_connected);
-
-            if (p.available) {
-              emit(cut_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCutCar : ACViolationType::kAntennaCutCar, cut_car,
-                   p.threshold);
-            }
-          } else {
-            comps_without_gate.fetch_add(1, std::memory_order_relaxed);
+          if (p.available) {
+            emit(cut_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCutCar : ACViolationType::kAntennaCutCar, cut_car,
+                 p.threshold);
           }
         }
       }
 
       // Routing layer PAR/CAR/PSR/CSR
-      if (has_routing && routing_rule != nullptr) {
-        if (!Utility::equalDoubleByError(metal_area_um, 0.0, MJ_ERROR) ||
-            !Utility::equalDoubleByError(side_area_um, 0.0, MJ_ERROR)) {
-          const double gate_plus_diff_factor = (routing_rule->gate_plus_diff >= 0.0) ? routing_rule->gate_plus_diff : 0.0;
-          const double eff_gate = root_data.gate_area + gate_plus_diff_factor * root_data.diff_area;
+      if (has_routing && routing_rule != nullptr &&
+          (!Utility::equalDoubleByError(metal_area_um, 0.0, MJ_ERROR) ||
+           !Utility::equalDoubleByError(side_area_um, 0.0, MJ_ERROR))) {
+        const double gate_plus_diff_factor = (routing_rule->gate_plus_diff >= 0.0) ? routing_rule->gate_plus_diff : 0.0;
+        const double eff_gate = root_data.gate_area + gate_plus_diff_factor * root_data.diff_area;
 
-          if (!Utility::equalDoubleByError(eff_gate, 0.0, MJ_ERROR)) {
-            auto factor = [&](double f, bool diffuse_only) {
-              if (f >= 0.0 && (!diffuse_only || diff_active)) {
-                return f;
-              }
-              return 1.0;
-            };
+        if (!Utility::equalDoubleByError(root_data.gate_area, 0.0, MJ_ERROR) &&
+            !Utility::equalDoubleByError(eff_gate, 0.0, MJ_ERROR)) {
+          checked_any_gate = true;
+          const double area_scale = factor(routing_rule->area_factor, routing_rule->area_factor_diffuse_only);
+          const double side_scale = factor(routing_rule->side_area_factor, routing_rule->side_area_factor_diffuse_only);
+          const double area_reduce = Utility::getPWLValue(routing_rule->area_diff_reduce_pwl, root_data.diff_area, 1.0);
+          const double minus_diff = (routing_rule->area_minus_diff >= 0.0) ? routing_rule->area_minus_diff * root_data.diff_area : 0.0;
 
-            const double area_scale = factor(routing_rule->area_factor, routing_rule->area_factor_diffuse_only);
-            const double side_scale = factor(routing_rule->side_area_factor, routing_rule->side_area_factor_diffuse_only);
+          const double par_area_num = (area_scale * metal_area_um) * area_reduce - minus_diff;
+          const double par_side_num = side_scale * side_area_um;
+          const double prev_area_num = routing_rule->cum_routing_plus_cut ? root_data.cum_cut_num : root_data.cum_area_num;
+          root_data.cum_area_num = std::max(0.0, prev_area_num + par_area_num);
+          root_data.cum_side_num = std::max(0.0, root_data.cum_side_num + par_side_num);
 
-            const double area_reduce = Utility::getPWLValue(routing_rule->area_diff_reduce_pwl, root_data.diff_area, 1.0);
+          const double par_area_check = std::max(0.0, Utility::getRatio(par_area_num, eff_gate));
+          const double par_side_check = std::max(0.0, Utility::getRatio(par_side_num, eff_gate));
+          const double car = Utility::getRatio(root_data.cum_area_num, eff_gate);
+          const double csr = Utility::getRatio(root_data.cum_side_num, eff_gate);
 
-            const double minus_diff = (routing_rule->area_minus_diff >= 0.0) ? routing_rule->area_minus_diff * root_data.diff_area : 0.0;
+          ACThresholdPick p = pickThreshold(routing_rule->area_ratio, routing_rule->diff_area_ratio, routing_rule->diff_area_ratio_pwl,
+                                             root_data.diff_area, root_data.diff_connected);
 
-            const double par_area_num = (area_scale * metal_area_um) * area_reduce - minus_diff;
-            const double par_side_num = side_scale * side_area_um;
+          if (p.available) {
+            emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffPar : ACViolationType::kAntennaPar, par_area_check,
+                 p.threshold);
+          }
 
-            const double par_area_check = std::max(0.0, Utility::getRatio(par_area_num, eff_gate));
-            const double par_side_check = std::max(0.0, Utility::getRatio(par_side_num, eff_gate));
+          p = pickThreshold(routing_rule->cum_area_ratio, routing_rule->cum_diff_area_ratio, routing_rule->cum_diff_area_ratio_pwl,
+                            root_data.diff_area, root_data.diff_connected);
 
-            const double prev_area_num = routing_rule->cum_routing_plus_cut ? root_data.cum_cut_num : root_data.cum_area_num;
-            root_data.cum_area_num = std::max(0.0, prev_area_num + par_area_num);
-            root_data.cum_side_num = std::max(0.0, root_data.cum_side_num + par_side_num);
+          if (p.available) {
+            emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCar : ACViolationType::kAntennaCar, car, p.threshold);
+          }
 
-            const double car = Utility::getRatio(root_data.cum_area_num, eff_gate);
-            const double csr = Utility::getRatio(root_data.cum_side_num, eff_gate);
+          p = pickThreshold(routing_rule->side_area_ratio, routing_rule->diff_side_area_ratio, routing_rule->diff_side_area_ratio_pwl,
+                            root_data.diff_area, root_data.diff_connected);
 
-            ACThresholdPick p = pickThreshold(routing_rule->area_ratio, routing_rule->diff_area_ratio, routing_rule->diff_area_ratio_pwl,
-                                               root_data.diff_area, root_data.diff_connected);
+          if (p.available) {
+            emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffPsr : ACViolationType::kAntennaPsr, par_side_check,
+                 p.threshold);
+          }
 
-            if (p.available) {
-              emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffPar : ACViolationType::kAntennaPar, par_area_check,
-                   p.threshold);
-            }
+          p = pickThreshold(routing_rule->cum_side_area_ratio, routing_rule->cum_diff_side_area_ratio,
+                            routing_rule->cum_diff_side_area_ratio_pwl, root_data.diff_area, root_data.diff_connected);
 
-            p = pickThreshold(routing_rule->cum_area_ratio, routing_rule->cum_diff_area_ratio, routing_rule->cum_diff_area_ratio_pwl,
-                              root_data.diff_area, root_data.diff_connected);
-
-            if (p.available) {
-              emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCar : ACViolationType::kAntennaCar, car, p.threshold);
-            }
-
-            p = pickThreshold(routing_rule->side_area_ratio, routing_rule->diff_side_area_ratio, routing_rule->diff_side_area_ratio_pwl,
-                              root_data.diff_area, root_data.diff_connected);
-
-            if (p.available) {
-              emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffPsr : ACViolationType::kAntennaPsr, par_side_check,
-                   p.threshold);
-            }
-
-            p = pickThreshold(routing_rule->cum_side_area_ratio, routing_rule->cum_diff_side_area_ratio,
-                              routing_rule->cum_diff_side_area_ratio_pwl, root_data.diff_area, root_data.diff_connected);
-
-            if (p.available) {
-              emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCsr : ACViolationType::kAntennaCsr, csr, p.threshold);
-            }
-          } else {
-            comps_without_gate.fetch_add(1, std::memory_order_relaxed);
+          if (p.available) {
+            emit(routing_rule->layer_name, p.is_diff ? ACViolationType::kAntennaDiffCsr : ACViolationType::kAntennaCsr, csr, p.threshold);
           }
         }
+      }
+
+      if (!checked_any_gate) {
+        comps_without_gate.fetch_add(1, std::memory_order_relaxed);
       }
 
       comps_by_root[root].clear();
@@ -1386,29 +1533,27 @@ void AntennaChecker::readPinAntennaInfo(ACModel& ac_model, idb::IdbPin* pin, con
     return;
   }
 
+  // Unqualified areas apply on every layer. LAYER-qualified ones apply at their annotated
+  // process stage (see processPin), and still count as antenna info for the pin.
+  const bool has_layer_gate = term->has_antenna_gate_area_by_layer();
+  const bool has_layer_diff = term->has_antenna_diff_area_by_layer();
+
   if (term->has_antenna_gate_area()) {
     gate_area = term->get_antenna_gate_area();
-    if (instance_pin) {
-      pins_with_gate_area.fetch_add(1, std::memory_order_relaxed);
-    }
+  }
+  if (instance_pin && (term->has_antenna_gate_area() || has_layer_gate)) {
+    pins_with_gate_area.fetch_add(1, std::memory_order_relaxed);
   }
 
   if (term->has_antenna_diff_area()) {
     diff_area = term->get_antenna_diff_area();
-    provides_diff = true;
   }
 
-  if (!Utility::equalDoubleByError(diff_area, 0.0, MJ_ERROR)) {
-    provides_diff = true;
-  }
+  // A pin protects the net only through real diffusion area. An output or an explicit
+  // "ANTENNADIFFAREA 0" has none, so it must not select the diode thresholds.
+  provides_diff = !Utility::equalDoubleByError(diff_area, 0.0, MJ_ERROR);
 
-  idb::IdbConnectDirection dir = term->get_direction();
-  if (dir == idb::IdbConnectDirection::kOutput || dir == idb::IdbConnectDirection::kOutputTriState ||
-      dir == idb::IdbConnectDirection::kInOut) {
-    provides_diff = true;
-  }
-
-  if (instance_pin && !term->has_antenna_gate_area() && !term->has_antenna_diff_area()) {
+  if (instance_pin && !term->has_antenna_gate_area() && !term->has_antenna_diff_area() && !has_layer_gate && !has_layer_diff) {
     pins_missing_antenna_info.fetch_add(1, std::memory_order_relaxed);
   }
 }

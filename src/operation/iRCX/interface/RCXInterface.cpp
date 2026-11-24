@@ -30,6 +30,7 @@
 #include "RCXHeader.hpp"
 #include "ResExtractor.hpp"
 #include "RunRCXFromTopologyTool.hh"
+#include "SPEFSanitizer.hpp"
 #include "SPEFWriter.hpp"
 #include "TopoBuilder.hpp"
 #include "Utility.hpp"
@@ -586,20 +587,7 @@ void RCXInterface::wrapPin(Net& net, idb::IdbPin* idb_pin, bool is_driver)
 
 std::string RCXInterface::getSPEFName(std::string name)
 {
-  if (name.find('.') == std::string::npos) {
-    return name;
-  }
-
-  std::string spef_name;
-  spef_name.reserve(name.size());
-  for (int32_t name_idx = 0; name_idx < static_cast<int32_t>(name.size()); ++name_idx) {
-    char name_char = name[name_idx];
-    if ((name_char == '.' || name_char == '[' || name_char == ']') && (name_idx == 0 || name[name_idx - 1] != '\\')) {
-      spef_name.push_back('\\');
-    }
-    spef_name.push_back(name_char);
-  }
-  return spef_name;
+  return escapeSPEFName(name);
 }
 
 void RCXInterface::wrapSegmentList(Net& net, idb::IdbNet* idb_net)

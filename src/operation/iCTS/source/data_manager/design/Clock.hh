@@ -100,8 +100,6 @@ class Clock
   auto get_propagation_arcs() const -> const std::vector<ClockPropagationArc>& { return _propagation_arcs; }
   auto findPropagationArc(const Inst* inst) const -> const ClockPropagationArc*;
   auto findPropagationArc(const Pin* pin) const -> const ClockPropagationArc*;
-  auto is_preclustered_sink_reuse() const -> bool { return _preclustered_sink_reuse; }
-  auto get_preclustered_anchor_input_net_names() const -> const std::vector<std::string>& { return _preclustered_anchor_input_net_names; }
 
   // Setter
   auto set_clock_period_ns(double clock_period_ns) -> void { _clock_period_ns = clock_period_ns; }
@@ -109,9 +107,6 @@ class Clock
   auto set_synthesis_region_suffix(std::string suffix) -> void { _synthesis_region_suffix = std::move(suffix); }
   auto set_clock_source(Pin* clock_source) -> void { _clock_source = clock_source; }
   auto set_clock_source_net(Net* clock_source_net) -> void { _clock_source_net = clock_source_net; }
-  auto set_preclustered_sink_reuse(bool preclustered_sink_reuse) -> void { _preclustered_sink_reuse = preclustered_sink_reuse; }
-  auto add_preclustered_anchor_input_net_name(const std::string& net_name) -> void { appendUnique(_preclustered_anchor_input_net_names, net_name); }
-  auto clear_preclustered_anchor_input_net_names() -> void { _preclustered_anchor_input_net_names.clear(); }
 
   // Membership helpers.
   auto add_load(Pin* load) -> void { appendUnique(_loads, load); }
@@ -165,8 +160,6 @@ class Clock
   std::vector<Inst*> _insts;
   std::vector<Net*> _nets;
   std::vector<ClockPropagationArc> _propagation_arcs;
-  bool _preclustered_sink_reuse = false;
-  std::vector<std::string> _preclustered_anchor_input_net_names;
 };
 
 }  // namespace icts
