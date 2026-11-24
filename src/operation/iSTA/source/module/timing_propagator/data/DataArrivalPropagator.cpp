@@ -210,6 +210,7 @@ void DataArrivalPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisT
 
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
   std::map<std::string, TimingPathState>& source_path_state_map = _path_query.getPathStateMap(source_point, analysis_type, source_type, input_trans_type);
+  const ExceptionMatcher matcher(database.sdc(), database.network());
   // Arc delay depends on the analysis and transition pair, not the launch tag.
   // Query lazily so arcs with only invalid/filtered states still do no work.
   std::optional<double> shared_arc_delay;
@@ -225,13 +226,12 @@ void DataArrivalPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisT
       shared_arc_delay = _path_query.getDataArcDelay(arc, analysis_type, input_trans_type, output_trans_type);
     const double arc_delay = *shared_arc_delay;
     double candidate_arrival = _path_query.roundTime(source_path_state.get_arrival() + arc_delay);
-    const std::vector<int32_t> exception_state_list = ExceptionMatcher(database.sdc(), database.network())
-                                                          .advanceState(_through_index, source_path_state.get_exception_state_list(), arc.get_sink_pin(),
-                                                                        output_trans_type, arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
+    const std::vector<int32_t> exception_state_list = matcher.advanceState(_through_index, source_path_state.get_exception_state_list(), arc.get_sink_pin(),
+                                                                           output_trans_type,
+                                                                           arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
     const std::string path_state_tag
-        = ExceptionMatcher(database.sdc(), database.network())
-              .makePathStateTag(source_path_state.get_clock_name(), source_path_state.get_launch_clock_trans_type(), exception_state_list,
-                                source_path_state.get_is_clock_source_path(), source_path_state.crprPathTag(), source_path_state.get_launch_clock_edge_index());
+        = matcher.makePathStateTag(source_path_state.get_clock_name(), source_path_state.get_launch_clock_trans_type(), exception_state_list,
+                                   source_path_state.get_is_clock_source_path(), source_path_state.crprPathTag(), source_path_state.get_launch_clock_edge_index());
     std::map<std::string, TimingPathState>& sink_path_state_map = _path_query.getPathStateMap(sink_point, analysis_type, source_type, output_trans_type);
     if (sink_path_state_map.count(path_state_tag) == 0
         || _path_query.isBetterArrival(candidate_arrival, sink_path_state_map[path_state_tag].get_arrival(), analysis_type)) {

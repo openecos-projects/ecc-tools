@@ -42,6 +42,7 @@ void ClockPropagator::propagate()
 void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
 {
   Database& database = _database;
+  ClockNetworkBuilder network(_database);
   for (ClockSource& clock : sources) {
     _generated_clock_seeder.seed(clock);
     propagateClockSlewDelay(clock);
@@ -49,7 +50,7 @@ void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
       GraphVertex& vertex = database.graph().vertices()[vertex_idx];
       std::string& pin_name = vertex.get_pin_name();
       if (TimingPoint& timing_point = vertex.get_timing_point();
-          !timing_point.has_clock_state(clock.get_clock_name()) || ClockNetworkBuilder(_database).stopsAt(pin_name)) {
+          !timing_point.has_clock_state(clock.get_clock_name()) || network.stopsAt(pin_name)) {
         continue;
       }
       for (const auto& arc_idx : vertex.get_outgoing_arc_list()) {
@@ -67,11 +68,12 @@ void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
 void ClockPropagator::propagateClockSlewDelay(ClockSource& clock)
 {
   Database& database = _database;
+  ClockNetworkBuilder network(_database);
   for (int32_t vertex_idx : database.graph().vertexOrder()) {
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     std::string& pin_name = vertex.get_pin_name();
     TimingPoint& timing_point = vertex.get_timing_point();
-    if (!timing_point.has_clock_state(clock.get_clock_name()) || ClockNetworkBuilder(_database).stopsAt(pin_name)) {
+    if (!timing_point.has_clock_state(clock.get_clock_name()) || network.stopsAt(pin_name)) {
       continue;
     }
     for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {

@@ -159,14 +159,13 @@ TimingPathState* PathSearcher::updateDiversionPathState(const std::string& pin_n
       && !database.sdc().clockAllowsNetArc(database.network(), source_path_state.get_clock_name(), predecessor, pin_name))
     return nullptr;
   TimingPoint& timing_point = database.graph().sinkPoint(database.graph().arcs()[predecessor_arc_idx]);
+  const ExceptionMatcher matcher(database.sdc(), database.network());
   const std::vector<int32_t> exception_state_list
-      = ExceptionMatcher(database.sdc(), database.network())
-            .advanceState(_through_index, source_path_state.get_exception_state_list(), pin_name, trans_type,
-                          database.graph().arcs()[predecessor_arc_idx].get_type() == ArcType::kNet ? predecessor : "");
+      = matcher.advanceState(_through_index, source_path_state.get_exception_state_list(), pin_name, trans_type,
+                             database.graph().arcs()[predecessor_arc_idx].get_type() == ArcType::kNet ? predecessor : "");
   const std::string path_state_tag
-      = ExceptionMatcher(database.sdc(), database.network())
-            .makePathStateTag(source_path_state.get_clock_name(), source_path_state.get_launch_clock_trans_type(), exception_state_list,
-                              source_path_state.get_is_clock_source_path(), source_path_state.crprPathTag(), source_path_state.get_launch_clock_edge_index());
+      = matcher.makePathStateTag(source_path_state.get_clock_name(), source_path_state.get_launch_clock_trans_type(), exception_state_list,
+                                 source_path_state.get_is_clock_source_path(), source_path_state.crprPathTag(), source_path_state.get_launch_clock_edge_index());
   std::map<std::string, TimingPathState>& path_state_map = _query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
   if (path_state_map.count(path_state_tag) > 0 && !_query.isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
     return nullptr;

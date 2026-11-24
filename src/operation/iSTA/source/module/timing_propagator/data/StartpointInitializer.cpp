@@ -596,16 +596,15 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   std::string path_state_start_point = getPathStateStartPoint(start_point);
   TimingPoint& timing_point = database.graph().driverPoint(start_point);
   const auto launch_transition = edge_index ? (*edge_index % 2 ? TransType::kFall : TransType::kRise) : (clock_source_path ? trans_type : clock_trans_type);
+  const ExceptionMatcher matcher(database.sdc(), database.network());
   const std::vector<int32_t> initial_exception_state_list
-      = ExceptionMatcher(database.sdc(), database.network()).initState(path_state_start_point, clock_name, trans_type, analysis_type, launch_transition);
-  const std::vector<int32_t> exception_state_list
-      = ExceptionMatcher(database.sdc(), database.network()).advanceState(_through_index, initial_exception_state_list, start_point, trans_type);
+      = matcher.initState(path_state_start_point, clock_name, trans_type, analysis_type, launch_transition);
+  const std::vector<int32_t> exception_state_list = matcher.advanceState(_through_index, initial_exception_state_list, start_point, trans_type);
   const std::string crpr_pin = reference_pin.empty() ? getStartPointCrprClockPin(start_point) : std::string(reference_pin);
   const double crpr_bound = _path_query.clockPathBound(crpr_pin, clock_name, clock_trans_type, launch_transition);
   const bool preserve_crpr = crpr_bound > 0.;
   const std::string path_state_tag
-      = ExceptionMatcher(database.sdc(), database.network())
-            .makePathStateTag(clock_name, launch_transition, exception_state_list, clock_source_path, preserve_crpr ? crpr_pin : "", edge_index);
+      = matcher.makePathStateTag(clock_name, launch_transition, exception_state_list, clock_source_path, preserve_crpr ? crpr_pin : "", edge_index);
   std::map<std::string, TimingPathState>& path_state_map = _path_query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
   if (path_state_map.count(path_state_tag) > 0 && !_path_query.isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
     return;
