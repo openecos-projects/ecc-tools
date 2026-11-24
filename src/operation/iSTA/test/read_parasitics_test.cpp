@@ -78,8 +78,8 @@ void checkImport(const std::filesystem::path& file, const char* unit, const char
     require(std::abs(nodes.at("n:4").get_capacitance() - .002) < 1e-15, "positive extracted capacitance changed");
     require(std::abs(nodes.at("n:6").get_capacitance() - 5e-7) < 1e-15, "sub-aF positive capacitance was inflated");
     double wire_cap = 0.;
-    for (const auto& [name, node] : nodes)
-      wire_cap += node.get_capacitance();
+    for (const auto& nid : nodes.sortedIds())
+      wire_cap += nodes.get(nid).get_capacitance();
     require(std::abs(wire_cap - .0020005065) < 1e-15, "incorrect imported wire capacitance or repeated-read accumulation");
     const std::array<double, 7> expected_resistances{.01, .01, .01, .01, .01, 10., .1};
     for (std::size_t index = 0; index < expected_resistances.size(); ++index)

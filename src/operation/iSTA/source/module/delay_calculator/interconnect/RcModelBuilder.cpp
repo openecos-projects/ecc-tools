@@ -315,7 +315,7 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
       double sum_c = 0.;
       for (double cv : capacitance_list) sum_c += cv;
       double net_c = 0.;
-      for (auto& kv : parasitic_net.get_node_map()) net_c += kv.second.get_capacitance();
+      for (const auto& nid : parasitic_net.get_node_map().sortedIds()) net_c += parasitic_net.get_node_map().get(nid).get_capacitance();
       if (FILE* fp = std::fopen(mc, "a"); fp != nullptr) {
         std::fprintf(fp, "MC,%s,%s,%zu,%zu,%.12g,%.12g,%zu\n", parasitic_net.get_net_name().c_str(),
                      source_node_name.c_str(), node_name_list.size(),
@@ -379,8 +379,10 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     if (pin == _rc.pinName(source_node_name) || !arnoldi_model.get_term_index_map().contains(pin))
       return arnoldi_model;
   double wire_capacitance = 0.;
-  for (const auto& [name, node] : parasitic_net.get_node_map())
+  for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+    const ParasiticNode& node = parasitic_net.get_node_map().get(nid);
     wire_capacitance += node.get_capacitance();
+  }
   const double resistance = _rc.totalResistance(parasitic_net) * 1e-3;
   // The driver resistance can be folded into the network with a floor tied to
   // the net resistance. The per-sink merge computes
@@ -502,9 +504,12 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
   // or multi-driver network with this approximation.
   if (std::isfinite(resistance) && resistance > 0. && constants[0] >= 0. && constants[1] >= 0. && std::max(constants[0], constants[1]) < smallNetCutoff()) {
     const std::unordered_set<std::string> connected(node_name_list.begin(), node_name_list.end());
-    for (const auto& [name, node] : parasitic_net.get_node_map())
+    for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+      const ParasiticNode& node = parasitic_net.get_node_map().get(nid);
+      const std::string name(parasitic_net.get_node_map().nameOf(nid));
       if (!connected.contains(name) || !std::isfinite(node.get_capacitance()) || node.get_capacitance() < 0.)
         return arnoldi_model;
+    }
     for (auto& resistor : parasitic_net.get_resistor_list())
       if (!connected.contains(resistor.get_source_node()) || !connected.contains(resistor.get_sink_node()) || !std::isfinite(resistor.get_resistance())
           || resistor.get_resistance() < 0.)

@@ -53,8 +53,8 @@ double RcTreeAnalyzer::balancedDelay(ParasiticNet& net, const std::string& sourc
     if (count == 0)
       return 0.;
     double wire_cap = 0.;
-    for (const auto& [name, node] : net.get_node_map())
-      wire_cap += node.get_capacitance();
+    for (const auto& nid : net.get_node_map().sortedIds())
+      wire_cap += net.get_node_map().get(nid).get_capacitance();
     if (net.get_node_map().empty())
       wire_cap = net.get_lumped_capacitance();
     if (hasIncompleteNetwork(net, source))
@@ -69,8 +69,8 @@ double RcTreeAnalyzer::wireCapacitance(ParasiticNet& net) const
   if (net.get_lumped_capacitance() > 0.)
     return net.get_lumped_capacitance();
   double capacitance = 0.;
-  for (const auto& [name, node] : net.get_node_map())
-    capacitance += node.get_capacitance();
+  for (const auto& nid : net.get_node_map().sortedIds())
+    capacitance += net.get_node_map().get(nid).get_capacitance();
   return capacitance;
 }
 
@@ -225,8 +225,8 @@ void RcTreeAnalyzer::analyze(ParasiticNet& net, std::string& root, AnalysisType 
 double RcTreeAnalyzer::totalLoad(ParasiticNet& parasitic_net, AnalysisType analysis_type, TransType trans_type)
 {
   double total_load = 0.0;
-  for (std::pair<const std::string, ParasiticNode>& node_pair : parasitic_net.get_node_map()) {
-    std::string node_name = node_pair.first;
+  for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+    std::string node_name(parasitic_net.get_node_map().nameOf(nid));
     total_load += nodeLoad(parasitic_net, node_name, analysis_type, trans_type);
   }
   return total_load;

@@ -20,7 +20,17 @@
 #include <string>
 #include <vector>
 
+#include "NamedTable.h"
+
 namespace ista {
+
+// Domain tags for the SPEF node/net name spaces.
+struct ParasiticNodeTag;
+struct ParasiticNetTag;
+class ParasiticNode;
+class ParasiticNet;
+using ParasiticNodeTable = ecc::symbol::NamedTable<ParasiticNode, ParasiticNodeTag>;
+using ParasiticNetTable = ecc::symbol::NamedTable<ParasiticNet, ParasiticNetTag>;
 
 class ParasiticNode
 {
@@ -74,19 +84,20 @@ class ParasiticNet
   ~ParasiticNet() = default;
   // getter
   std::string& get_net_name() { return _net_name; }
-  std::map<std::string, ParasiticNode>& get_node_map() { return _node_map; }
+  ParasiticNodeTable& get_node_map() { return _node_map; }
+  const ParasiticNodeTable& get_node_map() const { return _node_map; }
   std::vector<ParasiticResistor>& get_resistor_list() { return _resistor_list; }
   double get_lumped_capacitance() const { return _lumped_capacitance; }
   // setter
   void set_net_name(const std::string& net_name) { _net_name = net_name; }
-  void set_node_map(const std::map<std::string, ParasiticNode>& node_map) { _node_map = node_map; }
+  void set_node_map(const ParasiticNodeTable& node_map) { _node_map = node_map; }
   void set_resistor_list(const std::vector<ParasiticResistor>& resistor_list) { _resistor_list = resistor_list; }
   void set_lumped_capacitance(const double lumped_capacitance) { _lumped_capacitance = lumped_capacitance; }
   // function
 
  private:
   std::string _net_name;
-  std::map<std::string, ParasiticNode> _node_map;
+  ParasiticNodeTable _node_map;
   std::vector<ParasiticResistor> _resistor_list;
   double _lumped_capacitance = 0.0;
 };
@@ -100,20 +111,20 @@ class Parasitics
   std::string& get_spef_file_path() { return _spef_file_path; }
   std::string& get_capacitive_unit() { return _capacitive_unit; }
   std::string& get_resistance_unit() { return _resistance_unit; }
-  std::map<std::string, ParasiticNet>& nets() { return _net_map; }
-  const std::map<std::string, ParasiticNet>& nets() const { return _net_map; }
+  ParasiticNetTable& nets() { return _net_map; }
+  const ParasiticNetTable& nets() const { return _net_map; }
   // setter
   void set_spef_file_path(const std::string& spef_file_path) { _spef_file_path = spef_file_path; }
   void set_capacitive_unit(const std::string& capacitive_unit) { _capacitive_unit = capacitive_unit; }
   void set_resistance_unit(const std::string& resistance_unit) { _resistance_unit = resistance_unit; }
-  void set_net_map(const std::map<std::string, ParasiticNet>& net_map) { _net_map = net_map; }
+  void set_net_map(const ParasiticNetTable& net_map) { _net_map = net_map; }
   // function
 
  private:
   std::string _spef_file_path;
   std::string _capacitive_unit;
   std::string _resistance_unit;
-  std::map<std::string, ParasiticNet> _net_map;
+  ParasiticNetTable _net_map;
 };
 
 }  // namespace ista

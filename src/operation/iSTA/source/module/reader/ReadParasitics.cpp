@@ -111,7 +111,8 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   // Apply this in pF after duplicate CAP entries have been summed, including
   // nodes present only in CONN/RES. Liberty pin capacitance is added later.
   constexpr double minimum_node_capacitance = 1e-9;
-  for (auto& [name, node] : parasitic_net.get_node_map()) {
+  for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+    ParasiticNode& node = parasitic_net.get_node_map().get(nid);
     node.set_capacitance(std::max(node.get_capacitance(), minimum_node_capacitance));
   }
   _parasitics.nets()[parasitic_net.get_net_name()] = parasitic_net;
