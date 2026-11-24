@@ -17,8 +17,8 @@ void LinkNetwork::link()
 
 void LinkNetwork::linkInstancePins()
 {
-  for (std::pair<const std::string, Instance>& instance_pair : _network.instances()) {
-    instance_pair.second.get_pin_name_list().clear();
+  for (const auto& id : _network.instances().sortedIds()) {
+    _network.instances().get(id).get_pin_name_list().clear();
   }
 
   for (std::pair<const std::string, Pin>& pin_pair : _network.pins()) {
@@ -33,8 +33,8 @@ void LinkNetwork::linkInstancePins()
 
 void LinkNetwork::linkInstances()
 {
-  for (std::pair<const std::string, Instance>& instance_pair : _network.instances()) {
-    linkInstance(instance_pair.second);
+  for (const auto& id : _network.instances().sortedIds()) {
+    linkInstance(_network.instances().get(id));
   }
 }
 

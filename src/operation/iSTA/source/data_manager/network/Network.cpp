@@ -174,7 +174,7 @@ const LibertyPort* Network::libertyPort(const LibertyLibrary& liberty, const Pin
   if (instance == instances().end())
     return nullptr;
   const auto& cells = liberty.get_cell_map();
-  const auto cell = cells.find(instance->second.get_cell_name());
+  const auto cell = cells.find(instance->get_cell_name());
   if (cell == cells.end())
     return nullptr;
   const auto port = cell->second.get_port_map().find(pin.get_pin_name());
@@ -186,8 +186,8 @@ TransType Network::launchClockTransition(std::string_view start) const
   const auto pin = pins().find(std::string(start));
   if (pin != pins().end() && !pin->second.get_is_port()) {
     const auto instance = instances().find(pin->second.get_instance_name());
-    if (instance != instances().end() && instance->second.get_is_sequential()) {
-      const std::vector<TimingArc>& arcs = instance->second.get_clock_to_q_arc().get_timing_arc_list();
+    if (instance != instances().end() && instance->get_is_sequential()) {
+      const std::vector<TimingArc>& arcs = instance->get_clock_to_q_arc().get_timing_arc_list();
       if (!arcs.empty() && arcs.front().get_trigger_trans_type() == TransType::kFall) {
         return TransType::kFall;
       }

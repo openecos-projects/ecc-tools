@@ -104,7 +104,7 @@ PinDirection TclGetFan::getDirection(Pin& pin)
   Database& database = STADM.getDatabase();
   auto instance = database.network().instances().find(pin.get_instance_name());
   if (!pin.get_is_port() && instance != database.network().instances().end()) {
-    auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+    auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
     if (cell != database.liberty().get_cell_map().end()) {
       auto port = cell->second.get_port_map().find(pin.get_pin_name());
       if (port != cell->second.get_port_map().end()) {
@@ -160,13 +160,13 @@ bool TclGetFan::isRegisterBoundary(Pin& pin)
     return false;
   }
   if (_is_fanin) {
-    if (!instance->second.get_is_sequential()) {
+    if (!instance->get_is_sequential()) {
       return false;
     }
-    if (pin.get_full_name() == instance->second.get_clock_pin_name()) {
+    if (pin.get_full_name() == instance->get_clock_pin_name()) {
       return true;
     }
-    auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+    auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
     if (cell != database.liberty().get_cell_map().end()) {
       for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
         if (arc.get_is_clock_arc() && pin.get_pin_name() == arc.get_source_port()) {
@@ -175,7 +175,7 @@ bool TclGetFan::isRegisterBoundary(Pin& pin)
       }
     }
   } else {
-    for (TimingCheckArc& check : instance->second.get_check_arc_list()) {
+    for (TimingCheckArc& check : instance->get_check_arc_list()) {
       if (pin.get_full_name() == check.get_data_port()) {
         return true;
       }
@@ -207,7 +207,7 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
   if (pin.get_is_port() || instance == database.network().instances().end()) {
     return adjacent;
   }
-  auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+  auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end()) {
     return adjacent;
   }
@@ -220,7 +220,7 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
     if (pin.get_pin_name() != (fanin ? arc.get_sink_port() : arc.get_source_port())) {
       continue;
     }
-    std::string other_name = instance->first + ":" + (fanin ? arc.get_source_port() : arc.get_sink_port());
+    std::string other_name = pin.get_instance_name() + ":" + (fanin ? arc.get_source_port() : arc.get_sink_port());
     auto other = database.network().pins().find(other_name);
     if (other != database.network().pins().end() && isSearchPin(other->second)) {
       adjacent.push_back(other_name);

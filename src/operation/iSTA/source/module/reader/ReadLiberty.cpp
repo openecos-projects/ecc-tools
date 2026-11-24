@@ -180,8 +180,8 @@ void ReadLiberty::readLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list)
 idb::LibLibrary* ReadLiberty::findReferenceLibrary(const std::vector<idb::LibLibrary*>& lib_list)
 {
   std::map<idb::LibLibrary*, std::pair<int32_t, int32_t>> lib_usage_map;
-  for (const std::pair<const std::string, Instance>& instance_pair : _network.instances()) {
-    const Instance& instance = instance_pair.second;
+  for (const auto& id : _network.instances().sortedIds()) {
+    const Instance& instance = _network.instances().get(id);
     for (idb::LibLibrary* lib : lib_list) {
       idb::LibCell* lib_cell = lib->findCell(instance.get_cell_name().c_str());
       if (lib_cell == nullptr) {

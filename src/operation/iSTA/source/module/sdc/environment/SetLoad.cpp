@@ -128,7 +128,7 @@ double getLibraryPinCapacitance(Database& database, const std::string& pin_name,
   if (instance_iter == database.network().instances().end()) {
     return 0.0;
   }
-  const auto cell_iter = database.liberty().get_cell_map().find(instance_iter->second.get_cell_name());
+  const auto cell_iter = database.liberty().get_cell_map().find(instance_iter->get_cell_name());
   if (cell_iter == database.liberty().get_cell_map().end()) {
     return 0.0;
   }

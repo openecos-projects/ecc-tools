@@ -117,14 +117,33 @@ void sortedIdsAreNameLexicographicRegardlessOfInsertOrder()
   for (const char* name : {"zebra", "mango", "apple", "kiwi"}) {
     table[name].value = 0;
   }
-  const std::vector<uint32_t> ids = table.sortedIds();
+  const std::vector<ecc::symbol::Id<TestTag>> ids = table.sortedIds();
   require(ids.size() == 4, "sortedIds() dropped or duplicated entries");
   std::vector<std::string> names;
-  for (uint32_t id : ids) {
-    names.push_back(std::string(table.nameOf(ecc::symbol::Id<TestTag>{id})));
+  for (const auto& id : ids) {
+    names.push_back(std::string(table.nameOf(id)));
   }
   const std::vector<std::string> expected = {"apple", "kiwi", "mango", "zebra"};
   require(names == expected, "sortedIds() did not reproduce name-lexicographic order");
+}
+
+// Mirrors replacing `for (auto& [name, x] : table) { x.touch(); }` with
+// `for (auto id : table.sortedIds()) { table.get(id).touch(); }` when the
+// loop body never needs the name.
+void sortedIdsPlusGetVisitsEveryValueExactlyOnce()
+{
+  WidgetTable table;
+  table["zebra"].value = 1;
+  table["mango"].value = 2;
+  table["apple"].value = 3;
+  int visited = 0;
+  int total = 0;
+  for (const auto& id : table.sortedIds()) {
+    ++visited;
+    total += table.get(id).value;
+  }
+  require(visited == 3, "sortedIds()+get() did not visit every entry exactly once");
+  require(total == 6, "sortedIds()+get() did not reach the same values operator[] stored");
 }
 
 }  // namespace
@@ -138,5 +157,6 @@ int main()
   clearResetsToEmpty();
   idRoundTripsThroughNameOfAndGet();
   sortedIdsAreNameLexicographicRegardlessOfInsertOrder();
+  sortedIdsPlusGetVisitsEveryValueExactlyOnce();
   return 0;
 }

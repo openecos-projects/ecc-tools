@@ -314,7 +314,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (pin_it == database.network().pins().end() || instance_it == database.network().instances().end()) {
       continue;
     }
-    const auto cell_it = library.get_cell_map().find(instance_it->second.get_cell_name());
+    const auto cell_it = library.get_cell_map().find(instance_it->get_cell_name());
     if (cell_it == library.get_cell_map().end()) {
       continue;
     }
@@ -334,7 +334,8 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     }
   }
 
-  for (auto& [instance_name, instance] : database.network().instances()) {
+  for (const auto& id : database.network().instances().sortedIds()) {
+    const Instance& instance = database.network().instances().get(id);
     if (!instance.get_is_sequential())
       continue;
     if (!instance.get_clock_pin_name().empty())
@@ -377,7 +378,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     exported.level = exported.is_clock_arc ? 0 : database.graph().sinkPoint(arc).get_level();
     const auto owner_it = database.network().instances().find(arc.get_owner_name());
     if (!arc.get_owner_name().empty() && owner_it != database.network().instances().end()) {
-      exported.library_cell = owner_it->second.get_cell_name();
+      exported.library_cell = owner_it->get_cell_name();
     } else if (arc.get_type() == ArcType::kCell && !arc.get_owner_name().empty()) {
       addDiagnostic("unsupported arc owner identity: " + arc.get_owner_name());
     }
@@ -459,7 +460,8 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     }
   }
 
-  for (auto& [instance_name, instance] : database.network().instances()) {
+  for (const auto& id : database.network().instances().sortedIds()) {
+    Instance& instance = database.network().instances().get(id);
     const auto cell_it = cell_ids.find(instance.get_cell_name());
     if (cell_it == cell_ids.end())
       continue;

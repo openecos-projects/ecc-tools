@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "NamedTable.h"
 #include "network/HierarchyPin.hpp"
 #include "network/Instance.hpp"
 #include "network/Net.hpp"
@@ -18,6 +19,13 @@
 namespace ista {
 class LibertyLibrary;
 class LibertyPort;
+
+// Domain tags for ecc::symbol::Id<Domain>/NamedTable<T, Domain>; never
+// defined, used only to keep distinct name domains from being interchangeable
+// at the type level even though every Id<Domain> is the same uint32_t at
+// runtime.
+struct InstanceTag;
+using InstanceTable = ecc::symbol::NamedTable<Instance, InstanceTag>;
 
 struct NetSegment
 {
@@ -35,8 +43,8 @@ class Network
  public:
   std::string& name() { return _name; }
   const std::string& name() const { return _name; }
-  std::map<std::string, Instance, std::less<>>& instances() { return _instances; }
-  const std::map<std::string, Instance, std::less<>>& instances() const { return _instances; }
+  InstanceTable& instances() { return _instances; }
+  const InstanceTable& instances() const { return _instances; }
   std::map<std::string, Pin, std::less<>>& pins() { return _pins; }
   const std::map<std::string, Pin, std::less<>>& pins() const { return _pins; }
   std::map<std::string, Net, std::less<>>& nets() { return _nets; }
@@ -69,7 +77,7 @@ class Network
   std::unordered_map<std::string, std::string> _net_query_names;
   std::unordered_map<std::string, std::vector<std::string>> _pin_nets;
   std::string _name;
-  std::map<std::string, Instance, std::less<>> _instances;
+  InstanceTable _instances;
   std::map<std::string, Pin, std::less<>> _pins;
   std::map<std::string, Net, std::less<>> _nets;
   std::map<std::string, HierarchyPin, std::less<>> _hierarchy_pins;

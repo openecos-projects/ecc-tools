@@ -67,8 +67,8 @@ int32_t QorSummaryBuilder::getQorCellArea()
 {
   Database& database = _database;
   double cell_area = 0.0;
-  for (std::pair<const std::string, Instance>& instance_pair : database.network().instances()) {
-    Instance& instance = database.network().instances()[instance_pair.first];
+  for (const auto& id : database.network().instances().sortedIds()) {
+    Instance& instance = database.network().instances().get(id);
     std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
     if (timing_cell_map.count(instance.get_cell_name()) > 0) {
       cell_area += timing_cell_map[instance.get_cell_name()].get_area();
@@ -82,7 +82,8 @@ int32_t QorSummaryBuilder::getQorLeafCellK()
   std::size_t leaf_count = 0;
   const auto& cells = _database.liberty().get_cell_map();
   const auto& pins = _database.network().pins();
-  for (const auto& [name, instance] : _database.network().instances()) {
+  for (const auto& id : _database.network().instances().sortedIds()) {
+    const Instance& instance = _database.network().instances().get(id);
     const bool connected = std::any_of(instance.get_pin_name_list().begin(), instance.get_pin_name_list().end(),
                                        [&](const std::string& pin_name) {
                                          const auto pin = pins.find(pin_name);

@@ -129,9 +129,9 @@ std::string nodeKind(const Database& database, const Pin& pin, bool root, bool s
   if (instance == database.network().instances().end()) {
     return "other_boundary";
   }
-  const std::string& master = instance->second.get_cell_name();
+  const std::string& master = instance->get_cell_name();
   const bool output = pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout;
-  if (isClockGate(database, &instance->second)) {
+  if (isClockGate(database, instance)) {
     return output ? "icg_output" : "icg_input";
   }
   if (isInverter(master)) {
@@ -153,8 +153,8 @@ std::string cellRole(const Database& database, const Pin& pin)
   if (instance == database.network().instances().end()) {
     return {};
   }
-  const std::string& master = instance->second.get_cell_name();
-  if (isClockGate(database, &instance->second)) {
+  const std::string& master = instance->get_cell_name();
+  if (isClockGate(database, instance)) {
     return "clock_gate";
   }
   if (isInverter(master)) {
@@ -201,7 +201,7 @@ std::string cellMasterForArc(const Database& database, const Arc& arc)
     return {};
   }
   const auto instance = database.network().instances().find(source->second.get_instance_name());
-  return instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
+  return instance == database.network().instances().end() ? std::string{} : instance->get_cell_name();
 }
 
 std::optional<double> finiteNs(const std::optional<double>& value, TimingTimeUnit unit)
@@ -340,7 +340,7 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
       node.name = nodeName(pin);
       node.instance_name = pin.get_instance_name();
       node.pin_name = pin.get_pin_name();
-      node.master = instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
+      node.master = instance == database.network().instances().end() ? std::string{} : instance->get_cell_name();
       const bool root = root_pins.contains(pin_key);
       const bool sink = sink_pins.contains(pin_key);
       node.kind = nodeKind(database, pin, root, sink);

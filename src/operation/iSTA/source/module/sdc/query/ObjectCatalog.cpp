@@ -96,9 +96,11 @@ std::map<std::string, std::vector<std::string>> cellPaths(const Network& network
     path.push_back(parent.empty() ? name : name.substr(parent.size() + 1));
   }
   // Networks supplied without an elaboration plan have only textual names.
-  for (const auto& [name, instance] : network.instances())
+  for (const auto& id : network.instances().sortedIds()) {
+    const std::string name(network.instances().nameOf(id));
     if (!paths.contains(name))
       paths[name] = splitPath(name);
+  }
   return paths;
 }
 
@@ -167,7 +169,7 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
         attributes["pin_name"] = pin.get_pin_name();
         const auto instance = database.network().instances().find(pin.get_instance_name());
         if (instance != database.network().instances().end())
-          attributes["ref_name"] = instance->second.get_cell_name();
+          attributes["ref_name"] = instance->get_cell_name();
       }
       addObjectMatch(matches, name, display, pin.get_is_port() ? "port" : "pin", std::move(attributes));
     }
@@ -181,7 +183,9 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
   if (type == QueryObjectType::kCell || type == QueryObjectType::kAny) {
     for (const auto& name : database.network().hierarchyCells())
       addObjectMatch(matches, name, name, "cell", {{"is_hierarchical", "true"}, {"is_sequential", "false"}});
-    for (auto& [name, instance] : database.network().instances()) {
+    for (const auto& id : database.network().instances().sortedIds()) {
+      const std::string name(database.network().instances().nameOf(id));
+      const Instance& instance = database.network().instances().get(id);
       addObjectMatch(matches, name, name, "cell",
                      {{"ref_name", instance.get_cell_name()},
                       {"is_hierarchical", "false"},
@@ -329,7 +333,7 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       Pin& pin = database.network().pins().at(object_name);
       auto instance = database.network().instances().find(pin.get_instance_name());
       if (instance != database.network().instances().end()) {
-        auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+        auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
         if (cell != database.liberty().get_cell_map().end())
           result.insert(cell->second.get_library_name() + "/" + cell->first + "/" + pin.get_pin_name());
       }

@@ -64,7 +64,7 @@ bool isBidirectionalCellPin(Database& database, const std::string& pin_name)
   const auto instance = database.network().instances().find(pin->second.get_instance_name());
   if (instance == database.network().instances().end())
     return false;
-  const auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+  const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end())
     return false;
   const auto port = cell->second.get_port_map().find(pin->second.get_pin_name());
@@ -111,7 +111,7 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
   const auto instance = database.network().instances().find(pin->second.get_instance_name());
   if (instance == database.network().instances().end())
     return -1;
-  const auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+  const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end())
     return -1;
 
@@ -228,7 +228,8 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   view.clock_reached_pins.resize(view.domains.size(), 0);
   view.clock_reached_sequential_pins.resize(view.domains.size(), 0);
   std::set<std::string> sequential_clock_pins;
-  for (auto& [name, instance] : database.network().instances()) {
+  for (const auto& id : database.network().instances().sortedIds()) {
+    const Instance& instance = database.network().instances().get(id);
     if (instance.get_is_sequential()) {
       ++view.sequential_instances;
       sequential_clock_pins.insert(instance.get_clock_pin_name());

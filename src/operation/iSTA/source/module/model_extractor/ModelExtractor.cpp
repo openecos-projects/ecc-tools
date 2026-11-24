@@ -59,8 +59,8 @@ double ModelExtractor::getDesignArea()
 {
   Database& database = _database;
   double design_area = 0.0;
-  for (std::pair<const std::string, Instance>& instance_pair : database.network().instances()) {
-    Instance& instance = instance_pair.second;
+  for (const auto& id : database.network().instances().sortedIds()) {
+    Instance& instance = database.network().instances().get(id);
     if (database.liberty().get_cell_map().count(instance.get_cell_name()) == 0) {
       continue;
     }

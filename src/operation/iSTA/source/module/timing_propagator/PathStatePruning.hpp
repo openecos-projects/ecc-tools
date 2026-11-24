@@ -61,7 +61,7 @@ class PathStatePruning
         } else {
           const auto instance = _database.network().instances().find(pin.get_instance_name());
           if (instance != _database.network().instances().end())
-            for (const auto& arc : instance->second.get_check_arc_list()) {
+            for (const auto& arc : instance->get_check_arc_list()) {
               const auto type = arc.get_check_type();
               if (arc.get_data_port() != endpoint
                   || !(mode == AnalysisType::kMax ? type == TimingCheckType::kSetup || type == TimingCheckType::kRecovery

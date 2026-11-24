@@ -77,7 +77,7 @@ void outputClockPathJson(std::ostream& json_file, Database& database, const std:
     const bool is_port = pin != database.network().pins().end() && pin->second.get_is_port();
     const std::string instance_name = pin == database.network().pins().end() ? std::string{} : pin->second.get_instance_name();
     const auto instance = database.network().instances().find(instance_name);
-    const std::string cell_name = instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
+    const std::string cell_name = instance == database.network().instances().end() ? std::string{} : instance->get_cell_name();
     json_file << "{\"kind\":\"" << (is_port ? "point" : "clock_arc") << "\",\"pin\":\"" << escapeJsonString(point.pin_name) << "\",\"instance\":\""
               << escapeJsonString(instance_name) << "\",\"cell\":\"" << escapeJsonString(cell_name) << "\",\"transition\":\""
               << GetTransTypeName()(point.transition) << "\"}";

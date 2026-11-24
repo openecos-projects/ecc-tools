@@ -40,10 +40,10 @@ bool isRegisterOutput(const Database& database, const ExceptionObject& object)
     return false;
   const auto& instances = database.network().instances();
   auto instance = instances.find(pin->second.get_instance_name());
-  if (instance == instances.end() || !instance->second.get_is_sequential())
+  if (instance == instances.end() || !instance->get_is_sequential())
     return false;
   const auto& cells = database.liberty().get_cell_map();
-  auto cell = cells.find(instance->second.get_cell_name());
+  auto cell = cells.find(instance->get_cell_name());
   if (cell == cells.end())
     return false;
   const auto& ports = cell->second.get_port_map();

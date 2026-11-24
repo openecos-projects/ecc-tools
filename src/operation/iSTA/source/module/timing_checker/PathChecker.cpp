@@ -45,8 +45,8 @@ std::string_view PathChecker::getClockName(const std::string& pin_name)
     return point->second.launchClock();
   if (pin != pins.end() && !pin->second.get_is_port()) {
     const auto instance = _database.network().instances().find(pin->second.get_instance_name());
-    if (instance != _database.network().instances().end() && instance->second.get_is_sequential()) {
-      const auto clock_point = points.find(instance->second.get_clock_pin_name());
+    if (instance != _database.network().instances().end() && instance->get_is_sequential()) {
+      const auto clock_point = points.find(instance->get_clock_pin_name());
       if (clock_point != points.end() && !clock_point->second.launchClock().empty())
         return clock_point->second.launchClock();
     }
@@ -434,9 +434,9 @@ double PathChecker::getClockReconvergencePessimism(const TimingPathState& path, 
     if (pin == _database.network().pins().end() || pin->second.get_is_port())
       return 0.0;
     const auto instance = _database.network().instances().find(pin->second.get_instance_name());
-    if (instance == _database.network().instances().end() || !instance->second.get_is_sequential())
+    if (instance == _database.network().instances().end() || !instance->get_is_sequential())
       return 0.0;
-    launch_pin = instance->second.get_clock_pin_name();
+    launch_pin = instance->get_clock_pin_name();
     launch_transition = path.get_launch_clock_trans_type();
   }
   if (!_database.network().pins().contains(launch_pin))
@@ -459,7 +459,7 @@ std::vector<TimingCheckArc*> PathChecker::getCheckArcs(const std::string& end_po
     for (auto& arc : gating->second)
       if (isMatchCheckType(arc, analysis))
         arcs.push_back(&arc);
-  for (auto& arc : instance->second.get_check_arc_list())
+  for (auto& arc : instance->get_check_arc_list())
     if (arc.get_data_port() == end_point && isMatchCheckType(arc, analysis))
       arcs.push_back(&arc);
   return arcs;

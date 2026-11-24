@@ -103,8 +103,17 @@ class NamedTable
   const T& get(IdType id) const { return _storage[id.value - 1]; }
 
   // Ids in name-lexicographic order, matching the order std::map<std::string, T>
-  // iteration already gave every existing consumer.
-  std::vector<uint32_t> sortedIds() const { return _symbols.sorted_ids(); }
+  // iteration already gave every existing consumer. Pair with get(id) to
+  // replace a `for (auto& [name, value] : table)` loop that only needs the
+  // value, not the name.
+  std::vector<IdType> sortedIds() const
+  {
+    std::vector<IdType> ids;
+    for (uint32_t id : _symbols.sorted_ids()) {
+      ids.push_back(IdType{id});
+    }
+    return ids;
+  }
 
  private:
   SymbolTable _symbols;

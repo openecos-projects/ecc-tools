@@ -49,7 +49,7 @@ std::optional<double> ElectricalChecker::limit(ElectricalRule rule, const Pin& p
   std::string lib_pin;
   const auto instance = db.network().instances().find(pin.get_instance_name());
   if (!pin.get_is_port() && instance != db.network().instances().end()) {
-    const auto found = db.liberty().get_cell_map().find(instance->second.get_cell_name());
+    const auto found = db.liberty().get_cell_map().find(instance->get_cell_name());
     if (found != db.liberty().get_cell_map().end()) {
       cell = &found->second;
       lib_pin = cell->get_library_name() + "/" + found->first + "/" + pin.get_pin_name();

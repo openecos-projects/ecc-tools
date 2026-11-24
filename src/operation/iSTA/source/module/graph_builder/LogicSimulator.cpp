@@ -104,7 +104,9 @@ void LogicSimulator::propagateCaseValues()
       }
     }
 
-    for (const auto& [instance_name, instance] : _network.instances()) {
+    for (const auto& instance_id : _network.instances().sortedIds()) {
+      const std::string instance_name(_network.instances().nameOf(instance_id));
+      const Instance& instance = _network.instances().get(instance_id);
       const auto cell = _liberty.get_cell_map().find(instance.get_cell_name());
       if (cell == _liberty.get_cell_map().end())
         continue;
@@ -159,10 +161,10 @@ void LogicSimulator::disableInsensitiveArcs()
     const auto instance = _network.instances().find(arc.get_owner_name());
     if (instance == _network.instances().end())
       continue;
-    const auto cell = _liberty.get_cell_map().find(instance->second.get_cell_name());
+    const auto cell = _liberty.get_cell_map().find(instance->get_cell_name());
     if (cell == _liberty.get_cell_map().end())
       continue;
-    const auto values = constantInputs(instance->second);
+    const auto values = constantInputs(*instance);
     const auto* cell_arc = arc.libertyArcId() ? _liberty.findCellArc(*arc.libertyArcId()) : nullptr;
     bool enabled = cell_arc == nullptr || cell_arc->get_timing_arc_list().empty();
     if (cell_arc != nullptr) {

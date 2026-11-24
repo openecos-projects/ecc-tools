@@ -39,7 +39,9 @@ std::vector<ClockCheck> ClockChecker::check()
   std::map<std::tuple<std::string, std::string, TimingCheckType, TransType>, ClockCheck> worst;
   const auto& factors = _database.sdc().timingDerates();
   ClockReconvergenceCalculator reconvergence(_database);
-  for (const auto& [instance_name, instance] : _database.network().instances()) {
+  for (const auto& instance_id : _database.network().instances().sortedIds()) {
+    const std::string instance_name(_database.network().instances().nameOf(instance_id));
+    const Instance& instance = _database.network().instances().get(instance_id);
     auto cell = _database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell == _database.liberty().get_cell_map().end())
       continue;

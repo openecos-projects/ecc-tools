@@ -65,7 +65,7 @@ int endpointSelectorSpecificity(const Network& network, const ExceptionObjects& 
     const auto instance = network.instances().find(pin->second.get_instance_name());
     concrete = concrete
                || (start && instance != network.instances().end()
-                   && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, instance->second.get_clock_pin_name()}));
+                   && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, instance->get_clock_pin_name()}));
   }
   if (concrete) {
     return concrete_score;
@@ -346,12 +346,13 @@ bool ExceptionMatcher::matchesEndpointObjects(const ExceptionObjects& objects, s
   if (pin == _network.pins().end() || pin->second.get_is_port()) {
     return false;
   }
-  const auto instance = _network.instances().find(pin->second.get_instance_name());
+  const std::string& instance_name = pin->second.get_instance_name();
+  const auto instance = _network.instances().find(instance_name);
   if (instance == _network.instances().end()) {
     return false;
   }
-  return objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kCell, instance->first})
-         || (start && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, instance->second.get_clock_pin_name()}));
+  return objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kCell, instance_name})
+         || (start && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, instance->get_clock_pin_name()}));
 }
 
 }  // namespace ista

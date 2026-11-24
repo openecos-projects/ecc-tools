@@ -36,7 +36,8 @@ void ClockGatingChecker::infer()
         if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
           pending.emplace_back(pin, clock);
   };
-  for (const auto& [name, instance] : network.instances()) {
+  for (const auto& id : network.instances().sortedIds()) {
+    const Instance& instance = network.instances().get(id);
     if (!instance.get_is_sequential() && !instance.get_is_clock_gating())
       continue;
     seed(instance.get_clock_pin_name());

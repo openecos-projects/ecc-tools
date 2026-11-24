@@ -51,7 +51,9 @@ void GraphConnectivityBuilder::buildTimingPointList()
 void GraphConnectivityBuilder::buildCellArcs()
 {
   Database& database = _database;
-  for (auto& [instance_name, instance] : database.network().instances()) {
+  for (const auto& instance_id : database.network().instances().sortedIds()) {
+    const std::string instance_name(database.network().instances().nameOf(instance_id));
+    Instance& instance = database.network().instances().get(instance_id);
     if (buildLibraryCellArcs(instance)) {
       continue;
     }

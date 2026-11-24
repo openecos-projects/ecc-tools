@@ -44,9 +44,9 @@ bool masterReachesSource(const Network& network, const TimingClock& master, cons
     }
     if (!pin.get_is_port() && direction != PinDirection::kOutput) {
       const auto cell = network.instances().find(pin.get_instance_name());
-      if (cell == network.instances().end() || (cell->second.get_is_sequential() && cell->second.get_clock_pin_name() != name))
+      if (cell == network.instances().end() || (cell->get_is_sequential() && cell->get_clock_pin_name() != name))
         continue;
-      for (const auto& output_name : cell->second.get_pin_name_list()) {
+      for (const auto& output_name : cell->get_pin_name_list()) {
         const auto output = network.pins().find(output_name);
         if (output != network.pins().end() && output->second.get_direction() != PinDirection::kInput)
           pending.push_back(output_name);
