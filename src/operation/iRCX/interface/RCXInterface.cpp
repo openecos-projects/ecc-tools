@@ -330,7 +330,10 @@ void RCXInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   config.report_geometry = false;
 
   // 配置文件
-  std::filesystem::path config_file_path = std::filesystem::absolute(RCXUTIL.getConfigValue<std::string>(config_map, "-config", ""));
+  std::error_code path_error;
+  std::filesystem::path config_file_path = std::filesystem::absolute(RCXUTIL.getConfigValue<std::string>(config_map, "-config", ""), path_error);
+  if (path_error)
+    RCXLOG.error(Loc::current(), "Failed to resolve config path: ", path_error.message());
   config.config_file_path = config_file_path.string();
 
   std::ifstream config_file_stream(config_file_path);
@@ -338,42 +341,103 @@ void RCXInterface::wrapConfig(std::map<std::string, std::any>& config_map)
     RCXLOG.error(Loc::current(), "Failed to open config file '", config.config_file_path, "'!");
   }
 
-  nlohmann::json config_json;
-  config_file_stream >> config_json;
+  auto config_json = nlohmann::json::parse(config_file_stream, nullptr, false);
+  if (config_file_stream.bad())
+    RCXLOG.error(Loc::current(), "Failed to read config file: ", config.config_file_path);
+  if (config_json.is_discarded())
+    RCXLOG.error(Loc::current(), "Invalid JSON in config file: ", config.config_file_path);
+  if (!config_json.is_object())
+    RCXLOG.error(Loc::current(), "RCX config must be an object");
+  const auto string_field = [](const nlohmann::json& object, const char* key) -> std::string {
+    if (!object.contains(key) || !object.at(key).is_string())
+      RCXLOG.error(Loc::current(), key, " must be a string");
+    return object.at(key).get<std::string>();
+  };
 
   std::filesystem::path config_directory_path = config_file_path.parent_path();
 
   // 通用配置
   config.thread_number = normalizeThreadNumber(config_json);
   if (config_json.contains("output")) {
-    std::string output_directory_path = config_json["output"].get<std::string>();
+    std::string output_directory_path = string_field(config_json, "output");
     if (!output_directory_path.empty()) {
       config.output_directory_path = RCXUTIL.getAbsolutePath(config_directory_path, output_directory_path);
       config.temp_directory_path = config.output_directory_path;
     }
   }
   if (config_json.contains("report_geometry")) {
+    if (!config_json.at("report_geometry").is_boolean())
+      RCXLOG.error(Loc::current(), "report_geometry must be a boolean");
     config.report_geometry = config_json["report_geometry"].get<bool>();
   }
-  config.mapping_file_path = RCXUTIL.getAbsolutePath(config_directory_path, config_json["mapping_file"].get<std::string>());
+  config.mapping_file_path = RCXUTIL.getAbsolutePath(config_directory_path, string_field(config_json, "mapping_file"));
 
-  // 工艺角配置
+  // Build corner configuration before replacing the previous list.
+  std::vector<Corner> corners;
+  if (!config_json.contains("corners") || !config_json.at("corners").is_array() || config_json.at("corners").empty())
+    RCXLOG.error(Loc::current(), "corners must be a nonempty array");
   for (nlohmann::json& corner_json : config_json["corners"]) {
+    if (!corner_json.is_object())
+      RCXLOG.error(Loc::current(), "corner must be an object");
     Corner corner;
     corner.set_tmpr_list(std::vector<double>{25.0});
-    corner.set_corner_name(corner_json["name"].get<std::string>());
+    corner.set_corner_name(string_field(corner_json, "name"));
     if (corner_json.contains("temperature")) {
+      if (!corner_json.at("temperature").is_array())
+        RCXLOG.error(Loc::current(), "temperature must be an array");
       std::vector<double> tmpr_list;
       for (nlohmann::json& tmpr_json : corner_json["temperature"]) {
+        if (!tmpr_json.is_number())
+          RCXLOG.error(Loc::current(), "corner temperature must be numeric");
         tmpr_list.push_back(tmpr_json.get<double>());
       }
       corner.set_tmpr_list(tmpr_list);
     }
-    corner.set_itf_file_path(RCXUTIL.getAbsolutePath(config_directory_path, corner_json["itf_file"].get<std::string>()));
-    corner.set_captab_file_path(RCXUTIL.getAbsolutePath(config_directory_path, corner_json["captab_file"].get<std::string>()));
-    config.corner_list.push_back(std::move(corner));
+    const bool has_process = corner_json.contains("process_file");
+    const bool has_legacy = corner_json.contains("itf_file");
+    if (!has_process && !has_legacy)
+      RCXLOG.error(Loc::current(), "corner requires process_file");
+    const auto resolve = [&](const char* key) {
+      const auto path = string_field(corner_json, key);
+      if (path.empty())
+        RCXLOG.error(Loc::current(), std::string(key) + " must not be empty");
+      return std::filesystem::path(RCXUTIL.getAbsolutePath(config_directory_path, path)).lexically_normal().string();
+    };
+    const auto process_path = resolve(has_process ? "process_file" : "itf_file");
+    if (has_process && has_legacy && process_path != resolve("itf_file"))
+      RCXLOG.error(Loc::current(), "process_file and legacy itf_file refer to different files");
+    corner.set_process_file_path(process_path);
+    if (corner_json.contains("process_options")) {
+      ProcessParseOptions options;
+      const auto& settings = corner_json.at("process_options");
+      if (!settings.is_object())
+        RCXLOG.error(Loc::current(), "process_options must be an object");
+      for (auto it = settings.begin(); it != settings.end(); ++it)
+        if (it.key() != "extensions")
+          RCXLOG.error(Loc::current(), "unknown process option: " + it.key());
+      if (settings.contains("extensions")) {
+        if (!settings.at("extensions").is_array())
+          RCXLOG.error(Loc::current(), "process extensions must be an array");
+        for (const auto& extension : settings.at("extensions")) {
+          if (!extension.is_string())
+            RCXLOG.error(Loc::current(), "process extension must be a string");
+          if (extension.get<std::string>() != "dielectric_surface_fields")
+            RCXLOG.error(Loc::current(), "unknown process extension: " + extension.get<std::string>());
+          // Accepted for compatibility; surface fields are ordinary input now.
+        }
+      }
+      corner.set_process_options(options);
+    }
+    corner.set_captab_file_path(RCXUTIL.getAbsolutePath(config_directory_path, string_field(corner_json, "captab_file")));
+    if (corner.get_tmpr_list().empty())
+      RCXLOG.error(Loc::current(), "corner temperature list must not be empty");
+    for (double temperature : corner.get_tmpr_list())
+      if (!std::isfinite(temperature))
+        RCXLOG.error(Loc::current(), "corner temperature must be finite");
+    corners.push_back(std::move(corner));
   }
 
+  config.corner_list = std::move(corners);
   omp_set_num_threads(config.thread_number);
 }
 

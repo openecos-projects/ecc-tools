@@ -8,11 +8,13 @@ endif()
 
 add_library(ircx_data_manager
     ${IRCX_DATA_MANAGER}/DataManager.cpp
+    ${IRCX_DATA_MANAGER}/ProcessBinding.cpp
 )
 
 target_link_libraries(ircx_data_manager
     PUBLIC
     ircx_toolkit
+    ircx_process_parser
 )
 
 target_include_directories(ircx_data_manager

@@ -10,32 +10,37 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
 
-#include "RCXHeader.hpp"
+#include <string>
+
+
 
 namespace ircx {
 
-class TableIdxRange
+enum class ProcessEffectType
 {
- public:
-  TableIdxRange() = default;
-  TableIdxRange(int32_t lower_idx, int32_t upper_idx) : _lower_idx(lower_idx), _upper_idx(upper_idx) {}
-  ~TableIdxRange() = default;
-  // getter
-  int32_t get_lower_idx() const { return _lower_idx; }
-  int32_t get_upper_idx() const { return _upper_idx; }
-  // setter
-  void set_lower_idx(int32_t lower_idx) { _lower_idx = lower_idx; }
-  void set_upper_idx(int32_t upper_idx) { _upper_idx = upper_idx; }
-  // function
+  kNone,
+  kBoth,
+  kResistance,
+  kCapacitance
+};
 
- private:
-  int32_t _lower_idx = -1;
-  int32_t _upper_idx = -1;
+struct GetProcessEffectType
+{
+  ProcessEffectType operator()(const std::string& process_effect_type_name) const
+  {
+    if (process_effect_type_name == "RESISTIVE_ONLY") {
+      return ProcessEffectType::kResistance;
+    }
+    if (process_effect_type_name == "CAPACITIVE_ONLY") {
+      return ProcessEffectType::kCapacitance;
+    }
+    return ProcessEffectType::kNone;
+  }
 };
 
 }  // namespace ircx

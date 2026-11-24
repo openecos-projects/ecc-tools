@@ -17,6 +17,8 @@
 #include "VarProcessor.hpp"
 
 #include "Utility.hpp"
+#include "ProcessBinding.hpp"
+#include "ProcessEvaluator.hpp"
 
 namespace ircx {
 
@@ -92,7 +94,7 @@ void VarProcessor::buildNetEtchProfile(int32_t corner_idx, int32_t net_idx)
     TopoEdge& edge = edge_list[edge_idx];
     std::vector<EdgeEtchInterval> edge_interval_list;
     if (!edge.get_is_via()) {
-      ProcessConductor* conductor = getProcessConductor(corner_data, edge.get_layer_idx());
+      const ProcessConductor* conductor = getProcessConductor(corner_data, edge.get_layer_idx());
       if (conductor != nullptr) {
         std::span<EdgeEnvInterval> env_interval_list = net_env.get_edge_interval_list(edge_idx);
         for (EdgeEnvInterval& env_interval : env_interval_list) {
@@ -126,14 +128,19 @@ void VarProcessor::applyCornerNetEffectiveGeometryList()
   int32_t thread_num = RCXUTIL.getThreadNum(net_num, RCXDM.getConfig().thread_number);
 
   for (int32_t corner_idx = 0; corner_idx < corner_num; ++corner_idx) {
+    std::vector<std::string> errors(net_num);
 #pragma omp parallel for schedule(dynamic) num_threads(thread_num)
     for (int32_t net_idx = 0; net_idx < net_num; ++net_idx) {
-      applyNetEffectiveGeometry(corner_idx, net_idx);
+      errors[net_idx] = applyNetEffectiveGeometry(corner_idx, net_idx);
+    }
+    for (int32_t net_idx = 0; net_idx < net_num; ++net_idx) {
+      if (!errors[net_idx].empty())
+        RCXLOG.error(Loc::current(), "Geometry evaluation failed for net ", net_idx, ": ", errors[net_idx]);
     }
   }
 }
 
-void VarProcessor::applyNetEffectiveGeometry(int32_t corner_idx, int32_t net_idx)
+std::string VarProcessor::applyNetEffectiveGeometry(int32_t corner_idx, int32_t net_idx)
 {
   Database& database = RCXDM.getDatabase();
   CornerData& corner_data = database.get_corner_data_list()[corner_idx];
@@ -145,60 +152,35 @@ void VarProcessor::applyNetEffectiveGeometry(int32_t corner_idx, int32_t net_idx
     if (edge.get_is_via()) {
       continue;
     }
-    ProcessConductor* conductor = getProcessConductor(corner_data, edge.get_layer_idx());
+    const ProcessConductor* conductor = getProcessConductor(corner_data, edge.get_layer_idx());
     if (conductor == nullptr) {
       continue;
     }
     std::span<EdgeEtchInterval> edge_interval_list = net_etch_profile.get_edge_interval_list(edge_idx);
     for (EdgeEtchInterval& edge_interval : edge_interval_list) {
-      applyEdgeEffectiveGeometry(*conductor, edge_interval);
+      auto error = applyEdgeEffectiveGeometry(*conductor, edge_interval);
+      if (!error.empty())
+        return error;
     }
   }
+  return {};
 }
 
-void VarProcessor::applyEdgeEffectiveGeometry(ProcessConductor& conductor, EdgeEtchInterval& edge_interval)
+std::string VarProcessor::applyEdgeEffectiveGeometry(const ProcessConductor& conductor, EdgeEtchInterval& edge_interval)
 {
-  for (ProcessEtchTable& etch_table : conductor.get_etch_table_list()) {
-    double lower_etch = 0.0;
-    std::optional<double> lower_etch_value = etch_table.get_table().query(edge_interval.get_width(), edge_interval.get_lower_spacing());
-    if (lower_etch_value.has_value()) {
-      lower_etch = lower_etch_value.value();
-    }
-
-    double upper_etch = 0.0;
-    std::optional<double> upper_etch_value = etch_table.get_table().query(edge_interval.get_width(), edge_interval.get_upper_spacing());
-    if (upper_etch_value.has_value()) {
-      upper_etch = upper_etch_value.value();
-    }
-
-    edge_interval.set_center(edge_interval.get_center() + 0.5 * lower_etch - 0.5 * upper_etch);
-    edge_interval.set_width(edge_interval.get_width() - lower_etch - upper_etch);
-  }
-
-  edge_interval.set_thickness(conductor.get_thickness());
+  const auto geometry = evaluateWireGeometry(conductor,
+      {edge_interval.get_width(), edge_interval.get_lower_spacing(), edge_interval.get_upper_spacing()}, ProcessEffectType::kCapacitance);
+  if (!geometry)
+    return geometry.error;
+  edge_interval.set_center(edge_interval.get_center() + geometry->center_shift);
+  edge_interval.set_width(geometry->width);
+  edge_interval.set_thickness(geometry->thickness);
+  return {};
 }
 
-ProcessConductor* VarProcessor::getProcessConductor(CornerData& corner_data, int32_t design_layer_idx)
+const ProcessConductor* VarProcessor::getProcessConductor(CornerData& corner_data, int32_t design_layer_idx)
 {
-  LayerTable& layer_table = RCXDM.getDatabase().get_layer_table();
-  std::unordered_map<int32_t, std::string>& design_idx_to_name_map = layer_table.get_design_idx_to_name_map();
-  if (design_idx_to_name_map.count(design_layer_idx) == 0) {
-    return nullptr;
-  }
-
-  std::string& design_layer_name = design_idx_to_name_map[design_layer_idx];
-  std::unordered_map<std::string, std::string>& design_name_to_process_name_map = layer_table.get_design_name_to_process_name_map();
-  if (design_name_to_process_name_map.count(design_layer_name) == 0) {
-    return nullptr;
-  }
-
-  std::string& process_layer_name = design_name_to_process_name_map[design_layer_name];
-  for (ProcessConductor& conductor : corner_data.get_process_conductor_list()) {
-    if (conductor.get_layer_name() == process_layer_name) {
-      return &conductor;
-    }
-  }
-  return nullptr;
+  return findProcessConductor(corner_data, RCXDM.getDatabase().get_layer_table(), design_layer_idx);
 }
 
 }  // namespace ircx

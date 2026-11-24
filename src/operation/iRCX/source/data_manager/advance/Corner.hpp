@@ -16,6 +16,7 @@
 #pragma once
 
 #include "RCXHeader.hpp"
+#include "ProcessReader.hpp"
 
 namespace ircx {
 
@@ -27,19 +28,22 @@ class Corner
   // getter
   std::string& get_corner_name() { return _corner_name; }
   std::vector<double>& get_tmpr_list() { return _tmpr_list; }
-  std::string& get_itf_file_path() { return _itf_file_path; }
+  std::string& get_process_file_path() { return _process_file_path; }
   std::string& get_captab_file_path() { return _captab_file_path; }
+  const ProcessParseOptions& get_process_options() const { return _process_options; }
   // setter
   void set_corner_name(const std::string& corner_name) { _corner_name = corner_name; }
   void set_tmpr_list(const std::vector<double>& tmpr_list) { _tmpr_list = tmpr_list; }
-  void set_itf_file_path(const std::string& itf_file_path) { _itf_file_path = itf_file_path; }
+  void set_process_file_path(const std::string& process_file_path) { _process_file_path = process_file_path; }
   void set_captab_file_path(const std::string& captab_file_path) { _captab_file_path = captab_file_path; }
+  void set_process_options(const ProcessParseOptions& options) { _process_options = options; }
   // function
 
  private:
   std::string _corner_name;
   std::vector<double> _tmpr_list;
-  std::string _itf_file_path;
+  std::string _process_file_path;
+  ProcessParseOptions _process_options;
   std::string _captab_file_path;
 };
 

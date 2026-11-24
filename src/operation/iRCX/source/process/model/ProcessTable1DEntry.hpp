@@ -10,35 +10,32 @@
 //
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
 // EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-// MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+// MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #pragma once
 
-#include "Logger.hpp"
+
 
 namespace ircx {
 
-enum class ProcessEffectType
+class ProcessTable1DEntry
 {
-  kNone,
-  kBoth,
-  kResistance,
-  kCapacitance
-};
+ public:
+  ProcessTable1DEntry() = default;
+  ProcessTable1DEntry(double key, double value) : _key(key), _value(value) {}
+  ~ProcessTable1DEntry() = default;
+  // getter
+  double get_key() const { return _key; }
+  double get_value() const { return _value; }
+  // setter
+  void set_key(double key) { _key = key; }
+  void set_value(double value) { _value = value; }
+  // function
 
-struct GetProcessEffectType
-{
-  ProcessEffectType operator()(const std::string& process_effect_type_name) const
-  {
-    if (process_effect_type_name == "RESISTIVE_ONLY") {
-      return ProcessEffectType::kResistance;
-    }
-    if (process_effect_type_name == "CAPACITIVE_ONLY") {
-      return ProcessEffectType::kCapacitance;
-    }
-    return ProcessEffectType::kNone;
-  }
+ private:
+  double _key = -1.0;
+  double _value = -1.0;
 };
 
 }  // namespace ircx

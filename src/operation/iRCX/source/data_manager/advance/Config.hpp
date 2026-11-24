@@ -29,9 +29,9 @@ class Config
   /////////////////////////////////////////////
   // **********        RCX        ********** //
   std::string config_file_path;       // required
-  int32_t thread_number;              // required
+  int32_t thread_number = 1;          // required
   std::string output_directory_path;  // optional
-  bool report_geometry;               // optional
+  bool report_geometry = false;      // optional
   std::string mapping_file_path;      // required
   std::vector<Corner> corner_list;    // required
   /////////////////////////////////////////////

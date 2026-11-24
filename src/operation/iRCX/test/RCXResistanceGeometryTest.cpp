@@ -8,6 +8,9 @@
 // http://license.coscl.org.cn/MulanPSL2
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND.
 // ***************************************************************************************
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -74,20 +77,37 @@ class ResistanceFixture
 
   void loadProcess(const std::string& body, double scale = 1.0, double temperature = 25.0)
   {
-    write("process.itf", "GLOBAL_TEMPERATURE = 25\nHALF_NODE_SCALE_FACTOR = " + std::to_string(scale) + "\n" + body);
-    write("mapping.map", "M1 metal1\nV1 via1\n");
+    loadInput("GLOBAL_TEMPERATURE = 25\nHALF_NODE_SCALE_FACTOR = " + std::to_string(scale) + "\n" + body,
+              "process.itf", true, temperature);
+  }
+
+  void loadInput(const std::string& text, const std::string& filename = "process.data", bool legacy = false, double temperature = 25.0)
+  {
+    write(filename, text);
+    loadConfiguration(std::string(R"([{"name":"TEST",")") + (legacy ? "itf_file" : "process_file") + "\":\"" + filename
+                      + R"(","captab_file":"empty.captab","temperature":[)" + std::to_string(temperature) + "]}]");
+    if (RCXDM.getDatabase().get_corner_data_list().size() != 1) {
+      throw std::runtime_error("process was not loaded");
+    }
+  }
+
+  void writeProcess(const std::string& name, const std::string& text) { write(name, text); }
+  void addRoutingLayer(const std::string& name)
+  {
+    auto* layers = _lef_service.get_layout()->get_layers();
+    layers->add_routing_layer(layers->set_layer(name, "ROUTING"));
+  }
+
+  void loadConfiguration(const std::string& corners)
+  {
+    write("mapping.map", "M1 metal1\nM2 metal2\nV1 via1\n");
     write("empty.captab", "");
-    write("rcx.json", R"({"thread_num":2,"mapping_file":"mapping.map","output":"output",
-      "corners":[{"name":"TEST","itf_file":"process.itf","captab_file":"empty.captab","temperature":[)"
-                          + std::to_string(temperature) + "]}]}");
+    write("rcx.json", R"({"thread_num":2,"mapping_file":"mapping.map","output":"output","corners":)" + corners + "}");
     std::map<std::string, std::any> config{{"-config", (_directory / "rcx.json").string()}};
     RCXDM.input(config);
     auto& layers = RCXDM.getDatabase().get_layer_table();
     layers.register_design_layer(0, "M1");
     layers.register_design_layer(1, "V1");
-    if (RCXDM.getDatabase().get_corner_data_list().size() != 1) {
-      throw std::runtime_error("ITF process was not loaded");
-    }
   }
 
   void addGeometry(bool is_via = false, int32_t cut_x = 100, int32_t cut_y = 200, bool vertical = false, bool reversed = false)
@@ -147,7 +167,7 @@ class ResistanceFixture
   {
     try {
       RCXRE.extract();
-    } catch (const std::exception&) {
+    } catch (const std::runtime_error&) {
       return;
     }
     throw std::runtime_error("invalid resistance geometry was accepted");
@@ -179,12 +199,233 @@ void checkVia(const std::string& properties, double expected, int32_t cut_x = 10
               double scale = 1.0, double temperature = 25.0)
 {
   ResistanceFixture fixture;
-  fixture.loadProcess("VIA via1 { FROM=metal1 TO=metal2 " + properties + " }", scale, temperature);
+  fixture.loadProcess("CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12 } CONDUCTOR metal2 { THICKNESS=.1 RPSQ=.12 } "
+                      "VIA via1 { FROM=metal1 TO=metal2 " + properties + " }", scale, temperature);
   fixture.addGeometry(true, cut_x, cut_y);
   fixture.extractAndExpect(expected);
 }
 
 using Test = std::pair<std::string, std::function<void()>>;
+
+std::vector<Test> processInputTests()
+{
+  return {
+      {"cache distinguishes files and accepts the obsolete extension spelling",
+       [] {
+         ResistanceFixture fixture;
+         fixture.writeProcess("a", "metal metal1 {Thickness .1 Resistance .12}");
+         fixture.writeProcess("b", "metal metal1 {Thickness .1 Resistance .24}");
+         fixture.loadConfiguration(R"([{"name":"A","process_file":"a","captab_file":"empty.captab"},
+           {"name":"B","process_file":"b","captab_file":"empty.captab"},
+           {"name":"C","process_file":"a","captab_file":"empty.captab","process_options":{"extensions":["dielectric_surface_fields"]}}])");
+         const auto& corners = RCXDM.getDatabase().get_corner_data_list();
+         if (corners[0].get_process_technology() == corners[1].get_process_technology()
+             || corners[0].get_process_technology() != corners[2].get_process_technology())
+           throw std::runtime_error("cache ignored source/options");
+         expectNear(corners[1].get_process_conductor_list()[0].get_sheet_resistance(), .24);
+       }},
+      {"equivalent aliases and extensionless paths work, missing inputs fail",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("metal metal1 {Thickness .1 Resistance .12}", "process");
+         fixture.loadConfiguration(R"([{"name":"A","process_file":"process","itf_file":"./process","captab_file":"empty.captab"}])");
+         for (const auto& corner : {R"([{"name":"A","captab_file":"empty.captab"}])",
+                                   R"([{"name":"A","process_file":"missing","captab_file":"empty.captab"}])"}) {
+           bool failed = false;
+           try {
+             fixture.loadConfiguration(corner);
+           } catch (const std::exception&) {
+             failed = true;
+           }
+           if (!failed)
+             throw std::runtime_error("missing source accepted");
+         }
+       }},
+      {"used layers without a matching model cannot produce zero resistance",
+       [] {
+         for (bool via : {false, true}) {
+           ResistanceFixture fixture;
+           fixture.loadInput("metal unused {Thickness .1 Resistance .12}");
+           fixture.addGeometry(via);
+           fixture.expectInvalidGeometry();
+         }
+       }},
+      {"via connections are checked at design binding",
+       [] {
+         for (const auto& upper : {"missing", "metal1"}) {
+           ResistanceFixture fixture;
+           bool failed = false;
+           try {
+             fixture.loadInput(std::string("metal metal1 {Thickness .1 Resistance .12} via via1 {Area .01 Resistance 4 LOWERLAYER metal1 UPPERLAYER ") + upper
+                               + "}");
+           } catch (const std::exception&) {
+             failed = true;
+           }
+           if (!failed)
+             throw std::runtime_error("invalid via connection accepted");
+         }
+       }},
+      {"unmapped contact definitions do not prevent routing layer extraction",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput(
+             "CONDUCTOR metal1 {THICKNESS=.1 RPSQ=.12} "
+             "CONDUCTOR diffusion {LAYER_TYPE=DIFFUSION THICKNESS=.1 RPSQ=10} "
+             "VIA contact {FROM=SUBSTRATE TO=diffusion RPV=.000001}");
+         const auto& process = RCXDM.getDatabase().get_corner_data_list()[0];
+         if (process.get_process_via_list().size() != 1)
+           throw std::runtime_error("unmapped contact definition was discarded");
+         fixture.addGeometry();
+         fixture.extractAndExpect(.6);
+       }},
+      {"via connections may name process conductors",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("metal metal1 {Thickness .1 Resistance .12} metal metal2 {Thickness .1 Resistance .12} "
+                           "via via1 {Area .01 Resistance 4 LOWERLAYER metal1 UPPERLAYER metal2}");
+         fixture.addGeometry(true, 100, 100);
+         fixture.extractAndExpect(4);
+       }},
+      {"via references can resolve through mapped LEF routing layers",
+       [] {
+         ResistanceFixture fixture;
+         fixture.addRoutingLayer("M1");
+         fixture.addRoutingLayer("M2");
+         fixture.loadInput("via via1 {Area .01 Resistance 4 LOWERLAYER metal1 UPPERLAYER metal2}");
+         fixture.addGeometry(true, 100, 100);
+         fixture.extractAndExpect(4);
+       }},
+      {"multiple temperatures share immutable technology",
+       [] {
+         ResistanceFixture fixture;
+         fixture.writeProcess("process.data", "metal metal1 {Thickness .1 Resistance .12}");
+         fixture.loadConfiguration(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab","temperature":[25,125]},
+                                       {"name":"B","process_file":"process.data","captab_file":"empty.captab"}])");
+         const auto& corners = RCXDM.getDatabase().get_corner_data_list();
+         if (corners.size() != 3 || corners[0].get_process_technology() != corners[1].get_process_technology()
+             || corners[0].get_process_technology() != corners[2].get_process_technology())
+           throw std::runtime_error("source not shared");
+         expectNear(corners[1].get_tmpr(), 125);
+       }},
+      {"failed load preserves state and corrected input retries",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("metal metal1 {Thickness .1 Resistance .12}");
+         const auto original = RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology();
+         const auto original_layers = RCXDM.getDatabase().get_layer_table().get_design_idx_to_name_map();
+         bool failed = false;
+         try {
+           fixture.loadInput("metal metal1 {Thickness .1 Resistance broken}");
+         } catch (const std::exception&) {
+           failed = true;
+         }
+         if (!failed || RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology() != original
+             || RCXDM.getDatabase().get_layer_table().get_design_idx_to_name_map() != original_layers)
+           throw std::runtime_error("failed load changed published state");
+         fixture.loadInput("metal metal1 {Thickness .1 Resistance .24}");
+         expectNear(RCXDM.getDatabase().get_corner_data_list()[0].get_process_conductor_list()[0].get_sheet_resistance(), .24);
+         if (RCXDM.getDatabase().get_layout_data().get_regular_net_num() != 2)
+           throw std::runtime_error("retry duplicated design data");
+       }},
+      {"malformed configuration uses the common logger and preserves state",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("metal metal1 {Thickness .1 Resistance .12}");
+         const auto model = RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology();
+         for (const auto& corners :
+              {std::string("["), std::string("null"), std::string("[7]"),
+               std::string(R"([{"name":7,"process_file":"process.data","captab_file":"empty.captab"}])"),
+               std::string(R"([{"name":"A","process_file":7,"captab_file":"empty.captab"}])"),
+               std::string(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab","temperature":["hot"]}])"),
+               std::string(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab","process_options":{"extensions":[7]}}])")}) {
+           bool logged_error = false;
+           try {
+             fixture.loadConfiguration(corners);
+           } catch (const std::runtime_error& error) {
+             logged_error = std::string(error.what()).size() > 0;
+           }
+           if (!logged_error)
+             throw std::runtime_error("configuration failure bypassed common logger");
+           if (RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology() != model)
+             throw std::runtime_error("failed configuration replaced previous model");
+         }
+       }},
+      {"process options and temperature require documented containers",
+       [] {
+         ResistanceFixture fixture;
+         fixture.writeProcess("process.data", "metal metal1 {Thickness .1 Resistance .12}");
+         for (const auto& tail : {R"("temperature":25)", R"("process_options":{"extensions":"dielectric_surface_fields"})"}) {
+           bool failed = false;
+           try {
+             fixture.loadConfiguration(std::string(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab",)") + tail + "}]");
+           } catch (const std::runtime_error&) {
+             failed = true;
+           }
+           if (!failed)
+             throw std::runtime_error("invalid configuration container accepted");
+         }
+       }},
+      {"conflicting input aliases fail without replacing model",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("metal metal1 {Thickness .1 Resistance .12}");
+         const auto original = RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology();
+         bool failed = false;
+         try {
+           fixture.loadConfiguration(R"([{"name":"A","process_file":"process.data","itf_file":"other.data","captab_file":"empty.captab"}])");
+         } catch (const std::exception&) {
+           failed = true;
+         }
+         if (!failed || RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology() != original)
+           throw std::runtime_error("conflicting aliases accepted");
+       }},
+
+      {"ITF through neutral path",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("CONDUCTOR metal1 { THICKNESS=0.1 RPSQ=0.12 RESISTIVE_ONLY_ETCH=0.02 }");
+         fixture.addGeometry();
+         fixture.extractAndExpect(0.75);
+       }},
+      {"Tech content with ITF extension",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("# CONDUCTOR and = in this comment are not syntax\nmetal metal1 { Thickness .1 Resistance .12 }", "wrong.itf");
+         fixture.addGeometry();
+         fixture.extractAndExpect(0.6);
+       }},
+      {"Tech through legacy path alias",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("metal metal1 { Thickness .1 Resistance .12 Tnom 25 Coeff_RT1 .003 }", "process", true, 125);
+         fixture.addGeometry();
+         fixture.extractAndExpect(0.78);
+       }},
+      {"Tech single-axis resistance etch",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput(R"(metal metal1 { Thickness .1 Resistance .12
+           ETCH_VS_WIDTH_AND_SPACING RESISTIVE_ONLY { WIDTHS {.2} VALUES {{.02}} } })");
+         fixture.addGeometry();
+         fixture.extractAndExpect(0.75);
+       }},
+      {"Tech resistance width-spacing table selected",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput(R"(metal metal1 { Thickness .1 Resistance 99
+           RPSQ_VS_WIDTH_AND_SPACING { WIDTHS {.1 .3} VALUES {{.08} {.16}} } })");
+         fixture.addGeometry();
+         fixture.extractAndExpect(0.6);
+       }},
+      {"Tech reference cut",
+       [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("via via1 { Area .01 Resistance 4 }");
+         fixture.addGeometry(true, 100, 100);
+         fixture.extractAndExpect(4.0);
+       }},
+  };
+}
 
 std::vector<Test> wireTests()
 {
@@ -257,14 +498,17 @@ std::vector<Test> invalidTests()
        }},
       {"nonpositive reference area", [] {
          ResistanceFixture fixture;
-         fixture.loadProcess("VIA via1 { AREA=-0.01 RPV=4 }");
-         fixture.addGeometry(true);
-         fixture.expectInvalidGeometry();
+         try { fixture.loadProcess("VIA via1 { AREA=-0.01 RPV=4 }"); }
+         catch (const std::exception&) { return; }
+         throw std::runtime_error("invalid reference area accepted by loader");
        }},
       {"nonfinite reference area", [] {
          ResistanceFixture fixture;
          fixture.loadProcess("VIA via1 { AREA=0.01 RPV=4 }");
-         RCXDM.getDatabase().get_corner_data_list()[0].get_process_via_list()[0].set_area(std::numeric_limits<double>::infinity());
+         auto& corner = RCXDM.getDatabase().get_corner_data_list()[0];
+         auto model = std::make_shared<ProcessTechnology>(*corner.get_process_technology());
+         model->vias[0].set_area(std::numeric_limits<double>::infinity());
+         corner.set_process_technology(std::move(model));
          fixture.addGeometry(true);
          fixture.expectInvalidGeometry();
        }},
@@ -276,7 +520,10 @@ void checkExistingScaledGeometry(double scale)
   ResistanceFixture fixture;
   fixture.loadProcess(R"(CONDUCTOR metal1 { THICKNESS=0.1 RHO=0.02
     ETCH_VS_WIDTH_AND_SPACING { WIDTHS {0.05 0.4} SPACINGS {0.05 0.5} VALUES {0.02 0.02 0.02 0.02} } })");
-  RCXDM.getDatabase().get_corner_data_list()[0].set_half_node_scale_factor(scale);
+  auto& corner = RCXDM.getDatabase().get_corner_data_list()[0];
+  auto model = std::make_shared<ProcessTechnology>(*corner.get_process_technology());
+  model->geometry_scale = scale;
+  corner.set_process_technology(std::move(model));
   fixture.addGeometry();
   if (!std::isfinite(scale) || scale <= 0.0) {
     fixture.expectInvalidGeometry();
@@ -291,10 +538,44 @@ void checkExistingScaledGeometry(double scale)
 
 int main(int argc, char** argv)
 {
+  setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
   try {
     const std::string group = argc > 1 ? argv[1] : "0.9";
     std::vector<Test> tests;
-    if (group == "wire_etch") {
+    if (group == "logger_exit") {
+      // A child exercises the normal CLI contract without terminating this test.
+      ResistanceFixture fixture;
+      int output[2];
+      if (pipe(output) != 0)
+        throw std::runtime_error("pipe failed");
+      std::cout.flush();
+      const auto child = fork();
+      if (child < 0)
+        throw std::runtime_error("fork failed");
+      if (child == 0) {
+        close(output[0]);
+        if (dup2(output[1], STDOUT_FILENO) < 0)
+          _exit(99);
+        close(output[1]);
+        unsetenv("ECC_LOGGER_THROW_ON_ERROR");
+        fixture.loadConfiguration("[");
+        _exit(0);
+      }
+      close(output[1]);
+      std::string log;
+      char buffer[1024];
+      for (ssize_t size; (size = read(output[0], buffer, sizeof(buffer))) > 0;)
+        log.append(buffer, size);
+      close(output[0]);
+      int status = 0;
+      if (waitpid(child, &status, 0) != child || !WIFEXITED(status) || WEXITSTATUS(status) != EXIT_FAILURE
+          || log.find("Invalid JSON in config file") == std::string::npos || log.find("Error") == std::string::npos)
+        throw std::runtime_error("CLI failure did not log and exit through the common logger");
+      return EXIT_SUCCESS;
+    }
+    if (group == "process_input") {
+      tests = processInputTests();
+    } else if (group == "wire_etch") {
       tests = wireTests();
     } else if (group == "via_area") {
       tests = viaTests();

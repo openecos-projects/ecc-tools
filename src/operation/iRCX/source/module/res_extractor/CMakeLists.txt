@@ -13,6 +13,7 @@ add_library(ircx_res_extractor
 target_link_libraries(ircx_res_extractor
     PUBLIC
     ircx_data_manager
+    ircx_process_evaluator
     ircx_module
     ircx_toolkit
 )

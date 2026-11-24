@@ -13,6 +13,7 @@ add_library(ircx_var_processor
 target_link_libraries(ircx_var_processor
     PUBLIC
     ircx_data_manager
+    ircx_process_evaluator
     ircx_module
     ircx_toolkit
 )

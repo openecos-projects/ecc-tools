@@ -26,6 +26,7 @@
 #include <iostream>
 #include <vector>
 
+#include "Logger.hpp"
 #include "json.hpp"
 
 namespace ircx {
@@ -360,12 +361,9 @@ bool sanitizeSPEFOutputsForConfig(const std::filesystem::path& config_path)
     return false;
   }
 
-  nlohmann::json config_json;
-  try {
-    config_json = nlohmann::json::parse(config_stream);
-  } catch (const std::exception& exc) {
-    std::cerr << "[iRCX] Failed to parse iRCX config '" << abs_config << "': " << exc.what() << "\n";
-    return false;
+  const auto config_json = nlohmann::json::parse(config_stream, nullptr, false);
+  if (config_stream.bad() || config_json.is_discarded() || !config_json.is_object()) {
+    RCXLOG.error(Loc::current(), "Failed to parse iRCX config for SPEF sanitization: ", abs_config);
   }
 
   if (!config_json.contains("output") || config_json["output"].is_null()) {
