@@ -18,6 +18,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <set>
@@ -56,19 +57,20 @@ int endpointSelectorSpecificity(const Network& network, const ExceptionObjects& 
   if (objects.empty()) {
     return 0;
   }
-  bool concrete
-      = (objects.contains({ExceptionObjectType::kPort, std::string(pin_name)}) || objects.contains({ExceptionObjectType::kPin, std::string(pin_name)}));
-  const auto pin = network.pins().find(std::string(pin_name));
+  bool concrete = (objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPort, pin_name})
+                    || objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, pin_name}));
+  const auto pin = network.pins().find(pin_name);
   if (pin != network.pins().end() && !pin->second.get_is_port()) {
-    concrete = concrete || objects.contains({ExceptionObjectType::kCell, pin->second.get_instance_name()});
+    concrete = concrete || objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kCell, pin->second.get_instance_name()});
     const auto instance = network.instances().find(pin->second.get_instance_name());
-    concrete
-        = concrete || (start && instance != network.instances().end() && objects.contains({ExceptionObjectType::kPin, instance->second.get_clock_pin_name()}));
+    concrete = concrete
+               || (start && instance != network.instances().end()
+                   && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, instance->second.get_clock_pin_name()}));
   }
   if (concrete) {
     return concrete_score;
   }
-  return objects.contains({ExceptionObjectType::kClock, std::string(clock_name)}) ? clock_score : 0;
+  return objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kClock, clock_name}) ? clock_score : 0;
 }
 
 int getSpecificity(const Network& network, const TimingException& exception, std::string_view start, std::string_view launch_clock, std::string_view end,
@@ -153,7 +155,7 @@ std::vector<int32_t> ExceptionMatcher::initState(std::string_view start, std::st
   for (const TimingException& exception : _sdc.get_path_exception_list()) {
     bool applies = isRelevantToAnalysis(exception, analysis_type) && matchesEndpointObjects(exception.get_from_objects(), start, clock, true);
     if (applies && exception.get_from_trans_type() != TransType::kNone) {
-      const bool clock_selector = !clock.empty() && exception.get_from_objects().contains({ExceptionObjectType::kClock, std::string(clock)});
+      const bool clock_selector = !clock.empty() && exception.get_from_objects().contains(ExceptionObjectKeyView{ExceptionObjectType::kClock, clock});
       const TransType actual_trans_type = clock_selector ? launch_transition : start_trans_type;
       applies = actual_trans_type == exception.get_from_trans_type();
     }
@@ -180,7 +182,7 @@ std::vector<int32_t> ExceptionMatcher::advanceState(const ExceptionThroughIndex&
       // Most propagated states have no pending through group. Resolve the
       // hierarchy net only when a group actually needs matching, once per arc.
       if (!net_checked) {
-        const auto sink = _network.pins().find(std::string(pin_name));
+        const auto sink = _network.pins().find(pin_name);
         if (sink != _network.pins().end())
           net = &sink->second.get_net_name();
         net_checked = true;
@@ -244,12 +246,12 @@ ResolvedTimingExceptions ExceptionMatcher::resolve(std::string_view start, std::
     }
     int launch_group = -1;
     int capture_group = -1;
-    const std::vector<std::set<std::string>>& groups = relation.get_groups();
+    const std::vector<std::set<std::string, std::less<>>>& groups = relation.get_groups();
     for (std::size_t index = 0; index < groups.size(); ++index) {
-      if (groups[index].contains(std::string(launch_clock))) {
+      if (groups[index].contains(launch_clock)) {
         launch_group = static_cast<int>(index);
       }
-      if (groups[index].contains(std::string(capture_clock))) {
+      if (groups[index].contains(capture_clock)) {
         capture_group = static_cast<int>(index);
       }
     }
@@ -273,7 +275,8 @@ ResolvedTimingExceptions ExceptionMatcher::resolve(std::string_view start, std::
       continue;
     }
     if (exception.get_to_trans_type() != TransType::kNone) {
-      const bool clock_selector = !capture_clock.empty() && exception.get_to_objects().contains({ExceptionObjectType::kClock, std::string(capture_clock)});
+      const bool clock_selector
+          = !capture_clock.empty() && exception.get_to_objects().contains(ExceptionObjectKeyView{ExceptionObjectType::kClock, capture_clock});
       const TransType actual_trans_type = clock_selector ? capture_clock_trans_type : end_trans_type;
       if (actual_trans_type != exception.get_to_trans_type()) {
         continue;
@@ -315,29 +318,31 @@ ResolvedTimingExceptions ExceptionMatcher::resolve(std::string_view start, std::
 
 bool ExceptionMatcher::matchesThroughObjects(const ExceptionObjects& objects, std::string_view pin_name) const
 {
-  if ((objects.contains({ExceptionObjectType::kPort, std::string(pin_name)}) || objects.contains({ExceptionObjectType::kPin, std::string(pin_name)}))) {
+  if (objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPort, pin_name})
+      || objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, pin_name})) {
     return true;
   }
-  const auto pin = _network.pins().find(std::string(pin_name));
+  const auto pin = _network.pins().find(pin_name);
   if (pin == _network.pins().end()) {
     return false;
   }
   for (const auto& name : _network.pinNets(std::string(pin_name)))
-    if (objects.contains({ExceptionObjectType::kNet, name}))
+    if (objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kNet, name}))
       return true;
-  return (!pin->second.get_instance_name().empty() && objects.contains({ExceptionObjectType::kCell, pin->second.get_instance_name()}))
+  return (!pin->second.get_instance_name().empty() && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kCell, pin->second.get_instance_name()}))
          || (_network.netSegments().empty() && !pin->second.get_net_name().empty()
-             && objects.contains({ExceptionObjectType::kNet, pin->second.get_net_name()}));
+             && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kNet, pin->second.get_net_name()}));
 }
 
 bool ExceptionMatcher::matchesEndpointObjects(const ExceptionObjects& objects, std::string_view pin_name, std::string_view clock_name, bool start) const
 {
   if (objects.empty()
-      || (objects.contains({ExceptionObjectType::kPort, std::string(pin_name)}) || objects.contains({ExceptionObjectType::kPin, std::string(pin_name)}))
-      || objects.contains({ExceptionObjectType::kClock, std::string(clock_name)})) {
+      || (objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPort, pin_name})
+          || objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, pin_name}))
+      || objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kClock, clock_name})) {
     return true;
   }
-  const auto pin = _network.pins().find(std::string(pin_name));
+  const auto pin = _network.pins().find(pin_name);
   if (pin == _network.pins().end() || pin->second.get_is_port()) {
     return false;
   }
@@ -345,8 +350,8 @@ bool ExceptionMatcher::matchesEndpointObjects(const ExceptionObjects& objects, s
   if (instance == _network.instances().end()) {
     return false;
   }
-  return objects.contains({ExceptionObjectType::kCell, instance->first})
-         || (start && objects.contains({ExceptionObjectType::kPin, instance->second.get_clock_pin_name()}));
+  return objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kCell, instance->first})
+         || (start && objects.contains(ExceptionObjectKeyView{ExceptionObjectType::kPin, instance->second.get_clock_pin_name()}));
 }
 
 }  // namespace ista

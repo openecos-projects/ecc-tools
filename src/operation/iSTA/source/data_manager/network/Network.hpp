@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -34,14 +35,14 @@ class Network
  public:
   std::string& name() { return _name; }
   const std::string& name() const { return _name; }
-  std::map<std::string, Instance>& instances() { return _instances; }
-  const std::map<std::string, Instance>& instances() const { return _instances; }
-  std::map<std::string, Pin>& pins() { return _pins; }
-  const std::map<std::string, Pin>& pins() const { return _pins; }
-  std::map<std::string, Net>& nets() { return _nets; }
-  const std::map<std::string, Net>& nets() const { return _nets; }
-  std::map<std::string, HierarchyPin>& hierarchyPins() { return _hierarchy_pins; }
-  const std::map<std::string, HierarchyPin>& hierarchyPins() const { return _hierarchy_pins; }
+  std::map<std::string, Instance, std::less<>>& instances() { return _instances; }
+  const std::map<std::string, Instance, std::less<>>& instances() const { return _instances; }
+  std::map<std::string, Pin, std::less<>>& pins() { return _pins; }
+  const std::map<std::string, Pin, std::less<>>& pins() const { return _pins; }
+  std::map<std::string, Net, std::less<>>& nets() { return _nets; }
+  const std::map<std::string, Net, std::less<>>& nets() const { return _nets; }
+  std::map<std::string, HierarchyPin, std::less<>>& hierarchyPins() { return _hierarchy_pins; }
+  const std::map<std::string, HierarchyPin, std::less<>>& hierarchyPins() const { return _hierarchy_pins; }
   std::unordered_map<std::string, size_t>& hierarchyIndices() { return _hierarchy_indices; }
   const std::unordered_map<std::string, size_t>& hierarchyIndices() const { return _hierarchy_indices; }
   const std::map<std::string, NetSegment>& netSegments() const { return _net_segments; }
@@ -68,10 +69,10 @@ class Network
   std::unordered_map<std::string, std::string> _net_query_names;
   std::unordered_map<std::string, std::vector<std::string>> _pin_nets;
   std::string _name;
-  std::map<std::string, Instance> _instances;
-  std::map<std::string, Pin> _pins;
-  std::map<std::string, Net> _nets;
-  std::map<std::string, HierarchyPin> _hierarchy_pins;
+  std::map<std::string, Instance, std::less<>> _instances;
+  std::map<std::string, Pin, std::less<>> _pins;
+  std::map<std::string, Net, std::less<>> _nets;
+  std::map<std::string, HierarchyPin, std::less<>> _hierarchy_pins;
   std::unordered_map<std::string, size_t> _hierarchy_indices;
 };
 }  // namespace ista

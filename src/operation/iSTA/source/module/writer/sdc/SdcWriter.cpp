@@ -46,7 +46,8 @@ std::string selector(const char* suffix, TransType type)
 {
   return std::string(" -") + (type == TransType::kRise ? "rise_" : type == TransType::kFall ? "fall_" : "") + suffix + " ";
 }
-std::string clocks(const std::set<std::string>& names)
+template <typename Compare>
+std::string clocks(const std::set<std::string, Compare>& names)
 {
   return sdcQuery("get_clocks", {names.begin(), names.end()});
 }

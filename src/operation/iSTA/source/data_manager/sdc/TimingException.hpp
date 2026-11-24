@@ -18,9 +18,11 @@
 
 #include <compare>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -42,7 +44,30 @@ struct ExceptionObject
   std::string name;
   auto operator<=>(const ExceptionObject&) const = default;
 };
-using ExceptionObjects = std::set<ExceptionObject>;
+
+// A non-owning (type, name) pair for probing ExceptionObjects without
+// constructing a std::string. Compares identically to ExceptionObject's
+// defaulted operator<=> (type, then name, lexicographically).
+struct ExceptionObjectKeyView
+{
+  ExceptionObjectType type;
+  std::string_view name;
+};
+
+struct ExceptionObjectLess
+{
+  using is_transparent = void;
+
+  static std::pair<ExceptionObjectType, std::string_view> key(const ExceptionObject& object) { return {object.type, object.name}; }
+  static std::pair<ExceptionObjectType, std::string_view> key(const ExceptionObjectKeyView& view) { return {view.type, view.name}; }
+
+  template <typename Lhs, typename Rhs>
+  bool operator()(const Lhs& lhs, const Rhs& rhs) const
+  {
+    return key(lhs) < key(rhs);
+  }
+};
+using ExceptionObjects = std::set<ExceptionObject, ExceptionObjectLess>;
 
 enum class TimingExceptionType
 {
@@ -158,13 +183,23 @@ class TimingClockGroup
   TimingClockGroup() = default;
   ~TimingClockGroup() = default;
   // getter
-  const std::vector<std::set<std::string>>& get_groups() const { return _groups; }
+  const std::vector<std::set<std::string, std::less<>>>& get_groups() const { return _groups; }
   bool get_allow_paths() const { return _allow_paths; }
   TimingClockGroupType get_type() const { return _type; }
   const std::string& get_name() const { return _name; }
   const std::string& get_comment() const { return _comment; }
   // setter
-  void set_groups(const std::vector<std::set<std::string>>& groups) { _groups = groups; }
+  // The non-template overload binds a braced-init-list group literal
+  // (template deduction cannot); the template also accepts a get_groups()
+  // copy, whose comparator is already std::less<>. Both convert once here,
+  // so membership lookups against the stored groups take a string_view
+  // without allocating.
+  void set_groups(const std::vector<std::set<std::string>>& groups) { assignGroups(groups); }
+  template <typename Compare>
+  void set_groups(const std::vector<std::set<std::string, Compare>>& groups)
+  {
+    assignGroups(groups);
+  }
   void set_allow_paths(bool value) { _allow_paths = value; }
   void set_type(TimingClockGroupType value) { _type = value; }
   void set_name(std::string value) { _name = std::move(value); }
@@ -172,7 +207,17 @@ class TimingClockGroup
   // function
 
  private:
-  std::vector<std::set<std::string>> _groups;
+  template <typename Compare>
+  void assignGroups(const std::vector<std::set<std::string, Compare>>& groups)
+  {
+    _groups.clear();
+    _groups.reserve(groups.size());
+    for (const auto& group : groups) {
+      _groups.emplace_back(group.begin(), group.end());
+    }
+  }
+
+  std::vector<std::set<std::string, std::less<>>> _groups;
   bool _allow_paths = false;
   TimingClockGroupType _type = TimingClockGroupType::kAsynchronous;
   std::string _name;

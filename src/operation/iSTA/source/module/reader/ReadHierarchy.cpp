@@ -2,6 +2,7 @@
 #include "ReadHierarchy.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -76,7 +77,7 @@ void linkHierarchy(Network& network, const idb::verilog_import::VerilogImportPla
     }
     return it->second;
   };
-  std::map<std::string, HierarchyPin> pins;
+  std::map<std::string, HierarchyPin, std::less<>> pins;
   for (const auto& port : plan.hierarchical_ports) {
     const auto& [net_name, error] = resolveNet(port.net);
     const auto direction = port.direction == idb::verilog::Direction::input    ? PinDirection::kInput
