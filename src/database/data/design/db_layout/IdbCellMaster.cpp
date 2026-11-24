@@ -295,9 +295,9 @@ IdbCellMaster* IdbCellMasterList::set_cell_master(string name)
 
 IdbCellMaster* IdbCellMasterList::find_cell_master(const string& src_name)
 {
-  auto cellMasterIt = _master_map.find(src_name);
-  if (cellMasterIt != _master_map.end()) {
-    return cellMasterIt->second;
+  IdbCellMaster** cellMasterIt = _master_map.find(src_name);
+  if (cellMasterIt != nullptr) {
+    return *cellMasterIt;
   }
   return nullptr;
 }

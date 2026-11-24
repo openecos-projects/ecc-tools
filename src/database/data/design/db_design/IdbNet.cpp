@@ -496,18 +496,11 @@ IdbNetList::~IdbNetList()
   _net_list.clear();
 }
 
-IdbNet* IdbNetList::find_net(string name)
+IdbNet* IdbNetList::find_net(std::string_view name)
 {
-  //   for (IdbNet* net : _net_list) {
-  //     if (net->get_net_name() == name) {
-  //       return net;
-  //     }
-  //   }
-
-  //   return nullptr;
-  auto net_pair = _net_map.find(name);
-  if (net_pair != _net_map.end()) {
-    return net_pair->second;
+  IdbNet** net_pair = _net_map.find(name);
+  if (net_pair != nullptr) {
+    return *net_pair;
   }
 
   return nullptr;
@@ -534,9 +527,9 @@ bool IdbNetList::rename_net(IdbNet* net, string new_name)
 
   const string old_name = net->get_net_name();
   if (!old_name.empty()) {
-    auto map_iter = _net_map.find(old_name);
-    if (map_iter != _net_map.end() && map_iter->second == net) {
-      _net_map.erase(map_iter);
+    IdbNet** map_iter = _net_map.find(old_name);
+    if (map_iter != nullptr && *map_iter == net) {
+      _net_map.erase(old_name);
     }
   }
 
@@ -610,10 +603,7 @@ IdbNet* IdbNetList::add_net(string name, IdbConnectType type)
 bool IdbNetList::remove_net(string name)
 {
   /// remove net from net map
-  auto it_map = _net_map.find(name);
-  if (it_map != _net_map.end()) {
-    it_map = _net_map.erase(it_map);
-  }
+  _net_map.erase(name);
 
   /// remove net from netlist
   auto it = std::find_if(_net_list.begin(), _net_list.end(), [name](auto net) { return name == net->get_net_name(); });

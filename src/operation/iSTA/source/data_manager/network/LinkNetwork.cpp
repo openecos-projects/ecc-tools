@@ -27,7 +27,7 @@ void LinkNetwork::linkInstancePins()
       continue;
     }
 
-    appendUnique(_network.instances()[pin.get_instance_name()].get_pin_name_list(), std::string(_network.pins().nameOf(id)));
+    appendUnique(_network.instances().at(pin.get_instance_name()).get_pin_name_list(), std::string(_network.pins().nameOf(id)));
   }
 }
 
@@ -155,7 +155,7 @@ void LinkNetwork::linkNet(const std::string& net_name, Net& net)
   net.get_load_pin_list().clear();
 
   for (std::string& pin_name : net.get_pin_name_list()) {
-    Pin& pin = _network.pins()[pin_name];
+    Pin& pin = _network.pins().at(pin_name);
     pin.set_net_name(net_name);
     appendUnique(net.get_load_pin_list(), pin_name);
   }

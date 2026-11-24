@@ -35,6 +35,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -48,6 +49,7 @@
 #include "IdbHalo.h"
 #include "IdbNet.h"
 #include "IdbObs.h"
+#include "../../../symbol/NamedTable.h"
 #include "IdbPins.h"
 
 namespace idb {
@@ -171,6 +173,9 @@ class IdbInstance : public IdbObject
   int _flip_flop_flag = -1;  /// -1:not set, 0:not flip flop, 1:flip flop
 };
 
+// Domain tag for the iDB instance name space.
+struct IdbInstanceTag;
+
 class IdbInstanceList
 {
  public:
@@ -216,12 +221,12 @@ class IdbInstanceList
   uint64_t get_area_physics();
   uint64_t get_area_clock();
 
-  IdbInstance* find_instance(string name);
+  IdbInstance* find_instance(std::string_view name);
   IdbInstance* find_instance(size_t index);
   bool rename_instance(string old_name, string new_name);
   vector<IdbInstance*> find_instance_by_master(string master_name);
   bool contains(IdbInstance* instance);
-  bool contains(string name) { return find_instance(name) != nullptr; }
+  bool contains(std::string_view name) { return find_instance(name) != nullptr; }
   bool has_io_cell()
   {
     for (IdbInstance* instance : _instance_list) {
@@ -261,7 +266,7 @@ class IdbInstanceList
  private:
   uint64_t _mutex_index = 0;
   std::vector<IdbInstance*> _instance_list;
-  std::unordered_map<string, IdbInstance*> _instance_map;
+  ecc::symbol::NamedTable<IdbInstance*, IdbInstanceTag> _instance_map;
 };
 
 }  // namespace idb

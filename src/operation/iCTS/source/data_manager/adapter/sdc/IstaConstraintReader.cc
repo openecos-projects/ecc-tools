@@ -121,7 +121,7 @@ auto objectName(const ista::Database& database, SdcObjectKind kind, const std::s
   if (pin == database.network().pins().end()) {
     return name;
   }
-  const auto& value = pin->second;
+  const auto& value = *pin;
   return value.get_is_port() ? value.get_pin_name() : value.get_instance_name() + "/" + value.get_pin_name();
 }
 
@@ -220,7 +220,9 @@ auto IstaConstraintReader::snapshot(ista::Database& database) -> SdcClockData
 {
   SdcClockData data;
   auto& sdc = database.sdc();
-  for (auto& [name, clock] : sdc.get_clock_map()) {
+  for (const auto& id : sdc.get_clock_map().sortedIds()) {
+    const std::string name(sdc.get_clock_map().nameOf(id));
+    ista::TimingClock& clock = sdc.get_clock_map().get(id);
     data.clocks.push_back(clockDeclaration(database, name, clock));
     if (clock.get_is_propagated()) {
       data.propagated_clocks.push_back({.kind = SdcObjectKind::kClock, .name = name});
@@ -237,7 +239,7 @@ auto IstaConstraintReader::snapshot(ista::Database& database) -> SdcClockData
   }
   for (const auto& [name, value] : sdc.get_case_analysis_map()) {
     const auto pin = database.network().pins().find(name);
-    const auto kind = pin != database.network().pins().end() && pin->second.get_is_port() ? SdcObjectKind::kPort : SdcObjectKind::kPin;
+    const auto kind = pin != database.network().pins().end() && pin->get_is_port() ? SdcObjectKind::kPort : SdcObjectKind::kPin;
     data.case_analyses.push_back({.value = caseValue(value), .objects = {{.kind = kind, .name = objectName(database, kind, name)}}});
   }
   const auto fanout = sdc.get_max_fanout();

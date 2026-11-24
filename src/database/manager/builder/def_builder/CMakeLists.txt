@@ -12,6 +12,7 @@ target_include_directories(def_builder
         ${HOME_DATABASE}/manager/service/def_service
         ${HOME_DATABASE}/manager/service/lef_service
         ${HOME_DATABASE}/basic/geometry
+        ${HOME_DATABASE}/symbol
 )
 
 target_include_directories(def_builder

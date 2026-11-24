@@ -61,7 +61,7 @@ void PinDirectionResolver::resolve()
   Database& database = _database;
   std::map<std::string, PinDirection> inout_pin_direction_map = makeInoutPinDirectionMap();
   for (std::pair<const std::string, PinDirection>& pin_direction_pair : inout_pin_direction_map) {
-    database.network().pins()[pin_direction_pair.first].set_direction(pin_direction_pair.second);
+    database.network().pins().at(pin_direction_pair.first).set_direction(pin_direction_pair.second);
   }
 }
 
@@ -136,7 +136,7 @@ LibertyPort* PinDirectionResolver::libertyPort(Pin& pin)
   if (database.network().instances().count(pin.get_instance_name()) == 0) {
     return nullptr;
   }
-  Instance& instance = database.network().instances()[pin.get_instance_name()];
+  Instance& instance = database.network().instances().at(pin.get_instance_name());
   auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return nullptr;
@@ -234,7 +234,7 @@ int32_t PinDirectionResolver::getUnresolvedInoutPinNum(Net& net, std::map<std::s
   Database& database = _database;
   int32_t unresolved_inout_pin_num = 0;
   for (std::string& pin_name : net.get_pin_name_list()) {
-    Pin& pin = database.network().pins()[pin_name];
+    Pin& pin = database.network().pins().at(pin_name);
     if (pin.get_direction() == PinDirection::kInout && inout_pin_direction_map.count(pin_name) == 0) {
       unresolved_inout_pin_num++;
     }
@@ -245,7 +245,7 @@ int32_t PinDirectionResolver::getUnresolvedInoutPinNum(Net& net, std::map<std::s
 bool PinDirectionResolver::isResolvedDriverPin(const std::string& pin_name, std::map<std::string, PinDirection>& inout_pin_direction_map)
 {
   Database& database = _database;
-  Pin& pin = database.network().pins()[pin_name];
+  Pin& pin = database.network().pins().at(pin_name);
   PinDirection direction = pin.get_direction();
   if (direction == PinDirection::kInout && inout_pin_direction_map.count(pin_name) > 0) {
     direction = inout_pin_direction_map[pin_name];
