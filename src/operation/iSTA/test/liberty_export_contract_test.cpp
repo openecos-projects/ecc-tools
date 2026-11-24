@@ -212,6 +212,37 @@ void checkLibertyCellFamilies()
   require(coordinates == expected, "Liberty-derived family coordinates changed");
 }
 
+void checkSignaturelessCellFamilyOrder()
+{
+  // A cell with no derivable logic function falls back to a "cell:<name>"
+  // family key. The families map is name-ordered and "cell:" < "logic", so
+  // signatureless singletons take the lowest main_ids in name order even when
+  // their names sort after the logic cells. main_id crosses into PyPlaceDB,
+  // so this assignment order is a compatibility contract.
+  LibertyLibrary library;
+  addCell(library, "aaa_buffer", "lib", 1.0, 1.0, 4.0, false);
+  auto add_signatureless = [&library](const char* name) {
+    auto& cell = library.get_cell_map()[name];
+    cell.set_cell_name(name);
+    cell.set_library_name("lib");
+    cell.set_area(1.0);
+    cell.set_leakage_power(1.0);
+    auto& input = cell.get_port_map()["A"];
+    input.set_port_name("A");
+    input.set_is_input(true);
+    auto& output = cell.get_port_map()["Y"];
+    output.set_port_name("Y");
+    output.set_is_output(true);  // no function expression: no logic signature
+  };
+  add_signatureless("mmm_tie");
+  add_signatureless("zzz_tie");
+  std::map<std::string, int32_t> family;
+  for (const auto& cell : LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF))
+    family.emplace(cell.name, cell.main_id);
+  require(family.at("mmm_tie") == 0 && family.at("zzz_tie") == 1 && family.at("aaa_buffer") == 2,
+          "signatureless cell families lost name-ordered main_id assignment");
+}
+
 void checkEndpointIdentity()
 {
   for (bool reverse : {false, true}) {
@@ -295,5 +326,6 @@ int main()
   checkTransitionCapacitanceExport();
   checkLibertyCellFamilies();
   checkTriStateEnableSplitsFamilies();
+  checkSignaturelessCellFamilyOrder();
   checkDiagnosticOrder();
 }
