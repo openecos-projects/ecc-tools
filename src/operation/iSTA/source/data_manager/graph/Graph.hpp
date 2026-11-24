@@ -63,7 +63,6 @@ class Graph
         _endpoints(other._endpoints),
         _clock_gating_checks(other._clock_gating_checks),
         _clock_gating_endpoints(other._clock_gating_endpoints),
-        _timing_order(other._timing_order),
         _points(other._points),
         _path_states_pruned(other._path_states_pruned),
         _capture_required_clocks(other._capture_required_clocks),
@@ -124,8 +123,6 @@ class Graph
     _clock_gating_checks.clear();
     _clock_gating_endpoints.clear();
   }
-  std::vector<std::string>& timingOrder() { return _timing_order; }
-  const std::vector<std::string>& timingOrder() const { return _timing_order; }
   std::map<std::string, TimingPoint>& points() { return _points; }
   const std::map<std::string, TimingPoint>& points() const { return _points; }
   TimingPoint& driverPoint(const std::string& pin_name)
@@ -192,7 +189,6 @@ class Graph
   std::vector<std::string> _endpoints;
   std::map<std::string, std::vector<TimingCheckArc>> _clock_gating_checks;
   std::set<std::string> _clock_gating_endpoints;
-  std::vector<std::string> _timing_order;
   std::map<std::string, TimingPoint> _points;
   bool _path_states_pruned = false;
   std::map<std::string, std::set<std::string>> _capture_required_clocks;

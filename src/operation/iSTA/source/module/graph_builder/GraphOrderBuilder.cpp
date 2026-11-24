@@ -100,13 +100,11 @@ void GraphOrderBuilder::sortVertices()
     }
   }
   _graph.vertexOrder().clear();
-  _graph.timingOrder().clear();
   while (!vertex_queue.empty()) {
     int32_t vertex_idx = vertex_queue.front();
     vertex_queue.pop();
     GraphVertex& vertex = vertices[vertex_idx];
     _graph.vertexOrder().push_back(vertex_idx);
-    _graph.timingOrder().push_back(vertex.get_pin_name());
     for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
       Arc& arc = _graph.arcs()[arc_idx];
       if (isDisabled(arc)) {
