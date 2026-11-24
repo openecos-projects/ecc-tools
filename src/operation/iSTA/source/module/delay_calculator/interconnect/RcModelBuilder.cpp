@@ -28,7 +28,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <sstream>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -95,18 +94,15 @@ bool loopedSmallNetEnabled()
 }
 }  // namespace
 
-std::string RcModelBuilder::getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                    TransType trans_type)
+RcModelBuilder::DmpModelKey RcModelBuilder::getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name,
+                                                                    AnalysisType analysis_type, TransType trans_type)
 {
-  std::stringstream key_stream;
-  key_stream << parasitic_net.get_net_name() << "|" << source_node_name << "|" << static_cast<int32_t>(analysis_type) << "|"
-             << static_cast<int32_t>(trans_type);
-  return key_stream.str();
+  return {parasitic_net.get_net_name(), source_node_name, analysis_type, trans_type};
 }
 
 ParasiticDmpModel& RcModelBuilder::dmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type)
 {
-  std::string dmp_model_key = getParasiticDmpModelKey(parasitic_net, source_node_name, analysis_type, trans_type);
+  const DmpModelKey dmp_model_key = getParasiticDmpModelKey(parasitic_net, source_node_name, analysis_type, trans_type);
   if (_parasitic_dmp_model_cache.count(dmp_model_key) == 0) {
     _parasitic_dmp_model_cache[dmp_model_key] = buildParasiticDmpModel(parasitic_net, source_node_name, analysis_type, trans_type);
   }
