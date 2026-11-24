@@ -199,11 +199,13 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
     if (!database.network().netSegments().empty()) {
       for (const auto& [name, segment] : database.network().netSegments()) {
         const auto physical = database.network().nets().find(segment.physical_net);
-        const auto fanout = physical == database.network().nets().end() ? 0 : physical->second.get_load_pin_list().size();
+        const auto fanout = physical == database.network().nets().end() ? 0 : physical->get_load_pin_list().size();
         addObjectMatch(matches, name, name, "net", {{"fanout", std::to_string(fanout)}});
       }
     } else
-      for (auto& [name, net] : database.network().nets()) {
+      for (const auto& id : database.network().nets().sortedIds()) {
+        const std::string name(database.network().nets().nameOf(id));
+        Net& net = database.network().nets().get(id);
         addObjectMatch(matches, name, name, "net", {{"fanout", std::to_string(net.get_load_pin_list().size())}});
         // Flattening can choose an inner segment as the physical net name.
         // Top-level port declarations still name the same connected net in SDC.

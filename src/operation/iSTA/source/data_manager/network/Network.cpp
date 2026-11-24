@@ -62,10 +62,11 @@ const std::string& Network::physicalNet(const std::string& name) const
 {
   if (!_net_segments.empty())
     return netSegment(name).physical_net;
-  const auto found = _nets.find(name);
-  if (found == _nets.end())
+  // find() only succeeds when the key equals `name`, so the validated key
+  // found->first is always the argument itself; return it directly.
+  if (!_nets.contains(name))
     throw std::invalid_argument("net no longer exists: " + name);
-  return found->first;
+  return name;
 }
 
 std::string Network::netQueryName(const std::string& physical_name) const

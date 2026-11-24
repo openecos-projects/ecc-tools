@@ -97,6 +97,13 @@ class NamedTable
     return raw ? std::optional<IdType>(IdType{*raw}) : std::nullopt;
   }
 
+  // Rebinds the entry keyed by old_name to new_name, preserving the stored
+  // value's identity, id, and storage slot (std::map extract()+key mutation+
+  // insert() semantics). The value's own name member, if it has one, is not
+  // touched. Throws std::invalid_argument if old_name is absent or new_name
+  // is already present.
+  void rekey(std::string_view old_name, std::string_view new_name) { _symbols.rekey(old_name, new_name); }
+
   std::string_view nameOf(IdType id) const { return _symbols.view(id.value); }
 
   T& get(IdType id) { return _storage[id.value - 1]; }

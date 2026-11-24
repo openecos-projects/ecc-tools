@@ -185,8 +185,8 @@ void GraphConnectivityBuilder::rebuildCellArcListByPinDirection()
 void GraphConnectivityBuilder::buildNetDriverLoadList()
 {
   Database& database = _database;
-  for (std::pair<const std::string, Net>& net_pair : database.network().nets()) {
-    makeNetDriverLoad(net_pair.second);
+  for (const auto& id : database.network().nets().sortedIds()) {
+    makeNetDriverLoad(database.network().nets().get(id));
   }
 }
 
@@ -232,7 +232,9 @@ bool GraphConnectivityBuilder::isDriverPin(Pin& pin)
 void GraphConnectivityBuilder::buildNetArcs()
 {
   Database& database = _database;
-  for (auto& [net_name, net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const std::string net_name(database.network().nets().nameOf(id));
+    Net& net = database.network().nets().get(id);
     for (std::string& driver_pin : net.get_driver_pin_list()) {
       for (std::string& load_pin : net.get_load_pin_list()) {
         if (load_pin != driver_pin) {

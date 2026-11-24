@@ -48,6 +48,48 @@ void SymbolTable::rehash(std::size_t new_capacity)
   _index = std::move(next);
 }
 
+// Knuth 6.4R backward-shift deletion: linear probing with no tombstones,
+// so every following entry in the cluster that hashed at or before the hole
+// must move up. Keeps probe chains intact without a deleted-slot marker.
+void SymbolTable::removeSlot(std::size_t slot)
+{
+  const std::size_t mask = _index.size() - 1;
+  std::size_t hole = slot;
+  std::size_t next = (hole + 1) & mask;
+  while (_index[next].id != 0) {
+    const std::size_t ideal = _index[next].hash & mask;
+    const bool in_range = (hole < next) ? (ideal > hole && ideal <= next) : (ideal > hole || ideal <= next);
+    if (!in_range) {
+      _index[hole] = _index[next];
+      hole = next;
+    }
+    next = (next + 1) & mask;
+  }
+  _index[hole] = Slot{0, 0};
+  --_used;
+}
+
+void SymbolTable::rekey(std::string_view old_name, std::string_view new_name)
+{
+  if (find(new_name).has_value()) {
+    throw std::invalid_argument("SymbolTable::rekey: new name already interned");
+  }
+  const uint32_t old_hash = hashOf(old_name);
+  const std::size_t old_slot = locate(old_name, old_hash);
+  if (_index[old_slot].id == 0) {
+    throw std::invalid_argument("SymbolTable::rekey: old name not interned");
+  }
+  const uint32_t id = _index[old_slot].id;
+  removeSlot(old_slot);
+  const uint32_t offset = static_cast<uint32_t>(_arena.size());
+  _arena.insert(_arena.end(), new_name.begin(), new_name.end());
+  _entries[id - 1] = Entry{offset, static_cast<uint32_t>(new_name.size())};
+  const uint32_t new_hash = hashOf(new_name);
+  const std::size_t new_slot = locate(new_name, new_hash);
+  _index[new_slot] = Slot{new_hash, id};
+  ++_used;
+}
+
 uint32_t SymbolTable::intern(std::string_view name)
 {
   const uint32_t hash = hashOf(name);

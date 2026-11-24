@@ -65,7 +65,7 @@ void linkHierarchy(Network& network, const idb::verilog_import::VerilogImportPla
         if (physical == network.nets().end())
           error = "physical net not found: " + net_name;
         else
-          for (const auto& pin : physical->second.get_pin_name_list()) {
+          for (const auto& pin : physical->get_pin_name_list()) {
             if (!names.contains(pin)) {
               error = "physical net has an unmatched pin '" + pin + "'";
               break;

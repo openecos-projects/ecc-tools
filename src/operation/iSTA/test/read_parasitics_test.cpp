@@ -132,9 +132,7 @@ void checkConnectivity(const std::filesystem::path& file)
   require(parasitics.nets().contains("n"), "valid hierarchical pin separator was rejected");
   // Linking an assign can choose an internal net name while extraction keeps
   // the top-level port alias as *D_NET. All terminals still have to match.
-  auto extracted = network.nets().extract("n");
-  extracted.key() = "internal";
-  network.nets().insert(std::move(extracted));
+  network.nets().rekey("n", "internal");
   text.replace(text.find("*D_NET n "), 9, "*D_NET in ");
   std::ofstream(file) << text;
   require(dmInst->readSpef(file.string()), "port-alias SPEF fixture failed to parse");

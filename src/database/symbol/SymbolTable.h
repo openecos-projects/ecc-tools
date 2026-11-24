@@ -25,6 +25,13 @@ class SymbolTable
   SymbolTable();
 
   uint32_t intern(std::string_view name);
+  // Rebinds an existing id to a new name: the id (and therefore everything
+  // that holds it, e.g. a NamedTable storage slot) keeps its identity, only
+  // the name the id resolves from changes. Mirrors std::map::extract() +
+  // node_handle::key() mutation + insert() — renaming a key in place without
+  // copying or moving the mapped value. Throws std::invalid_argument if
+  // old_name is not interned or new_name already is.
+  void rekey(std::string_view old_name, std::string_view new_name);
   std::optional<uint32_t> find(std::string_view name) const;
   std::string_view view(uint32_t id) const;
   std::size_t size() const { return _entries.size(); }
@@ -44,6 +51,7 @@ class SymbolTable
   };
 
   std::size_t locate(std::string_view name, uint32_t hash) const;
+  void removeSlot(std::size_t slot);
   void rehash(std::size_t new_capacity);
 
   std::vector<char> _arena;

@@ -447,7 +447,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
       name = it->second;
   }
 
-  for (auto& [net_name, net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const std::string net_name(database.network().nets().nameOf(id));
+    const Net& net = database.network().nets().get(id);
     if (net.get_driver_pin_list().empty()) {
       addDiagnostic("net without a resolved driver: " + net_name);
       continue;

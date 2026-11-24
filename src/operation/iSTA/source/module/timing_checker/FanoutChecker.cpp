@@ -22,7 +22,9 @@ std::vector<FanoutCheck> FanoutChecker::check() const
   const auto& _sdc = _database.sdc();
   const auto& _sim_values = _database.graph().simValues();
   std::vector<FanoutCheck> checks;
-  for (const auto& [net_name, net] : _network.nets()) {
+  for (const auto& id : _network.nets().sortedIds()) {
+    const std::string net_name(_network.nets().nameOf(id));
+    const Net& net = _network.nets().get(id);
     double fanout_load = 0.0;
     const std::set<std::string> loads(net.get_load_pin_list().begin(), net.get_load_pin_list().end());
     for (const std::string& load : loads) {

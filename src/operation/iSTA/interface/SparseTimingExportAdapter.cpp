@@ -209,13 +209,14 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       continue;
     const auto net = database.network().nets().find(pin.net_name);
     if (net != database.network().nets().end()) {
-      const auto& connected = net->second.get_pin_name_list();
+      const auto& connected = net->get_pin_name_list();
       if (std::find(connected.begin(), connected.end(), pin.name) != connected.end())
         inout_nets.insert(pin.net_name);
     }
   }
   DelayCalculator calculator(database, STADM.getConfig());
-  for (auto& [name, net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const Net& net = database.network().nets().get(id);
     if (!pin_ids.contains(net.get_driver_pin()))
       continue;
     auto& cap = view.reference_pin_cap[pin_ids.at(net.get_driver_pin())];

@@ -107,6 +107,64 @@ void idIsDomainTyped()
   require(Id<PinTag>{7} == real_id, "two Ids with the same value did not compare equal");
 }
 
+void rekeyMovesTheBindingNotTheId()
+{
+  SymbolTable table;
+  const uint32_t a = table.intern("alpha");
+  const uint32_t b = table.intern("beta");
+  table.rekey("alpha", "gamma");
+  require(!table.find("alpha").has_value(), "rekey left the old name findable");
+  const auto gamma = table.find("gamma");
+  require(gamma.has_value() && *gamma == a, "rekey did not preserve the id");
+  require(table.view(a) == "gamma", "rekey did not repoint the id's bytes");
+  require(table.find("beta").has_value() && *table.find("beta") == b, "rekey disturbed an unrelated entry");
+  require(table.size() == 2, "rekey changed the logical entry count");
+}
+
+void rekeyRejectsInvalidArguments()
+{
+  SymbolTable table;
+  table.intern("alpha");
+  table.intern("beta");
+  bool threw_absent = false;
+  try {
+    table.rekey("missing", "gamma");
+  } catch (const std::invalid_argument&) {
+    threw_absent = true;
+  }
+  require(threw_absent, "rekey from an absent name did not throw");
+  bool threw_duplicate = false;
+  try {
+    table.rekey("alpha", "beta");
+  } catch (const std::invalid_argument&) {
+    threw_duplicate = true;
+  }
+  require(threw_duplicate, "rekey onto an existing name did not throw");
+  require(table.find("alpha").has_value() && table.find("beta").has_value(), "a rejected rekey still mutated the table");
+}
+
+// Backward-shift removal must not break probe chains: intern enough colliding
+// and non-colliding names to span a cluster, rekey one from the middle, and
+// confirm every remaining name still resolves.
+void rekeyKeepsProbeChainsIntact()
+{
+  SymbolTable table;
+  std::vector<std::string> names;
+  for (int i = 0; i < 60; ++i) {
+    names.push_back("net_" + std::to_string(i));
+    table.intern(names.back());
+  }
+  table.rekey("net_30", "renamed_30");
+  for (const std::string& name : names) {
+    if (name == "net_30") {
+      require(!table.find(name).has_value(), "rekeyed name still resolves under its old name");
+      continue;
+    }
+    require(table.find(name).has_value(), "rekey broke resolution of an unrelated entry in the same cluster");
+  }
+  require(table.find("renamed_30").has_value(), "rekeyed name does not resolve under its new name");
+}
+
 }  // namespace
 
 int main()
@@ -117,5 +175,8 @@ int main()
   growthPreservesEveryEntry();
   sortedIdsAreNameLexicographic();
   idIsDomainTyped();
+  rekeyMovesTheBindingNotTheId();
+  rekeyRejectsInvalidArguments();
+  rekeyKeepsProbeChainsIntact();
   return 0;
 }

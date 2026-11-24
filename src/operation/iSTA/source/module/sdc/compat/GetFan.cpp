@@ -194,7 +194,7 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
   if (fanin ? isLoad(pin) : isDriver(pin)) {
     auto net = database.network().nets().find(pin.get_net_name());
     if (net != database.network().nets().end()) {
-      for (const std::string& other_name : net->second.get_pin_name_list()) {
+      for (const std::string& other_name : net->get_pin_name_list()) {
         auto other = database.network().pins().find(other_name);
         if (other != database.network().pins().end() && other_name != pin.get_full_name() && (fanin ? isDriver(*other) : isLoad(*other))
             && isSearchPin(*other)) {

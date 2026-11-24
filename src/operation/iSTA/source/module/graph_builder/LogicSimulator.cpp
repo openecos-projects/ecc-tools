@@ -96,7 +96,8 @@ void LogicSimulator::propagateCaseValues()
   bool changed = true;
   for (std::size_t iteration = 0; changed && iteration <= _network.pins().size(); ++iteration) {
     changed = false;
-    for (const auto& [net_name, net] : _network.nets()) {
+    for (const auto& id : _network.nets().sortedIds()) {
+      const Net& net = _network.nets().get(id);
       for (const std::string& load : net.get_load_pin_list()) {
         const auto value = driverValue(net, load);
         if (value)

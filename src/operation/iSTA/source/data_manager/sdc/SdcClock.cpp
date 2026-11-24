@@ -33,7 +33,7 @@ bool masterReachesSource(const Network& network, const TimingClock& master, cons
     if (drives) {
       const auto net = network.nets().find(pin.get_net_name());
       if (net != network.nets().end())
-        for (const auto& load_name : net->second.get_pin_name_list()) {
+        for (const auto& load_name : net->get_pin_name_list()) {
           const auto load = network.pins().find(load_name);
           if (load == network.pins().end() || load->get_net_name() != pin.get_net_name())
             continue;

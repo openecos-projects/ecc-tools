@@ -35,7 +35,7 @@ bool RcTreeAnalyzer::hasDisabledDriver(const std::string& name, const std::strin
   const auto found = _database.network().nets().find(name);
   if (found == _database.network().nets().end())
     return false;
-  const auto& drivers = found->second.get_driver_pin_list();
+  const auto& drivers = found->get_driver_pin_list();
   return drivers.size() > 1
          && std::any_of(drivers.begin(), drivers.end(), [&](const auto& pin) { return pin != source && _database.graph().simValues().isDriverDisabled(pin); });
 }
@@ -48,7 +48,7 @@ double RcTreeAnalyzer::balancedDelay(ParasiticNet& net, const std::string& sourc
     const auto found = _database.network().nets().find(net.get_net_name());
     if (found == _database.network().nets().end())
       return 0.;
-    const auto& loads = found->second.get_load_pin_list();
+    const auto& loads = found->get_load_pin_list();
     const auto count = std::count_if(loads.begin(), loads.end(), [&](const auto& pin) { return pin != source; });
     if (count == 0)
       return 0.;
@@ -85,7 +85,7 @@ bool RcTreeAnalyzer::hasIncompleteNetwork(ParasiticNet& net, const std::string& 
   auto root = nodeName(net, source);
   const auto& tree = rootedTree(net, root);
   const std::set<std::string> reachable(tree.nodes.begin(), tree.nodes.end());
-  for (const auto& pin : logical->second.get_pin_name_list()) {
+  for (const auto& pin : logical->get_pin_name_list()) {
     const auto node = nodeName(net, pin);
     if (node.empty() || !reachable.contains(node)) {
       entry->second = true;

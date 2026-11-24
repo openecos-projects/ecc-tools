@@ -109,7 +109,8 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
         for (const auto& [edge, slew] : edges)
           record(ElectricalRule::kTransition, pin, clock, true, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, true, edge));
   }
-  for (const auto& [name, net] : db.network().nets()) {
+  for (const auto& id : db.network().nets().sortedIds()) {
+    const Net& net = db.network().nets().get(id);
     std::set<std::string> drivers(net.get_driver_pin_list().begin(), net.get_driver_pin_list().end());
     if (!net.get_driver_pin().empty())
       drivers.insert(net.get_driver_pin());

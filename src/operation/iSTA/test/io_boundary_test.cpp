@@ -97,7 +97,8 @@ void testNet(idb::CellMasterType cell_type, idb::IdbConnectDirection port_direct
   if (has_core_load) {
     require(database.network().pins().count("core:A") == 1, "core-facing load was removed");
   }
-  for (auto& [name, wrapped_net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const Net& wrapped_net = database.network().nets().get(id);
     require(wrapped_net.get_pin_name_list().size() == port_num + (has_core_load ? 2U : 1U), "signal net lost pin membership");
     for (const std::string& pin_name : wrapped_net.get_pin_name_list()) {
       require(database.network().pins().count(pin_name) == 1, "wrapped net references a filtered pin");

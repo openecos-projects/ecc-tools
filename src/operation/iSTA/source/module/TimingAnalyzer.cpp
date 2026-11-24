@@ -95,7 +95,9 @@ std::uint64_t structureSignature(const Database& database)
   }
 
   mixValue(hash, network.nets().size());
-  for (const auto& [name, net] : network.nets()) {
+  for (const auto& id : network.nets().sortedIds()) {
+    const std::string name(network.nets().nameOf(id));
+    const Net& net = network.nets().get(id);
     mixString(hash, name);
     mixString(hash, net.get_driver_pin());
     mixValue(hash, net.get_driver_pin_list().size());

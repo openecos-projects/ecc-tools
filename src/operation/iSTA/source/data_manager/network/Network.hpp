@@ -28,6 +28,8 @@ struct InstanceTag;
 using InstanceTable = ecc::symbol::NamedTable<Instance, InstanceTag>;
 struct PinTag;
 using PinTable = ecc::symbol::NamedTable<Pin, PinTag>;
+struct NetTag;
+using NetTable = ecc::symbol::NamedTable<Net, NetTag>;
 
 struct NetSegment
 {
@@ -49,8 +51,8 @@ class Network
   const InstanceTable& instances() const { return _instances; }
   PinTable& pins() { return _pins; }
   const PinTable& pins() const { return _pins; }
-  std::map<std::string, Net, std::less<>>& nets() { return _nets; }
-  const std::map<std::string, Net, std::less<>>& nets() const { return _nets; }
+  NetTable& nets() { return _nets; }
+  const NetTable& nets() const { return _nets; }
   std::map<std::string, HierarchyPin, std::less<>>& hierarchyPins() { return _hierarchy_pins; }
   const std::map<std::string, HierarchyPin, std::less<>>& hierarchyPins() const { return _hierarchy_pins; }
   std::unordered_map<std::string, size_t>& hierarchyIndices() { return _hierarchy_indices; }
@@ -81,7 +83,7 @@ class Network
   std::string _name;
   InstanceTable _instances;
   PinTable _pins;
-  std::map<std::string, Net, std::less<>> _nets;
+  NetTable _nets;
   std::map<std::string, HierarchyPin, std::less<>> _hierarchy_pins;
   std::unordered_map<std::string, size_t> _hierarchy_indices;
 };

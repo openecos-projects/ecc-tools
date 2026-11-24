@@ -369,10 +369,10 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
   if (!tree_like && !loopedSmallNetEnabled())
     return arnoldi_model;
   const auto net = _database.network().nets().find(parasitic_net.get_net_name());
-  if (!arnoldi_model.get_is_valid() || net == _database.network().nets().end() || net->second.get_driver_pin_list().size() != 1
-      || net->second.get_driver_pin_list().front() != _rc.pinName(source_node_name))
+  if (!arnoldi_model.get_is_valid() || net == _database.network().nets().end() || net->get_driver_pin_list().size() != 1
+      || net->get_driver_pin_list().front() != _rc.pinName(source_node_name))
     return arnoldi_model;
-  const auto& loads = net->second.get_load_pin_list();
+  const auto& loads = net->get_load_pin_list();
   if (loads.empty() || loads.size() + 1 != arnoldi_model.get_term_pin_list().size())
     return arnoldi_model;
   for (const auto& pin : loads)
@@ -452,7 +452,7 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     if (balanced_tree) {
       const auto& sim = _database.graph().simValues();
       for (bool as_driver : {true, false}) {
-        const auto logic = sim.value(net->second.get_driver_pin_list().front(), as_driver);
+        const auto logic = sim.value(net->get_driver_pin_list().front(), as_driver);
         if (logic.has_value()
             && (*logic == TimingCaseValue::kZero || *logic == TimingCaseValue::kOne || *logic == TimingCaseValue::kStatic))
           constant_driver = true;

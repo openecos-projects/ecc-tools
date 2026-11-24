@@ -81,7 +81,7 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   if (excl_driver_cc) {
     const auto net_it = _network.nets().find(net_name);
     if (net_it != _network.nets().end()) {
-      for (const auto& pin_name : net_it->second.get_pin_name_list()) {
+      for (const auto& pin_name : net_it->get_pin_name_list()) {
         const auto pin_it = _network.pins().find(pin_name);
         if (pin_it == _network.pins().end())
           continue;
@@ -124,7 +124,7 @@ bool ReadParasitics::connectionsMatch(const spef::Net& net, const std::string& n
     STALOG.warn(Loc::current(), "Ignoring SPEF net absent from the timing network: ", net.name);
     return false;
   }
-  const auto& pins = found->second.get_pin_name_list();
+  const auto& pins = found->get_pin_name_list();
   const std::unordered_set<std::string_view> pin_names(pins.begin(), pins.end());
   for (const auto& connection : net.conns) {
     if (connection.conn_direction == spef::ConnectionDirection::kInternal)

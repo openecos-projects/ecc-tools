@@ -657,7 +657,7 @@ std::vector<std::string> findClockSources(Tcl_Interp* interp, Database& database
       const auto net = database.network().nets().find(database.network().physicalNet(name));
       if (net == database.network().nets().end())
         throw std::invalid_argument("clock source net no longer exists: " + name);
-      for (const auto& pin_name : net->second.get_pin_name_list()) {
+      for (const auto& pin_name : net->get_pin_name_list()) {
         const auto& pin = database.network().pins().at(pin_name);
         if (pin.get_direction() == PinDirection::kInout
             || (pin.get_is_port() ? pin.get_direction() == PinDirection::kInput : pin.get_direction() == PinDirection::kOutput))

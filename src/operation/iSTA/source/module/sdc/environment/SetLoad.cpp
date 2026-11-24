@@ -152,11 +152,11 @@ double subtractNetLoadPinCapacitance(Database& database, const std::string& net_
     return load_value;
   }
   double adjusted = load_value;
-  const auto& loads = net_iter->second.get_load_pin_list();
+  const auto& loads = net_iter->get_load_pin_list();
   std::set<std::string> capacitive_pins(loads.begin(), loads.end());
   // Input ports are driver-only after graph construction, but their explicit
   // load still contributes to the network capacitance. Deduplicate inout pins.
-  for (const auto& name : net_iter->second.get_driver_pin_list()) {
+  for (const auto& name : net_iter->get_driver_pin_list()) {
     const auto pin = database.network().pins().find(name);
     if (pin != database.network().pins().end() && (pin->get_is_port() || pin->get_direction() == PinDirection::kInout))
       capacitive_pins.insert(name);

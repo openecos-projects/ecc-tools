@@ -178,7 +178,7 @@ std::optional<bool> ReportPathContext::getTieDriverValue(const std::string& name
   const auto net = _database.network().nets().find(pin->get_net_name());
   if (net == _database.network().nets().end())
     return std::nullopt;
-  for (const auto& driver_name : net->second.get_driver_pin_list()) {
+  for (const auto& driver_name : net->get_driver_pin_list()) {
     const auto driver = _database.network().pins().find(driver_name);
     if (driver == _database.network().pins().end() || driver->get_is_port())
       continue;
@@ -299,7 +299,7 @@ std::optional<std::size_t> ReportPathContext::getPinFanout(const std::string& pi
   if (net_it == database.network().nets().end()) {
     return std::nullopt;
   }
-  const Net& net = net_it->second;
+  const Net& net = *net_it;
   const std::vector<std::string>& drivers = net.get_driver_pin_list();
   if (net.get_driver_pin() != pin_name && std::find(drivers.begin(), drivers.end(), pin_name) == drivers.end()) {
     return std::nullopt;

@@ -142,8 +142,9 @@ void LinkNetwork::linkNets()
     _network.pins().get(id).get_net_name().clear();
   }
 
-  for (std::pair<const std::string, Net>& net_pair : _network.nets()) {
-    linkNet(net_pair.first, net_pair.second);
+  for (const auto& id : _network.nets().sortedIds()) {
+    const std::string net_name(_network.nets().nameOf(id));
+    linkNet(net_name, _network.nets().get(id));
   }
 }
 
