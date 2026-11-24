@@ -206,7 +206,7 @@ double RequiredPropagator::resolveRequiredTime()
   Database& database = _database;
   double worst_arrival = 0.0;
   for (const std::string& end_point : database.graph().endpoints()) {
-    TimingPoint& timing_point = database.graph().points()[end_point];
+    TimingPoint& timing_point = database.graph().points().at(end_point);
     if (_query.isFinite(timing_point.get_arrival())) {
       worst_arrival = std::max(worst_arrival, timing_point.get_arrival());
     }
@@ -218,7 +218,7 @@ void RequiredPropagator::seedEndPointRequired(double required_time)
 {
   Database& database = _database;
   for (const std::string& end_point : database.graph().endpoints()) {
-    TimingPoint& point = database.graph().points()[end_point];
+    TimingPoint& point = database.graph().points().at(end_point);
     auto mode = point.get_path_state_map().find(AnalysisType::kMax);
     if (mode == point.get_path_state_map().end()) {
       point.set_required(required_time);
