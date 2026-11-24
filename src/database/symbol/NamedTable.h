@@ -56,6 +56,12 @@ class NamedTable
     return id ? &_storage[*id - 1] : nullptr;
   }
 
+  // find()'s miss sentinel, so the std::map idiom
+  // `auto it = table.find(x); if (it == table.end()) ...` keeps compiling
+  // unchanged on a migrated call site (only `it->second` needs to become
+  // `*it`/`it->`, since find() now returns T* rather than an iterator).
+  static constexpr T* end() { return nullptr; }
+
   T& at(std::string_view name)
   {
     T* found = find(name);

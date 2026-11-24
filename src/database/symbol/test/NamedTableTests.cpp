@@ -50,6 +50,18 @@ void findDoesNotInsertAndAtThrowsOnMiss()
   require(threw, "at() did not throw on a missing name");
 }
 
+// Mirrors the `auto it = container.find(x); if (it == container.end()) ...`
+// idiom the audit found ~50+ times on Network::instances() alone.
+void endSentinelMatchesFindMiss()
+{
+  WidgetTable table;
+  table["present"].value = 1;
+  Widget* found = table.find("present");
+  require(found != WidgetTable::end(), "find() on an existing key returned the end() sentinel");
+  Widget* missing = table.find("absent");
+  require(missing == WidgetTable::end(), "find() on a miss did not equal end()");
+}
+
 // Mirrors the test-fixture idiom the audit found ~30+ times in iSTA
 // (e.g. SdcTestDesign.hpp's addInstance holding Instance& across a loop that
 // calls addPin, which re-indexes the same instance key): take a reference,
@@ -121,6 +133,7 @@ int main()
 {
   operatorBracketInsertsOrFetchesLikeMap();
   findDoesNotInsertAndAtThrowsOnMiss();
+  endSentinelMatchesFindMiss();
   referencesSurviveUnrelatedInsertionsAndGrowth();
   clearResetsToEmpty();
   idRoundTripsThroughNameOfAndGet();
