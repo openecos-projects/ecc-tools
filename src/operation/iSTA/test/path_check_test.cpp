@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <set>
 #include <stdexcept>
 
@@ -393,7 +394,8 @@ int main()
   db.sdc().get_path_exception_list().push_back(maximum);
   path.set_exception_state_list(ExceptionMatcher(db.sdc(), db.network()).initState("out", "clk", TransType::kRise, AnalysisType::kMax, TransType::kRise));
   require(check.checkPath(path, "out", AnalysisType::kMax)->required() == 3.0, "max-delay exception lost the output-delay margin");
-  require(path.get_arrival() == 3.0 && path.get_clock_name() == "clk" && path.get_predecessor().empty(), "check changed the propagated path");
+  require(path.get_arrival() == 3.0 && path.get_clock_name() == "clk" && path.get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max(),
+          "check changed the propagated path");
   require(db.pathGroups().empty() && other.pathGroups().empty(), "check published path results");
   db.sdc().get_path_exception_list().clear();
   TimingIoDelay rise_only;

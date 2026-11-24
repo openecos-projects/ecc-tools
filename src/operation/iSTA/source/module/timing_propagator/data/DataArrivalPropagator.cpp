@@ -155,7 +155,6 @@ void DataArrivalPropagator::propagateArrivalArc(std::size_t arc_idx)
     if (_path_query.isFinite(candidate_arrival)
         && (!_path_query.isFinite(sink_point.get_arrival()) || candidate_arrival > sink_point.get_arrival() + kEpsilon)) {
       sink_point.set_arrival(candidate_arrival);
-      sink_point.set_predecessor(arc.get_source_pin());
       sink_point.set_predecessor_arc_idx(arc_idx);
       sink_point.set_launch_time(source_point.get_launch_time());
       sink_point.setLaunchClock(source_point.launchClock());
@@ -240,7 +239,6 @@ void DataArrivalPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisT
       sink_path_state.set_arrival(candidate_arrival);
       sink_path_state.set_slew(_path_query.getDataSlew(sink_point, analysis_type, output_trans_type));
       sink_path_state.set_start_point(source_path_state.get_start_point());
-      sink_path_state.set_predecessor(arc.get_source_pin());
       sink_path_state.set_predecessor_arc_idx(arc_idx);
       sink_path_state.set_predecessor_arc_delay(arc_delay);
       sink_path_state.set_launch_time(source_path_state.get_launch_time());

@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -87,7 +88,7 @@ void PathTracer::buildPathTrace(const std::string& end_point, AnalysisType analy
     path_pin_name_list.push_back(pin_name);
     path_trans_type_list.push_back(state->get_trans_type());
     path_state_tag_list.push_back(state->get_path_state_tag());
-    if (state->get_predecessor().empty()) {
+    if (state->get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max()) {
       break;
     }
     std::size_t arc_idx = state->get_predecessor_arc_idx();

@@ -53,7 +53,6 @@ class TimingPathState
   double get_launch_source_latency() const { return _launch_source_latency; }
   double get_launch_time() const { return _launch_time; }
   const std::string& get_start_point() const { return _start_point; }
-  const std::string& get_predecessor() const { return _predecessor; }
   const std::string& get_clock_name() const { return _clock_name; }
   const std::string& get_crpr_clock_pin() const { return _crpr_clock_pin; }
   const std::string& get_path_state_tag() const { return _path_state_tag; }
@@ -74,7 +73,6 @@ class TimingPathState
   void set_launch_source_latency(double value) { _launch_source_latency = value; }
   void set_launch_time(const double launch_time) { _launch_time = launch_time; }
   void set_start_point(const std::string_view start_point) { _start_point = start_point; }
-  void set_predecessor(const std::string_view predecessor) { _predecessor = predecessor; }
   void set_clock_name(const std::string_view clock_name) { _clock_name = clock_name; }
   void set_crpr_clock_pin(const std::string_view crpr_clock_pin) { _crpr_clock_pin = crpr_clock_pin; }
   void set_path_state_tag(const std::string_view path_state_tag) { _path_state_tag = path_state_tag; }
@@ -100,7 +98,6 @@ class TimingPathState
   std::optional<double> _input_delay;
   double _launch_source_latency = 0.0;
   std::string _start_point;
-  std::string _predecessor;
   std::string _clock_name;
   std::string _crpr_clock_pin;
   std::string _path_state_tag;

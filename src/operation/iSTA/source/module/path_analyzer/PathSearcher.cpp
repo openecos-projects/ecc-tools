@@ -175,7 +175,6 @@ TimingPathState* PathSearcher::updateDiversionPathState(const std::string& pin_n
   path_state.set_arrival(arrival);
   path_state.set_slew(_query.getDataSlew(timing_point, analysis_type, trans_type));
   path_state.set_start_point(source_path_state.get_start_point());
-  path_state.set_predecessor(predecessor);
   path_state.set_predecessor_arc_idx(predecessor_arc_idx);
   path_state.set_predecessor_arc_delay(predecessor_arc_delay);
   path_state.set_launch_time(source_path_state.get_launch_time());

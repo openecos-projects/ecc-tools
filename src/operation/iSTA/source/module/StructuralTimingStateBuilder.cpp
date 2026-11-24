@@ -113,7 +113,6 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
                 TimingPathState target = source_state;
                 target.set_arrival(kModelReferenceArrival);
                 target.set_slew(kModelReferenceSlew);
-                target.set_predecessor(arc.get_source_pin());
                 target.set_predecessor_arc_idx(arc_index);
                 target.set_predecessor_arc_delay(0.0);
                 target.set_predecessor_path_state_tag(source_tag);

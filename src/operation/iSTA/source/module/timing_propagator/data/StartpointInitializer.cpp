@@ -634,7 +634,6 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   path_state.set_path_state_tag(path_state_tag);
   path_state.set_predecessor_path_state_tag("");
   path_state.set_exception_state_list(exception_state_list);
-  path_state.set_predecessor("");
   path_state.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
   path_state.set_predecessor_arc_delay(0.0);
   path_state.set_trans_type(trans_type);

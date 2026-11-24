@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -226,7 +227,8 @@ int main()
     for (const auto& [source, transitions] : sources)
       for (const auto& [transition, states] : transitions)
         for (const auto& [tag, state] : states)
-          if (state.get_clock_name() != "clk" || state.get_start_point() != end || state.get_path_state_tag() != tag || !state.get_predecessor().empty()
+          if (state.get_clock_name() != "clk" || state.get_start_point() != end || state.get_path_state_tag() != tag
+              || state.get_predecessor_arc_idx() != std::numeric_limits<std::size_t>::max()
               || state.get_arrival() != (analysis == ista::AnalysisType::kMax ? 3.0 : 1.0))
             throw std::runtime_error("endpoint evaluation overwrote propagated path");
   testCaptureClocks();

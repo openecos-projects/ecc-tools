@@ -305,8 +305,7 @@ void testGeneratedInsertion()
   require(target_point.findDefaultClockState() == &target, "generated default state missing before data propagation");
   const auto generated_slew = target.slew(AnalysisType::kMax, TransType::kRise);
   DataPropagator(STADM.getDatabase(), STADC).propagate();
-  require(target_point.launchClock() == "master",
-          "fixture did not replace launch clock: " + target_point.launchClock() + " predecessor: " + target_point.get_predecessor());
+  require(target_point.launchClock() == "master", "fixture did not replace launch clock: " + target_point.launchClock());
   require(target_point.findDefaultClockState() == &target && target_point.findDefaultClockState()->slew(AnalysisType::kMax, TransType::kRise) == generated_slew,
           "data launch-clock summary replaced generated default clock state");
   STADC.clear();

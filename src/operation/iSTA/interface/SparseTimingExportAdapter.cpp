@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <set>
 #include <string_view>
@@ -277,7 +278,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
           if (pair[edge] == nullptr)
             continue;
           state.valid[edge] = true;
-          state.seed[edge] = pair[edge]->get_predecessor().empty();
+          state.seed[edge] = pair[edge]->get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max();
           state.reference[edge] = pair[edge]->get_arrival() * snapshot.time_unit_ps;
           state.reference[edge + 2] = pair[edge]->get_slew() * snapshot.time_unit_ps;
         }

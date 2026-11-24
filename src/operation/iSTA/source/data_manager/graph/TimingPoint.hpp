@@ -43,7 +43,6 @@ class TimingPoint
   double get_slack() const { return _slack; }
   double get_launch_time() const { return _launch_time; }
   int32_t get_level() const { return _level; }
-  std::string& get_predecessor() { return _predecessor; }
   // Reference-clock selection survives data propagation. The scalar arrival
   // summary may instead describe a data path launched by another clock.
   const std::string& defaultClock() const { return _default_clock; }
@@ -87,7 +86,6 @@ class TimingPoint
   void set_slack(const double slack) { _slack = slack; }
   void set_launch_time(const double launch_time) { _launch_time = launch_time; }
   void set_level(const int32_t level) { _level = level; }
-  void set_predecessor(std::string_view predecessor) { _predecessor = predecessor; }
   void setDefaultClock(std::string_view clock) { _default_clock = clock; }
   void setLaunchClock(std::string_view clock) { _launch_clock = clock; }
   void set_predecessor_arc_idx(const std::size_t predecessor_arc_idx) { _predecessor_arc_idx = predecessor_arc_idx; }
@@ -106,7 +104,6 @@ class TimingPoint
   double _slack = 0.0;
   double _launch_time = 0.0;
   int32_t _level = 0;
-  std::string _predecessor;
   std::string _default_clock;
   std::string _launch_clock;
   std::size_t _predecessor_arc_idx = std::numeric_limits<std::size_t>::max();
