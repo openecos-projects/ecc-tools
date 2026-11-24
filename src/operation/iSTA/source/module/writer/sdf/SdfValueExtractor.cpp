@@ -384,8 +384,8 @@ void SdfValueExtractor::dumpPinSlew(const char* path)
   if (fp == nullptr)
     return;
   std::fprintf(fp, "pin,min_rise,min_fall,max_rise,max_fall\n");
-  for (auto& entry : _database.network().pins()) {
-    std::string pin_name = entry.first;
+  for (const auto& id : _database.network().pins().sortedIds()) {
+    std::string pin_name(_database.network().pins().nameOf(id));
     std::fprintf(fp, "%s,%.13g,%.13g,%.13g,%.13g\n", pin_name.c_str(), slew(pin_name, AnalysisType::kMin, TransType::kRise),
                  slew(pin_name, AnalysisType::kMin, TransType::kFall), slew(pin_name, AnalysisType::kMax, TransType::kRise),
                  slew(pin_name, AnalysisType::kMax, TransType::kFall));

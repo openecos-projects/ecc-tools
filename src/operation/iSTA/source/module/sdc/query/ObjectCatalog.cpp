@@ -160,7 +160,9 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
     }
   }
   if (type == QueryObjectType::kPort || type == QueryObjectType::kPin || type == QueryObjectType::kAny) {
-    for (auto& [name, pin] : database.network().pins()) {
+    for (const auto& id : database.network().pins().sortedIds()) {
+      const std::string name(database.network().pins().nameOf(id));
+      const Pin& pin = database.network().pins().get(id);
       if ((type == QueryObjectType::kPort && !pin.get_is_port()) || (type == QueryObjectType::kPin && pin.get_is_port()))
         continue;
       const std::string display = pin.get_is_port() ? name : pin.get_instance_name() + "/" + pin.get_pin_name();
@@ -207,7 +209,7 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
         // Top-level port declarations still name the same connected net in SDC.
         for (const auto& pin_name : net.get_pin_name_list()) {
           const auto pin = database.network().pins().find(pin_name);
-          if (pin != database.network().pins().end() && pin->second.get_is_port() && pin->second.get_net_name() == name && pin_name != name)
+          if (pin != database.network().pins().end() && pin->get_is_port() && pin->get_net_name() == name && pin_name != name)
             matches.back().names.push_back(pin_name);
         }
       }
@@ -254,7 +256,7 @@ QueryObjectType getObjectType(Database& database, const std::string& name)
     return QueryObjectType::kPin;
   const auto pin = database.network().pins().find(name);
   if (pin != database.network().pins().end())
-    return pin->second.get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
+    return pin->get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
   if (database.sdc().get_clock_map().contains(name))
     return QueryObjectType::kClock;
   if (database.network().instances().contains(name) || database.network().hierarchyCells().contains(name))

@@ -78,14 +78,13 @@ void appendSparseElectricalEdges(const TimingData& snapshot, Database& database,
     // Borrow stable snapshot/network names, never strings in the growing vector.
     const auto pin = database.network().pins().find(state.pin);
     if (pin != database.network().pins().end())
-      representative.try_emplace({pin->first, state.role}, index);
+      representative.try_emplace({state.pin, state.role}, index);
     next_group = std::max(next_group, state.slew_group + 1);
   }
   std::array<int32_t, 2> electrical_tags{-1, -1};
   int32_t electrical_launch = -1;
   auto destination = [&](const std::string& pin, int32_t role, int32_t level) {
-    const auto name = database.network().pins().find(pin);
-    const auto key = std::pair<std::string_view, int32_t>{name->first, role};
+    const auto key = std::pair<std::string_view, int32_t>{pin, role};
     if (const auto found = representative.find(key); found != representative.end())
       return found->second;
     if (electrical_launch < 0) {

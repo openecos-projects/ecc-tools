@@ -40,7 +40,9 @@ unsigned TclAllInputs::exec()
     }
   }
   std::vector<std::string> ports;
-  for (auto& [name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string name(database.network().pins().nameOf(id));
+    const Pin& pin = database.network().pins().get(id);
     if (pin.get_is_port() && !sources.contains(name) && (pin.get_direction() == PinDirection::kInput || pin.get_direction() == PinDirection::kInout)) {
       ports.push_back(name);
     }
@@ -57,7 +59,9 @@ TclAllOutputs::TclAllOutputs(const char* cmd_name, ClientData client_data) : Sdc
 unsigned TclAllOutputs::exec()
 {
   std::vector<std::string> ports;
-  for (auto& [name, pin] : STADM.getDatabase().network().pins()) {
+  for (const auto& id : STADM.getDatabase().network().pins().sortedIds()) {
+    const std::string name(STADM.getDatabase().network().pins().nameOf(id));
+    const Pin& pin = STADM.getDatabase().network().pins().get(id);
     if (pin.get_is_port() && (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout)) {
       ports.push_back(name);
     }

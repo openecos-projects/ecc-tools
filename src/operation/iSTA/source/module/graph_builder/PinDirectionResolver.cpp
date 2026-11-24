@@ -29,8 +29,8 @@ namespace ista {
 void PinDirectionResolver::normalize()
 {
   Database& database = _database;
-  for (auto& pin_pair : database.network().pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : database.network().pins().sortedIds()) {
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_is_port()) {
       continue;
     }
@@ -69,8 +69,9 @@ std::map<std::string, PinDirection> PinDirectionResolver::makeInoutPinDirectionM
 {
   Database& database = _database;
   std::map<std::string, PinDirection> inout_pin_direction_map;
-  for (std::pair<const std::string, Pin>& pin_pair : database.network().pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_direction() != PinDirection::kInout) {
       continue;
     }
@@ -82,11 +83,11 @@ std::map<std::string, PinDirection> PinDirectionResolver::makeInoutPinDirectionM
     if (isFloatingInoutPin(pin)) {
       continue;
     }
-    PinDirection pin_direction = inferInoutPinDirection(pin_pair.first, pin, inout_pin_direction_map);
+    PinDirection pin_direction = inferInoutPinDirection(pin_name, pin, inout_pin_direction_map);
     if (pin_direction == PinDirection::kNone || pin_direction == PinDirection::kInout) {
-      STALOG.error(Loc::current(), "Failed to infer inout pin direction: pin=", pin_pair.first, " net=", pin.get_net_name());
+      STALOG.error(Loc::current(), "Failed to infer inout pin direction: pin=", pin_name, " net=", pin.get_net_name());
     }
-    inout_pin_direction_map[pin_pair.first] = pin_direction;
+    inout_pin_direction_map[pin_name] = pin_direction;
   }
   return inout_pin_direction_map;
 }

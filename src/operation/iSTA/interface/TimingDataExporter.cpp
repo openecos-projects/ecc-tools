@@ -114,14 +114,14 @@ bool isActiveTimingVariant(Database& database, const TimingArc& timing_arc, cons
   if (timing_arc.get_when_expression().get_is_empty())
     return true;
   const auto pin = database.network().pins().find(output_pin);
-  if (pin == database.network().pins().end() || pin->second.get_is_port())
+  if (pin == database.network().pins().end() || pin->get_is_port())
     return true;
 
   std::map<std::string, bool> values;
   for (const auto& term : timing_arc.get_when_expression().get_term_list()) {
     if (term.get_operation_type() != LogicOperationType::kPort)
       continue;
-    const auto value = database.graph().simValues().value(pin->second.get_instance_name() + ":" + term.get_port_name());
+    const auto value = database.graph().simValues().value(pin->get_instance_name() + ":" + term.get_port_name());
     if (value && (*value == TimingCaseValue::kZero || *value == TimingCaseValue::kOne))
       values[term.get_port_name()] = *value == TimingCaseValue::kOne;
   }
@@ -247,7 +247,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   bool used_min_analysis_fallback = false;
   std::unordered_map<std::string, int32_t> pin_ids;
   pin_ids.reserve(database.network().pins().size());
-  for (auto& [name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string name(database.network().pins().nameOf(id));
+    const Pin& pin = database.network().pins().get(id);
     pin_ids.emplace(name, static_cast<int32_t>(snapshot.pins.size()));
     TimingPinData exported;
     exported.name = name;
@@ -318,7 +320,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (cell_it == library.get_cell_map().end()) {
       continue;
     }
-    const auto port_it = cell_it->second.get_port_map().find(pin_it->second.get_pin_name());
+    const auto port_it = cell_it->second.get_port_map().find(pin_it->get_pin_name());
     if (port_it == cell_it->second.get_port_map().end()) {
       continue;
     }
@@ -435,7 +437,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
       continue;
     }
     const auto current_pin = database.network().pins().find(current->second);
-    if ((current_pin == database.network().pins().end() || current_pin->second.get_net_name().empty()) && !sink->second.get_net_name().empty()) {
+    if ((current_pin == database.network().pins().end() || current_pin->get_net_name().empty()) && !sink->get_net_name().empty()) {
       current->second = arc.sink_pin;
     }
   }

@@ -84,7 +84,7 @@ std::set<std::string> TclGetFan::getQueryPins(const std::vector<Tcl_Obj*>& objec
       } else if (kind == QueryObjectType::kNet) {
         for (const auto& pin_name : database.network().nets().at(database.network().physicalNet(match)).get_pin_name_list()) {
           auto pin = database.network().pins().find(pin_name);
-          if (pin != database.network().pins().end() && (_is_fanin || isLoad(pin->second)))
+          if (pin != database.network().pins().end() && (_is_fanin || isLoad(*pin)))
             roots.insert(pin_name);
         }
       }
@@ -196,8 +196,8 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
     if (net != database.network().nets().end()) {
       for (const std::string& other_name : net->second.get_pin_name_list()) {
         auto other = database.network().pins().find(other_name);
-        if (other != database.network().pins().end() && other_name != pin.get_full_name() && (fanin ? isDriver(other->second) : isLoad(other->second))
-            && isSearchPin(other->second)) {
+        if (other != database.network().pins().end() && other_name != pin.get_full_name() && (fanin ? isDriver(*other) : isLoad(*other))
+            && isSearchPin(*other)) {
           adjacent.push_back(other_name);
         }
       }
@@ -222,7 +222,7 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
     }
     std::string other_name = pin.get_instance_name() + ":" + (fanin ? arc.get_source_port() : arc.get_sink_port());
     auto other = database.network().pins().find(other_name);
-    if (other != database.network().pins().end() && isSearchPin(other->second)) {
+    if (other != database.network().pins().end() && isSearchPin(*other)) {
       adjacent.push_back(other_name);
     }
   }

@@ -48,7 +48,9 @@ void ClockGatingChecker::infer()
     if (definition.get_is_generated())
       for (const auto& target : definition.get_source_list())
         pending.emplace_back(target, definition.get_master_clock_name());
-  for (const auto& [name, pin] : network.pins()) {
+  for (const auto& id : network.pins().sortedIds()) {
+    const std::string name(network.pins().nameOf(id));
+    const Pin& pin = network.pins().get(id);
     if (!pin.get_is_port() || (pin.get_direction() != PinDirection::kOutput && pin.get_direction() != PinDirection::kInout))
       continue;
     bool primary_root = false;
@@ -94,15 +96,15 @@ void ClockGatingChecker::infer()
   std::set<std::tuple<std::string, std::string, bool, std::string>> inferred;
   for (const auto& [output, output_clocks] : clock_fanin) {
     const auto pin = network.pins().find(output);
-    if (pin == network.pins().end() || pin->second.get_is_port())
+    if (pin == network.pins().end() || pin->get_is_port())
       continue;
-    const auto& instance = network.instances().at(pin->second.get_instance_name());
+    const auto& instance = network.instances().at(pin->get_instance_name());
     if (instance.get_is_sequential() || instance.get_is_clock_gating())
       continue;
     const auto cell = _database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell == _database.liberty().get_cell_map().end())
       continue;
-    const auto port = cell->second.get_port_map().find(pin->second.get_pin_name());
+    const auto port = cell->second.get_port_map().find(pin->get_pin_name());
     if (port == cell->second.get_port_map().end() || !port->second.get_is_output())
       continue;
     const auto& function = port->second.get_function_expression();

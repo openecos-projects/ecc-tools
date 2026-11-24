@@ -96,7 +96,8 @@ void ReadLiberty::checkCellReferences() const
   // ReadNetwork has already removed PG terminals. Instance pin lists are
   // linked later by DataManager, so inspect the imported signal pins here.
   // Filler/tap cells with no signal terminals do not need a timing model.
-  for (const auto& [name, pin] : _network.pins()) {
+  for (const auto& id : _network.pins().sortedIds()) {
+    const Pin& pin = _network.pins().get(id);
     if (pin.get_is_port())
       continue;
     const auto& instance = _network.instances().at(pin.get_instance_name());

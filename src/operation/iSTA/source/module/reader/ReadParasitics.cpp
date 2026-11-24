@@ -45,8 +45,8 @@ void ReadParasitics::readNet(spef::Net& spef_net)
     // extraction names the same connection after the port. Resolve only an
     // actual port alias, then validate every extracted terminal below.
     const auto port = _network.pins().find(net_name);
-    if (port != _network.pins().end() && port->second.get_is_port())
-      net_name = port->second.get_net_name();
+    if (port != _network.pins().end() && port->get_is_port())
+      net_name = port->get_net_name();
   }
   // An ECO can leave the old extracted terminals in SPEF. Those nodes must
   // not replace the loads of the linked netlist or become a fictitious RC tree.
@@ -85,11 +85,11 @@ void ReadParasitics::readNet(spef::Net& spef_net)
         const auto pin_it = _network.pins().find(pin_name);
         if (pin_it == _network.pins().end())
           continue;
-        const auto direction = pin_it->second.get_direction();
+        const auto direction = pin_it->get_direction();
         if (direction == PinDirection::kOutput || direction == PinDirection::kInout) {
-          driver_instance = pin_it->second.get_instance_name();
+          driver_instance = pin_it->get_instance_name();
           // SPEF node names use `instance:pin`; build the matching form.
-          driver_pin = driver_instance + ":" + pin_it->second.get_pin_name();
+          driver_pin = driver_instance + ":" + pin_it->get_pin_name();
           break;
         }
       }

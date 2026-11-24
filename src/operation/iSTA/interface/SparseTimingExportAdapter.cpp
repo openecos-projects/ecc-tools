@@ -59,15 +59,15 @@ struct EndpointArcHash
 bool isBidirectionalCellPin(Database& database, const std::string& pin_name)
 {
   const auto pin = database.network().pins().find(pin_name);
-  if (pin == database.network().pins().end() || pin->second.get_is_port())
+  if (pin == database.network().pins().end() || pin->get_is_port())
     return false;
-  const auto instance = database.network().instances().find(pin->second.get_instance_name());
+  const auto instance = database.network().instances().find(pin->get_instance_name());
   if (instance == database.network().instances().end())
     return false;
   const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end())
     return false;
-  const auto port = cell->second.get_port_map().find(pin->second.get_pin_name());
+  const auto port = cell->second.get_port_map().find(pin->get_pin_name());
   return port != cell->second.get_port_map().end() && port->second.get_is_input() && port->second.get_is_output();
 }
 
@@ -76,7 +76,7 @@ bool isTopLevelInoutNet(Database& database, const std::unordered_set<std::string
   if (inout_nets.empty())
     return false;
   const auto pin = database.network().pins().find(pin_name);
-  return pin != database.network().pins().end() && inout_nets.contains(pin->second.get_net_name());
+  return pin != database.network().pins().end() && inout_nets.contains(pin->get_net_name());
 }
 
 bool sameLaunchTag(const std::vector<std::string>& tags, int32_t lhs, int32_t rhs)
@@ -108,7 +108,7 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
   const auto pin = database.network().pins().find(data_pin);
   if (pin == database.network().pins().end())
     return -1;
-  const auto instance = database.network().instances().find(pin->second.get_instance_name());
+  const auto instance = database.network().instances().find(pin->get_instance_name());
   if (instance == database.network().instances().end())
     return -1;
   const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
@@ -290,7 +290,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         // tagged graph from a register clock-to-Q arc.
         const auto pin = database.network().pins().find(name);
         const auto port_constraint = database.sdc().get_port_constraint_map().find(name);
-        if (pin != database.network().pins().end() && pin->second.get_is_port() && port_constraint != database.sdc().get_port_constraint_map().end()
+        if (pin != database.network().pins().end() && pin->get_is_port() && port_constraint != database.sdc().get_port_constraint_map().end()
             && (early ? port_constraint->second.get_has_input_delay_min() : port_constraint->second.get_has_input_delay_max()) && state.source_type != 2) {
           state.seed = state.valid;
         }
@@ -382,7 +382,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       }
       const auto sink_pin = database.network().pins().find(arc.sink_pin);
       const auto sink_constraint = database.sdc().get_port_constraint_map().find(arc.sink_pin);
-      const bool synthetic_output = !cell && sink_pin != database.network().pins().end() && sink_pin->second.get_is_port()
+      const bool synthetic_output = !cell && sink_pin != database.network().pins().end() && sink_pin->get_is_port()
                                     && sink_constraint != database.sdc().get_port_constraint_map().end()
                                     && (early ? sink_constraint->second.get_has_output_delay_min() : sink_constraint->second.get_has_output_delay_max());
       if (!active.contains({arc.source_pin, arc.sink_pin}) && !synthetic_output)
@@ -507,7 +507,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
     auto& state = view.states[state_id];
     const auto pin = database.network().pins().find(state.pin);
     const auto constraint = database.sdc().get_port_constraint_map().find(state.pin);
-    if (pin != database.network().pins().end() && pin->second.get_is_port() && state.source_type == 2
+    if (pin != database.network().pins().end() && pin->get_is_port() && state.source_type == 2
         && constraint != database.sdc().get_port_constraint_map().end()
         && (early ? constraint->second.get_has_output_delay_min() : constraint->second.get_has_output_delay_max()) && !net_destinations.contains(state_id)) {
       state.seed = state.valid;

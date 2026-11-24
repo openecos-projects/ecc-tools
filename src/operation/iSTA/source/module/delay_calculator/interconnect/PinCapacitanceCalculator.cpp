@@ -27,10 +27,10 @@ namespace ista {
 double PinCapacitanceCalculator::driverCapacitance(const std::string& pin_name, AnalysisType analysis_type, TransType trans_type)
 {
   const auto pin = _database.network().pins().find(pin_name);
-  if (pin == _database.network().pins().end() || (!pin->second.get_is_port() && pin->second.get_direction() != PinDirection::kInout)) {
+  if (pin == _database.network().pins().end() || (!pin->get_is_port() && pin->get_direction() != PinDirection::kInout)) {
     return 0.0;
   }
-  return pinCapacitance(pin->second.get_full_name(), analysis_type, trans_type);
+  return pinCapacitance(pin->get_full_name(), analysis_type, trans_type);
 }
 
 double PinCapacitanceCalculator::pinCapacitance(std::string& pin_name, AnalysisType analysis_type, TransType trans_type)

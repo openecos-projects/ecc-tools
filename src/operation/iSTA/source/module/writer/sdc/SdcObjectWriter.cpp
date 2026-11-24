@@ -76,9 +76,9 @@ namespace {
 std::pair<std::string, std::string> objectQuery(Database& database, const std::string& name, bool exception)
 {
   if (const auto pin = database.network().pins().find(name); pin != database.network().pins().end()) {
-    if (pin->second.get_is_port())
+    if (pin->get_is_port())
       return {"get_ports", name};
-    return {"get_pins", pin->second.get_instance_name() + "/" + pin->second.get_pin_name()};
+    return {"get_pins", pin->get_instance_name() + "/" + pin->get_pin_name()};
   }
   if (const auto pin = database.network().hierarchyPins().find(name); pin != database.network().hierarchyPins().end()) {
     return {"get_pins", pin->second.instance + "/" + pin->second.port};

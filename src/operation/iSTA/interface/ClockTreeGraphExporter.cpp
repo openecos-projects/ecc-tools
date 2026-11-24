@@ -187,20 +187,20 @@ std::string netNameForArc(const Network& network, const Arc& arc)
     return {};
   }
   const auto sink = network.pins().find(arc.get_sink_pin());
-  if (sink != network.pins().end() && !sink->second.get_net_name().empty()) {
-    return sink->second.get_net_name();
+  if (sink != network.pins().end() && !sink->get_net_name().empty()) {
+    return sink->get_net_name();
   }
   const auto source = network.pins().find(arc.get_source_pin());
-  return source == network.pins().end() ? std::string{} : source->second.get_net_name();
+  return source == network.pins().end() ? std::string{} : source->get_net_name();
 }
 
 std::string cellMasterForArc(const Database& database, const Arc& arc)
 {
   const auto source = database.network().pins().find(arc.get_source_pin());
-  if (source == database.network().pins().end() || source->second.get_instance_name().empty()) {
+  if (source == database.network().pins().end() || source->get_instance_name().empty()) {
     return {};
   }
-  const auto instance = database.network().instances().find(source->second.get_instance_name());
+  const auto instance = database.network().instances().find(source->get_instance_name());
   return instance == database.network().instances().end() ? std::string{} : instance->get_cell_name();
 }
 
@@ -369,7 +369,7 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
               const auto name = predecessor->second.find(local);
               if (name != predecessor->second.end()) {
                 const auto pin = database.network().pins().find(name->second);
-                timing.predecessor = pin == database.network().pins().end() ? name->second : nodeName(pin->second);
+                timing.predecessor = pin == database.network().pins().end() ? name->second : nodeName(*pin);
               }
             }
             if (arrival.has_value()) {

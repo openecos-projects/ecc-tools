@@ -77,7 +77,7 @@ LoadTargets findLoadTargets(Tcl_Interp* interp, Database& database, const std::v
     SdcObjectType type = SdcObject::getType(object);
     if (type == SdcObjectType::kPort) {
       auto pin = database.network().pins().find(name);
-      if (pin == database.network().pins().end() || !pin->second.get_is_port()) {
+      if (pin == database.network().pins().end() || !pin->get_is_port()) {
         throw std::invalid_argument("set_load port no longer exists: " + name);
       }
       targets.ports.insert(name);
@@ -118,12 +118,12 @@ double getLibraryPinCapacitance(Database& database, const std::string& pin_name,
   if (pin_iter == database.network().pins().end()) {
     return 0.0;
   }
-  if (pin_iter->second.get_is_port()) {
+  if (pin_iter->get_is_port()) {
     auto& port_constraints = database.sdc().get_port_constraint_map();
     const auto constraint = port_constraints.find(pin_name);
     return constraint != port_constraints.end() && constraint->second.get_has_load() ? constraint->second.get_load(analysis_type, trans_type) : 0.0;
   }
-  Pin& pin = pin_iter->second;
+  Pin& pin = *pin_iter;
   const auto instance_iter = database.network().instances().find(pin.get_instance_name());
   if (instance_iter == database.network().instances().end()) {
     return 0.0;
@@ -158,7 +158,7 @@ double subtractNetLoadPinCapacitance(Database& database, const std::string& net_
   // load still contributes to the network capacitance. Deduplicate inout pins.
   for (const auto& name : net_iter->second.get_driver_pin_list()) {
     const auto pin = database.network().pins().find(name);
-    if (pin != database.network().pins().end() && (pin->second.get_is_port() || pin->second.get_direction() == PinDirection::kInout))
+    if (pin != database.network().pins().end() && (pin->get_is_port() || pin->get_direction() == PinDirection::kInout))
       capacitive_pins.insert(name);
   }
   for (const std::string& pin_name : capacitive_pins) {

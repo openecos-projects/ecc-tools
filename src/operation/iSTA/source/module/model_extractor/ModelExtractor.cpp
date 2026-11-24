@@ -71,8 +71,8 @@ double ModelExtractor::getDesignArea()
 void ModelExtractor::buildPorts(CharacterizedLibrary& tc_lib)
 {
   Database& database = _database;
-  for (std::pair<const std::string, Pin>& pin_pair : database.network().pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : database.network().pins().sortedIds()) {
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_is_port()) {
       buildCharacterizedPort(tc_lib, pin);
     }

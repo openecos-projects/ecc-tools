@@ -154,10 +154,10 @@ bool SdfWriter::isSdfOutputOnlyCellArc(Arc& arc)
 {
   Database& database = _database;
   auto source_pin_it = database.network().pins().find(arc.get_source_pin());
-  if (source_pin_it == database.network().pins().end() || source_pin_it->second.get_is_port()) {
+  if (source_pin_it == database.network().pins().end() || source_pin_it->get_is_port()) {
     return false;
   }
-  auto instance_it = database.network().instances().find(source_pin_it->second.get_instance_name());
+  auto instance_it = database.network().instances().find(source_pin_it->get_instance_name());
   if (instance_it == database.network().instances().end()) {
     return false;
   }
@@ -169,7 +169,7 @@ bool SdfWriter::isSdfOutputOnlyCellArc(Arc& arc)
       continue;
     }
 
-    const PinDirection direction = pin_it->second.get_direction();
+    const PinDirection direction = pin_it->get_direction();
     if (direction == PinDirection::kInput || direction == PinDirection::kInout) {
       return false;
     }

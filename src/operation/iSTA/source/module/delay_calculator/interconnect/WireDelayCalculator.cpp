@@ -44,7 +44,7 @@ double WireDelayCalculator::calcNetArcSlew(Arc& arc, AnalysisType analysis_type,
     const auto source = database.network().pins().find(arc.get_source_pin());
     // Without a wire model, propagate the port waveform directly. A disabled
     // bidirectional load does not supply a physical source voltage domain.
-    if (source != database.network().pins().end() && source->second.get_is_port())
+    if (source != database.network().pins().end() && source->get_is_port())
       return input_slew;
   }
   if (_rc.hasDisabledDriver(arc.get_owner_name(), arc.get_source_pin())) {
@@ -145,7 +145,7 @@ double WireDelayCalculator::calcNetArcDelay(Arc& arc, AnalysisType analysis_type
     return calcParasiticDelay(arc, analysis_type, trans_type, input_slew);
   }
   const auto source = database.network().pins().find(arc.get_source_pin());
-  if (source != database.network().pins().end() && source->second.get_is_port())
+  if (source != database.network().pins().end() && source->get_is_port())
     return 0.;
   if (_rc.hasDisabledDriver(arc.get_owner_name(), arc.get_source_pin())) {
     double delay = 0., slew = input_slew;

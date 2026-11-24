@@ -195,8 +195,8 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             continue;
           const auto endpoint_pin = database.network().pins().find(name);
           const bool is_output_port
-              = endpoint_pin != database.network().pins().end() && endpoint_pin->second.get_is_port()
-                && (endpoint_pin->second.get_direction() == PinDirection::kOutput || endpoint_pin->second.get_direction() == PinDirection::kInout);
+              = endpoint_pin != database.network().pins().end() && endpoint_pin->get_is_port()
+                && (endpoint_pin->get_direction() == PinDirection::kOutput || endpoint_pin->get_direction() == PinDirection::kInout);
           if (is_output_port && !hasLaunchClockState(database, path))
             continue;
           const auto checked = checker.checkPathCandidates(path, name, AnalysisType::kMin);

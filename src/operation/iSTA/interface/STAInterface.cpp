@@ -90,8 +90,8 @@ void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
   for (const auto& [name, constraint] : database.sdc().get_port_constraint_map()) {
     const auto pin_it = database.network().pins().find(name);
     const auto exported = pins.find(name);
-    if (pin_it == database.network().pins().end() || exported == pins.end() || !pin_it->second.get_is_port()
-        || (pin_it->second.get_direction() != PinDirection::kInput && pin_it->second.get_direction() != PinDirection::kInout))
+    if (pin_it == database.network().pins().end() || exported == pins.end() || !pin_it->get_is_port()
+        || (pin_it->get_direction() != PinDirection::kInput && pin_it->get_direction() != PinDirection::kInout))
       continue;
     exported->second->max_rise_slew_ps = constraint.get_input_transition(AnalysisType::kMax, TransType::kRise) * snapshot.time_unit_ps;
     exported->second->max_fall_slew_ps = constraint.get_input_transition(AnalysisType::kMax, TransType::kFall) * snapshot.time_unit_ps;

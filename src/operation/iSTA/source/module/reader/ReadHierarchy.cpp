@@ -49,13 +49,13 @@ void linkHierarchy(Network& network, const idb::verilog_import::VerilogImportPla
       const auto& names = expected.at(net_id);
       for (const auto& name : names) {
         const auto pin = network.pins().find(name);
-        if (pin == network.pins().end() || pin->second.get_net_name().empty()) {
+        if (pin == network.pins().end() || pin->get_net_name().empty()) {
           error = "missing connected leaf pin '" + name + "'";
           break;
         }
         if (net_name.empty())
-          net_name = pin->second.get_net_name();
-        else if (net_name != pin->second.get_net_name()) {
+          net_name = pin->get_net_name();
+        else if (net_name != pin->get_net_name()) {
           error = "Verilog net spans different physical nets at '" + name + "'";
           break;
         }

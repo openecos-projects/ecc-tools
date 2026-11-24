@@ -489,10 +489,10 @@ DerateContext TimingStateQuery::derateContext(const std::string& pin_name) const
   const auto pin = network.pins().find(pin_name);
   if (pin == network.pins().end())
     return context;
-  context.net = pin->second.get_net_name();
-  if (pin->second.get_is_port())
+  context.net = pin->get_net_name();
+  if (pin->get_is_port())
     return context;
-  context.instance = pin->second.get_instance_name();
+  context.instance = pin->get_instance_name();
   const auto instance = network.instances().find(std::string(context.instance));
   if (instance != network.instances().end()) {
     const auto& cells = _database.liberty().get_cell_map();

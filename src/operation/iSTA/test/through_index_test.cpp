@@ -28,8 +28,8 @@ std::vector<int32_t> reference(Database& db, std::vector<int32_t> state, const s
       auto pin = db.network().pins().find(sink);
       bool direct = names.contains({ExceptionObjectType::kPin, sink})
                     || (pin != db.network().pins().end()
-                        && (names.contains({ExceptionObjectType::kCell, pin->second.get_instance_name()})
-                            || names.contains({ExceptionObjectType::kNet, pin->second.get_net_name()})));
+                        && (names.contains({ExceptionObjectType::kCell, pin->get_instance_name()})
+                            || names.contains({ExceptionObjectType::kNet, pin->get_net_name()})));
       int crossing = direct ? std::numeric_limits<int>::max() : std::numeric_limits<int>::min();
       for (const auto& object : names) {
         if (object.type != ExceptionObjectType::kPin)

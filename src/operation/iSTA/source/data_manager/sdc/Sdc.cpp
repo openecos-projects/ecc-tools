@@ -49,7 +49,7 @@ void Sdc::setClockSources(const Network& network, TimingClock& clock, const std:
     else if (network.isHierarchyPin(object))
       updated_kinds.push_back(ClockSourceKind::kPin);
     else if (const auto pin = network.pins().find(object); pin != network.pins().end())
-      updated_kinds.push_back(pin->second.get_is_port() ? ClockSourceKind::kPort : ClockSourceKind::kPin);
+      updated_kinds.push_back(pin->get_is_port() ? ClockSourceKind::kPort : ClockSourceKind::kPin);
     else
       updated_kinds.push_back(network.hasNet(object) ? ClockSourceKind::kNet : ClockSourceKind::kPort);
   }

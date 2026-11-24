@@ -27,7 +27,7 @@ bool masterReachesSource(const Network& network, const TimingClock& master, cons
     const auto found = network.pins().find(name);
     if (found == network.pins().end())
       continue;
-    const auto& pin = found->second;
+    const auto& pin = *found;
     const auto direction = pin.get_direction();
     const bool drives = direction == PinDirection::kInout || direction == (pin.get_is_port() ? PinDirection::kInput : PinDirection::kOutput);
     if (drives) {
@@ -35,9 +35,9 @@ bool masterReachesSource(const Network& network, const TimingClock& master, cons
       if (net != network.nets().end())
         for (const auto& load_name : net->second.get_pin_name_list()) {
           const auto load = network.pins().find(load_name);
-          if (load == network.pins().end() || load->second.get_net_name() != pin.get_net_name())
+          if (load == network.pins().end() || load->get_net_name() != pin.get_net_name())
             continue;
-          const auto& value = load->second;
+          const auto& value = *load;
           if (value.get_direction() == PinDirection::kInout || value.get_direction() == (value.get_is_port() ? PinDirection::kOutput : PinDirection::kInput))
             pending.push_back(load_name);
         }
@@ -48,7 +48,7 @@ bool masterReachesSource(const Network& network, const TimingClock& master, cons
         continue;
       for (const auto& output_name : cell->get_pin_name_list()) {
         const auto output = network.pins().find(output_name);
-        if (output != network.pins().end() && output->second.get_direction() != PinDirection::kInput)
+        if (output != network.pins().end() && output->get_direction() != PinDirection::kInput)
           pending.push_back(output_name);
       }
     }

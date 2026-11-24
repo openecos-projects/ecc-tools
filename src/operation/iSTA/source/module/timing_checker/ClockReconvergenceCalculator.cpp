@@ -165,10 +165,10 @@ std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalc
   Database& database = _database;
   std::vector<ClockPathPoint> clock_path_pin_list;
   auto pin = database.network().pins().find(clock_pin_name);
-  int32_t vertex_idx = pin == database.network().pins().end() ? -1 : pin->second.get_load_vertex_idx();
+  int32_t vertex_idx = pin == database.network().pins().end() ? -1 : pin->get_load_vertex_idx();
   const auto* selected = clockPoint(database, clock_pin_name, clock_name);
   if (pin != database.network().pins().end() && selected && (vertex_idx < 0 || &database.graph().vertices()[vertex_idx].get_timing_point() != selected))
-    vertex_idx = pin->second.get_driver_vertex_idx();
+    vertex_idx = pin->get_driver_vertex_idx();
   TransType current_trans_type = trans_type;
   std::set<int32_t> visited;
   while (vertex_idx >= 0 && visited.insert(vertex_idx).second) {

@@ -36,7 +36,7 @@ unsigned TclGetName::exec()
   }
   auto pin = database.network().pins().find(object_name);
   if (pin != database.network().pins().end()) {
-    setResult(pin->second.get_pin_name());
+    setResult(pin->get_pin_name());
     return 1;
   }
   std::vector<std::string> objects = parseObjectPatterns(interpreter(), object_name, false);
@@ -54,7 +54,7 @@ unsigned TclGetName::exec()
   object_name = matches.front();
   pin = database.network().pins().find(object_name);
   if (pin != database.network().pins().end()) {
-    setResult(pin->second.get_pin_name());
+    setResult(pin->get_pin_name());
   } else if (database.network().instances().contains(object_name) || database.network().hasNet(object_name)
              || database.sdc().get_clock_map().contains(object_name)) {
     setResult(object_name);

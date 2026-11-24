@@ -73,7 +73,7 @@ std::map<std::string, bool> LogicSimulator::constantInputs(const Instance& insta
     const auto value = _values.value(pin_name);
     if (pin == _network.pins().end() || !value || !isConstant(*value))
       continue;
-    values[pin->second.get_pin_name()] = *value == TimingCaseValue::kOne;
+    values[pin->get_pin_name()] = *value == TimingCaseValue::kOne;
   }
   return values;
 }
@@ -198,7 +198,9 @@ void LogicSimulator::propagate()
   _values.clear();
   for (const auto& [pin, value] : _sdc.get_case_analysis_map())
     _values.setValue(pin, value);
-  for (const auto& [pin_name, pin] : _network.pins()) {
+  for (const auto& pin_id : _network.pins().sortedIds()) {
+    const std::string pin_name(_network.pins().nameOf(pin_id));
+    const Pin& pin = _network.pins().get(pin_id);
     if (pin.get_constant_value() != TimingCaseValue::kNone) {
       if (!_values.value(pin_name))
         _values.setValue(pin_name, pin.get_constant_value());

@@ -24,7 +24,9 @@ namespace ista {
 void GraphEndpointClassifier::classify()
 {
   Database& database = _database;
-  for (auto& [pin_name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     if (isStartPoint(pin_name, pin)) {
       database.graph().startpoints().push_back(pin_name);
     }

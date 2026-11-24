@@ -43,8 +43,8 @@ void GraphConnectivityBuilder::build()
 void GraphConnectivityBuilder::buildTimingPointList()
 {
   Database& database = _database;
-  for (std::pair<const std::string, Pin>& pin_pair : database.network().pins()) {
-    database.graph().points()[pin_pair.first] = TimingPoint();
+  for (const auto& id : database.network().pins().sortedIds()) {
+    database.graph().points()[std::string(database.network().pins().nameOf(id))] = TimingPoint();
   }
 }
 
@@ -248,12 +248,16 @@ void GraphConnectivityBuilder::buildGraphVertexList()
   Database& database = _database;
   database.graph().vertices().clear();
   database.graph().driverPoints().clear();
-  for (auto& [pin_name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     int32_t idx = addGraphVertex(pin_name, isDriverPin(pin), database.graph().points()[pin_name]);
     pin.set_load_vertex_idx(idx);
     pin.set_driver_vertex_idx(idx);
   }
-  for (auto& [pin_name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_direction() == PinDirection::kInout) {
       database.graph().vertices()[pin.get_load_vertex_idx()].set_is_driver(false);
       pin.set_driver_vertex_idx(addGraphVertex(pin_name, true, database.graph().driverPoints()[pin_name]));

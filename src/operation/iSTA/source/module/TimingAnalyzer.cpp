@@ -68,7 +68,9 @@ std::uint64_t structureSignature(const Database& database)
 
   mixString(hash, network.name());
   mixValue(hash, network.pins().size());
-  for (const auto& [name, pin] : network.pins()) {
+  for (const auto& id : network.pins().sortedIds()) {
+    const std::string name(network.pins().nameOf(id));
+    const Pin& pin = network.pins().get(id);
     mixString(hash, name);
     mixValue(hash, static_cast<std::uint8_t>(pin.get_direction()));
     mixString(hash, pin.get_instance_name());

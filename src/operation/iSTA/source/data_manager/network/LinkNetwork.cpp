@@ -21,13 +21,13 @@ void LinkNetwork::linkInstancePins()
     _network.instances().get(id).get_pin_name_list().clear();
   }
 
-  for (std::pair<const std::string, Pin>& pin_pair : _network.pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : _network.pins().sortedIds()) {
+    Pin& pin = _network.pins().get(id);
     if (!isInstancePin(pin)) {
       continue;
     }
 
-    appendUnique(_network.instances()[pin.get_instance_name()].get_pin_name_list(), pin_pair.first);
+    appendUnique(_network.instances()[pin.get_instance_name()].get_pin_name_list(), std::string(_network.pins().nameOf(id)));
   }
 }
 
@@ -103,7 +103,7 @@ TimingCellArc* LinkNetwork::findClockToQArc(Instance& instance, LibertyCell& tim
     // A sequential master can expose both Q and QN.  The DEF may connect only
     // one of them; bind the clock-to-output metadata to that physical output
     // instead of whichever Liberty arc happens to be listed first.
-    if (pin != _network.pins().end() && !pin->second.get_net_name().empty())
+    if (pin != _network.pins().end() && !pin->get_net_name().empty())
       return &timing_cell_arc;
   }
   return first_clock_arc;
@@ -138,8 +138,8 @@ void LinkNetwork::appendUnique(std::vector<std::string>& list, const std::string
 
 void LinkNetwork::linkNets()
 {
-  for (std::pair<const std::string, Pin>& pin_pair : _network.pins()) {
-    pin_pair.second.get_net_name().clear();
+  for (const auto& id : _network.pins().sortedIds()) {
+    _network.pins().get(id).get_net_name().clear();
   }
 
   for (std::pair<const std::string, Net>& net_pair : _network.nets()) {

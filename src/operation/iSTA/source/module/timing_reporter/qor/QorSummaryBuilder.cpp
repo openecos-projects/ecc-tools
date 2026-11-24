@@ -87,7 +87,7 @@ int32_t QorSummaryBuilder::getQorLeafCellK()
     const bool connected = std::any_of(instance.get_pin_name_list().begin(), instance.get_pin_name_list().end(),
                                        [&](const std::string& pin_name) {
                                          const auto pin = pins.find(pin_name);
-                                         return pin != pins.end() && !pin->second.get_net_name().empty();
+                                         return pin != pins.end() && !pin->get_net_name().empty();
                                        });
     // Exclude empty unresolved physical fillers without altering the design.
     // Keep modeled instances and connected black boxes in the leaf inventory.

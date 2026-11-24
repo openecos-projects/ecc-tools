@@ -43,15 +43,15 @@ std::string_view PathChecker::getClockName(const std::string& pin_name)
   const auto point = points.find(pin_name);
   if (point != points.end() && point->second.get_is_clock_point() && !point->second.launchClock().empty())
     return point->second.launchClock();
-  if (pin != pins.end() && !pin->second.get_is_port()) {
-    const auto instance = _database.network().instances().find(pin->second.get_instance_name());
+  if (pin != pins.end() && !pin->get_is_port()) {
+    const auto instance = _database.network().instances().find(pin->get_instance_name());
     if (instance != _database.network().instances().end() && instance->get_is_sequential()) {
       const auto clock_point = points.find(instance->get_clock_pin_name());
       if (clock_point != points.end() && !clock_point->second.launchClock().empty())
         return clock_point->second.launchClock();
     }
   }
-  if (pin != pins.end() && pin->second.get_is_port()) {
+  if (pin != pins.end() && pin->get_is_port()) {
     const auto& ports = _database.sdc().get_port_constraint_map();
     const auto port = ports.find(pin_name);
     if (port != ports.end()) {
@@ -431,9 +431,9 @@ double PathChecker::getClockReconvergencePessimism(const TimingPathState& path, 
   auto launch_transition = path.get_crpr_clock_trans_type();
   if (launch_pin.empty()) {
     const auto pin = _database.network().pins().find(path.get_start_point());
-    if (pin == _database.network().pins().end() || pin->second.get_is_port())
+    if (pin == _database.network().pins().end() || pin->get_is_port())
       return 0.0;
-    const auto instance = _database.network().instances().find(pin->second.get_instance_name());
+    const auto instance = _database.network().instances().find(pin->get_instance_name());
     if (instance == _database.network().instances().end() || !instance->get_is_sequential())
       return 0.0;
     launch_pin = instance->get_clock_pin_name();
