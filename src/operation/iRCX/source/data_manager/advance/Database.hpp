@@ -41,6 +41,7 @@ class Database
   RCData& get_rc_data() { return _rc_data; }
   std::vector<CornerData>& get_corner_data_list() { return _corner_data_list; }
   std::vector<NetEnv>& get_net_env_list() { return _net_env_list; }
+  std::vector<std::vector<EdgeEnvInterval>>& get_special_edge_env_list() { return _special_edge_env_list; }
   CornerNetPool<NetEtchProfile>& get_corner_net_etch_profile_pool() { return _corner_net_etch_profile_pool; }
   // setter
   void set_design_name(const std::string& design_name) { _layout_data.set_design_name(design_name); }
@@ -65,6 +66,7 @@ class Database
   RCData _rc_data;
   std::vector<CornerData> _corner_data_list;
   std::vector<NetEnv> _net_env_list;
+  std::vector<std::vector<EdgeEnvInterval>> _special_edge_env_list;
   CornerNetPool<NetEtchProfile> _corner_net_etch_profile_pool;
 };
 

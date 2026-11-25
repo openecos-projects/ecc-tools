@@ -15,6 +15,12 @@
 // ***************************************************************************************
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <optional>
+#include <vector>
+
 #include "ProcessTable1DEntry.hpp"
 
 namespace ircx {
@@ -22,6 +28,8 @@ namespace ircx {
 class ProcessTable1D
 {
  public:
+  enum class BoundaryPolicy { kClamp, kReject };
+  void set_boundary_policy(BoundaryPolicy policy) { _boundary_policy = policy; }
   ProcessTable1D() = default;
   ~ProcessTable1D() = default;
   // getter
@@ -42,9 +50,11 @@ class ProcessTable1D
   bool get_is_empty() const { return _entry_list.empty(); }
   std::optional<double> query(double key) const
   {
-    if (_entry_list.empty()) {
+    if (_entry_list.empty() || std::isnan(key)) {
       return std::nullopt;
     }
+    if (_boundary_policy == BoundaryPolicy::kReject && (key < _entry_list.front().get_key() || key > _entry_list.back().get_key()))
+      return std::nullopt;
     if (_entry_list.size() == 1 || key <= _entry_list.front().get_key()) {
       return _entry_list.front().get_value();
     }
@@ -84,6 +94,7 @@ class ProcessTable1D
   }
 
   std::vector<ProcessTable1DEntry> _entry_list;
+  BoundaryPolicy _boundary_policy = BoundaryPolicy::kClamp;
 };
 
 }  // namespace ircx

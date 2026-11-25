@@ -55,6 +55,7 @@ class EnvBuilder
   // function
   void buildEBModel(EBModel& eb_model);
   bool buildNetEnvList(EBModel& eb_model);
+  std::vector<EdgeEnvInterval> buildSameLayerEnv(EBModel& eb_model, TopoEdge& edge);
   std::vector<CrossLayerOverlap> getClippedCrossLayerOverlapList(const std::vector<CrossLayerOverlap>& cross_layer_overlap_list, int32_t start_coord,
                                                                  int32_t end_coord);
   std::vector<EnvLayerPixelOverlapList> getCrossLayerPixelOverlapList(EBModel& eb_model, const LineSegment& line_segment, int32_t base_layer_idx,

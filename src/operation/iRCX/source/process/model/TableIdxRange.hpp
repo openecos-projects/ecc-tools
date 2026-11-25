@@ -15,27 +15,27 @@
 // ***************************************************************************************
 #pragma once
 
-#include "RCXHeader.hpp"
+#include <cstdint>
 
 namespace ircx {
 
-class ProcessTable1DEntry
+class TableIdxRange
 {
  public:
-  ProcessTable1DEntry() = default;
-  ProcessTable1DEntry(double key, double value) : _key(key), _value(value) {}
-  ~ProcessTable1DEntry() = default;
+  TableIdxRange() = default;
+  TableIdxRange(int32_t lower_idx, int32_t upper_idx) : _lower_idx(lower_idx), _upper_idx(upper_idx) {}
+  ~TableIdxRange() = default;
   // getter
-  double get_key() const { return _key; }
-  double get_value() const { return _value; }
+  int32_t get_lower_idx() const { return _lower_idx; }
+  int32_t get_upper_idx() const { return _upper_idx; }
   // setter
-  void set_key(double key) { _key = key; }
-  void set_value(double value) { _value = value; }
+  void set_lower_idx(int32_t lower_idx) { _lower_idx = lower_idx; }
+  void set_upper_idx(int32_t upper_idx) { _upper_idx = upper_idx; }
   // function
 
  private:
-  double _key = -1.0;
-  double _value = -1.0;
+  int32_t _lower_idx = -1;
+  int32_t _upper_idx = -1;
 };
 
 }  // namespace ircx

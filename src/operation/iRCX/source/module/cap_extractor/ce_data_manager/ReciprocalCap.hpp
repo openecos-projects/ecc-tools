@@ -3,9 +3,10 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
-#include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "Logger.hpp"
 
 namespace ircx::pattern {
 // Integrate the union of the two directed visibility supports. Values are
@@ -23,7 +24,7 @@ class ReciprocalCap
   void add(bool forward, double lo, double hi, double cap)
   {
     if (!(std::isfinite(lo) && std::isfinite(hi) && std::isfinite(cap)) || hi <= lo || cap < 0)
-      throw std::invalid_argument("invalid reciprocal capacitance interval");
+      RCXLOG.error(ircx::Loc::current(), "invalid reciprocal capacitance interval");
     const double rate = cap / (hi - lo);
     const int direction = forward ? 0 : 1;
     events_.push_back({lo, rate, direction, 1});

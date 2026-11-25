@@ -56,6 +56,16 @@ struct PGViaGeometry
   int32_t top_enclosure_y = 0;
 };
 
+// Cached metal enclosure rectangle relative to a via center (0, 0).
+struct PGViaLayerRect
+{
+  std::string layer_name;
+  int32_t ll_x = 0;
+  int32_t ll_y = 0;
+  int32_t ur_x = 0;
+  int32_t ur_y = 0;
+};
+
 #define FPI (ifp::FPInterface::getInst())
 
 class FPInterface
@@ -132,12 +142,6 @@ class FPInterface
   PGViaGeometry getIDBViaGeometry(idb::IdbLayerCut* idb_cut_layer, PGSegment& pg_segment);
   bool adjustIDBViaEnclosureArea(idb::IdbLayerRouting* idb_layer, int32_t cut_width, int32_t cut_height, PGSegment& pg_segment,
                                  int32_t& enclosure_x, int32_t& enclosure_y);
-  void adjustLineSegmentListByViaEnclosure(std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map,
-                                           PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
-                                           int32_t enclosure_ur_x, int32_t enclosure_ur_y);
-  bool adjustStripeSegmentListByViaEnclosure(std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map,
-                                             PGSegment& pg_segment, std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y,
-                                             int32_t enclosure_ur_x, int32_t enclosure_ur_y);
   bool adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x,
                                        int32_t enclosure_ur_y);
   bool outputPGVia(idb::IdbSpecialWire* idb_special_wire, PGSegment& pg_segment);
@@ -153,6 +157,7 @@ class FPInterface
   // Cleared when a new design is loaded; keyed by layer names / via geometry.
   std::map<std::pair<std::string, std::string>, std::pair<int32_t, int32_t>> _pg_via_min_size_cache;
   std::map<std::string, std::vector<idb::IdbVia*>> _pg_via_stack_cache;
+  std::map<std::string, std::vector<PGViaLayerRect>> _pg_via_shapes_cache;
   size_t _adjusted_via_count = 0;
 
   FPInterface() = default;

@@ -28,7 +28,8 @@ namespace ista {
 class ModelExtractor
 {
  public:
-  explicit ModelExtractor(Database& database) : _database(database), _check_arc_extractor(database), _delay_arc_extractor(database), _model_path_query(database)
+  ModelExtractor(Database& database, PathChecker& check)
+      : _database(database), _check(check), _check_arc_extractor(database), _delay_arc_extractor(database), _model_path_query(database)
   {
   }
   TimingModel extract();
@@ -43,6 +44,7 @@ class ModelExtractor
   void buildClockPathArc(CharacterizedLibrary& tc_lib, std::string& clock_port_name, std::string timing_type);
   double getDesignArea();
   Database& _database;
+  PathChecker& _check;
   CheckArcExtractor _check_arc_extractor;
   DelayArcExtractor _delay_arc_extractor;
   ModelPathFinder _model_path_query;

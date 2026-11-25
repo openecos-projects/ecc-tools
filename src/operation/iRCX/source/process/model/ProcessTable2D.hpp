@@ -15,6 +15,12 @@
 // ***************************************************************************************
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 #include "TableIdxRange.hpp"
 
 namespace ircx {
