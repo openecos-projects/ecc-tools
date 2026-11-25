@@ -255,6 +255,10 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
   if (!arnoldi_model.get_is_valid() || arnoldi_model.get_order() <= 0 || arnoldi_model.get_total_capacitance() <= 0.0) {
     return std::nullopt;
   }
+  // A zero input slew means the arc has not been propagated yet. Fitting the
+  // driver there produces a model whose ramp is far shorter than the one the
+  // real slew would give, and that stale fit then feeds the
+  // waveform the SDF reports. ISTA_SKIP_ZERO_SLEW=1 refuses it instead.
   static const bool skip_zero_slew = [] {
     const char* e = std::getenv("ISTA_SKIP_ZERO_SLEW");
     return e != nullptr && *e != '0';
@@ -287,11 +291,11 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     output_threshold *= .01;
   const bool supported_thresholds
       = lower_threshold < .5 && upper_threshold > .5 && std::abs(lower_threshold + upper_threshold - 1.) < 1e-12 && std::abs(output_threshold - .5) < 1e-12;
-  // reference builds the driver model once for the specified output load, that
-  // is the total capacitance of the net. The effective capacitance only feeds
-  // the library lookup used for the delay and slew targets, so refitting the
-  // driver at each effective-capacitance trial moves the model away from the
-  // one reference builds.
+  // The driver model is built once for the specified output load, that is the
+  // total capacitance of the net. The effective capacitance only feeds the
+  // library lookup used for the delay and slew targets, so refitting the driver
+  // at each effective-capacitance trial would move the model away from the one
+  // built for the total load.
   static const bool fit_at_total_c = [] {
     const char* e = std::getenv("ISTA_FIT_AT_TOTAL_C");
     return e != nullptr && std::atoi(e) != 0;
@@ -581,22 +585,21 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     }
     return true;
   };
-  // REF2022 reverse-engineered convergence (binary strings `ceff_delay_max_error`
-  // plus `report_app_var`: rc_ceff_delay_max_error_pct = 8,
-  // rc_ceff_delay_min_diff_ps_donotuse = 0.25). reference compares the *same*
-  // quantity across iterations; the default scalar check compares the fitted
-  // waveform against the table at the current Ceff, which the fit itself
-  // satisfies, so it can never move Ceff. ISTA_REF_CEFF_ITER=1 selects the
-  // reference criterion instead.
+  // Convergence is judged on the delay, not on the fitted waveform, with an 8%
+  // relative band plus a 0.25 ps absolute floor. The comparison must use the
+  // *same* quantity across iterations; the default scalar check compares the
+  // fitted waveform against the table at the current Ceff, which the fit itself
+  // satisfies, so it can never move Ceff. ISTA_MODEL_CEFF_ITER=1 selects the
+  // delay-based criterion instead.
   static const bool ref_ceff_iter_env = [] {
-    const char* e = std::getenv("ISTA_REF_CEFF_ITER");
+    const char* e = std::getenv("ISTA_MODEL_CEFF_ITER");
     return e != nullptr && *e != '0';
   }();
-  // Gate the reference criterion on the total RC: the 8%/0.25 ps band is far too
-  // wide for the picosecond-scale nets that dominate gcd, where the default path
-  // is already closer to reference. ISTA_REF_CEFF_RC_MIN_PS sets the cutoff in ps.
+  // Gate the delay-based criterion on the total RC: the 8%/0.25 ps band is far
+  // too wide for the picosecond-scale nets that dominate gcd, where the default
+  // path is already closer. ISTA_MODEL_CEFF_RC_MIN_PS sets the cutoff in ps.
   static const double ref_ceff_rc_min_ps = [] {
-    const char* e = std::getenv("ISTA_REF_CEFF_RC_MIN_PS");
+    const char* e = std::getenv("ISTA_MODEL_CEFF_RC_MIN_PS");
     return e != nullptr ? std::atof(e) : 0.0;
   }();
   const bool ref_ceff_iter = ref_ceff_iter_env && total_capacitance > 0.0
@@ -729,13 +732,13 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
       if (match_crossing || driver_fit) {
         double source_time = 0.;
         ArnoldiWaveformSolver::crossingTime(driver_ramp, pole_residue, 0, .5, source_time);
-        // reference compares the distributed source crossing against the same
+        // The distributed source crossing is compared against the same
         // network's dominant time constant. Using the lumped rd*Cref instead
         // leaves a systematic gap (2.68 ps on s13207 fanout_net_3 versus a
-        // 1.48 ps acceptance band). ISTA_REF_FIRST_POLE=1 makes the reference
-        // use the first Arnoldi pole so the two paths describe one response.
+        // 1.48 ps acceptance band). ISTA_MODEL_FIRST_POLE=1 makes the two
+        // paths describe one response by using the first Arnoldi pole.
         static const bool ref_first_pole = [] {
-          const char* e = std::getenv("ISTA_REF_FIRST_POLE");
+          const char* e = std::getenv("ISTA_MODEL_FIRST_POLE");
           return e != nullptr && *e != '0';
         }();
         const auto& ref_poles = pole_residue.get_pole_list();
@@ -769,8 +772,8 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
           }
         }
         // ISTA_CEFF_ALWAYS_TOTAL keeps the lookup load at the net total
-        // capacitance, which is what reference reports: on s13207 fanout_net_3
-        // its Total capacitance and Effective capacitance are both 0.078191 pF.
+        // capacitance: on s13207 fanout_net_3 the reported total and effective
+        // capacitance are both 0.078191 pF.
         // When the 1% acceptance band below rejects the iter=0 model, the loop
         // otherwise takes exactly one crossingCapacitance step (0.94-0.97 x
         // total) and stops, so effC never really iterates.
@@ -783,9 +786,9 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
           emit_ci(converged);
           break;
         }
-        // The default 1% acceptance band is far tighter than reference's own
-        // rc_ceff_delay_max_error_pct (8), so the iter=0 model is rejected on
-        // large nets where reference accepts it. ISTA_CEFF_ACCEPT_PCT sweeps the
+        // The default 1% acceptance band is far tighter than the 8% used for
+        // convergence, so the iter=0 model is rejected on large nets where it
+        // would otherwise be accepted. ISTA_CEFF_ACCEPT_PCT sweeps the
         // band; the default 1.0 keeps every existing result unchanged.
         static const double accept_pct = [] {
           const char* e = std::getenv("ISTA_CEFF_ACCEPT_PCT");
@@ -828,6 +831,12 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
           emit_ci(converged);
           break;
         }
+        // A per-arc delay report prints TotalC in its "Effective capacitance"
+        // fields, so the Ceff actually used has to be recovered from the
+        // reported cell delay. For gcd `fixio_net_0` the delay corresponds to
+        // 9.4996 fF against a 9.5255 fF total, i.e. a 0.27% reduction.
+        // The charge-based definition below is the classical Ceff; the crossing fit
+        // gives 0.916 x total and is far off, so allow selecting the charge model.
         static const bool charge_ceff = [] {
           const char* e = std::getenv("ISTA_USE_CHARGE_CEFF");
           return e != nullptr && *e != '0';
@@ -968,15 +977,15 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
       if (!std::isfinite(ramp) || ramp <= 0.0)
         return false;
       if (ref_ceff_iter && !match_crossing) {
-        // reference stops when the delay stops moving: |delay_new - delay_old| <
-        // max(8% * delay_new, 0.25 ps). The 8% band is wide, so the loop normally
-        // ends after one Ceff update.
+        // Convergence stops when the delay stops moving:
+        // |delay_new - delay_old| < max(8% * delay_new, 0.25 ps). The 8% band is
+        // wide, so the loop normally ends after one Ceff update.
         const double delay_new = tableDelay(timing_arc, output_trans_type, input_slew, capacitance);
         const double delay_old = tableDelay(timing_arc, output_trans_type, input_slew, effective_capacitance);
         // `rc_ceff_delay_min_diff_ps_donotuse` carries a `donotuse` suffix, so the
-        // absolute floor may be inert in reference. ISTA_REF_CEFF_NO_FLOOR=1 drops it.
+        // absolute floor may be inert in reference. ISTA_MODEL_CEFF_NO_FLOOR=1 drops it.
         static const bool no_floor = [] {
-          const char* e = std::getenv("ISTA_REF_CEFF_NO_FLOOR");
+          const char* e = std::getenv("ISTA_MODEL_CEFF_NO_FLOOR");
           return e != nullptr && *e != '0';
         }();
         const double tolerance = no_floor ? .08 * std::abs(delay_new) : std::max(.08 * std::abs(delay_new), .25e-3);

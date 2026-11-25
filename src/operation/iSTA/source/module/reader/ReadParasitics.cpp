@@ -61,13 +61,12 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   for (spef::ResCap& spef_res : spef_net.ress) {
     readResistance(parasitic_net, spef_res);
   }
-  // REF2022 reverse-engineered on ip2 `_07829_` (`_11805_`/MUX4X1P4H7R driving
-  // `_11807_`/AOI22X0P5H7R): the driver cell's own output-to-input coupling
-  // (`Y | S1` = 0.062109 fF) is excluded from the wire capacitance. The liberty
-  // cell tables already contain that intra-cell effect, so counting it again
-  // inflates the load. The residual after excluding only this pair is 0.000308 fF
-  // against REF's `report_delay_calculation`. ISTA_WIRE_CAP_EXCL_DRIVER_CC=0
-  // restores the previous behaviour.
+  // On ip2 `_07829_` (`_11805_`/MUX4X1P4H7R driving `_11807_`/AOI22X0P5H7R) the
+  // driver cell's own output-to-input coupling (`Y | S1` = 0.062109 fF) is
+  // excluded from the wire capacitance. The liberty cell tables already contain
+  // that intra-cell effect, so counting it again inflates the load. The residual
+  // after excluding only this pair is 0.000308 fF.
+  // ISTA_WIRE_CAP_EXCL_DRIVER_CC=0 restores the previous behaviour.
   // Excluding the driver's own output-to-input coupling closes ip2 `_11805_` to
   // 0.00031 fF against reference, but it was refuted at suite level: gcd 88.1% ->
   // 54.1%, ip2 60.0% -> 48.7%, ws2811 91.3% -> 58.4%, s713 90.3% -> 55.0%. ip2 has

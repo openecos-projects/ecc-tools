@@ -1177,7 +1177,7 @@ class Simulator
   double _period, _step;
   int _steps_per_period = 2;
   std::size_t _implied_root_count = 0;
-  // 多 driver net 合并（PTPX 的 multi driver net consolidation）的统计与样例
+  // 多 driver net 合并的统计与样例
   std::size_t _consolidated_net_count = 0;
   std::vector<std::string> _consolidated_net_details;
   std::map<std::string, std::size_t> _node_index;
@@ -1439,10 +1439,8 @@ bool Simulator::build()
       if (compile(port.get_function_expression(), ports, gate.function)) {
         if (driven.count(gate.output)) {
           // 一条 net 上有多个 driver（例如修复 buffer 的 A/Y 被短接在同一条 net 上）：
-          // PTPX 的语义是 multi driver net consolidation —— 合并该 net、只保留一个
-          // driver 的活动，并断掉环上的时序弧（PWR-303 / PTE-003），而不是放弃整个
-          // 设计的向量less 仿真。这里按同样的规则挑一个 driver 保留，其余从仿真图里摘掉；
-          // 被摘掉的实例其输出 pin 仍会写上"合并后 net 的活动"（活动按 pin 写回）。
+          // 同一 net 只保留一个 driver 参与无向量仿真，其余从仿真图中移除。
+          // 每个实例的输出 pin 仍会写入合并后 net 的活动。
           std::size_t previous = _gates.size();
           for (std::size_t idx = 0; idx < _gates.size(); ++idx) {
             if (_gates[idx].output == gate.output) {
@@ -1452,7 +1450,7 @@ bool Simulator::build()
           }
           const bool new_self_loop = isSelfReferential(gate);
           const bool old_self_loop = previous != _gates.size() && isSelfReferential(_gates[previous]);
-          // 非自环者优先（自环那条正对应 PTPX 断掉的弧）；都是或都不是自环时保留先入者，
+          // 非自环者优先；都是或都不是自环时保留先入者，
           // instance_map 是 std::map（实例名字典序），所以结果始终是确定的。
           const bool keep_new = previous != _gates.size() && new_self_loop != old_self_loop && !new_self_loop;
           ++_consolidated_net_count;
@@ -1564,7 +1562,7 @@ bool Simulator::build()
           Loc::current(),
           "Broke ",
           broken_cycles,
-          " gate cycle(s) in the vectorless simulator (PTPX semantics: timing arcs on a loop are disabled)"
+          " gate cycle(s) in the vectorless simulator (remaining gates evaluated in construction order)"
       );
     }
     std::set<std::size_t> implied;
@@ -1641,7 +1639,7 @@ bool Simulator::build()
         Loc::current(),
         "Broke ",
         broken_cycles,
-        " gate cycle(s) in the vectorless simulator (PTPX semantics: timing arcs on a loop are disabled)"
+        " gate cycle(s) in the vectorless simulator (remaining gates evaluated in construction order)"
     );
   }
   if (_consolidated_net_count > 0) {
@@ -1649,7 +1647,7 @@ bool Simulator::build()
         Loc::current(),
         "Consolidated ",
         _consolidated_net_count,
-        " multi-driver net(s) in the vectorless simulator (keep one driver, drop the rest; same semantics as PTPX)"
+        " multi-driver net(s) in the vectorless simulator (keep one driver, drop the rest)"
     );
     for (auto& detail : _consolidated_net_details)
       PWLOG.warn(Loc::current(), "  ", detail);
@@ -1686,9 +1684,8 @@ bool Simulator::isSelfReferential(const Gate& gate)
   return false;
 }
 
-// 返回为打破组合环而"断掉"的 gate 条数。没被拓扑排序覆盖的 gate 按构建顺序
-// （= 实例名字典序）追加到末尾：settle() 对它们相当于用上一步的值求值，等价于
-// PTPX 把环上的时序弧 disable 掉，而不是放弃整个设计的仿真。
+// 返回拓扑排序未覆盖的 gate 数。将这些 gate 按构建顺序（= 实例名字典序）
+// 追加到末尾，并在 settle() 中按该顺序求值。
 std::size_t Simulator::orderGates()
 {
   _gate_order.clear();

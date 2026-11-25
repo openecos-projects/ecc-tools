@@ -74,12 +74,12 @@ double smallNetCutoff()
   return value;
 }
 
-// reference's reduced small-net capacitance divider. Enabled by default;
-// ISTA_REF_BALANCED=0 restores the plain total-RC response for A/B runs.
-bool refBalancedEnabled()
+// The reduced small-net capacitance divider. Enabled by default;
+// ISTA_MODEL_BALANCED=0 restores the plain total-RC response for A/B runs.
+bool balancedTreeEnabled()
 {
   static const bool value = [] {
-    const char* text = std::getenv("ISTA_REF_BALANCED");
+    const char* text = std::getenv("ISTA_MODEL_BALANCED");
     return text == nullptr || *text != '0';
   }();
   return value;
@@ -751,6 +751,13 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
   for (const auto& [name, node] : parasitic_net.get_node_map())
     wire_capacitance += node.get_capacitance();
   const double resistance = _rc.totalResistance(parasitic_net) * 1e-3;
+  // The driver resistance can be folded into the network with a floor tied to
+  // the net resistance. The per-sink merge computes
+  //   rd_eff = rd + min(rd, threshold * rnet)
+  // branch-free, with threshold defaulting to 0.45. Off by default: the only
+  // consumer of drive_resistance is the series-insertion path, which needs
+  // ISTA_DRIVE_RES_SERIES and measurably degrades the net delay on its own
+  // (picorv32a >0.1ps 2.89% -> 5.40%).
   {
     static const double rd_floor = [] {
       const char* e = std::getenv("ISTA_RD_LESS_THAN_RNET");
@@ -765,7 +772,7 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
       drive_resistance = rd;
     }
   }
-  // Fanout ceiling for the small-net reduction branch. reference does not
+  // Fanout ceiling for the small-net reduction branch. The limit is not
   // publish the limit; it is exposed so the modelled fanout range can be swept
   // against reference instead of being fixed at the historical value.
   static const std::size_t fanout_limit = [] {
@@ -787,15 +794,15 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     const double total_load = wire_capacitance + pin_load;
     const double reduced_load = std::max(wire_capacitance / (count + 1.) + pin_load / count, .1 * total_load);
     // Ordinary total RC keeps priority: when the network already fits below the
-    // small-net cutoff the plain total-RC value is the reference and the
-    // enhanced fanout reduction only extends that range (see reduced_load).
-    // Round 101 measured REF2022 directly: a small net's reported delay is
-    // ln2 * R * (Cw/(n+1) + Cp/n) even when the total RC is already below the
-    // 2 ps cutoff, so the spread form is the response value for n <= 5.
+    // small-net cutoff the plain total-RC value wins and the enhanced fanout
+    // reduction only extends that range (see reduced_load).
+    // A small net's response is ln2 * R * (Cw/(n+1) + Cp/n) even when the total
+    // RC is already below the 2 ps cutoff, so the spread form is the response
+    // value for n <= 5.
     // The plain total-RC constant is kept separately because the balanced flag
     // (source-correction policy) must not be decided by the smaller value.
-    // reference's "Balanced case tree" response, which report_delay_calculation
-    // prints verbatim for the constant-driven fanout cone:
+    // The balanced case-tree response, which a per-arc delay report prints
+    // verbatim for the constant-driven fanout cone:
     //   RC delay: (r_wire/load_count) * (c_pin + c_wire/load_count)
     // Algebraically R * (n*c_pin + c_wire) / n^2 == R * totalC / n^2.  Both
     // r_wire and c_wire are byte-identical to this builder's resistance and
@@ -803,10 +810,10 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     // collapses onto the total RC divided by n^2.  ArnoldiResponseCalculator
     // multiplies the constant by ln2, hence the divisor below.
     static const bool balanced_tree = [] {
-      const char* e = std::getenv("ISTA_REF_BALANCED_TREE");
+      const char* e = std::getenv("ISTA_MODEL_BALANCED_TREE");
       return e == nullptr ? true : std::atoi(e) != 0;
     }();
-    // Only the constant-driven cone takes this branch: reference announces
+    // Only the constant-driven cone takes this branch: the report announces
     // "RC delay calculation is being skipped because the driver from-pin is
     // constant" for exactly that population and still emits a number, while
     // every other net keeps the full RC solve.
@@ -821,7 +828,7 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
       }
     }
     double response_load = total_load;
-    if (refBalancedEnabled() && loads.size() <= fanout_limit)
+    if (balancedTreeEnabled() && loads.size() <= fanout_limit)
       response_load = wire_capacitance / (count + 1.) + pin_load / count;
     else if (constant_driver && count > 0.)
       response_load = total_load / (count * count * std::log(2.));
@@ -830,11 +837,15 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     total_constants[edge == TransType::kRise ? 0 : 1] = resistance * total_load;
     arnoldi_model.setTotalTimeConstants(total_constants);
     {
-      static const bool ref_lumped = [] {
-        const char* e = std::getenv("ISTA_REF_LUMPED_LN2");
+      static const bool use_lumped_ln2 = [] {
+        const char* e = std::getenv("ISTA_MODEL_LUMPED_LN2");
         return e == nullptr ? true : std::atoi(e) != 0;
       }();
-      if (ref_lumped && !constant_driver && loads.size() > fanout_limit)
+      // The plain single-pole form is used as soon as the
+      // receiver count passes the reduced-fanout range: measured alpha =
+      // REF/(TotalR*TotalC) is 0.6935 +- 0.002 for every fanout >= 6 (1,839
+      // corners) and the reduced form is exact for fanout <= 5.
+      if (use_lumped_ln2 && !constant_driver && loads.size() > fanout_limit)
         arnoldi_model.setLumpedMode(1);
     }
     {
@@ -871,6 +882,10 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
       const char* e = std::getenv("ISTA_FORCE_SMALLNET_CORR");
       return e != nullptr ? std::atoi(e) : 2;
     }();
+    // The small-net source correction (K = K0*6/(N+1)) applies
+    // up to tau ~ 5 ps on cx55/prince; the former 0.3 ps cutoff left every
+    // multi-load net uncorrected. Measured 19-case <0.1ps 92.1434% -> 94.0238%
+    //.
     static const double corr_rc_max = [] {
       const char* e = std::getenv("ISTA_SMALLNET_CORR_RC_MAX_PS");
       return e != nullptr ? std::atof(e) * 1e-3 : 5.0e-3;
@@ -883,6 +898,14 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
       const double tau_max = std::max(constants[0], constants[1]);
       apply_corr = (corr_rc_max >= 0.0) ? (tau_max <= corr_rc_max) : true;
     }
+    // A per-arc delay report fixes this boundary: for the single-pole regime
+    // outside the reduced-fanout range it prints
+    //   To_pin transition time == hypot(From_pin transition time, tau*slew_factor)
+    // with From_pin transition time equal to the library output transition and
+    // no source correction at all (exact to 0.0000 ps on _23271_/Y->_24468_/B).
+    // Inside the reduced range (fanout <= fanout_limit)
+    // the correction is required. Gating at fanout_limit measured 19-case
+    // slews: >0.1ps 10.30% -> 8.23%.
     static const int corr_fanout = [] {
       const char* e = std::getenv("ISTA_SMALLNET_CORR_FANOUT");
       return e != nullptr ? std::atoi(e) : static_cast<int>(fanout_limit);
