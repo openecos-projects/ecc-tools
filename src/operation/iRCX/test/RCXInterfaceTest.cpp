@@ -25,6 +25,7 @@
 #include "DataManager.hpp"
 #include "RCXInterface.hpp"
 #include "SPEFSanitizer.hpp"
+#include "SPEFWriter.hpp"
 #include "SpefParser.hh"
 #include "Utility.hpp"
 #include "idm.h"
@@ -192,7 +193,7 @@ void checkSpefEscaping()
 {
   require(RCXI.getSPEFName("state_8__$_OR__A_Y") == "state_8__\\$_OR__A_Y", "'$' in a flat name was not escaped");
   require(RCXI.getSPEFName("u_core.cnt_$_NAND__Y") == "u_core\\.cnt_\\$_NAND__Y", "'$' in a hierarchical name was not escaped");
-  require(RCXI.getSPEFName("bus[0]_reg_p") == "bus[0]_reg_p", "flat bus name escaping changed");
+  require(RCXI.getSPEFName("bus[0]_reg_p") == "bus\\[0\\]_reg_p", "literal brackets in a scalar name were not escaped");
   require(RCXI.getSPEFName("pre\\$escaped") == "pre\\$escaped", "already escaped '$' was escaped twice");
 
   InterfaceFixture fixture;
@@ -380,6 +381,68 @@ void checkSpefEscaping()
   require(saw_escaped_sig, "config-relative sanitizer failed to escape relative output dir SPEF");
 }
 
+void checkSpefWriter(bool check_names)
+{
+  InterfaceFixture fixture;
+  fixture.prepare();
+  fixture.init();
+  RCXI.runRCX();
+  auto& database = RCXDM.getDatabase();
+  const auto path = fixture.directory() / "output/spef_writer/interface_test_TYPICAL_25C.spef";
+  auto write_spef = [&]() {
+    ircx::SPEFWriter::initInst();
+    ircx::SPEFWriter::getInst().write();
+    ircx::SPEFWriter::destroyInst();
+    std::ifstream in(path);
+    require(in.is_open(), "writer did not produce SPEF");
+    return std::string(std::istreambuf_iterator<char>(in), {});
+  };
+
+  if (check_names) {
+    auto nodes = database.get_topo_pool().get_net_node_list(0);
+    require(nodes.size() == 2, "writer fixture needs two nodes");
+    nodes[0].set_pin_name(R"(port\:1)");
+    nodes[1].set_pin_name(R"(u\.x:B[3])");
+    auto& names = database.get_spef_name_data();
+    names.get_port_name_list().push_back(R"(port\:1)");
+    names.get_port_direction_list().push_back(ircx::Direction::kInput);
+    ircx::Pin pin;
+    pin.set_pin_name(R"(u\.x:B[3])");
+    pin.set_direction(ircx::Direction::kInput);
+    database.get_layout_data().get_net_list()[0].get_pin_list().push_back(pin);
+    const std::string text = write_spef();
+    require(text.find("*I u\\.x:B[3] I") != std::string::npos, "writer changed an unmapped bus pin into a scalar name");
+    spef::SpefReader reader;
+    require(reader.read(path.string()), "cannot read writer pin names");
+    reader.expandName();
+    const auto& connections = reader.getSpefFile()->nets.at(0).conns;
+    require(connections.size() == 2 && connections[0].conn_type == spef::ConnectionType::kExternal
+                && connections[0].pin_port_name == "port:1" && connections[1].pin_port_name == "u.x:B[3]",
+            "writer treated an escaped colon in a port as a pin delimiter");
+  } else {
+    auto& ground = database.get_rc_data().get_corner_net_ground_capacitance_list(ircx::CornerNetIdx(0, 0));
+    require(ground.size() == 1, "writer fixture needs one capacitance edge");
+    ground[0] = 2.0;
+    const std::string nonempty = write_spef();
+    require(nonempty.find("\n*CAP\n") != std::string::npos && nonempty.find("\n*RES\n") != std::string::npos,
+            "writer omitted a nonempty CAP or RES section");
+    ground[0] = 0.0;
+    const std::string zero_cap = write_spef();
+    require(zero_cap.find("\n*CAP\n") == std::string::npos && zero_cap.find("\n*RES\n") != std::string::npos,
+            "writer emitted an empty CAP section or dropped a nonempty RES section");
+    const auto old_nodes = database.get_topo_pool().get_net_node_list(0);
+    std::vector<ircx::TopoNode> nodes(old_nodes.begin(), old_nodes.end());
+    ircx::TopoPool isolated;
+    isolated.add_net(std::move(nodes), {});
+    database.get_topo_pool() = std::move(isolated);
+    const std::string no_edges = write_spef();
+    require(no_edges.find("\n*D_NET ") != std::string::npos && no_edges.find("\n*CAP\n") == std::string::npos
+                && no_edges.find("\n*RES\n") == std::string::npos,
+            "writer emitted empty CAP/RES sections for a net without edges");
+  }
+  RCXI.destroyRCX();
+}
+
 void checkMissingDatabase(bool has_lef, bool has_def, bool retry = false)
 {
   InterfaceFixture fixture;
@@ -424,6 +487,10 @@ int main(int argc, char** argv)
       checkMissingDatabase(false, false, true);
     } else if (scenario == "spef_escaping") {
       checkSpefEscaping();
+    } else if (scenario == "spef_writer_sections") {
+      checkSpefWriter(false);
+    } else if (scenario == "spef_writer_names") {
+      checkSpefWriter(true);
     } else {
       throw std::runtime_error("unknown interface test scenario: " + scenario);
     }

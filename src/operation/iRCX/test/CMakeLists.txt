@@ -37,8 +37,14 @@ if(BUILD_TESTING)
   )
 
   add_test(NAME ircx_interface_test COMMAND ircx_interface_test)
-  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping)
+  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping spef_writer_sections spef_writer_names)
     add_test(NAME ircx_interface_${scenario} COMMAND ircx_interface_test ${scenario})
+  endforeach()
+
+  add_executable(ircx_spef_test RCXSPEFTest.cpp)
+  target_link_libraries(ircx_spef_test PRIVATE ircx_spef_writer ircx_aux spef)
+  foreach(scenario decode names comments empty_sections plot_names topology_names)
+    add_test(NAME ircx_spef_${scenario} COMMAND ircx_spef_test ${scenario})
   endforeach()
 endif()
 

@@ -261,7 +261,8 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data, LayerTable& layer_t
   std::unordered_map<std::string, std::string> pin_name_map = getLayoutPinNameMap(layout_data.get_net_list()[net_idx]);
 
   for (const spef::ConnEntry& conn : spef_net.conns) {
-    std::string node_name = getNormalizedSpefName(conn.pin_port_name);
+    // Exchange names have already been decoded by SpefReader::expandName().
+    std::string node_name = spef::stripQuotes(conn.pin_port_name);
     if (node_name_to_info_map.find(node_name) != node_name_to_info_map.end()) {
       continue;
     }
@@ -291,8 +292,8 @@ std::optional<NetTopo> buildNetTopo(LayoutData& layout_data, LayerTable& layer_t
   }
 
   for (const spef::ResCap& res : spef_net.ress) {
-    std::string first_node_name = getNormalizedSpefName(res.node1);
-    std::string second_node_name = getNormalizedSpefName(res.node2);
+    std::string first_node_name = spef::stripQuotes(res.node1);
+    std::string second_node_name = spef::stripQuotes(res.node2);
     std::unordered_map<std::string, NodeInfo>::iterator first_node_it = node_name_to_info_map.find(first_node_name);
     std::unordered_map<std::string, NodeInfo>::iterator second_node_it = node_name_to_info_map.find(second_node_name);
     if (first_node_it == node_name_to_info_map.end() || second_node_it == node_name_to_info_map.end()) {
@@ -379,7 +380,7 @@ bool SpefTopologyBuilder::build(LayoutData& layout_data, LayerTable& layer_table
   std::unordered_map<std::string, int32_t> layout_net_name_to_idx_map = detail::getLayoutNetIdxMap(layout_data);
   std::vector<detail::NetTopo> net_topo_list(net_num);
   for (const spef::Net& spef_net : exchange->nets) {
-    std::unordered_map<std::string, int32_t>::iterator net_idx_it = layout_net_name_to_idx_map.find(detail::getNormalizedSpefName(spef_net.name));
+    std::unordered_map<std::string, int32_t>::iterator net_idx_it = layout_net_name_to_idx_map.find(spef::stripQuotes(spef_net.name));
     if (net_idx_it == layout_net_name_to_idx_map.end()) {
       RCXLOG.warn(Loc::current(), (strict ? "run_rcx_from_topology failed" : "run_rcx_from_topology warning"), ": net not found in layout, net=", spef_net.name,
                   ".");
