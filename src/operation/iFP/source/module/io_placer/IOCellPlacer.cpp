@@ -17,7 +17,9 @@
 #include "IOCellPlacer.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <numeric>
+#include <optional>
 #include <tuple>
 
 #include "DataManager.hpp"
@@ -129,6 +131,108 @@ int32_t powerRoleOrder(const std::string& role)
     return 3;
   }
   return 4;
+}
+
+struct EmbeddedPort
+{
+  int32_t x = 0;
+  int32_t y = 0;
+  idb::IdbRect rect;
+};
+
+int64_t alignDown(int64_t value, int64_t step)
+{
+  return value - ((value % step + step) % step);
+}
+
+int64_t alignUp(int64_t value, int64_t step)
+{
+  return alignDown(value + step - 1, step);
+}
+
+std::optional<EmbeddedPort> tryBuildEmbeddedPort(const idb::IdbRect& pad_rect, int64_t min_w, int64_t max_w, int64_t min_area,
+                                                 int64_t snap)
+{
+  const int64_t bx0 = alignUp(pad_rect.get_low_x(), snap);
+  const int64_t bx1 = alignDown(pad_rect.get_high_x(), snap);
+  const int64_t by0 = alignUp(pad_rect.get_low_y(), snap);
+  const int64_t by1 = alignDown(pad_rect.get_high_y(), snap);
+  const int64_t avail_w = bx1 - bx0;
+  const int64_t avail_h = by1 - by0;
+  if (avail_w < min_w || avail_h < min_w) {
+    return std::nullopt;
+  }
+
+  int64_t side = min_w;
+  if (min_area > 0) {
+    int64_t root = static_cast<int64_t>(std::sqrt(static_cast<long double>(min_area)));
+    while (root * root < min_area) {
+      ++root;
+    }
+    while (root > 0 && (root - 1) * (root - 1) >= min_area) {
+      --root;
+    }
+    side = std::max(side, root);
+  }
+  if (max_w > 0 && side > max_w) {
+    side = max_w;
+  }
+  side = alignUp(side, snap);
+  if (max_w > 0 && side > max_w) {
+    side = alignDown(max_w, snap);
+  }
+  if (side < min_w) {
+    return std::nullopt;
+  }
+  const int64_t even_side = alignUp(side, 2 * snap);
+  if (even_side <= avail_w && even_side <= avail_h && (max_w <= 0 || even_side <= max_w)) {
+    side = even_side;
+  }
+
+  int64_t w = std::min(side, avail_w);
+  int64_t h = std::min(side, avail_h);
+  if (w * h < min_area) {
+    auto grow = [snap, min_area](int64_t& dim, int64_t other, int64_t avail) {
+      dim = std::min(avail, std::max(dim, alignUp((min_area - 1) / other + 1, snap)));
+    };
+    if (avail_w >= avail_h) {
+      grow(w, h, avail_w);
+      if (w * h < min_area) {
+        grow(h, w, avail_h);
+      }
+    } else {
+      grow(h, w, avail_h);
+      if (w * h < min_area) {
+        grow(w, h, avail_w);
+      }
+    }
+  }
+  const int64_t short_side = std::min(w, h);
+  if (w <= 0 || h <= 0 || w > avail_w || h > avail_h || short_side < min_w || w * h < min_area || (max_w > 0 && short_side > max_w)) {
+    return std::nullopt;
+  }
+
+  auto place_axis = [snap](int64_t lo, int64_t hi, int64_t span) {
+    const int64_t ll = std::clamp(alignDown(lo + (hi - lo - span) / 2, snap), lo, hi - span);
+    const int64_t ur = ll + span;
+    const int64_t origin = std::clamp(alignDown(ll + span / 2, snap), ll, ur);
+    return std::tuple<int32_t, int32_t, int32_t>(static_cast<int32_t>(origin), static_cast<int32_t>(ll), static_cast<int32_t>(ur));
+  };
+  const auto [cx, ll_x, ur_x] = place_axis(bx0, bx1, w);
+  const auto [cy, ll_y, ur_y] = place_axis(by0, by1, h);
+  return EmbeddedPort{cx, cy, idb::IdbRect(ll_x, ll_y, ur_x, ur_y)};
+}
+
+std::optional<EmbeddedPort> buildEmbeddedPort(const idb::IdbRect& pad_rect, const RoutingLayer& layer, int32_t manufacture_grid)
+{
+  const int64_t min_w = std::max<int64_t>(1, layer.get_min_width());
+  const int64_t max_w = std::max<int64_t>(0, layer.get_max_width());
+  const int64_t min_area = std::max<int64_t>(0, layer.get_min_area());
+  const int64_t grid = std::max<int64_t>(1, manufacture_grid);
+  if (auto aligned = tryBuildEmbeddedPort(pad_rect, min_w, max_w, min_area, grid)) {
+    return aligned;
+  }
+  return grid > 1 ? tryBuildEmbeddedPort(pad_rect, min_w, max_w, min_area, 1) : std::nullopt;
 }
 
 }  // namespace
@@ -1061,9 +1165,10 @@ bool IOCellPlacer::updateIOPinPorts()
         FPLOG.error(Loc::current(), "IO pin '", io_pin.get_name(), "' refers to unplaced PAD '", binding.instance_name, "'.");
         return false;
       }
-      // Use one access rectangle on the highest available routing layer, rather
-      // than copying all of the cell's internal power-ring metal into the top port.
+      // Embed one compact, DRC-legal access rectangle inside the highest-layer
+      // PAD shape instead of duplicating the full pad metal slab at top level.
       const InstancePinShape* access = nullptr;
+      const RoutingLayer* access_layer = nullptr;
       int access_order = -1;
       int64_t access_area = -1;
       for (const InstancePinShape& shape : instance.get_pin_shape_list()) {
@@ -1078,21 +1183,20 @@ bool IOCellPlacer::updateIOPinPorts()
         if (layer == nullptr) {
           continue;
         }
-        const int64_t width = static_cast<int64_t>(shape.get_ur_x()) - shape.get_ll_x();
-        const int64_t height = static_cast<int64_t>(shape.get_ur_y()) - shape.get_ll_y();
-        const int64_t area = width * height;
-        const int64_t thickness = std::min(width, height);
-        if (width <= 0 || height <= 0 || thickness < layer->get_min_width() || area < layer->get_min_area()
-            || (layer->get_max_width() > 0 && thickness > layer->get_max_width())) {
+        const idb::IdbRect local_rect(shape.get_ll_x(), shape.get_ll_y(), shape.get_ur_x(), shape.get_ur_y());
+        if (!buildEmbeddedPort(local_rect, *layer, 1).has_value()) {
           continue;
         }
+        const int64_t area = (static_cast<int64_t>(shape.get_ur_x()) - shape.get_ll_x())
+                             * (static_cast<int64_t>(shape.get_ur_y()) - shape.get_ll_y());
         if (layer->get_order() > access_order || (layer->get_order() == access_order && area > access_area)) {
           access = &shape;
+          access_layer = layer;
           access_order = layer->get_order();
           access_area = area;
         }
       }
-      if (access == nullptr) {
+      if (access == nullptr || access_layer == nullptr) {
         FPLOG.error(Loc::current(), "No legal routing access rectangle for IO pin '", io_pin.get_name(), "' on PAD '", binding.instance_name, "/",
                     binding.pin_name, "'.");
         return false;
@@ -1134,15 +1238,22 @@ bool IOCellPlacer::updateIOPinPorts()
                         access->get_ur_y() + instance.get_y());
       idb::IdbOrientTransform transform(orient, &origin, instance.get_width(), instance.get_height());
       transform.transformRect(&rect);
-      const int32_t x = rect.get_low_x() + (rect.get_high_x() - rect.get_low_x()) / 2;
-      const int32_t y = rect.get_low_y() + (rect.get_high_y() - rect.get_low_y()) / 2;
+      const std::optional<EmbeddedPort> embedded = buildEmbeddedPort(rect, *access_layer, database.get_manufacture_grid());
+      if (!embedded.has_value()) {
+        FPLOG.error(Loc::current(), "Failed to build legal embedded port for IO pin '", io_pin.get_name(), "' on PAD '", binding.instance_name,
+                    "/", binding.pin_name, "'.");
+        return false;
+      }
+      const int32_t x = embedded->x;
+      const int32_t y = embedded->y;
+      const idb::IdbRect& port_rect = embedded->rect;
       IOPort port;
       port.set_layer_name(access->get_layer_name());
       port.set_coord(x, y);
       port.set_placed(true);
-      port.set_rect(rect.get_low_x(), rect.get_low_y(), rect.get_high_x(), rect.get_high_y());
+      port.set_rect(port_rect.get_low_x(), port_rect.get_low_y(), port_rect.get_high_x(), port_rect.get_high_y());
       absolute_ports.push_back(port);
-      port.set_rect(rect.get_low_x() - x, rect.get_low_y() - y, rect.get_high_x() - x, rect.get_high_y() - y);
+      port.set_rect(port_rect.get_low_x() - x, port_rect.get_low_y() - y, port_rect.get_high_x() - x, port_rect.get_high_y() - y);
       relative_ports.push_back(port);
     }
     io_pin.set_instance_name(bindings.size() == 1 ? bindings.front().instance_name : "");
