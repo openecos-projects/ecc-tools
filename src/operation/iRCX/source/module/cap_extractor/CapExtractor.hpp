@@ -72,8 +72,6 @@ class CapExtractor
   std::string extractEdgeCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx);
   std::string extractEdgeIntervalCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, int32_t interval_idx);
   std::string extractCapacitanceSpan(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, int32_t interval_idx, int32_t start_coord, int32_t end_coord);
-  void getCrossLayerName(std::vector<CrossLayerOverlap>& cross_layer_overlap_list, int32_t start_coord, int32_t end_coord, std::string& below_layer_name,
-                         std::string& above_layer_name);
   const ProcessConductor* getProcessConductor(CornerData& corner_data, int32_t design_layer_idx);
 };
 

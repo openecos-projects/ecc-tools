@@ -180,8 +180,12 @@ std::string CapExtractor::extractCapacitanceSpan(int32_t corner_idx, int32_t net
   if (!conductor) return {};
 
   auto& interval = database.get_net_env_list()[net_idx].get_edge_interval_list(edge_idx)[interval_idx];
-  std::string below, above;
-  getCrossLayerName(interval.get_cross_layer_overlap_list(), start_coord, end_coord, below, above);
+  const auto [below_layer, above_layer] = pattern::crossLayers(interval.get_cross_layer_overlap_list(), start_coord, end_coord);
+  // Captab contexts use LEF/DEF names; process names belong to the ITF binding.
+  const auto& design_names = database.get_layer_table().get_design_idx_to_name_map();
+  const auto& master = design_names.at(edge.get_layer_idx());
+  const std::string below = below_layer == 0 ? "SUBSTRATE" : design_names.at(below_layer);
+  const std::string above = above_layer == -1 ? "-" : design_names.at(above_layer);
   const double unit = 1.0 / database.get_layout_data().get_dbu_per_micron();
   const auto parts = _neighborhood->pieces(edge, start_coord, end_coord, unit);
   auto& ground = database.get_rc_data().get_corner_net_ground_capacitance_list(CornerNetIdx(corner_idx, net_idx));
@@ -189,7 +193,7 @@ std::string CapExtractor::extractCapacitanceSpan(int32_t corner_idx, int32_t net
     if (part.duplicate) continue;
     const auto sides = pattern::gridSides(edge, part, unit);
     std::string error;
-    const auto caps = _grid->queryChecked(conductor->get_layer_name(), below, above, edge.get_width() * unit,
+    const auto caps = _grid->queryChecked(master, below, above, edge.get_width() * unit,
                                           sides.lower ? sides.lower_spacing : -1., sides.upper ? sides.upper_spacing : -1., error);
     if (!caps) return error;
     _neighborhood->recordGridCoverage(part.hi - part.lo, caps->width_clamped, caps->gap_clamped);
@@ -201,19 +205,6 @@ std::string CapExtractor::extractCapacitanceSpan(int32_t corner_idx, int32_t net
       addDirectedCoupling(corner_idx, net_idx, edge_idx, sides.upper, part.lo, part.hi, length * caps->right);
   }
   return {};
-}
-
-void CapExtractor::getCrossLayerName(std::vector<CrossLayerOverlap>& overlaps, int32_t start_coord, int32_t end_coord,
-                                     std::string& below, std::string& above)
-{
-  below = "SUBSTRATE";
-  above.clear();
-  const auto [below_idx, above_idx] = pattern::crossLayers(overlaps, start_coord, end_coord);
-  auto& layers = RCXDM.getDatabase().get_layer_table();
-  if (below_idx != 0)
-    below = layers.get_design_name_to_process_name_map().at(layers.get_design_idx_to_name_map().at(below_idx));
-  if (above_idx != -1)
-    above = layers.get_design_name_to_process_name_map().at(layers.get_design_idx_to_name_map().at(above_idx));
 }
 
 const ProcessConductor* CapExtractor::getProcessConductor(CornerData& corner_data, int32_t design_layer_idx)

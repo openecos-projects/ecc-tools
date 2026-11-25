@@ -64,9 +64,9 @@ class InterfaceFixture
 
   void prepare(bool has_lef = true, bool has_def = true)
   {
-    write("mapping.map", "M1 metal1\n");
+    write("mapping.map", "conducting_layers\nM1 metal1\nvia_layers\nmarker_layers\nremove_layers\nPO\nCT\n");
     write("typical.itf", "CONDUCTOR metal1 { THICKNESS=0.1 RPSQ=0.12 }\n");
-    write("typical.captab", "P metal1 SUBSTRATE - .2\n-1 -1 0 0 0\n-1 .2 0 0 0\n.2 -1 0 0 0\n.2 .2 0 0 0\n");
+    write("typical.captab", "P M1 SUBSTRATE - .2\n-1 -1 0 0 0\n-1 .2 0 0 0\n.2 -1 0 0 0\n.2 .2 0 0 0\n");
     write("ircx.config", R"({
       "thread_num": 1,
       "output": "output",
@@ -174,7 +174,7 @@ void checkPatternGridInput(const std::string& scenario)
 {
   InterfaceFixture fixture;
   fixture.prepare();
-  const std::string grid = "P metal1 SUBSTRATE - .2\n"
+  const std::string grid = "P M1 SUBSTRATE - .2\n"
                            "-1 -1 8 0 0\n-1 .2 5 0 3\n.2 -1 5 3 0\n.2 .2 2 3 3\n";
   const std::string a_table = "A metal1 OVER SUBSTRATE\n.1 0 2\n2 0 3\n";
   const std::string b_table = "B metal1 OVER SUBSTRATE UNDER metal2\n.1 0 2\n2 0 3\n";
@@ -184,12 +184,12 @@ void checkPatternGridInput(const std::string& scenario)
           : scenario == "reject_empty" ? "" : scenario == "reject_mixed" ? grid + a_table : grid);
   if (scenario == "override" || scenario == "override_corners") {
     const auto path = fixture.directory() / "explicit-grid.captab";
-    std::ofstream(path) << "P metal1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
+    std::ofstream(path) << "P M1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
     setenv("IRCX_PATTERN_GRID", path.c_str(), 1);
   }
   if (scenario == "corners" || scenario == "override_corners") {
     std::ofstream(fixture.directory() / "other.captab")
-        << "P metal1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
+        << "P M1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
     std::ofstream(fixture.directory() / "ircx.config") << R"({
       "thread_num": 2, "output":"output", "mapping_file":"mapping.map",
       "corners":[
@@ -199,6 +199,11 @@ void checkPatternGridInput(const std::string& scenario)
   }
   if (scenario == "overlap") fixture.addNet("n1", 1050);
   if (scenario == "coupling" || scenario == "corners") fixture.addNet("n1", 1400);
+  if (scenario == "process_names") {
+    auto process_grid = grid;
+    process_grid.replace(process_grid.find("M1"), 2, "metal1");
+    std::ofstream(fixture.directory() / "typical.captab") << process_grid;
+  }
   if (invalid) {
     bool rejected = false;
     try {
@@ -210,6 +215,16 @@ void checkPatternGridInput(const std::string& scenario)
     return;
   }
   fixture.init();
+  if (scenario == "process_names") {
+    bool rejected = false;
+    try {
+      RCXI.runRCX();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("missing pattern grid context: M1|SUBSTRATE|-") != std::string::npos;
+    }
+    require(rejected, "captab must use design layer names without a process-name fallback");
+    return;
+  }
   if (scenario == "removed_mode") setenv("IRCX_MULTI_MODE", "off", 1);
   if (scenario == "removed_prebuilt") setenv("IRCX_MULTI_MODE", "prebuilt", 1);
   if (scenario == "removed_rank") setenv("IRCX_MULTI_RANK", "3", 1);
