@@ -7,6 +7,8 @@
 
 #include "Config.hpp"
 #include "Database.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "TimingAnalyzer.hpp"
@@ -264,8 +266,8 @@ static void structuralFfPath()
   analyzer.prepareStructure();
   require(analyzer.isStructureCurrent(), "FF structural model signature is not current");
   require(database.pathGroups().empty(), "FF structural preparation ran numeric path analysis");
-  require(database.graph().points().at("ff:CK").has_clock_state("core"), "clock PI did not reach FF CK");
-  require(database.graph().points().at("ff:CK").find_clock_state("core")->is_structural,
+  require(database.graph().points().at("ff:CK").has_clock_state(clockId(database, "core")), "clock PI did not reach FF CK");
+  require(database.graph().points().at("ff:CK").find_clock_state(clockId(database, "core"))->is_structural,
           "clock state was not marked structural");
   for (const auto* pin : {"unclocked:CK", "unclocked:Q"}) {
     const auto& paths = database.graph().points().at(pin).get_path_state_map();

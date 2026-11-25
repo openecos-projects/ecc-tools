@@ -6,6 +6,8 @@
 #include "Config.hpp"
 #include "DataSlewPropagator.hpp"
 #include "Database.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "StartpointInitializer.hpp"
 
@@ -79,11 +81,11 @@ static void missingAndZeroClockSlew()
   db.graph().incomingArcs()[name] = {0};
   std::vector<std::string> starts{name};
   auto& point = db.graph().points()[name];
-  point.setLaunchClock("clock");
-  point.setDefaultClock("clock");
+  point.setLaunchClock(clockId(db, "clock"));
+  point.setDefaultClock(clockId(db, "clock"));
   StartpointInitializer(db, delay).seed(starts);
   require(point.get_data_slew_map().empty(), "missing divider waveform was seeded as zero");
-  point.get_clock_state("clock").slew_map.set(AnalysisType::kMin, TransType::kRise, 0.0);
+  point.get_clock_state(clockId(db, "clock")).slew_map.set(AnalysisType::kMin, TransType::kRise, 0.0);
   StartpointInitializer(db, delay).seed(starts);
   require(point.get_data_slew_map().contains(AnalysisType::kMin) && point.get_data_slew_map().at(AnalysisType::kMin).at(TransType::kRise) == 0.0,
           "explicit zero clock slew was mistaken for a missing waveform");
@@ -91,13 +93,13 @@ static void missingAndZeroClockSlew()
 
   point.set_is_clock_point(true);
   instance.set_output_pin_name("divider:Q");
-  point.get_clock_state("clock").slew_map.set(AnalysisType::kMax, TransType::kRise, 0.3);
-  point.get_clock_state("second").slew_map.set(AnalysisType::kMax, TransType::kRise, 0.7);
+  point.get_clock_state(clockId(db, "clock")).slew_map.set(AnalysisType::kMax, TransType::kRise, 0.3);
+  point.get_clock_state(clockId(db, "second")).slew_map.set(AnalysisType::kMax, TransType::kRise, 0.7);
   for (const auto* clock_name : {"clock", "second"}) {
     auto& clock = db.sdc().get_clock_map()[clock_name];
     clock.set_clock_name(clock_name);
     clock.set_period(10.0);
-    auto& state = point.get_clock_state(clock_name);
+    auto& state = point.get_clock_state(clockId(db, clock_name));
     state.waveformSlot(TransType::kRise) = state;
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       state.waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);

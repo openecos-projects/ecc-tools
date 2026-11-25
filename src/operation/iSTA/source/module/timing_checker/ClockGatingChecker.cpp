@@ -32,9 +32,9 @@ void ClockGatingChecker::infer()
   auto seed = [&](const std::string& pin) {
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
-      for (const auto& [clock, state] : point->get_clock_state_map())
+      for (const auto& [clock_id, state] : point->get_clock_state_map())
         if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms()))
-          pending.emplace_back(pin, clock);
+          pending.emplace_back(pin, std::string(_database.sdc().get_clock_map().nameOf(clock_id)));
   };
   for (const auto& id : network.instances().sortedIds()) {
     const Instance& instance = network.instances().get(id);
@@ -72,10 +72,13 @@ void ClockGatingChecker::infer()
       if (arc.get_type() != ArcType::kNet || query.isDisableArc(arc))
         continue;
       const auto& point = graph.sourcePoint(arc);
-      for (const auto& [clock, state] : point.get_clock_state_map())
+      for (const auto& [clock_id, state] : point.get_clock_state_map()) {
+        // Clock names stay the exchange format of the fanin walk below.
+        const auto clock = std::string(_database.sdc().get_clock_map().nameOf(clock_id));
         if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms())
             && _database.sdc().clockAllowsNetArc(network, clock, arc.get_source_pin(), name))
           pending.emplace_back(arc.get_source_pin(), clock);
+      }
     }
   }
   while (!pending.empty()) {
@@ -89,7 +92,7 @@ void ClockGatingChecker::infer()
     for (auto index : *incoming) {
       auto& arc = graph.arcs()[index];
       const auto* point = clockPoint(_database, arc.get_source_pin(), clock);
-      const auto* state = point ? point->find_clock_state(clock) : nullptr;
+      const auto* state = point ? point->find_clock_state(clockIdOf(_database, clock)) : nullptr;
       if (arc.get_is_clock_arc() || query.isDisableArc(arc) || !state || state->is_source_path_only || (!state->is_structural && !state->hasWaveforms()))
         continue;
       if (arc.get_type() == ArcType::kNet && !_database.sdc().clockAllowsNetArc(network, clock, arc.get_source_pin(), arc.get_sink_pin()))

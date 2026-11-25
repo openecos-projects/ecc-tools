@@ -5,6 +5,8 @@
 #include <string>
 
 #include "SdfValueExtractor.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "SdfWriter.hpp"
 #include "graph/TimingStateQuery.hpp"
@@ -131,10 +133,10 @@ static void cellArcAndCheckValues()
   table_arc.get_check_table_map()[TransType::kRise] = table;
   width.get_timing_arc_list().push_back(table_arc);
   auto& clock = db.graph().points()["u:CK"];
-  clock.setLaunchClock("clock");
-  clock.setDefaultClock("clock");
-  clock.get_clock_state("clock").slew_map.set(AnalysisType::kMin, TransType::kRise, 0.0);
-  clock.get_clock_state("clock").slew_map.set(AnalysisType::kMax, TransType::kRise, 1.0);
+  clock.setLaunchClock(clockId(db, "clock"));
+  clock.setDefaultClock(clockId(db, "clock"));
+  clock.get_clock_state(clockId(db, "clock")).slew_map.set(AnalysisType::kMin, TransType::kRise, 0.0);
+  clock.get_clock_state(clockId(db, "clock")).slew_map.set(AnalysisType::kMax, TransType::kRise, 1.0);
   auto width_values = extractor.checkValues(instance, width, table_arc, TransType::kRise);
   require(width_values.minimum == 2.0 && width_values.maximum == 4.0, "WIDTH reversed corners were not ordered");
   cell.get_sdf_check_arc_list().push_back(width);
@@ -184,7 +186,7 @@ static void conditionalArcValues()
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       arc.get_timing_arc_delay_map()[0][mode][edge][edge] = .25;
       arc.get_graph_delay_map()[mode][edge][edge] = .25;
-      auto& wave = point.get_clock_state("M").waveformSlot(edge);
+      auto& wave = point.get_clock_state(clockId(db, "M")).waveformSlot(edge);
       wave.physical_slew_map.set(mode, edge, mode == AnalysisType::kMin ? .2 : .6);
       wave.slew_map.set(mode, edge, .01); // Published ideal slew is not the physical waveform.
     }

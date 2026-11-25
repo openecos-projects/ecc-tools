@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "ClockArcPropagator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "ClockPropagator.hpp"
 #include "ClockReconvergenceCalculator.hpp"
 #include "GraphBuilder.hpp"
@@ -94,7 +96,7 @@ void generatedInsertion()
   // Same scalar-cell experiment: PT U-2022.12-SP3 and OpenSTA return .04 ns.
   if (std::abs(correction - .04) > 1e-9 || common != "ci0:Y")
     throw std::runtime_error("generated insertion trace lost common-path correction across opposite source phases");
-  if (db.graph().points().at("ci0:Y").has_clock_state("generated"))
+  if (db.graph().points().at("ci0:Y").has_clock_state(clockId(db, "generated")))
     throw std::runtime_error("generated insertion trace leaked into ordinary clock coverage");
   Logger::destroyInst();
 }
@@ -167,9 +169,9 @@ void sharedArc(bool slow_first, AnalysisType mode, TransType edge, bool derate =
   arc.get_input_output_delay_map()[mode][edge][output] = 0.;
   db.graph().arcs().push_back(arc);
   std::vector<std::string> sources{"u:A"};
-  ClockSource slow("slow", sources, true), fast("fast", sources, true);
+  ClockSource slow("slow", sources, true, clockId(db, "slow")), fast("fast", sources, true, clockId(db, "fast"));
   for (auto name : {"slow", "fast"}) {
-    auto& state = db.graph().points().at("u:A").get_clock_state(name);
+    auto& state = db.graph().points().at("u:A").get_clock_state(clockId(db, name));
     state.waveformSlot(edge).physical_arrival_map.set(mode, edge, 0.);
     state.waveformSlot(edge).physical_slew_map.set(mode, edge, name == std::string("slow") ? 2. : .1);
     if (mixed) {
@@ -178,14 +180,14 @@ void sharedArc(bool slow_first, AnalysisType mode, TransType edge, bool derate =
       state.waveformSlot(output).physical_slew_map.set(mode, edge, .45);
     }
     state.summarize();
-    db.graph().points().at("u:Y").get_clock_state(name);
+    db.graph().points().at("u:Y").get_clock_state(clockId(db, name));
   }
   for (auto* clock : (slow_first ? std::vector<ClockSource*>{&slow, &fast} : std::vector<ClockSource*>{&fast, &slow})) {
     propagation.propagateSlew(*clock, 0, mode, edge, false);
     propagation.propagateArrival(*clock, 0, mode, edge, false);
   }
   for (auto name : {"slow", "fast"}) {
-    auto& state = db.graph().points().at("u:Y").get_clock_state(name);
+    auto& state = db.graph().points().at("u:Y").get_clock_state(clockId(db, name));
     double expected = (std::string(name) == "slow" ? 3.0 : 1.1) * factor;
     if (mixed) {
       if (state.waveformCount() != 2 || std::fabs(*state.waveform(output)->physicalArrival(mode, output) - 6.45) > 1e-9

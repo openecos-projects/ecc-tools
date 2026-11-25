@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #pragma once
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <string_view>
@@ -25,11 +26,42 @@
 #include "Database.hpp"
 
 namespace ista {
-const TimingPoint* clockPoint(const Database& database, const std::string& pin, std::string_view clock);
-const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, std::string_view clock, std::optional<TransType> source = std::nullopt);
-std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, std::string_view clock, AnalysisType mode,
+// Resolve a clock name to its SDC table id; the invalid id stands in for a
+// name-probe miss, which every callee maps to the same empty result.
+inline ClockId clockIdOf(const Database& database, std::string_view clock)
+{
+  const auto id = database.sdc().get_clock_map().id(clock);
+  return id ? *id : ClockId{};
+}
+const TimingPoint* clockPoint(const Database& database, const std::string& pin, ClockId clock);
+inline const TimingPoint* clockPoint(const Database& database, const std::string& pin, std::string_view clock)
+{
+  return clockPoint(database, pin, clockIdOf(database, clock));
+}
+const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, ClockId clock, std::optional<TransType> source = std::nullopt);
+inline const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, std::string_view clock, std::optional<TransType> source = std::nullopt)
+{
+  return clockWaveform(database, pin, clockIdOf(database, clock), source);
+}
+std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, ClockId clock, AnalysisType mode,
                                               TransType local_edge);
+inline std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, std::string_view clock, AnalysisType mode,
+                                                     TransType local_edge)
+{
+  return clockSourceTransitions(database, pin, clockIdOf(database, clock), mode, local_edge);
+}
 bool isIdealClockPin(const Database& database, const std::string& pin);
+
+// Name-ordered view of a point's clock states, reproducing the iteration order
+// the string-keyed map gave. Use only where downstream order is observable.
+inline std::vector<std::pair<std::string_view, const ClockState*>> clockStatesInNameOrder(const TimingPoint& point, const Database& database)
+{
+  std::vector<std::pair<std::string_view, const ClockState*>> states;
+  for (const auto& [clock, state] : point.get_clock_state_map())
+    states.emplace_back(database.sdc().get_clock_map().nameOf(clock), &state);
+  std::sort(states.begin(), states.end(), [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
+  return states;
+}
 
 struct ClockPinValues
 {
@@ -39,8 +71,14 @@ struct ClockPinValues
   double uncertainty = 0.0;
   std::string propagated_pin;
 };
-ClockPinValues clockPinValues(const Database& database, const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+ClockPinValues clockPinValues(const Database& database, const std::string& pin, ClockId clock, AnalysisType analysis, TransType transition,
                               AnalysisType check = AnalysisType::kNone, std::optional<TransType> source = std::nullopt, const TimingPoint* point = nullptr);
+inline ClockPinValues clockPinValues(const Database& database, const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+                                     AnalysisType check = AnalysisType::kNone, std::optional<TransType> source = std::nullopt,
+                                     const TimingPoint* point = nullptr)
+{
+  return clockPinValues(database, pin, clockIdOf(database, clock), analysis, transition, check, source, point);
+}
 // Snapshot queries are scoped to a phase with fixed topology, waveforms and
 // constraints. Live references remain valid until the next values() call.
 class ClockPinValuesQuery

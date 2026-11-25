@@ -4,6 +4,8 @@
 
 #include "Config.hpp"
 #include "Database.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "Logger.hpp"
 #include "TimingAnalyzer.hpp"
@@ -44,8 +46,8 @@ static void reconvergentCandidates(bool variation)
     instance.set_clock_pin_name(name);
     instance.set_output_pin_name(name.substr(0, 1) + ":Q");
     point.set_is_clock_point(true);
-    point.setLaunchClock("clk");
-    auto& state = point.get_clock_state("clk");
+    point.setLaunchClock(clockId(db, "clk"));
+    auto& state = point.get_clock_state(clockId(db, "clk"));
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       state.waveformSlot(edge).arrival_map.set(AnalysisType::kMin, edge, name == "a:CK" ? 1. : 1.2);
       state.waveformSlot(edge).arrival_map.set(AnalysisType::kMax, edge, variation ? (name == "a:CK" ? 2. : 1.3) : state.waveformSlot(edge).arrival_map.get(AnalysisType::kMin, edge).value_or(0.));
@@ -110,8 +112,8 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
     instance.set_clock_pin_name(name);
     instance.set_output_pin_name(name.substr(0, 1) + ":Q");
     point.set_is_clock_point(true);
-    point.setLaunchClock("clk");
-    auto& state = point.get_clock_state("clk");
+    point.setLaunchClock(clockId(db, "clk"));
+    auto& state = point.get_clock_state(clockId(db, "clk"));
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       state.waveformSlot(edge).arrival_map.set(AnalysisType::kMin, edge, name == "a:CK" ? 1. : name == "b:CK" ? 1.2 : 0.);
       state.waveformSlot(edge).arrival_map.set(AnalysisType::kMax, edge, name == "a:CK" ? 2. : name == "b:CK" ? 1.3 : .05);
@@ -233,7 +235,7 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
   RequiredPropagator required(db, checker);
   for (const double late : {2.25, 1.75}) {
     for (Database* design : {&db, &exhaustive}) {
-      auto& state = design->graph().points().at("a:CK").get_clock_state("clk");
+      auto& state = design->graph().points().at("a:CK").get_clock_state(clockId(db, "clk"));
       state.waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMax, TransType::kRise, late);
       state.waveformSlot(TransType::kFall).arrival_map.set(AnalysisType::kMax, TransType::kFall, late - .125);
       state.summarize();
@@ -297,8 +299,8 @@ static void cumulativeMergeTolerance(bool hold)
       instance.set_clock_pin_name(name);
       instance.set_output_pin_name(name.substr(0, 1) + ":Q");
       point.set_is_clock_point(true);
-      point.setLaunchClock("clk");
-      auto& state = point.get_clock_state("clk");
+      point.setLaunchClock(clockId(db, "clk"));
+      auto& state = point.get_clock_state(clockId(db, "clk"));
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         const double early = name == "a:CK" ? .9 : .900005;
         const double late = name == "a:CK" ? 1. : .900005;

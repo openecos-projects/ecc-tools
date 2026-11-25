@@ -39,6 +39,9 @@ class SymbolTable
   bool remove(std::string_view name);
   std::optional<uint32_t> find(std::string_view name) const;
   std::string_view view(uint32_t id) const;
+  // The id was interned and not removed. Stale ids can linger in containers
+  // after erase(), so validity is not proof of liveness.
+  bool alive(uint32_t id) const { return id > 0 && id <= _entries.size() && _entries[id - 1].live; }
   // Number of live (name-resolvable) entries.
   std::size_t size() const { return _used; }
   std::vector<uint32_t> sorted_ids() const;

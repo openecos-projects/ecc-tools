@@ -6,6 +6,8 @@
 #include <type_traits>
 
 #include "DelayCalculator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "graph/PathTagTable.hpp"
 #include "Logger.hpp"
 #include "PathSearcher.hpp"
@@ -37,8 +39,8 @@ void testCaptureClocks()
   db.network().pins()["in"].set_is_port(true);
   auto& ck = db.graph().points()["ff:CK"];
   ck.set_is_clock_point(true);
-  ck.setDefaultClock("a");
-  ck.setLaunchClock("a");
+  ck.setDefaultClock(clockId(db, "a"));
+  ck.setLaunchClock(clockId(db, "a"));
   for (const auto* name : {"launch", "a", "b", "source_only"}) {
     auto& clock = db.sdc().get_clock_map()[name];
     clock.set_clock_name(name);
@@ -46,8 +48,8 @@ void testCaptureClocks()
   }
   for (const auto* clock : {"a", "b"})
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
-      ck.get_clock_state(clock).waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);
-  ck.get_clock_state("source_only").is_source_path_only = true;
+      ck.get_clock_state(clockId(db, clock)).waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);
+  ck.get_clock_state(clockId(db, "source_only")).is_source_path_only = true;
   db.sdc().get_clock_map()["source_only"].set_setup_uncertainty(100.0);
   TimingCheckArc check;
   check.set_data_port(endpoint);

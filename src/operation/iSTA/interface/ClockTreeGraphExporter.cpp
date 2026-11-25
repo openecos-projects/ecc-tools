@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "ClockTreeGraphExporter.hpp"
 
+#include "graph/TimingStateQuery.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -86,10 +88,10 @@ const TimingPoint* timingPointFor(const Graph& graph, const Pin& pin)
   return driver == graph.driverPoints().end() ? nullptr : driver;
 }
 
-const ClockState* clockStateFor(const Graph& graph, const Pin& pin, const std::string& clock)
+const ClockState* clockStateFor(const Database& database, const Pin& pin, const std::string& clock)
 {
-  const TimingPoint* point = timingPointFor(graph, pin);
-  return point == nullptr ? nullptr : point->find_clock_state(clock);
+  const TimingPoint* point = timingPointFor(database.graph(), pin);
+  return point == nullptr ? nullptr : point->find_clock_state(clockIdOf(database, clock));
 }
 
 bool isInverter(const std::string& master)
@@ -314,7 +316,7 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
     states.reserve(point_names.size());
     for (const std::string& name : point_names) {
       const Pin& pin = database.network().pins().at(name);
-      const ClockState* state = clockStateFor(database.graph(), pin, exported.name);
+      const ClockState* state = clockStateFor(database, pin, exported.name);
       states.push_back(state);
       const auto arrival
           = state == nullptr

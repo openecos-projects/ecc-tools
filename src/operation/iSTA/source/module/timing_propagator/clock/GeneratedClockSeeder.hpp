@@ -32,7 +32,7 @@ class GeneratedClockSeeder
 
  private:
   bool seedFromMaster(ClockSource& clock, const TimingClock& definition);
-  bool hasPhysicalClockState(const TimingPoint& timing_point, std::string_view clock_name);
+  bool hasPhysicalClockState(const TimingPoint& timing_point, ClockId clock);
   Database& _database;
   DelayCalculator& _delay;
   ClockArcPropagator _clock_arc_propagator;

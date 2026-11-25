@@ -79,7 +79,7 @@ class PathStatePruning
               for (const auto& [clock, state] : point->get_clock_state_map())
                 if (!state.is_source_path_only) {
                   clock_found = true;
-                  if (!admit(arc.get_clock_port(), clock, arc.get_clock_trans_type()))
+                  if (!admit(arc.get_clock_port(), std::string(sdc.get_clock_map().nameOf(clock)), arc.get_clock_trans_type()))
                     return false;
                 }
               if (!clock_found)

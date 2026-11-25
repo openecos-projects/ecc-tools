@@ -3,6 +3,8 @@
 #include <string>
 
 #include "ClockReconvergenceCalculator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "graph/TimingStateQuery.hpp"
 
 namespace {
@@ -36,11 +38,11 @@ void inoutSource()
   clock.set_source_list({"clk"});
   clock.set_is_propagated(true);
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
-    auto& wave = graph.driverPoints().at("clk").get_clock_state("core").waveformSlot(TransType::kFall);
+    auto& wave = graph.driverPoints().at("clk").get_clock_state(clockId(db, "core")).waveformSlot(TransType::kFall);
     wave.arrival_map.set(mode, TransType::kFall, mode == AnalysisType::kMin ? 1. : 2.);
     wave.physical_slew_map.set(mode, TransType::kFall, .1);
     for (const auto* name : {"launch", "capture"}) {
-      auto& sink = graph.points().at(name).get_clock_state("core").waveformSlot(TransType::kFall);
+      auto& sink = graph.points().at(name).get_clock_state(clockId(db, "core")).waveformSlot(TransType::kFall);
       sink.arrival_map.set(mode, TransType::kRise, wave.arrival_map.get(mode, TransType::kFall).value() + .2);
       sink.predecessor_map.set(mode, TransType::kRise, db.network().pins().id("clk").value());
       sink.predecessor_vertex_map.set(mode, TransType::kRise, pin.get_driver_vertex_idx());
@@ -81,13 +83,13 @@ int main()
     graph.vertices().push_back(vertex);
   }
   for (const auto* clock : {"launch_clock", "capture_clock"}) {
-    auto& root = graph.points()["root"].get_clock_state(clock);
+    auto& root = graph.points()["root"].get_clock_state(clockId(database, clock));
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       root.arrival_map.set(AnalysisType::kMin, edge, 2.0);
       root.arrival_map.set(AnalysisType::kMax, edge, edge == TransType::kRise ? 5.0 : 4.0);
     }
     for (const auto* name : {"launch", "capture"}) {
-      auto& state = graph.points()[name].get_clock_state(clock);
+      auto& state = graph.points()[name].get_clock_state(clockId(database, clock));
       for (auto analysis : {AnalysisType::kMin, AnalysisType::kMax}) {
         for (auto edge : {TransType::kRise, TransType::kFall}) {
           state.predecessor_map.set(analysis, edge, database.network().pins().id("root").value());
@@ -125,7 +127,7 @@ int main()
   for (const auto* clock : {"launch_clock", "capture_clock"})
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (auto edge : {TransType::kRise, TransType::kFall}) {
-        auto& state = graph.points()["root"].get_clock_state(clock);
+        auto& state = graph.points()["root"].get_clock_state(clockId(database, clock));
         state.predecessor_map.set(mode, edge, database.network().pins().id("source").value());
         state.predecessor_vertex_map.set(mode, edge, 3);
         state.predecessor_trans_type_map.set(mode, edge, edge);
@@ -140,7 +142,7 @@ int main()
           "public clock path query lost source-to-endpoint order");
   // The leaf can have equal early/late arrival while its common prefix still
   // carries variation. A leaf-only bound would erase a CPPR-critical launch.
-  auto& launch = graph.points()["launch"].get_clock_state("launch_clock");
+  auto& launch = graph.points()["launch"].get_clock_state(clockId(database, "launch_clock"));
   launch.arrival_map.set(AnalysisType::kMin, TransType::kRise, 6.);
   launch.arrival_map.set(AnalysisType::kMax, TransType::kRise, 6.);
   require(TimingStateQuery(database).clockPathBound("launch", "launch_clock", TransType::kRise) == 3.,
@@ -155,7 +157,7 @@ int main()
   for (const auto* clock : {"launch_clock", "capture_clock"}) {
     database.sdc().get_clock_map()[clock].set_source_list({"source"});
     for (const auto& id : graph.points().sortedIds()) {
-      auto& state = graph.points().get(id).get_clock_state(clock);
+      auto& state = graph.points().get(id).get_clock_state(clockId(database, clock));
       state.physical_predecessor_map = state.predecessor_map;
       state.physical_predecessor_trans_type_map = state.predecessor_trans_type_map;
     }
@@ -168,8 +170,8 @@ int main()
   require(crpr.correction("launch", TransType::kRise, "launch_clock", "capture", TransType::kRise, "capture_clock", AnalysisType::kMax, common) == 3.0,
           "common clock-source propagated port lost CRPR");
   database.sdc().clockPinConstraints().clear();
-  graph.points()["root"].get_clock_state("launch_clock").arrival_map.erase(AnalysisType::kMin, TransType::kRise);
-  graph.points()["root"].get_clock_state("launch_clock").arrival_map.erase(AnalysisType::kMin, TransType::kFall);
+  graph.points()["root"].get_clock_state(clockId(database, "launch_clock")).arrival_map.erase(AnalysisType::kMin, TransType::kRise);
+  graph.points()["root"].get_clock_state(clockId(database, "launch_clock")).arrival_map.erase(AnalysisType::kMin, TransType::kFall);
   require(crpr.correction("launch", TransType::kRise, "launch_clock", "capture", TransType::kRise, "capture_clock", AnalysisType::kMax, common) == 0.0,
           "missing early waveform fabricated a CPPR correction");
 }

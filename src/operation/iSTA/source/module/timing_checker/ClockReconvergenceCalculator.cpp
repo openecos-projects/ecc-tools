@@ -131,7 +131,7 @@ std::size_t ClockReconvergenceCalculator::commonPrefixDepth(std::size_t launch, 
 double ClockReconvergenceCalculator::getClockCommonPathDelayDelta(const ClockPathPoint& common_pin, std::string_view clock_name)
 {
   const auto& point = _database.graph().vertices().at(common_pin.vertex).get_timing_point();
-  const auto* clock = point.find_clock_state(clock_name);
+  const auto* clock = point.find_clock_state(clockIdOf(_database, clock_name));
   const auto* state = clock ? clock->waveform(common_pin.source) : nullptr;
   if (!state)
     return 0.;
@@ -174,7 +174,7 @@ std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalc
   while (vertex_idx >= 0 && visited.insert(vertex_idx).second) {
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     clock_path_pin_list.push_back({vertex_idx, current_trans_type, source});
-    const auto* clock = vertex.get_timing_point().find_clock_state(clock_name);
+    const auto* clock = vertex.get_timing_point().find_clock_state(clockIdOf(database, clock_name));
     const ClockWaveform* state = clock ? clock->waveform(source) : nullptr;
     if (state == nullptr || !state->predecessor_map.get(analysis_type, current_trans_type)) {
       break;

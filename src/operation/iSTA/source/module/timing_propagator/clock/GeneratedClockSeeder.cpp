@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "GeneratedClockSeeder.hpp"
 
+#include "graph/TimingStateQuery.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -41,7 +43,7 @@ void GeneratedClockSeeder::seed(ClockSource& clock)
     // A generated clock defines a new waveform at its target. Retain the
     // insertion trace, but rebase source-edge identity to that target's edges.
     for (const auto& pin : clock.get_source_list()) {
-      auto& state = database.graph().driverPoint(pin).get_clock_state(clock.get_clock_name());
+      auto& state = database.graph().driverPoint(pin).get_clock_state(clock.id());
       for (auto edge : {TransType::kRise, TransType::kFall})
         state.waveformSlot(edge) = state.physicalEdge(edge);
       state.summarize();
@@ -60,7 +62,7 @@ void GeneratedClockSeeder::seed(ClockSource& clock)
       continue;
     }
     TimingPoint& timing_point = database.graph().driverPoint(pin_name);
-    ClockState& state = timing_point.get_clock_state(clock.get_clock_name());
+    ClockState& state = timing_point.get_clock_state(clock.id());
     const bool port = database.network().pins().at(pin_name).get_is_port();
     const auto constraint = database.sdc().get_port_constraint_map().find(pin_name);
     // A remaining explicit port transition selects a fixed source waveform in
@@ -101,7 +103,7 @@ bool GeneratedClockSeeder::seedFromMaster(ClockSource& clock, const TimingClock&
   };
   auto isMasterSeed = [&](GraphVertex& vertex) {
     const std::string& pin = vertex.get_pin_name();
-    if (!vertex.get_timing_point().has_clock_state(master_name) || !hasPhysicalClockState(vertex.get_timing_point(), master_name))
+    if (const auto master_id = clockIdOf(database, master_name); !vertex.get_timing_point().has_clock_state(master_id) || !hasPhysicalClockState(vertex.get_timing_point(), master_id))
       return false;
     if (master_source.empty())
       return true;
@@ -164,10 +166,10 @@ bool GeneratedClockSeeder::seedFromMaster(ClockSource& clock, const TimingClock&
   for (int32_t vertex_idx : source_path_points) {
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     TimingPoint& point = vertex.get_timing_point();
-    const bool marked = point.has_clock_state(clock.get_clock_name());
-    ClockState& generated_state = point.get_clock_state(clock.get_clock_name());
+    const bool marked = point.has_clock_state(clock.id());
+    ClockState& generated_state = point.get_clock_state(clock.id());
     generated_state.is_source_path_only = !marked;
-    if (const ClockState* master_state = point.find_clock_state(master_name); master_state != nullptr && isMasterSeed(vertex)) {
+    if (const ClockState* master_state = point.find_clock_state(clockIdOf(database, master_name)); master_state != nullptr && isMasterSeed(vertex)) {
       master_state->eachWaveform([&generated_state](TransType edge, const ClockWaveform& wave) { generated_state.waveformSlot(edge) = wave; });
       generated_state.summarize();
     }
@@ -181,7 +183,7 @@ bool GeneratedClockSeeder::seedFromMaster(ClockSource& clock, const TimingClock&
         continue;
       GraphVertex& vertex = database.graph().vertices()[vertex_idx];
       TimingPoint& source_point = vertex.get_timing_point();
-      if (!hasPhysicalClockState(source_point, clock.get_clock_name()))
+      if (!hasPhysicalClockState(source_point, clock.id()))
         continue;
       for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
         Arc& arc = database.graph().arcs()[arc_idx];
@@ -196,13 +198,13 @@ bool GeneratedClockSeeder::seedFromMaster(ClockSource& clock, const TimingClock&
   }
 
   return std::ranges::all_of(clock.get_source_list(), [&](const std::string& target) {
-    return database.graph().points().contains(target) && hasPhysicalClockState(database.graph().driverPoint(target), clock.get_clock_name());
+    return database.graph().points().contains(target) && hasPhysicalClockState(database.graph().driverPoint(target), clock.id());
   });
 }
 
-bool GeneratedClockSeeder::hasPhysicalClockState(const TimingPoint& timing_point, std::string_view clock_name)
+bool GeneratedClockSeeder::hasPhysicalClockState(const TimingPoint& timing_point, ClockId clock)
 {
-  const ClockState* state = timing_point.find_clock_state(clock_name);
+  const ClockState* state = timing_point.find_clock_state(clock);
   if (state == nullptr)
     return false;
   for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin})

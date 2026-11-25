@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "SdcTestDesign.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "SdcWriter.hpp"
 #include "TimingAnalyzer.hpp"
@@ -109,9 +111,9 @@ int main(int, char** argv)
       require(pathValues(db) == pathValues(fresh), "rebuilt timing differs from a fresh analysis of the same constraints");
       const double load = stage >= 3 ? 1.8 : stage == 2 ? 1. : .5;
       near(delay.pinLoad("data:Y", AnalysisType::kMax, TransType::kRise), load, "set_load lost or duplicated during rebuild");
-      const auto& clock = db.graph().points().at("clock:Y").get_clock_state("M");
+      const auto& clock = db.graph().points().at("clock:Y").get_clock_state(clockId(db, "M"));
       near(clock.arrival_map.get(AnalysisType::kMax, TransType::kRise).value(), stage == 1 ? .1 : 0., "propagated/ideal clock mode lost during rebuild");
-      const auto& source = db.graph().driverPoint("clk").get_clock_state("M");
+      const auto& source = db.graph().driverPoint("clk").get_clock_state(clockId(db, "M"));
       for (const auto mode : {AnalysisType::kMin, AnalysisType::kMax})
         for (const auto edge : {TransType::kRise, TransType::kFall}) {
           near(source.waveform(edge)->physicalSlew(mode, edge).value(), .1, "clock source ignored set_input_transition");
@@ -156,9 +158,9 @@ int main(int, char** argv)
     for (const auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (const auto edge : {TransType::kRise, TransType::kFall}) {
         const auto expected = replace ? .12 : edge == TransType::kRise ? .05 : .08;
-        near(db.graph().driverPoint("clk").get_clock_state("M").slew_map.get(mode, edge).value(), expected, "clock input drive selection");
-        near(db.graph().points().at("clock:A").get_clock_state("M").slew_map.get(mode, edge).value(), expected, "clock receiver lost port waveform");
-        near(db.graph().driverPoint("clk").get_clock_state("M").arrival_map.get(mode, edge).value(), replace ? 0. : .02,
+        near(db.graph().driverPoint("clk").get_clock_state(clockId(db, "M")).slew_map.get(mode, edge).value(), expected, "clock input drive selection");
+        near(db.graph().points().at("clock:A").get_clock_state(clockId(db, "M")).slew_map.get(mode, edge).value(), expected, "clock receiver lost port waveform");
+        near(db.graph().driverPoint("clk").get_clock_state(clockId(db, "M")).arrival_map.get(mode, edge).value(), replace ? 0. : .02,
              "clock root lost driving-cell load-dependent delay");
       }
   }

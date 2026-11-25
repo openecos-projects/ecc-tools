@@ -50,7 +50,7 @@ void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
       GraphVertex& vertex = database.graph().vertices()[vertex_idx];
       std::string& pin_name = vertex.get_pin_name();
       if (TimingPoint& timing_point = vertex.get_timing_point();
-          !timing_point.has_clock_state(clock.get_clock_name()) || network.stopsAt(pin_name)) {
+          !timing_point.has_clock_state(clock.id()) || network.stopsAt(pin_name)) {
         continue;
       }
       for (const auto& arc_idx : vertex.get_outgoing_arc_list()) {
@@ -73,7 +73,7 @@ void ClockPropagator::propagateClockSlewDelay(ClockSource& clock)
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     std::string& pin_name = vertex.get_pin_name();
     TimingPoint& timing_point = vertex.get_timing_point();
-    if (!timing_point.has_clock_state(clock.get_clock_name()) || network.stopsAt(pin_name)) {
+    if (!timing_point.has_clock_state(clock.id()) || network.stopsAt(pin_name)) {
       continue;
     }
     for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
@@ -91,10 +91,10 @@ void ClockPropagator::publishClock(ClockSource& clock)
   TimingClock& definition = database.sdc().get_clock_map().at(std::string(clock.get_clock_name()));
   for (GraphVertex& vertex : database.graph().vertices()) {
     TimingPoint& timing_point = vertex.get_timing_point();
-    if (timing_point.find_clock_state(clock.get_clock_name()) == nullptr) {
+    if (timing_point.find_clock_state(clock.id()) == nullptr) {
       continue;
     }
-    ClockState& clock_state = timing_point.get_clock_state(clock.get_clock_name());
+    ClockState& clock_state = timing_point.get_clock_state(clock.id());
     clock_state.eachWaveform([&](TransType source_edge, ClockWaveform& state) {
       state.arrival_map.clear();
       state.slew_map.clear();

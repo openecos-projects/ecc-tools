@@ -16,6 +16,8 @@
 #include <vector>
 
 #include "Database.hpp"
+
+#include "graph/TimingStateQuery.hpp"
 #include "DelayCalculator.hpp"
 #include "TimingAnalyzer.hpp"
 
@@ -59,12 +61,12 @@ int main()
   DelayCalculator delay(db, config);
   TimingAnalyzer(db, delay).analyze();
 
-  // markClock skips output ports with no fanout by design ("no internal data
-  // fanout to analyze"), so the observable point here is the source pin "in".
+  // The id-keyed map iterates in SDC definition order by design; the
+  // name-ordered helper is the contract output consumers rely on.
   auto& point = db.graph().points()["in"];
   std::vector<std::string> iterated;
-  for (const auto& [clock_name, state] : point.get_clock_state_map())
-    iterated.push_back(clock_name);
+  for (const auto& [clock_name, state] : clockStatesInNameOrder(point, db))
+    iterated.emplace_back(clock_name);
   std::string actual;
   for (const auto& name : iterated)
     actual += name + ",";
@@ -73,10 +75,10 @@ int main()
 
   // The default clock is the name-first clock reaching the point, not the
   // first-defined one.
-  require(point.defaultClock() == "aclk", "default clock followed SDC definition order instead of name order");
+  require(point.defaultClock() == db.sdc().get_clock_map().id("aclk").value(), "default clock followed SDC definition order instead of name order");
   require(point.findDefaultClockState() != nullptr, "default clock lost its clock state");
 
   // Clock-state lookup by every name works and returns distinct states.
   for (const auto* name : {"zclk", "mclk", "aclk"})
-    require(point.has_clock_state(name), "clock state missing after propagation");
+    require(point.has_clock_state(db.sdc().get_clock_map().id(name).value()), "clock state missing after propagation");
 }

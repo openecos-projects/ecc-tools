@@ -58,11 +58,12 @@ std::vector<ClockCheck> ClockChecker::check()
       const auto logic = _database.graph().simValues().value(pin);
       if (logic && (*logic == TimingCaseValue::kZero || *logic == TimingCaseValue::kOne))
         continue;
-      for (const auto& [clock_name, state] : point->get_clock_state_map()) {
-        const auto definition = _database.sdc().get_clock_map().find(clock_name);
-        if (state.is_source_path_only || definition == _database.sdc().get_clock_map().end())
+      for (const auto& [clock_id, state] : point->get_clock_state_map()) {
+        if (state.is_source_path_only || !_database.sdc().get_clock_map().contains(clock_id))
           continue;
-        const auto& clock = *definition;
+        const auto& clock = _database.sdc().get_clock_map().get(clock_id);
+        // Reports key on the name; resolve once at the boundary.
+        const std::string clock_name(_database.sdc().get_clock_map().nameOf(clock_id));
         if (!(clock.get_period() > 0.))
           continue;
         for (auto edge : {TransType::kRise, TransType::kFall}) {

@@ -19,18 +19,22 @@
 #include <string_view>
 #include <vector>
 
+#include "graph/TimingPoint.hpp"
+
 namespace ista {
 
 class ClockSource
 {
  public:
   ~ClockSource() = default;
-  ClockSource(std::string_view clock_name, const std::vector<std::string>& source_list, bool is_propagated)
-      : _clock_name(clock_name), _source_list(source_list), _is_propagated(is_propagated)
+  ClockSource(std::string_view clock_name, const std::vector<std::string>& source_list, bool is_propagated, ClockId clock_id = {})
+      : _clock_name(clock_name), _source_list(source_list), _is_propagated(is_propagated), _clock_id(clock_id)
   {
   }
 
   [[nodiscard]] std::string_view get_clock_name() const { return _clock_name; }
+  // Id into the SDC clock table; valid for every source built from the table.
+  [[nodiscard]] ClockId id() const { return _clock_id; }
   [[nodiscard]] const std::vector<std::string>& get_source_list() const { return _source_list; }
   [[nodiscard]] bool get_is_propagated() const { return _is_propagated; }
   [[nodiscard]] const std::vector<std::string>& get_clock_point_list() const { return _clock_point_list; }
@@ -44,6 +48,7 @@ class ClockSource
   const std::vector<std::string>& _source_list;
   std::vector<std::string> _clock_point_list;
   bool _is_propagated = false;
+  ClockId _clock_id{};
 };
 
 }  // namespace ista

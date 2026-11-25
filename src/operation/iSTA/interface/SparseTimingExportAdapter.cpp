@@ -248,13 +248,14 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
     for (const auto& id : point_map.sortedIds()) {
       const std::string name(point_map.nameOf(id));
       auto& point = point_map.get(id);
-      for (auto& [clock, clock_state] : point.get_clock_state_map()) {
-        if (domains.contains(clock)) {
-          ++view.clock_reached_pins[domains.at(clock)];
+      // Name order here feeds the exported clock_pin_sample ordering.
+      for (auto [clock_name, clock_state] : clockStatesInNameOrder(point, database)) {
+        if (domains.contains(std::string(clock_name))) {
+          ++view.clock_reached_pins[domains.at(std::string(clock_name))];
           if (sequential_clock_pins.contains(name))
-            ++view.clock_reached_sequential_pins[domains.at(clock)];
+            ++view.clock_reached_sequential_pins[domains.at(std::string(clock_name))];
           if (view.clock_pin_sample.size() < 30)
-            view.clock_pin_sample.push_back(clock + ":" + name);
+            view.clock_pin_sample.push_back(std::string(clock_name) + ":" + name);
         }
       }
       for (auto& [key, pair] : pathStates(database, point, role, analysis)) {

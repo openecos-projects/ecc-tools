@@ -54,12 +54,12 @@ void ClockArcPropagator::propagateArrival(ClockSource& clock, std::size_t arc_id
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
   if ((respect_boundaries && arc.get_type() == ArcType::kNet
        && !database.sdc().clockAllowsNetArc(database.network(), std::string(clock.get_clock_name()), arc.get_source_pin(), arc.get_sink_pin()))
-      || (respect_boundaries && (!source_point.has_clock_state(clock.get_clock_name()) || !sink_point.has_clock_state(clock.get_clock_name())))
-      || source_point.find_clock_state(clock.get_clock_name()) == nullptr || sink_point.find_clock_state(clock.get_clock_name()) == nullptr) {
+      || (respect_boundaries && (!source_point.has_clock_state(clock.id()) || !sink_point.has_clock_state(clock.id())))
+      || source_point.find_clock_state(clock.id()) == nullptr || sink_point.find_clock_state(clock.id()) == nullptr) {
     return;
   }
-  auto& source_state = source_point.get_clock_state(clock.get_clock_name());
-  auto& sink_state = sink_point.get_clock_state(clock.get_clock_name());
+  auto& source_state = source_point.get_clock_state(clock.id());
+  auto& sink_state = sink_point.get_clock_state(clock.id());
   source_state.eachWaveform([&](TransType source_edge, ClockWaveform& source) {
     if (!source.physicalArrival(analysis_type, input_trans_type) || !source.physicalSlew(analysis_type, input_trans_type))
       return;
@@ -164,12 +164,12 @@ void ClockArcPropagator::propagateSlew(ClockSource& clock, std::size_t arc_idx, 
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
   if ((respect_boundaries && arc.get_type() == ArcType::kNet
        && !database.sdc().clockAllowsNetArc(database.network(), std::string(clock.get_clock_name()), arc.get_source_pin(), arc.get_sink_pin()))
-      || (respect_boundaries && (!source_point.has_clock_state(clock.get_clock_name()) || !sink_point.has_clock_state(clock.get_clock_name())))
-      || source_point.find_clock_state(clock.get_clock_name()) == nullptr || sink_point.find_clock_state(clock.get_clock_name()) == nullptr) {
+      || (respect_boundaries && (!source_point.has_clock_state(clock.id()) || !sink_point.has_clock_state(clock.id())))
+      || source_point.find_clock_state(clock.id()) == nullptr || sink_point.find_clock_state(clock.id()) == nullptr) {
     return;
   }
-  auto& source_state = source_point.get_clock_state(clock.get_clock_name());
-  auto& sink_state = sink_point.get_clock_state(clock.get_clock_name());
+  auto& source_state = source_point.get_clock_state(clock.id());
+  auto& sink_state = sink_point.get_clock_state(clock.id());
   source_state.eachWaveform([&](TransType source_edge, ClockWaveform& source) {
     if (!source.physicalSlew(analysis_type, input_trans_type))
       return;

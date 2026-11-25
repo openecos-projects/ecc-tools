@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "DelayCalculator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "PathReportWriter.hpp"
 #include "TimingAnalyzer.hpp"
 #include "TimingJsonWriter.hpp"
@@ -162,7 +164,7 @@ static void clockPathJson()
     net.set_pin_name_list(pins);
   }
   for (auto [pin_name, predecessor, predecessor_vertex] : {std::tuple{"ff:CK", "buf:Y", 2}, std::tuple{"buf:Y", "buf:A", 1}, std::tuple{"buf:A", "clk", 0}}) {
-    auto& state = db.graph().points()[pin_name].get_clock_state("clk");
+    auto& state = db.graph().points()[pin_name].get_clock_state(clockId(db, "clk"));
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         auto& waveform = state.waveformSlot(edge);

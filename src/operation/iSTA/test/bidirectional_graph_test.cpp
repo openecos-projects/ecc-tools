@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "ReadLiberty.hpp"
+
+#include "clock_id_helper.hpp"
 #include "interconnect/PinCapacitanceCalculator.hpp"
 #include "interconnect/RcTreeAnalyzer.hpp"
 // SPDX-License-Identifier: MulanPSL-2.0
@@ -209,7 +211,7 @@ void checkMode(int32_t output_enable, bool clock_mode, bool constant_data = fals
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
   if (clock_mode) {
     require(database.graph().points().at("buffer:sense").get_is_clock_point(), "top clock did not reach core through PAD");
-    require(database.graph().driverPoint("buffer:sense").find_clock_state("forwarded") != nullptr, "generated clock was lost");
+    require(database.graph().driverPoint("buffer:sense").find_clock_state(clockId(database, "forwarded")) != nullptr, "generated clock was lost");
   } else {
     DataPropagator(STADM.getDatabase(), STADC).propagate();
     {

@@ -6,6 +6,8 @@
 
 #include "ClockGatingChecker.hpp"
 #include "DataManager.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "MinTimingDataExporter.hpp"
 #include "PathChecker.hpp"
@@ -84,7 +86,7 @@ Database design(bool high, bool invert_clock, bool invert_output)
     point.set_is_clock_point(true);
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (auto edge : {TransType::kRise, TransType::kFall}) {
-        auto& wave = point.get_clock_state("clk").waveformSlot(edge);
+        auto& wave = point.get_clock_state(clockId(db, "clk")).waveformSlot(edge);
         wave.arrival_map.set(mode, edge, 0.);
         wave.slew_map.set(mode, edge, .03);
       }
@@ -332,7 +334,7 @@ int main()
   }
   {
     auto db = design(true, false, false);
-    auto& state = db.graph().points().at("gate:C").get_clock_state("clk");
+    auto& state = db.graph().points().at("gate:C").get_clock_state(clockId(db, "clk"));
     for (auto source : {TransType::kRise, TransType::kFall}) {
       auto& wave = state.waveformSlot(source);
       wave.arrival_map.clear();
@@ -363,7 +365,7 @@ int main()
   second.set_period(20);
   second.set_fall_edge(9);
   auto& input = db.graph().points().at("gate:C");
-  input.get_clock_state("second") = input.get_clock_state("clk");
+  input.get_clock_state(clockId(db, "second")) = input.get_clock_state(clockId(db, "clk"));
   ClockGatingChecker(db).infer();
   require(db.graph().clockGatingChecks().at("gate:E").size() == 2, "unreachable capture clock added a gate check");
   Config config;
@@ -376,14 +378,14 @@ int main()
   path.set_trans_type(TransType::kRise);
   auto checks = checker.checkPathCandidates(path, "gate:E", AnalysisType::kMin);
   require(checks.size() == 1 && checks.front().captureClock() == "clk", "gate borrowed another clock on the same input pin");
-  auto old = db.graph().points().at("ff:CK").get_clock_state("clk");
+  auto old = db.graph().points().at("ff:CK").get_clock_state(clockId(db, "clk"));
   db.graph().points().at("ff:CK").clearClockStates();
-  db.graph().points().at("ff:CK").get_clock_state("second") = old;
+  db.graph().points().at("ff:CK").get_clock_state(clockId(db, "second")) = old;
   ClockGatingChecker(db).infer();
   require(db.graph().clockGatingChecks().empty(), "gate traversed a separate primary-clock boundary");
   db.graph().points().at("gate:Y").clearClockStates();
-  db.graph().points().at("gate:Y").get_clock_state("second") = old;
-  input.get_clock_state_map().erase("second");
+  db.graph().points().at("gate:Y").get_clock_state(clockId(db, "second")) = old;
+  input.get_clock_state_map().erase(clockId(db, "second"));
   ClockGatingChecker(db).infer();
   require(db.graph().clockGatingChecks().empty(), "gate traversed a new primary clock at its output");
   db.network().instances().at("ff").set_is_sequential(false);

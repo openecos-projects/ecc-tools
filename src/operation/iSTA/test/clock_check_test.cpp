@@ -3,6 +3,8 @@
 #include <stdexcept>
 
 #include "ClockChecker.hpp"
+
+#include "clock_id_helper.hpp"
 using namespace ista;
 static void near(double actual, double expected, const char* message)
 {
@@ -25,7 +27,7 @@ int main()
   clock.set_clock_name("clk");
   clock.set_period(2.);
   clock.set_fall_edge(.8);
-  auto& state = db.graph().points()["block/ff:CK"].get_clock_state("clk");
+  auto& state = db.graph().points()["block/ff:CK"].get_clock_state(clockId(db, "clk"));
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       state.waveformSlot(edge).arrival_map.set(mode, edge, 0.);

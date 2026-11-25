@@ -107,13 +107,13 @@ void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
       continue;
     double rise = 0.0;
     double fall = 0.0;
-    for (const auto& [clock_name, state] : point->get_clock_state_map()) {
+    for (const auto& [clock_id, state] : point->get_clock_state_map()) {
       (void) state;
-      const auto clock = database.sdc().get_clock_map().find(clock_name);
-      if (clock == database.sdc().get_clock_map().end())
+      if (!database.sdc().get_clock_map().contains(clock_id))
         continue;
-      rise = std::max(rise, modelTransitionPs(*clock, TransType::kRise, snapshot.time_unit_ps));
-      fall = std::max(fall, modelTransitionPs(*clock, TransType::kFall, snapshot.time_unit_ps));
+      auto& clock = database.sdc().get_clock_map().get(clock_id);
+      rise = std::max(rise, modelTransitionPs(clock, TransType::kRise, snapshot.time_unit_ps));
+      fall = std::max(fall, modelTransitionPs(clock, TransType::kFall, snapshot.time_unit_ps));
     }
     exported->second->max_rise_slew_ps = rise;
     exported->second->max_fall_slew_ps = fall;

@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "ClockPropagator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DataManager.hpp"
 #include "DataPropagator.hpp"
 #include "DelayCalculator.hpp"
@@ -177,7 +179,7 @@ void path(const LibertyLibrary& library, bool disabled, bool clock)
   STADC.initialize(db.graph());
   ClockPropagator(db, STADC).propagate();
   if (clock) {
-    require(db.graph().driverPoint("u:Y").find_clock_state("control") == nullptr, "clock propagated through three-state control by default");
+    require(db.graph().driverPoint("u:Y").find_clock_state(clockId(db, "control")) == nullptr, "clock propagated through three-state control by default");
     return;
   }
   DataPropagator(db, STADC).propagate();

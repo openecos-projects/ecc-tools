@@ -52,7 +52,7 @@ bool TimingStateQuery::shouldStopDataPropagation(Arc& arc)
   if (point != _database.graph().points().end())
     for (const auto& [clock, state] : point->get_clock_state_map())
       if (!state.is_source_path_only && _database.sdc().get_clock_map().contains(clock))
-        return false;
+        return false;  // key is now ClockId; contains(id) checks liveness
   // An ordinary data arrival at the gate pin is not a latch opening clock.
   return true;
 }
@@ -82,20 +82,22 @@ double TimingStateQuery::getClockArrival(const std::string& pin_name, AnalysisTy
   TimingPoint& timing_point = database.graph().points()[pin_name];
   if (timing_point.findDefaultClockState() == nullptr)
     return 0.0;
-  return getClockArrival(pin_name, timing_point.defaultClock(), analysis_type, trans_type);
+  const ClockId clock = timing_point.defaultClock();
+  return getClockArrival(pin_name, clock.valid() ? std::string_view(_database.sdc().get_clock_map().nameOf(clock)) : std::string_view(""), analysis_type, trans_type);
 }
 
 double TimingStateQuery::getClockArrival(const std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
                                          std::optional<TransType> source)
 {
-  const auto* point = clockPoint(_database, pin_name, clock_name);
-  if (point && point->find_clock_state(clock_name)->is_structural) {
-    const auto values = clockPinValues(_database, pin_name, clock_name, analysis_type, trans_type, AnalysisType::kNone, source, point);
+  const ClockId clock = clockIdOf(_database, clock_name);
+  const auto* point = clockPoint(_database, pin_name, clock);
+  if (point && point->find_clock_state(clock)->is_structural) {
+    const auto values = clockPinValues(_database, pin_name, clock, analysis_type, trans_type, AnalysisType::kNone, source, point);
     if (values.propagated)
       throw std::invalid_argument("structural timing preparation requires ideal clocks");
     return values.source_latency + values.network_latency;
   }
-  const ClockWaveform* state = clockWaveform(_database, pin_name, clock_name, source);
+  const ClockWaveform* state = clockWaveform(_database, pin_name, clock, source);
   return state == nullptr ? 0.0 : state->arrival(analysis_type, trans_type).value_or(0.0);
 }
 
@@ -114,24 +116,26 @@ double TimingStateQuery::getClockSlew(const std::string& pin_name, AnalysisType 
   TimingPoint& timing_point = database.graph().points()[pin_name];
   if (timing_point.findDefaultClockState() == nullptr)
     return 0.0;
-  return getClockSlew(pin_name, timing_point.defaultClock(), analysis_type, trans_type);
+  const ClockId clock = timing_point.defaultClock();
+  return getClockSlew(pin_name, clock.valid() ? std::string_view(_database.sdc().get_clock_map().nameOf(clock)) : std::string_view(""), analysis_type, trans_type);
 }
 
 double TimingStateQuery::getClockSlew(const std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
                                       std::optional<TransType> source)
 {
-  const auto* point = clockPoint(_database, pin_name, clock_name);
-  if (point && point->find_clock_state(clock_name)->is_structural) {
-    auto& clock = _database.sdc().get_clock_map().at(std::string(clock_name));
+  const ClockId clock_id = clockIdOf(_database, clock_name);
+  const auto* point = clockPoint(_database, pin_name, clock_id);
+  if (point && point->find_clock_state(clock_id)->is_structural) {
+    auto& clock = _database.sdc().get_clock_map().get(clock_id);
     const auto mode = clock.get_transition_map().find(analysis_type);
     const auto edge = source.value_or(trans_type);
     return mode != clock.get_transition_map().end() && mode->second.contains(edge) ? mode->second.at(edge) : 0.0;
   }
-  const ClockWaveform* state = clockWaveform(_database, pin_name, clock_name, source);
+  const ClockWaveform* state = clockWaveform(_database, pin_name, clock_id, source);
   return state == nullptr ? 0.0 : state->slew(analysis_type, trans_type).value_or(0.0);
 }
 
-const TimingPoint* clockPoint(const Database& database, const std::string& pin, std::string_view clock)
+const TimingPoint* clockPoint(const Database& database, const std::string& pin, ClockId clock)
 {
   const auto receiver = database.graph().points().find(pin);
   if (receiver != database.graph().points().end() && receiver->find_clock_state(clock))
@@ -140,13 +144,13 @@ const TimingPoint* clockPoint(const Database& database, const std::string& pin, 
   return driver != database.graph().driverPoints().end() && driver->find_clock_state(clock) ? &*driver : nullptr;
 }
 
-const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, std::string_view clock, std::optional<TransType> source)
+const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, ClockId clock, std::optional<TransType> source)
 {
   const auto* point = clockPoint(database, pin, clock);
   return point ? point->find_clock_state(clock)->waveform(source) : nullptr;
 }
 
-std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, std::string_view clock, AnalysisType mode, TransType local_edge)
+std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, ClockId clock, AnalysisType mode, TransType local_edge)
 {
   const auto* point = clockPoint(database, pin, clock);
   if (!point)
@@ -197,15 +201,17 @@ std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::
       result.push_back(*delay);
       continue;
     }
+    const ClockId wanted = clockIdOf(database, delay->get_clock_name());
     std::set<std::string> clocks;
     for (const auto* points : {&database.graph().points(), &database.graph().driverPoints()}) {
       const auto point = points->find(delay->get_reference_pin());
       if (point == points->end())
         continue;
       for (const auto& [clock, state] : point->get_clock_state_map()) {
-        if (state.is_source_path_only || (!delay->get_clock_name().empty() && clock != delay->get_clock_name()))
+        if (state.is_source_path_only || (!delay->get_clock_name().empty() && clock != wanted))
           continue;
-        clocks.insert(clock);
+        // Keep the resolved set name-ordered, as the string-keyed map gave.
+        clocks.insert(std::string(database.sdc().get_clock_map().nameOf(clock)));
       }
     }
     if (clocks.empty())
@@ -219,14 +225,13 @@ std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::
   return result;
 }
 
-ClockPinValues clockPinValues(const Database& database, const std::string& pin, std::string_view clock_name, AnalysisType analysis, TransType transition,
+ClockPinValues clockPinValues(const Database& database, const std::string& pin, ClockId clock_id, AnalysisType analysis, TransType transition,
                               AnalysisType check, std::optional<TransType> source_edge, const TimingPoint* point)
 {
   ClockPinValues result;
-  const auto definition = database.sdc().get_clock_map().find(std::string(clock_name));
-  if (definition == database.sdc().get_clock_map().end())
+  if (!database.sdc().get_clock_map().contains(clock_id))
     return result;
-  const auto& clock = *definition;
+  const auto& clock = database.sdc().get_clock_map().get(clock_id);
   result.propagated = clock.get_is_propagated();
   result.source_latency = clock.get_source_latency(analysis, clockVariation(analysis), source_edge.value_or(transition));
   result.network_latency = clock.get_network_latency(analysis, source_edge.value_or(transition));
@@ -264,20 +269,20 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
   };
   std::string current = pin;
   if (!point)
-    point = clockPoint(database, pin, clock_name);
+    point = clockPoint(database, pin, clock_id);
   // A physical predecessor is unique for this clock, analysis and edge. Bound
   // traversal as a guard against malformed traces without allocating a set.
   for (size_t remaining = database.graph().vertices().size() + 1; remaining && !current.empty(); --remaining) {
     auto entry = annotations.find(current);
     if (entry != annotations.end()) {
-      auto specific = entry->second.find(std::string(clock_name));
+      auto specific = entry->second.find(std::string(database.sdc().get_clock_map().nameOf(clock_id)));
       if (specific != entry->second.end())
         apply(specific->second, current);
       auto generic = entry->second.find("");
       if (generic != entry->second.end())
         apply(generic->second, current);
     }
-    const auto* clock_state = point ? point->find_clock_state(clock_name) : nullptr;
+    const auto* clock_state = point ? point->find_clock_state(clock_id) : nullptr;
     const auto* state = clock_state ? clock_state->waveform(source_edge) : nullptr;
     if (!state)
       break;
@@ -289,7 +294,7 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
       const auto vertex_index = *index;
       point = vertex_index >= 0 && static_cast<size_t>(vertex_index) < database.graph().vertices().size() ? &database.graph().vertices()[vertex_index].get_timing_point() : nullptr;
     } else {
-      point = clockPoint(database, current, clock_name);
+      point = clockPoint(database, current, clock_id);
     }
     if (source_edge)
       source_edge = state->predecessorSource(analysis, trace_edge, *source_edge);
@@ -315,16 +320,17 @@ const ClockPinValues& ClockPinValuesQuery::values(const std::string& pin, std::s
 
 double TimingStateQuery::clockPathBound(const std::string& pin_name, std::string_view clock_name, TransType transition, std::optional<TransType> source) const
 {
+  const ClockId clock_id = clockIdOf(_database, clock_name);
   double bound = 0.;
   // Equal arrival at a leaf does not imply equal arrivals on its common prefix.
   // Inspect both selected early/late traces; flat ideal clocks keep one tag.
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
-    const auto* point = clockPoint(_database, pin_name, clock_name);
+    const auto* point = clockPoint(_database, pin_name, clock_id);
     auto edge = transition;
     auto origin = source;
     std::set<const TimingPoint*> visited;
     while (point && visited.insert(point).second) {
-      const auto* clock = point->find_clock_state(clock_name);
+      const auto* clock = point->find_clock_state(clock_id);
       const auto* state = clock ? clock->waveform(origin) : nullptr;
       if (!state)
         break;

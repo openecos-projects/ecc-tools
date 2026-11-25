@@ -8,6 +8,8 @@
 #include <stdexcept>
 
 #include "CheckArcExtractor.hpp"
+
+#include "clock_id_helper.hpp"
 #include "graph/PathTagTable.hpp"
 #include "DelayCalculator.hpp"
 #include "PathChecker.hpp"
@@ -126,9 +128,9 @@ int main(int argc, char** argv)
   }
   auto& clock_point = db.graph().points()["ff:CK"];
   clock_point.set_is_clock_point(true);
-  clock_point.setDefaultClock("capture");
-  clock_point.setLaunchClock("capture");
-  clock_point.get_clock_state("capture").waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 0.);
+  clock_point.setDefaultClock(clockId(db, "capture"));
+  clock_point.setLaunchClock(clockId(db, "capture"));
+  clock_point.get_clock_state(clockId(db, "capture")).waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 0.);
   TimingClockUncertainty uncertainty;
   uncertainty.set_from_clocks({"launch"});
   uncertainty.set_to_clocks({"capture"});

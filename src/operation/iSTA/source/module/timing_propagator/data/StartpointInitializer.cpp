@@ -44,7 +44,7 @@ void StartpointInitializer::seed(std::vector<std::string>& startpoints)
     TimingPoint& timing_point = database.graph().driverPoint(start_point);
     timing_point.set_arrival(getStartPointArrival(start_point, AnalysisType::kMax));
     timing_point.set_launch_time(getStartPointLaunchTime(start_point, AnalysisType::kMax));
-    timing_point.setLaunchClock(getClockName(start_point));
+    timing_point.setLaunchClock(clockIdOf(database, getClockName(start_point)));
     seedPathState(start_point, AnalysisType::kMax);
     seedPathState(start_point, AnalysisType::kMin);
   }
@@ -449,16 +449,16 @@ std::string_view StartpointInitializer::getClockName(std::string& pin_name)
   if (!pin.get_is_port() && database.network().instances().count(pin.get_instance_name()) > 0) {
     Instance& instance = database.network().instances()[pin.get_instance_name()];
     if (instance.get_is_sequential() && database.graph().points().count(instance.get_clock_pin_name()) > 0) {
-      const auto& propagated_clock_name = database.graph().points()[instance.get_clock_pin_name()].launchClock();
-      if (!propagated_clock_name.empty()) {
-        return propagated_clock_name;
+      const auto propagated_clock = database.graph().points()[instance.get_clock_pin_name()].launchClock();
+      if (propagated_clock.valid()) {
+        return database.sdc().get_clock_map().nameOf(propagated_clock);
       }
     }
   }
   if (database.graph().points().count(pin_name) > 0) {
     TimingPoint& timing_point = database.graph().points()[pin_name];
-    if (timing_point.get_is_clock_point() && !timing_point.launchClock().empty()) {
-      return timing_point.launchClock();
+    if (timing_point.get_is_clock_point() && timing_point.launchClock().valid()) {
+      return database.sdc().get_clock_map().nameOf(timing_point.launchClock());
     }
   }
   if (pin.get_is_port()) {
@@ -485,9 +485,9 @@ std::vector<std::string> StartpointInitializer::getStartPointClockNames(std::str
     Instance& instance = database.network().instances()[pin.get_instance_name()];
     if (instance.get_is_sequential() && database.graph().points().contains(instance.get_clock_pin_name())) {
       const auto& states = database.graph().points().at(instance.get_clock_pin_name()).get_clock_state_map();
-      for (const auto& [clock_name, state] : states)
+      for (const auto& [clock_id, state] : states)
         if (!state.is_source_path_only)
-          names.insert(clock_name);
+          names.insert(std::string(database.sdc().get_clock_map().nameOf(clock_id)));
     }
   }
   if (names.empty())

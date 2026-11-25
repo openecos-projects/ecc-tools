@@ -16,6 +16,7 @@ struct Id
   constexpr bool valid() const { return value != 0; }
   friend constexpr bool operator==(Id lhs, Id rhs) { return lhs.value == rhs.value; }
   friend constexpr bool operator!=(Id lhs, Id rhs) { return lhs.value != rhs.value; }
+  friend constexpr bool operator<(Id lhs, Id rhs) { return lhs.value < rhs.value; }
 };
 
 }  // namespace ecc::symbol

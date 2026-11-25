@@ -41,14 +41,14 @@ std::string_view PathChecker::getClockName(const std::string& pin_name)
   const auto pin = pins.find(pin_name);
   const auto& points = _database.graph().points();
   const auto point = points.find(pin_name);
-  if (point != points.end() && point->get_is_clock_point() && !point->launchClock().empty())
-    return point->launchClock();
+  if (point != points.end() && point->get_is_clock_point() && point->launchClock().valid())
+    return std::string(_database.sdc().get_clock_map().nameOf(point->launchClock()));
   if (pin != pins.end() && !pin->get_is_port()) {
     const auto instance = _database.network().instances().find(pin->get_instance_name());
     if (instance != _database.network().instances().end() && instance->get_is_sequential()) {
       const auto clock_point = points.find(instance->get_clock_pin_name());
-      if (clock_point != points.end() && !clock_point->launchClock().empty())
-        return clock_point->launchClock();
+      if (clock_point != points.end() && clock_point->launchClock().valid())
+        return std::string(_database.sdc().get_clock_map().nameOf(clock_point->launchClock()));
     }
   }
   if (pin != pins.end() && pin->get_is_port()) {
@@ -68,9 +68,10 @@ std::vector<std::string> PathChecker::getCaptureClockNames(const std::string& cl
   std::vector<std::string> names;
   const auto point = _database.graph().points().find(clock_pin);
   if (point != _database.graph().points().end()) {
-    for (const auto& [clock_name, state] : point->get_clock_state_map())
-      if (!state.is_source_path_only)
-        names.push_back(clock_name);
+    // Capture enumeration is name-ordered output; the id-keyed map is not.
+    for (const auto& [clock_name, state] : clockStatesInNameOrder(*point, _database))
+      if (!state->is_source_path_only)
+        names.emplace_back(clock_name);
   }
   if (names.empty())
     names.emplace_back(getClockName(clock_pin));

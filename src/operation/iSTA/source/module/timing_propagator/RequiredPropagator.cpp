@@ -316,7 +316,7 @@ void RequiredPropagator::updateSlack()
       timing_point.set_required(required);
       timing_point.set_slack(slack);
       timing_point.set_launch_time(worst->get_launch_time());
-      timing_point.setLaunchClock(worst->get_clock_name());
+      timing_point.setLaunchClock(clockIdOf(_database, worst->get_clock_name()));
       if (auto check = _setup_checks.find(worst); check != _setup_checks.end())
         timing_point.set_setup_check_time(check->second);
     }

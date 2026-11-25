@@ -4,6 +4,8 @@
 #include <vector>
 
 #include "DataManager.hpp"
+
+#include "clock_id_helper.hpp"
 #include "Logger.hpp"
 #include "SparseTimingSnapshot.hpp"
 #include "TimingDataExporter.hpp"
@@ -51,9 +53,9 @@ int main()
   }
   auto& capture = database.graph().points()["ff:CK"];
   capture.set_is_clock_point(true);
-  capture.setDefaultClock("capture");
-  capture.setLaunchClock("capture");
-  capture.get_clock_state("capture").waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 0);
+  capture.setDefaultClock(clockId(database, "capture"));
+  capture.setLaunchClock(clockId(database, "capture"));
+  capture.get_clock_state(clockId(database, "capture")).waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 0);
   PathTagTable::Key clock_key;
   clock_key.clock_name = "clock";
   const uint32_t clock_tag = database.pathTags().intern(clock_key);

@@ -6,6 +6,8 @@
 #include <stdexcept>
 
 #include "DelayCalculator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "Logger.hpp"
 #include "PathChecker.hpp"
 #include "sdc/ExceptionMatcher.hpp"
@@ -46,11 +48,11 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
     const auto clock = second ? "b" : "a";
     auto& point = db.graph().points()[pin];
     point.set_is_clock_point(true);
-    point.setDefaultClock(clock);
-    point.setLaunchClock(clock);
+    point.setDefaultClock(clockId(db, clock));
+    point.setLaunchClock(clockId(db, clock));
     for (auto analysis : {AnalysisType::kMax, AnalysisType::kMin})
       for (auto edge : {TransType::kRise, TransType::kFall})
-        point.get_clock_state(clock).waveformSlot(edge).arrival_map.set(analysis, edge, second ? 0.7 : 0.4);
+        point.get_clock_state(clockId(db, clock)).waveformSlot(edge).arrival_map.set(analysis, edge, second ? 0.7 : 0.4);
     TimingCheckArc arc;
     arc.set_clock_port(pin);
     arc.set_data_port("ff:D");
@@ -153,10 +155,10 @@ static void asynchronousChecks()
     }
     auto& ck = db.graph().points()["ff:CK"];
     ck.set_is_clock_point(true);
-    ck.setDefaultClock("clk");
+    ck.setDefaultClock(clockId(db, "clk"));
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
-      ck.get_clock_state("clk").waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, .5);
-      ck.get_clock_state("clk").waveformSlot(TransType::kRise).slew_map.set(mode, TransType::kRise, .1);
+      ck.get_clock_state(clockId(db, "clk")).waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, .5);
+      ck.get_clock_state(clockId(db, "clk")).waveformSlot(TransType::kRise).slew_map.set(mode, TransType::kRise, .1);
     }
     TimingCheckArc arc;
     arc.set_clock_port("ff:CK");
@@ -208,10 +210,10 @@ static void checkSlewRange()
   }
   auto& point = db.graph().points()["ff:CK"];
   point.set_is_clock_point(true);
-  point.setDefaultClock("clk");
+  point.setDefaultClock(clockId(db, "clk"));
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
-    point.get_clock_state("clk").waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);
-    point.get_clock_state("clk").waveformSlot(TransType::kRise).slew_map.set(mode, TransType::kRise, mode == AnalysisType::kMin ? .1 : .2);
+    point.get_clock_state(clockId(db, "clk")).waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);
+    point.get_clock_state(clockId(db, "clk")).waveformSlot(TransType::kRise).slew_map.set(mode, TransType::kRise, mode == AnalysisType::kMin ? .1 : .2);
     db.graph().points()["ff:D"].get_data_slew_map()[mode][TransType::kRise] = mode == AnalysisType::kMin ? .1 : .3;
   }
   TimingCheckArc arc;

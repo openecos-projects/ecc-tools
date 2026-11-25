@@ -104,9 +104,10 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
       for (const auto& [edge, slew] : edges)
         for (const auto& clock : dataClocks(point, analysis, edge))
           record(ElectricalRule::kTransition, pin, clock, false, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, false, edge));
-    for (const auto& [clock, state] : point.get_clock_state_map())
-      state.physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
-        record(ElectricalRule::kTransition, pin, clock, true, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, true, edge));
+    for (const auto& [clock, state] : clockStatesInNameOrder(point, db))
+      state->physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
+        record(ElectricalRule::kTransition, pin, std::string(clock), true, analysis, edge, slew,
+               limit(ElectricalRule::kTransition, pin, std::string(clock), true, edge));
       });
   }
   for (const auto& id : db.network().nets().sortedIds()) {
@@ -153,8 +154,8 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
           if (point) {
             for (const auto& clock : dataClocks(*point, analysis, edge))
               evaluate(clock, false);
-            for (const auto& [clock, state] : point->get_clock_state_map())
-              evaluate(clock, true);
+            for (const auto& [clock, state] : clockStatesInNameOrder(*point, db))
+              evaluate(std::string(clock), true);
           } else {
             evaluate("", false);
           }

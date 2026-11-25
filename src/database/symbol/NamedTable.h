@@ -98,6 +98,8 @@ class NamedTable
   }
 
   bool contains(std::string_view name) const { return _symbols.find(name).has_value(); }
+  // Live membership by id: false for never-interned and erased ids alike.
+  bool contains(IdType id) const { return _symbols.alive(id.value); }
   std::size_t count(std::string_view name) const { return contains(name) ? 1 : 0; }
 
   // Removes a name's binding. The storage slot and id stay allocated but the

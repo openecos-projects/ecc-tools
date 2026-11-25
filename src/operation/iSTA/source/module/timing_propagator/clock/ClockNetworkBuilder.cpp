@@ -63,7 +63,7 @@ void ClockNetworkBuilder::orderSources(std::vector<ClockSource>& sources)
       append_clock(clock.get_master_clock_name());
     visiting.erase(name);
     visited.insert(name);
-    sources.emplace_back(name, clock.get_source_list(), clock.get_is_propagated());
+    sources.emplace_back(name, clock.get_source_list(), clock.get_is_propagated(), ClockId{*clock_map.id(name)});
   };
   for (const auto& id : clock_map.sortedIds())
     append_clock(std::string(clock_map.nameOf(id)));
@@ -79,6 +79,7 @@ void ClockNetworkBuilder::markClockPoints(std::vector<ClockSource>& sources)
 void ClockNetworkBuilder::markClock(ClockSource& clock)
 {
   Database& database = _database;
+  const auto _clock_ids = database.sdc().get_clock_map().sortedIds();
   std::queue<int32_t> pin_queue;
   std::set<std::string> visited_pins;
   for (const auto& clock_source : clock.get_source_list()) {
@@ -107,7 +108,7 @@ void ClockNetworkBuilder::markClock(ClockSource& clock)
       continue;
     }
     bool another_root = false;
-    for (const auto& cid : database.sdc().get_clock_map().sortedIds()) {
+    for (const auto& cid : _clock_ids) {
       const std::string name(database.sdc().get_clock_map().nameOf(cid));
       TimingClock& definition = database.sdc().get_clock_map().get(cid);
       if (name != clock.get_clock_name()
@@ -123,10 +124,10 @@ void ClockNetworkBuilder::markClock(ClockSource& clock)
     TimingPoint& timing_point = vertex.get_timing_point();
 
     timing_point.set_is_clock_point(true);
-    timing_point.get_clock_state(clock.get_clock_name());
-    if (timing_point.defaultClock().empty()) {
-      timing_point.setDefaultClock(clock.get_clock_name());
-      timing_point.setLaunchClock(clock.get_clock_name());
+    timing_point.get_clock_state(clock.id());
+    if (!timing_point.defaultClock().valid()) {
+      timing_point.setDefaultClock(clock.id());
+      timing_point.setLaunchClock(clock.id());
     }
     clock.add_clock_pin(pin_name);
 

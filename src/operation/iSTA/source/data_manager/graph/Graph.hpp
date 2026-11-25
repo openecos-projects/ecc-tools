@@ -175,7 +175,7 @@ class Graph
       point.set_required(std::numeric_limits<double>::infinity());
       point.set_slack(0.0);
       point.set_launch_time(0.0);
-      point.setLaunchClock("");
+      point.setLaunchClock(ClockId{});
       point.clearClockStates();
       point.get_path_state_map().clear();
       point.get_data_slew_map().clear();
