@@ -15,6 +15,8 @@
 #include <string>
 
 #include "Database.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "TimingAnalyzer.hpp"
 #include "graph/TimingStateQuery.hpp"

@@ -25,9 +25,21 @@
 #include <tuple>
 #include <vector>
 
+#include "Id.h"
 #include "common/TransType.hpp"
 
 namespace ista {
+
+struct PinTag;
+// Launch-clock name on a path state: interned in Database::clockNameSymbols(),
+// deliberately NOT the SDC clock table — states may carry names of clocks the
+// SDC never defined, and distinct undefined names must stay distinct.
+struct LaunchClockTag;
+using LaunchClockId = ecc::symbol::Id<LaunchClockTag>;
+// Start point of a path state: interned in Database::startPointSymbols().
+// Deliberately not PinId — a start point may never have become a pin.
+struct StartPointTag;
+using StartPointId = ecc::symbol::Id<StartPointTag>;
 
 class TimingPathState
 {
@@ -35,14 +47,16 @@ class TimingPathState
   TimingPathState() = default;
   ~TimingPathState() = default;
   // Arrival dominance must retain the launch path when CPPR can differ.
-  std::string_view crprPathTag() const { return _preserve_crpr_path ? std::string_view(_crpr_clock_pin) : std::string_view{}; }
+  // The CPPR launch pin when preserved, as a PinId into Network::pins();
+  // invalid id == no preserved path (the old empty-string form).
+  ecc::symbol::Id<PinTag> crprPinId() const { return _preserve_crpr_path ? _crpr_clock_pin : ecc::symbol::Id<PinTag>{}; }
   void set_preserve_crpr_path(bool value) { _preserve_crpr_path = value; }
   // Bound the correction by every common prefix, not just the leaf delta.
   double clockPathBound() const { return _clock_path_bound; }
   void setClockPathBound(double value) { _clock_path_bound = value; }
   std::size_t exceptionStartClass() const { return _exception_start_class; }
   void setExceptionStartClass(std::size_t value) { _exception_start_class = value; }
-  using Group = std::tuple<std::string, TransType, bool, std::optional<std::size_t>>;
+  using Group = std::tuple<LaunchClockId, TransType, bool, std::optional<std::size_t>>;
   Group group() const { return {_clock_name, _launch_clock_trans_type, _is_clock_source_path, _launch_clock_edge_index}; }
   // getter
   bool get_is_clock_source_path() const { return _is_clock_source_path; }
@@ -52,9 +66,9 @@ class TimingPathState
   std::optional<double> get_input_delay() const { return _input_delay; }
   double get_launch_source_latency() const { return _launch_source_latency; }
   double get_launch_time() const { return _launch_time; }
-  const std::string& get_start_point() const { return _start_point; }
-  const std::string& get_clock_name() const { return _clock_name; }
-  const std::string& get_crpr_clock_pin() const { return _crpr_clock_pin; }
+  StartPointId get_start_point() const { return _start_point; }
+  LaunchClockId get_clock_name() const { return _clock_name; }
+  ecc::symbol::Id<PinTag> get_crpr_clock_pin() const { return _crpr_clock_pin; }
   // Tag ids index Database::pathTags(); 0 means no tag.
   uint32_t get_path_state_tag() const { return _path_state_tag; }
   uint32_t get_predecessor_path_state_tag() const { return _predecessor_path_state_tag; }
@@ -73,9 +87,9 @@ class TimingPathState
   void set_input_delay(std::optional<double> value) { _input_delay = value; }
   void set_launch_source_latency(double value) { _launch_source_latency = value; }
   void set_launch_time(const double launch_time) { _launch_time = launch_time; }
-  void set_start_point(const std::string_view start_point) { _start_point = start_point; }
-  void set_clock_name(const std::string_view clock_name) { _clock_name = clock_name; }
-  void set_crpr_clock_pin(const std::string_view crpr_clock_pin) { _crpr_clock_pin = crpr_clock_pin; }
+  void set_start_point(StartPointId start_point) { _start_point = start_point; }
+  void set_clock_name(LaunchClockId clock_name) { _clock_name = clock_name; }
+  void set_crpr_clock_pin(ecc::symbol::Id<PinTag> crpr_clock_pin) { _crpr_clock_pin = crpr_clock_pin; }
   void set_path_state_tag(uint32_t path_state_tag) { _path_state_tag = path_state_tag; }
   void set_predecessor_path_state_tag(uint32_t path_state_tag) { _predecessor_path_state_tag = path_state_tag; }
   void set_exception_state_list(const std::vector<int32_t>& state_list) { _exception_state_list = state_list; }
@@ -98,9 +112,9 @@ class TimingPathState
   double _launch_time = 0.0;
   std::optional<double> _input_delay;
   double _launch_source_latency = 0.0;
-  std::string _start_point;
-  std::string _clock_name;
-  std::string _crpr_clock_pin;
+  StartPointId _start_point{};
+  LaunchClockId _clock_name{};
+  ecc::symbol::Id<PinTag> _crpr_clock_pin{};
   uint32_t _path_state_tag = 0;
   uint32_t _predecessor_path_state_tag = 0;
   std::vector<int32_t> _exception_state_list;

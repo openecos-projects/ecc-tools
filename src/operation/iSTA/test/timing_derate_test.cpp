@@ -73,7 +73,7 @@ static void reconvergentCandidates(bool variation)
     double worst = 100.;
     for (const auto& [tag, path] : paths) {
       std::string common;
-      double cppr = ClockReconvergenceCalculator(db).correction(path.get_crpr_clock_pin(), TransType::kRise, "clk", "a:CK", TransType::kRise, "clk",
+      double cppr = ClockReconvergenceCalculator(db).correction(std::string(pinNameOf(db, path.get_crpr_clock_pin())), TransType::kRise, "clk", "a:CK", TransType::kRise, "clk",
                                                                 AnalysisType::kMin, common);
       worst = std::min(worst, path.get_arrival() - (2. - cppr));
     }
@@ -246,7 +246,7 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         bool checked = false;
         for (const auto& [tag, path] : graph.points().at("end").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister).at(edge)) {
-          if (path.get_crpr_clock_pin() != "a:CK")
+          if (pinNameOf(db, path.get_crpr_clock_pin()) != "a:CK")
             continue;
           const auto end = checker.checkPath(path, "end", AnalysisType::kMax);
           if (!end || end->check().capture_transition != edge || end->check().capture_pin_transition != edge)

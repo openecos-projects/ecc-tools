@@ -338,7 +338,7 @@ block b(.CLK(clk),.Y(out)); block c(.CLK(clk),.Y(z)); endmodule
     for (auto& [source, transitions] : modes)
       for (auto& [transition, paths] : transitions)
         for (auto& [tag, path] : paths)
-          require(path.get_clock_name() != "master", "clock-as-data escaped its boundary");
+          require(std::string(launchClockName(db, path.get_clock_name())) != "master", "clock-as-data escaped its boundary");
   require(!db.graph().points().at("b/sink:A").get_path_state_map().empty(), "clock-as-data path missing inside boundary");
   command("create_generated_clock -name invalid -source [get_pins c/CLK] -master_clock master -divide_by 2 [get_pins c/CLK]");
   command("set_propagated_clock [all_clocks]");
@@ -456,9 +456,9 @@ BUF merge_cell(.A(b_out),.B(data),.Y(merged)); block d(.CLK(merged),.Y(out)); en
   auto& paths = db.graph().points().at("d/sink:A").get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise];
   bool data_found = false;
   for (auto& [tag, path] : paths)
-    if (path.get_clock_name() == "master") {
+    if (std::string(launchClockName(db, path.get_clock_name())) == "master") {
       require(!path.get_is_clock_source_path(), "clock-origin data crossed a replacement boundary");
-      data_found |= path.get_start_point() == "data";
+      data_found |= startPointName(db, path.get_start_point()) == "data";
     }
   require(data_found, "clock-origin state discarded ordinary data at reconvergence");
   STADC.clear();

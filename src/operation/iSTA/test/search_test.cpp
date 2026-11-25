@@ -69,8 +69,8 @@ void testCaptureClocks()
     for (const auto* tag : {"a_path", "b_path"}) {
       const uint32_t tag_id = tagId(tag);
       auto& path = db.graph().points()[endpoint].get_path_state_map()[analysis][PathSourceType::kInput][TransType::kRise][tag_id];
-      path.set_start_point("in");
-      path.set_clock_name("launch");
+      path.set_start_point(startPointId(db, "in"));
+      path.set_clock_name(launchClockId(db, "launch"));
       path.set_path_state_tag(tag_id);
       path.set_trans_type(TransType::kRise);
       path.set_arrival(analysis == AnalysisType::kMax ? 3.0 : 1.0);
@@ -87,7 +87,7 @@ void testCaptureClocks()
         for (auto& [transition, paths] : transitions)
           for (auto& [tag, path] : paths)
             path.set_exception_state_list(
-                matcher.initState(path.get_start_point(), path.get_clock_name(), transition, analysis, path.get_launch_clock_trans_type()));
+                matcher.initState(startPointName(db, path.get_start_point()), std::string(launchClockName(db, path.get_clock_name())), transition, analysis, path.get_launch_clock_trans_type()));
     return search.findPathEnds(endpoint);
   };
   auto paths = find_paths();
@@ -161,7 +161,7 @@ void testCaptureClocks()
   check_b.required = 7.0;
   const PathEnd a(path, check_a, 9.0, 6.0), b(path, check_b, 7.0, 4.0);
   require(&a.path() == &b.path() && a.captureClock() == "a" && b.captureClock() == "b" && a.required() == 9.0 && b.required() == 7.0
-              && path.get_clock_name() == "launch",
+              && std::string(launchClockName(db, path.get_clock_name())) == "launch",
           "independent endpoint results must share only a const propagation path");
 }
 }  // namespace
@@ -216,8 +216,8 @@ int main()
       root_key.clock_name = "root";
       const uint32_t root_tag = first.pathTags().intern(root_key);
       auto& state = first.graph().points()[end].get_path_state_map()[analysis][source][ista::TransType::kRise][root_tag];
-      state.set_start_point(end);
-      state.set_clock_name("clk");
+      state.set_start_point(startPointId(first, end));
+      state.set_clock_name(launchClockId(first, "clk"));
       state.set_trans_type(ista::TransType::kRise);
       state.set_path_state_tag(root_tag);
       state.set_arrival(analysis == ista::AnalysisType::kMax ? 3.0 : 1.0);
@@ -239,7 +239,7 @@ int main()
     for (const auto& [source, transitions] : sources)
       for (const auto& [transition, states] : transitions)
         for (const auto& [tag, state] : states)
-          if (state.get_clock_name() != "clk" || state.get_start_point() != end || state.get_path_state_tag() != tag
+          if (std::string(launchClockName(first, state.get_clock_name())) != "clk" || startPointName(first, state.get_start_point()) != end || state.get_path_state_tag() != tag
               || state.get_predecessor_arc_idx() != std::numeric_limits<std::size_t>::max()
               || state.get_arrival() != (analysis == ista::AnalysisType::kMax ? 3.0 : 1.0))
             throw std::runtime_error("endpoint evaluation overwrote propagated path");

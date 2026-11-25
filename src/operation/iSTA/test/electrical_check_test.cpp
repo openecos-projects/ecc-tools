@@ -335,7 +335,7 @@ int main(int argc, char** argv)
   PathTagTable::Key core_key;
   core_key.clock_name = "core";
   const uint32_t core_tag = db.pathTags().intern(core_key);
-  input.get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise][core_tag].set_clock_name("core");
+  input.get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise][core_tag].set_clock_name(launchClockId(db, "core"));
   input.get_clock_state(clockId(db, "core")).waveformSlot(TransType::kRise).physical_slew_map.set(AnalysisType::kMax, TransType::kRise, .15);
   input.get_clock_state(clockId(db, "core")).summarize();
   db.sdc().electricalLimits().set({ElectricalRule::kTransition, LimitObject::kClock, "core", true, TransType::kRise, .1});

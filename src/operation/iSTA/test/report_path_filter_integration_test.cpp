@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "Config.hpp"
+
+#include "clock_id_helper.hpp"
 #include "Database.hpp"
 #include "Logger.hpp"
 #include "QorSummaryBuilder.hpp"

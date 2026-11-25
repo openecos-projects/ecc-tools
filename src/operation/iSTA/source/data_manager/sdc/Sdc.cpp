@@ -72,7 +72,7 @@ bool Sdc::matchesClockSource(const Network& network, const std::string& source, 
   return std::find(drivers.begin(), drivers.end(), pin) != drivers.end();
 }
 
-bool Sdc::clockAllowsNetArc(const Network& network, const std::string& name, const std::string& from, const std::string& to, int before) const
+bool Sdc::clockAllowsNetArc(const Network& network, std::string_view name, const std::string& from, const std::string& to, int before) const
 {
   if (!network.hasHierarchyPins())
     return true;

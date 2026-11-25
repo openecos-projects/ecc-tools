@@ -189,7 +189,7 @@ class Sdc
   // Constraint rules consume read-only connectivity, never propagated timing.
   void setClockSources(const Network& network, TimingClock& clock, const std::vector<std::string>& objects) const;
   bool matchesClockSource(const Network& network, const std::string& source, const std::string& pin) const;
-  bool clockAllowsNetArc(const Network& network, const std::string& clock, const std::string& driver, const std::string& load,
+  bool clockAllowsNetArc(const Network& network, std::string_view clock, const std::string& driver, const std::string& load,
                          int before = std::numeric_limits<int>::max()) const;
   std::vector<std::pair<const LibertyCell*, const LibertyPort*>> drivingCellPorts(const LibertyLibrary& liberty, const std::string& pin) const;
   std::optional<double> fanoutLimit(const Network& network, const LibertyLibrary& liberty, const std::string& driver) const;

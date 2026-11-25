@@ -8,6 +8,8 @@
 
 #include "Database.hpp"
 
+#include "graph/TimingStateQuery.hpp"
+
 namespace ista {
 
 inline ClockId clockId(Database& db, std::string_view name)
@@ -17,6 +19,20 @@ inline ClockId clockId(Database& db, std::string_view name)
     return *id;
   clocks[name].set_clock_name(std::string(name));
   return clocks.id(name).value();
+}
+
+// TimingPathState identity fields are interned ids now.
+inline ecc::symbol::Id<PinTag> pinId(Database& db, std::string_view name)
+{
+  return db.network().pins().id(name).value();
+}
+inline LaunchClockId launchClockId(Database& db, std::string_view name)
+{
+  return LaunchClockId{db.clockNameSymbols().intern(name)};
+}
+inline StartPointId startPointId(Database& db, std::string_view name)
+{
+  return StartPointId{db.startPointSymbols().intern(name)};
 }
 
 }  // namespace ista

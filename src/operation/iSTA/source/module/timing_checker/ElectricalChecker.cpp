@@ -25,7 +25,7 @@ double slewRange(const Library& library, TransType edge)
   const double upper = edge == TransType::kRise ? library.get_slew_upper_threshold_pct_rise() : library.get_slew_upper_threshold_pct_fall();
   return (normalize(upper) - normalize(lower)) / library.get_slew_derate_from_library();
 }
-std::set<std::string> dataClocks(const TimingPoint& point, AnalysisType analysis, TransType edge)
+std::set<std::string> dataClocks(const Database& database, const TimingPoint& point, AnalysisType analysis, TransType edge)
 {
   std::set<std::string> clocks;
   auto mode = point.get_path_state_map().find(analysis);
@@ -34,7 +34,7 @@ std::set<std::string> dataClocks(const TimingPoint& point, AnalysisType analysis
       const auto transition = edges.find(edge);
       if (transition != edges.end())
         for (const auto& [tag, state] : transition->second)
-          clocks.insert(state.get_clock_name());
+          clocks.insert(std::string(launchClockName(database, state.get_clock_name())));
     }
   if (clocks.empty())
     clocks.insert("");
@@ -102,7 +102,7 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
     auto& point = vertex.get_timing_point();
     for (const auto& [analysis, edges] : point.get_data_slew_map())
       for (const auto& [edge, slew] : edges)
-        for (const auto& clock : dataClocks(point, analysis, edge))
+        for (const auto& clock : dataClocks(_database, point, analysis, edge))
           record(ElectricalRule::kTransition, pin, clock, false, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, false, edge));
     for (const auto& [clock, state] : clockStatesInNameOrder(point, db))
       state->physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
@@ -152,7 +152,7 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
             }
           };
           if (point) {
-            for (const auto& clock : dataClocks(*point, analysis, edge))
+            for (const auto& clock : dataClocks(_database, *point, analysis, edge))
               evaluate(clock, false);
             for (const auto& [clock, state] : clockStatesInNameOrder(*point, db))
               evaluate(std::string(clock), true);

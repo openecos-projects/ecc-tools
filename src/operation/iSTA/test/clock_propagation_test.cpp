@@ -124,7 +124,7 @@ void sourceProbe()
   for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
     for (auto edge : {TransType::kRise, TransType::kFall})
       for (auto& [tag, path] : db.graph().points().at("in").get_path_state_map().at(mode).at(PathSourceType::kInput).at(edge)) {
-        double expected = path.get_clock_name() == "a" ? 1.0 : 3.0;
+        double expected = std::string(launchClockName(db, path.get_clock_name())) == "a" ? 1.0 : 3.0;
         if (edge == TransType::kFall)
           expected += 5.0;
         if (std::fabs(path.get_arrival() - expected) > 1e-9 || std::fabs(path.get_launch_time() - expected) > 1e-9)

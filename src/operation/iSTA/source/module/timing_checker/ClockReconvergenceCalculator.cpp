@@ -29,14 +29,14 @@
 
 #include "graph/TimingStateQuery.hpp"
 namespace ista {
-double ClockReconvergenceCalculator::correction(const std::string& launch_pin, TransType launch_trans_type, std::string_view launch_clock,
-                                                const std::string& capture_pin, TransType capture_trans_type, std::string_view capture_clock,
+double ClockReconvergenceCalculator::correction(std::string_view launch_pin, TransType launch_trans_type, std::string_view launch_clock,
+                                                std::string_view capture_pin, TransType capture_trans_type, std::string_view capture_clock,
                                                 AnalysisType analysis_type, std::string& common_pin_name, std::optional<TransType> launch_source,
                                                 std::optional<TransType> capture_source)
 {
   common_pin_name.clear();
   if (!_database.sdc().clockPinConstraints().empty()) {
-    auto unsupported_local = [&](const std::string& pin, std::string_view name, AnalysisType mode, TransType edge, std::optional<TransType> source) {
+    auto unsupported_local = [&](std::string_view pin, std::string_view name, AnalysisType mode, TransType edge, std::optional<TransType> source) {
       const auto clock = _database.sdc().get_clock_map().find(std::string(name));
       if (clock == _database.sdc().get_clock_map().end() || clock->get_is_propagated())
         return false;
@@ -80,7 +80,7 @@ double ClockReconvergenceCalculator::correction(const std::string& launch_pin, T
 }
 
 const ClockReconvergenceCalculator::IndexedClockPath& ClockReconvergenceCalculator::indexedClockPath(
-    const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition, std::optional<TransType> source)
+    std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition, std::optional<TransType> source)
 {
   const auto key = std::tuple{std::string_view(pin), clock, analysis, transition, source};
   if (const auto found = _clock_paths.find(key); found != _clock_paths.end())
@@ -140,7 +140,7 @@ double ClockReconvergenceCalculator::getClockCommonPathDelayDelta(const ClockPat
   return early && late && std::isfinite(*early) && std::isfinite(*late) ? std::fabs(*late - *early) : 0.;
 }
 
-std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(const std::string& clock_pin_name, std::string_view clock_name,
+std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(std::string_view clock_pin_name, std::string_view clock_name,
                                                                                AnalysisType analysis_type, TransType trans_type,
                                                                                std::optional<TransType> source)
 {
@@ -157,7 +157,7 @@ std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(c
   return result;
 }
 
-std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalculator::getClockPathPinList(const std::string& clock_pin_name,
+std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalculator::getClockPathPinList(std::string_view clock_pin_name,
                                                                                                             std::string_view clock_name,
                                                                                                             AnalysisType analysis_type, TransType trans_type,
                                                                                                             std::optional<TransType> source)

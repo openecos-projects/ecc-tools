@@ -16,8 +16,10 @@ class PathStatePruning
  public:
   explicit PathStatePruning(const Database& database) : _database(database), _matcher(database.sdc(), database.network()) {}
 
-  bool canPruneTo(const std::string& endpoint, const std::string& launch) const
+  bool canPruneTo(const std::string& endpoint, LaunchClockId launch_id) const
   {
+    // Exception matchers work on text; resolve the interned name once.
+    const std::string launch(_database.clockNameSymbols().view(launch_id.value));
     const auto& graph = _database.graph();
     if (graph.clockGatingChecks().contains(endpoint))
       return false;

@@ -286,7 +286,7 @@ static void structuralFfPath()
   const auto& data_paths = database.graph().points().at("ff:D").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
   bool found_data_path = false;
   for (const auto& [tag, path] : data_paths.at(TransType::kRise)) {
-    if (path.get_start_point() == "data") {
+    if (startPointName(database, path.get_start_point()) == "data") {
       found_data_path = true;
       require(path.get_arrival() == 0.0 && path.get_slew() == 0.0, "structural data path acquired numeric timing");
       break;
@@ -297,7 +297,7 @@ static void structuralFfPath()
   const auto& merge_paths = database.graph().points().at("merge:Y").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
   std::set<std::pair<int32_t, int32_t>> merge_progress;
   for (const auto& [tag, path] : merge_paths.at(TransType::kRise))
-    if (path.get_start_point() == "data" && path.get_exception_state_list().size() == 2)
+    if (startPointName(database, path.get_start_point()) == "data" && path.get_exception_state_list().size() == 2)
       merge_progress.emplace(path.get_exception_state_list()[0], path.get_exception_state_list()[1]);
   require(merge_progress == std::set<std::pair<int32_t, int32_t>>{{0, -1}, {1, -1}},
           "setup through hit and bypass paths were not both retained at reconvergence");
@@ -305,14 +305,14 @@ static void structuralFfPath()
   std::set<std::pair<int32_t, int32_t>> endpoint_progress;
   const auto& endpoint_paths = database.graph().points().at("ff:D").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
   for (const auto& [tag, path] : endpoint_paths.at(TransType::kRise))
-    if (path.get_start_point() == "data" && path.get_exception_state_list().size() == 2)
+    if (startPointName(database, path.get_start_point()) == "data" && path.get_exception_state_list().size() == 2)
       endpoint_progress.emplace(path.get_exception_state_list()[0], path.get_exception_state_list()[1]);
   require(endpoint_progress == merge_progress, "through progress was lost before the timing-check endpoint");
 
   std::set<std::pair<int32_t, int32_t>> hold_progress;
   const auto& min_merge_paths = database.graph().points().at("merge:Y").get_path_state_map().at(AnalysisType::kMin).at(PathSourceType::kInput);
   for (const auto& [tag, path] : min_merge_paths.at(TransType::kRise))
-    if (path.get_start_point() == "data" && path.get_exception_state_list().size() == 2)
+    if (startPointName(database, path.get_start_point()) == "data" && path.get_exception_state_list().size() == 2)
       hold_progress.emplace(path.get_exception_state_list()[0], path.get_exception_state_list()[1]);
   require(hold_progress == std::set<std::pair<int32_t, int32_t>>{{-1, 0}, {-1, 1}},
           "hold-only through progress was copied from setup instead of propagated independently");
@@ -320,7 +320,7 @@ static void structuralFfPath()
   const auto& register_paths = database.graph().points().at("ff:Q").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister);
   bool found_register_path = false;
   for (const auto& [tag, path] : register_paths.at(TransType::kRise)) {
-    if (path.get_start_point() == "ff:Q") {
+    if (startPointName(database, path.get_start_point()) == "ff:Q") {
       found_register_path = true;
       require(std::abs(path.get_launch_source_latency() - 0.4) < 1E-12, "ideal source latency was lost in structural register state");
       require(std::abs(path.get_launch_time() - 1.4) < 1E-12, "ideal source latency was not included in structural launch time");

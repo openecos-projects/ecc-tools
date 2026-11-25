@@ -41,7 +41,7 @@ void DataArrivalPropagator::propagate()
   auto& graph = database.graph();
   if (prune && !database.sdc().get_path_exception_list().empty()) {
     const ExceptionMatcher matcher(database.sdc(), database.network());
-    std::map<std::pair<std::string, std::string>, std::size_t> starts;
+    std::map<std::pair<StartPointId, LaunchClockId>, std::size_t> starts;
     std::map<std::vector<int>, std::size_t> classes;
     for (auto& vertex : graph.vertices())
       for (auto& [mode, sources] : vertex.get_timing_point().get_path_state_map())
@@ -51,7 +51,10 @@ void DataArrivalPropagator::propagate()
               const auto key = std::pair{state.get_start_point(), state.get_clock_name()};
               auto found = starts.find(key);
               if (found == starts.end()) {
-                const auto entry = classes.try_emplace(matcher.startSpecificity(key.first, key.second), classes.size() + 1);
+                // Exception matching works on text; resolve the ids once per class.
+                const auto entry = classes.try_emplace(matcher.startSpecificity(startPointName(database, key.first),
+                                                                              launchClockName(database, key.second)),
+                                                       classes.size() + 1);
                 found = starts.emplace(key, entry.first->second).first;
               }
               state.setExceptionStartClass(found->second);
@@ -59,7 +62,7 @@ void DataArrivalPropagator::propagate()
   }
   graph.captureRequiredClocks().clear();
   graph.setExhaustiveRequired(false);
-  std::set<std::string> clock_names;
+  std::set<LaunchClockId> clock_names;
   if (prune)
     for (const auto& vertex : graph.vertices())
       for (const auto& [mode, sources] : vertex.get_timing_point().get_path_state_map())
@@ -67,7 +70,7 @@ void DataArrivalPropagator::propagate()
           for (const auto& [edge, states] : edges)
             for (const auto& [tag, state] : states)
               clock_names.insert(state.get_clock_name());
-  const std::vector<std::string> clocks(clock_names.begin(), clock_names.end());
+  const std::vector<LaunchClockId> clocks(clock_names.begin(), clock_names.end());
   prune = prune && !clocks.empty();
   std::vector<std::size_t> remaining_arcs(graph.vertices().size());
   std::vector<std::vector<bool>> reaches_safe(clocks.size(), std::vector<bool>(graph.vertices().size()));
@@ -115,7 +118,7 @@ void DataArrivalPropagator::propagate()
     }
   }
   database.graph().setPathStatesPruned(false);
-  std::vector<std::string_view> allowed_clocks;
+  std::vector<LaunchClockId> allowed_clocks;
   allowed_clocks.reserve(clocks.size());
   for (int32_t vertex_idx : database.graph().vertexOrder()) {
     // All fanin states are complete here; no downstream predecessor borrows
@@ -219,7 +222,8 @@ void DataArrivalPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisT
       continue;
     }
     if (source_path_state.get_is_clock_source_path() && arc.get_type() == ArcType::kNet
-        && !database.sdc().clockAllowsNetArc(database.network(), source_path_state.get_clock_name(), arc.get_source_pin(), arc.get_sink_pin()))
+        && !database.sdc().clockAllowsNetArc(database.network(), launchClockName(database, source_path_state.get_clock_name()),
+                                             arc.get_source_pin(), arc.get_sink_pin()))
       continue;
     if (!shared_arc_delay)
       shared_arc_delay = _path_query.getDataArcDelay(arc, analysis_type, input_trans_type, output_trans_type);
@@ -229,11 +233,12 @@ void DataArrivalPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisT
                                                                            output_trans_type,
                                                                            arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
     PathTagTable::Key tag_key;
-    tag_key.clock_name = source_path_state.get_clock_name();
+    tag_key.clock_name = launchClockName(database, source_path_state.get_clock_name());
     tag_key.launch_transition = source_path_state.get_launch_clock_trans_type();
     tag_key.exception_state_list = exception_state_list;
     tag_key.clock_source_path = source_path_state.get_is_clock_source_path();
-    tag_key.crpr_path = source_path_state.crprPathTag();
+    const auto crpr_pin = source_path_state.crprPinId();
+    tag_key.crpr_path = crpr_pin.valid() ? database.network().pins().nameOf(crpr_pin) : std::string_view{};
     tag_key.launch_clock_edge_index = source_path_state.get_launch_clock_edge_index();
     const uint32_t path_state_tag = database.pathTags().intern(tag_key);
     std::map<uint32_t, TimingPathState>& sink_path_state_map = _path_query.getPathStateMap(sink_point, analysis_type, source_type, output_trans_type);

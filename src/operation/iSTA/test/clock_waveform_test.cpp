@@ -3,6 +3,8 @@
 #include <stdexcept>
 
 #include "DelayCalculator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "TimingAnalyzer.hpp"
 using namespace ista;
 

@@ -199,8 +199,8 @@ void checkGate(bool high, bool invert_clock, bool invert_output)
   DelayCalculator delay(db, config);
   PathChecker checker(db, delay);
   TimingPathState path;
-  path.set_start_point("in");
-  path.set_clock_name("launch");
+  path.set_start_point(startPointId(db, "in"));
+  path.set_clock_name(launchClockId(db, "launch"));
   path.set_launch_clock_trans_type(TransType::kRise);
   path.set_trans_type(TransType::kRise);
   path.set_slew(.03);
@@ -291,8 +291,8 @@ int main()
     DelayCalculator delay(db, config);
     PathChecker checker(db, delay);
     TimingPathState path;
-    path.set_start_point("in");
-    path.set_clock_name("launch");
+    path.set_start_point(startPointId(db, "in"));
+    path.set_clock_name(launchClockId(db, "launch"));
     path.set_launch_clock_trans_type(TransType::kRise);
     path.set_trans_type(TransType::kRise);
     auto& launch = db.sdc().get_clock_map().at("launch");
@@ -320,8 +320,8 @@ int main()
     DelayCalculator delay(db, config);
     PathChecker checker(db, delay);
     TimingPathState path;
-    path.set_start_point("in");
-    path.set_clock_name("launch");
+    path.set_start_point(startPointId(db, "in"));
+    path.set_clock_name(launchClockId(db, "launch"));
     path.set_launch_clock_trans_type(TransType::kRise);
     path.set_trans_type(TransType::kRise);
     for (double phase : {0., 1., 3.}) {
@@ -350,8 +350,8 @@ int main()
     DelayCalculator delay(db, config);
     PathChecker checker(db, delay);
     TimingPathState path;
-    path.set_start_point("in");
-    path.set_clock_name("launch");
+    path.set_start_point(startPointId(db, "in"));
+    path.set_clock_name(launchClockId(db, "launch"));
     path.set_launch_clock_trans_type(TransType::kRise);
     path.set_trans_type(TransType::kRise);
     auto check = checker.checkPath(path, "gate:E", AnalysisType::kMin);
@@ -372,8 +372,8 @@ int main()
   DelayCalculator delay(db, config);
   PathChecker checker(db, delay);
   TimingPathState path;
-  path.set_start_point("in");
-  path.set_clock_name("launch");
+  path.set_start_point(startPointId(db, "in"));
+  path.set_clock_name(launchClockId(db, "launch"));
   path.set_launch_clock_trans_type(TransType::kRise);
   path.set_trans_type(TransType::kRise);
   auto checks = checker.checkPathCandidates(path, "gate:E", AnalysisType::kMin);

@@ -108,7 +108,7 @@ static void missingAndZeroClockSlew()
   const auto& paths = point.get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister).at(TransType::kRise);
   require(paths.size() == 2, "source initialization collapsed two launch clocks");
   for (const auto& [tag, path] : paths)
-    require(path.get_slew() == (path.get_clock_name() == "clock" ? 0.3 : 0.7), "path state did not use its named clock waveform");
+    require(path.get_slew() == (std::string(launchClockName(db, path.get_clock_name())) == "clock" ? 0.3 : 0.7), "path state did not use its named clock waveform");
   require(point.get_data_slew_map().at(AnalysisType::kMax).at(TransType::kRise) == 0.3, "physical source slew stopped using the default clock");
 }
 
@@ -145,7 +145,7 @@ static void bidirectionalIoClocks()
     const auto& transitions = db.graph().driverPoint("io").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
     require(!transitions.contains(TransType::kFall) || transitions.at(TransType::kFall).empty(), "rise-only input delay fabricated a falling input path");
     const auto& paths = transitions.at(TransType::kRise);
-    require(paths.size() == 1 && paths.begin()->second.get_clock_name() == "input_clock" && paths.begin()->second.get_arrival() == 3,
+    require(paths.size() == 1 && std::string(launchClockName(db, paths.begin()->second.get_clock_name())) == "input_clock" && paths.begin()->second.get_arrival() == 3,
             "output constraint overwrote the bidirectional port's input clock");
   }
 }

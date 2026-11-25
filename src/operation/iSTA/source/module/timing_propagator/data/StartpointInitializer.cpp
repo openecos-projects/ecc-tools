@@ -635,10 +635,12 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   path_state.set_launch_clock_trans_type(launch_transition);
   if (edge_index)
     path_state.set_launch_clock_edge_index(*edge_index);
-  path_state.set_start_point(path_state_start_point);
-  path_state.set_clock_name(clock_name);
+  // Start points keep their own symbol domain: constraint text may name a
+  // start point that never became a network pin.
+  path_state.set_start_point(StartPointId{database.startPointSymbols().intern(path_state_start_point)});
+  path_state.set_clock_name(LaunchClockId{database.clockNameSymbols().intern(clock_name)});
   path_state.set_is_clock_source_path(clock_source_path);
-  path_state.set_crpr_clock_pin(crpr_pin);
+  path_state.set_crpr_clock_pin(database.network().pins().id(crpr_pin).value_or({}));
   path_state.set_preserve_crpr_path(preserve_crpr);
   path_state.setClockPathBound(crpr_bound);
   path_state.set_path_state_tag(path_state_tag);

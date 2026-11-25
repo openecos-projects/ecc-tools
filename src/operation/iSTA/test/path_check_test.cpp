@@ -68,8 +68,8 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
   if (reverse)
     std::reverse(instance.get_check_arc_list().begin(), instance.get_check_arc_list().end());
   TimingPathState path;
-  path.set_start_point("in");
-  path.set_clock_name("launch");
+  path.set_start_point(startPointId(db, "in"));
+  path.set_clock_name(launchClockId(db, "launch"));
   path.set_launch_clock_trans_type(TransType::kRise);
   path.set_trans_type(TransType::kFall);
   path.set_arrival(1);
@@ -173,8 +173,8 @@ static void asynchronousChecks()
     arc.get_timing_arc_list().push_back(timing);
     instance.get_check_arc_list().push_back(arc);
     TimingPathState path;
-    path.set_start_point("in");
-    path.set_clock_name("clk");
+    path.set_start_point(startPointId(db, "in"));
+    path.set_clock_name(launchClockId(db, "clk"));
     path.set_launch_clock_trans_type(TransType::kRise);
     path.set_trans_type(TransType::kRise);
     path.set_slew(.3);
@@ -230,8 +230,8 @@ static void checkSlewRange()
   arc.get_timing_arc_list().push_back(timing);
   instance.get_check_arc_list().push_back(arc);
   TimingPathState path;
-  path.set_start_point("in");
-  path.set_clock_name("clk");
+  path.set_start_point(startPointId(db, "in"));
+  path.set_clock_name(launchClockId(db, "clk"));
   path.set_launch_clock_trans_type(TransType::kRise);
   path.set_trans_type(TransType::kRise);
   path.set_slew(.3);
@@ -310,8 +310,8 @@ static void outputPathBudget()
   output.set_trans_type(TransType::kRise);
   db.sdc().get_port_constraint_map()["out"].set_output_delays({output}, false);
   TimingPathState path;
-  path.set_start_point("in");
-  path.set_clock_name("clk");
+  path.set_start_point(startPointId(db, "in"));
+  path.set_clock_name(launchClockId(db, "clk"));
   path.set_launch_clock_trans_type(TransType::kRise);
   path.set_trans_type(TransType::kRise);
   path.set_launch_time(.4);
@@ -380,14 +380,21 @@ int main()
   PathChecker check(db, delay);
   PathChecker second(other, other_delay);
   TimingPathState path;
-  path.set_start_point("out");
-  path.set_clock_name("clk");
+  path.set_start_point(startPointId(db, "out"));
+  path.set_clock_name(launchClockId(db, "clk"));
   path.set_trans_type(TransType::kRise);
   path.set_arrival(3.0);
   const double setup = check.checkPath(path, "out", AnalysisType::kMax)->required();
   const double hold = check.checkPath(path, "out", AnalysisType::kMin)->required();
   require(setup == 8.0 && hold == -0.5, "output setup/hold boundary changed");
-  require(second.checkPath(path, "out", AnalysisType::kMax)->required() == 18.0, "endpoint check borrowed a different database");
+  // State ids are local to their owning Database; a second database gets its
+  // own seeding. Each checker must still read its own clock definition.
+  TimingPathState other_path;
+  other_path.set_start_point(startPointId(other, "out"));
+  other_path.set_clock_name(launchClockId(other, "clk"));
+  other_path.set_trans_type(TransType::kRise);
+  other_path.set_arrival(3.0);
+  require(second.checkPath(other_path, "out", AnalysisType::kMax)->required() == 18.0, "endpoint check borrowed a different database");
   require(check.calcPathSlack(path, setup, AnalysisType::kMax) == 5.0 && check.calcPathSlack(path, hold, AnalysisType::kMin) == 3.5, "slack sign changed");
   TimingException maximum;
   maximum.set_type(TimingExceptionType::kMaxDelay);
@@ -396,7 +403,7 @@ int main()
   db.sdc().get_path_exception_list().push_back(maximum);
   path.set_exception_state_list(ExceptionMatcher(db.sdc(), db.network()).initState("out", "clk", TransType::kRise, AnalysisType::kMax, TransType::kRise));
   require(check.checkPath(path, "out", AnalysisType::kMax)->required() == 3.0, "max-delay exception lost the output-delay margin");
-  require(path.get_arrival() == 3.0 && path.get_clock_name() == "clk" && path.get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max(),
+  require(path.get_arrival() == 3.0 && std::string(launchClockName(db, path.get_clock_name())) == "clk" && path.get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max(),
           "check changed the propagated path");
   require(db.pathGroups().empty() && other.pathGroups().empty(), "check published path results");
   db.sdc().get_path_exception_list().clear();

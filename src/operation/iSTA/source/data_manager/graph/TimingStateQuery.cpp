@@ -135,7 +135,7 @@ double TimingStateQuery::getClockSlew(const std::string& pin_name, std::string_v
   return state == nullptr ? 0.0 : state->slew(analysis_type, trans_type).value_or(0.0);
 }
 
-const TimingPoint* clockPoint(const Database& database, const std::string& pin, ClockId clock)
+const TimingPoint* clockPoint(const Database& database, std::string_view pin, ClockId clock)
 {
   const auto receiver = database.graph().points().find(pin);
   if (receiver != database.graph().points().end() && receiver->find_clock_state(clock))
@@ -144,13 +144,13 @@ const TimingPoint* clockPoint(const Database& database, const std::string& pin, 
   return driver != database.graph().driverPoints().end() && driver->find_clock_state(clock) ? &*driver : nullptr;
 }
 
-const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, ClockId clock, std::optional<TransType> source)
+const ClockWaveform* clockWaveform(const Database& database, std::string_view pin, ClockId clock, std::optional<TransType> source)
 {
   const auto* point = clockPoint(database, pin, clock);
   return point ? point->find_clock_state(clock)->waveform(source) : nullptr;
 }
 
-std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, ClockId clock, AnalysisType mode, TransType local_edge)
+std::vector<TransType> clockSourceTransitions(const Database& database, std::string_view pin, ClockId clock, AnalysisType mode, TransType local_edge)
 {
   const auto* point = clockPoint(database, pin, clock);
   if (!point)
@@ -225,7 +225,7 @@ std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::
   return result;
 }
 
-ClockPinValues clockPinValues(const Database& database, const std::string& pin, ClockId clock_id, AnalysisType analysis, TransType transition,
+ClockPinValues clockPinValues(const Database& database, std::string_view pin, ClockId clock_id, AnalysisType analysis, TransType transition,
                               AnalysisType check, std::optional<TransType> source_edge, const TimingPoint* point)
 {
   ClockPinValues result;
@@ -267,7 +267,7 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
       uncertainty_found = true;
     }
   };
-  std::string current = pin;
+  std::string current(pin);
   if (!point)
     point = clockPoint(database, pin, clock_id);
   // A physical predecessor is unique for this clock, analysis and edge. Bound
@@ -304,7 +304,7 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
   return result;
 }
 
-const ClockPinValues& ClockPinValuesQuery::values(const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+const ClockPinValues& ClockPinValuesQuery::values(std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition,
                                                   AnalysisType check, std::optional<TransType> source)
 {
   if (_mode == CacheMode::kNone) {
@@ -394,10 +394,10 @@ TimingStateQuery::PathStateGroup TimingStateQuery::pathStateGroup(const TimingPa
   const auto start_class = exceptions ? state.exceptionStartClass() : 0;
   // Direct/synthetic callers without forward classification remain separate.
   return {state.group(), progress ? *progress : state.get_exception_state_list(), start_class,
-          exceptions && start_class == 0 ? state.get_start_point() : std::string{}};
+          exceptions && start_class == 0 ? state.get_start_point() : StartPointId{}};
 }
 
-bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining_arcs, const std::vector<std::string_view>* allowed_clocks) const
+bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining_arcs, const std::vector<LaunchClockId>* allowed_clocks) const
 {
   bool pruned = false;
   auto allowed = [&](const TimingPathState& state) {

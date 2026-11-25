@@ -157,8 +157,8 @@ class Graph
 
   bool pathStatesPruned() const { return _path_states_pruned; }
   void setPathStatesPruned(bool value) { _path_states_pruned = value; }
-  std::map<std::string, std::set<std::string>>& captureRequiredClocks() { return _capture_required_clocks; }
-  const std::map<std::string, std::set<std::string>>& captureRequiredClocks() const { return _capture_required_clocks; }
+  std::map<std::string, std::set<LaunchClockId>>& captureRequiredClocks() { return _capture_required_clocks; }
+  const std::map<std::string, std::set<LaunchClockId>>& captureRequiredClocks() const { return _capture_required_clocks; }
   bool exhaustiveRequired() const { return _exhaustive_required; }
   void setExhaustiveRequired(bool value) { _exhaustive_required = value; }
 
@@ -199,7 +199,7 @@ class Graph
   std::set<std::string> _clock_gating_endpoints;
   PointTable _points;
   bool _path_states_pruned = false;
-  std::map<std::string, std::set<std::string>> _capture_required_clocks;
+  std::map<std::string, std::set<LaunchClockId>> _capture_required_clocks;
   bool _exhaustive_required = false;
 };
 

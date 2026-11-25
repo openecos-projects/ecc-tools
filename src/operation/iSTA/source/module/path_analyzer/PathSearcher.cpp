@@ -157,7 +157,7 @@ TimingPathState* PathSearcher::updateDiversionPathState(const std::string& pin_n
   Database& database = _database;
   const auto& incoming = database.graph().arcs().at(predecessor_arc_idx);
   if (source_path_state.get_is_clock_source_path() && incoming.get_type() == ArcType::kNet
-      && !database.sdc().clockAllowsNetArc(database.network(), source_path_state.get_clock_name(), predecessor, pin_name))
+      && !database.sdc().clockAllowsNetArc(database.network(), launchClockName(database, source_path_state.get_clock_name()), predecessor, pin_name))
     return nullptr;
   TimingPoint& timing_point = database.graph().sinkPoint(database.graph().arcs()[predecessor_arc_idx]);
   const ExceptionMatcher matcher(database.sdc(), database.network());
@@ -165,11 +165,11 @@ TimingPathState* PathSearcher::updateDiversionPathState(const std::string& pin_n
       = matcher.advanceState(_through_index, source_path_state.get_exception_state_list(), pin_name, trans_type,
                              database.graph().arcs()[predecessor_arc_idx].get_type() == ArcType::kNet ? predecessor : "");
   PathTagTable::Key tag_key;
-  tag_key.clock_name = source_path_state.get_clock_name();
+  tag_key.clock_name = launchClockName(database, source_path_state.get_clock_name());
   tag_key.launch_transition = source_path_state.get_launch_clock_trans_type();
   tag_key.exception_state_list = exception_state_list;
   tag_key.clock_source_path = source_path_state.get_is_clock_source_path();
-  tag_key.crpr_path = source_path_state.crprPathTag();
+  tag_key.crpr_path = pinNameOf(database, source_path_state.crprPinId());
   tag_key.launch_clock_edge_index = source_path_state.get_launch_clock_edge_index();
   const uint32_t path_state_tag = database.pathTags().intern(tag_key);
   std::map<uint32_t, TimingPathState>& path_state_map = _query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);

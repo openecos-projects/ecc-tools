@@ -143,8 +143,8 @@ int main(int argc, char** argv)
   const uint32_t path_tag = db.pathTags().intern(tag_key);
   auto& state = db.graph().points()["ff:D"].get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise][path_tag];
   state.set_path_state_tag(path_tag);
-  state.set_start_point("in");
-  state.set_clock_name("launch");
+  state.set_start_point(startPointId(db, "in"));
+  state.set_clock_name(launchClockId(db, "launch"));
   state.set_trans_type(TransType::kRise);
   state.set_arrival(3);
   DelayCalculator delay(db, config);

@@ -29,7 +29,7 @@ TimingPath PathTracer::buildTimingPath(const std::string& end_point, AnalysisTyp
 {
   Database& database = _database;
   const TimingPathState& end_path_state = path_end.path();
-  const std::string& start_point = end_path_state.get_start_point();
+  const std::string start_point(startPointName(database, end_path_state.get_start_point()));
   const TransType trans_type = end_path_state.get_trans_type();
   std::vector<std::string> path_pin_name_list;
   std::vector<TransType> path_trans_type_list;
@@ -119,13 +119,13 @@ void PathTracer::updatePathDelay(TimingPath& timing_path, Arc* arc, double arc_d
 void PathTracer::updateClockInfo(TimingPath& timing_path, const TimingPathState& state, const PathCheck& check)
 {
   timing_path.set_launch_time(state.get_launch_time());
-  timing_path.set_clock_name(state.get_clock_name());
+  timing_path.set_clock_name(std::string(launchClockName(_database, state.get_clock_name())));
   TransType launch_transition = state.get_launch_clock_trans_type();
   // Propagation records the selected launch edge, including clock_fall IO.
   timing_path.set_launch_clock_transition(launch_transition);
   timing_path.set_launch_clock_pin_transition(state.get_crpr_clock_trans_type());
-  timing_path.set_launch_clock_pin(state.get_crpr_clock_pin());
-  const auto clock = _database.sdc().get_clock_map().find(state.get_clock_name());
+  timing_path.set_launch_clock_pin(std::string(pinNameOf(_database, state.get_crpr_clock_pin())));
+  const auto clock = _database.sdc().get_clock_map().find(launchClockName(_database, state.get_clock_name()));
   const double edge = clock == _database.sdc().get_clock_map().end()
                           ? 0.0
                           : clock->edge(state.get_launch_clock_edge_index().value_or(launch_transition == TransType::kFall ? 1 : 0)).time;

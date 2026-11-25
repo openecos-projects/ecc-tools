@@ -33,24 +33,41 @@ inline ClockId clockIdOf(const Database& database, std::string_view clock)
   const auto id = database.sdc().get_clock_map().id(clock);
   return id ? *id : ClockId{};
 }
-const TimingPoint* clockPoint(const Database& database, const std::string& pin, ClockId clock);
-inline const TimingPoint* clockPoint(const Database& database, const std::string& pin, std::string_view clock)
+const TimingPoint* clockPoint(const Database& database, std::string_view pin, ClockId clock);
+inline const TimingPoint* clockPoint(const Database& database, std::string_view pin, std::string_view clock)
 {
   return clockPoint(database, pin, clockIdOf(database, clock));
 }
-const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, ClockId clock, std::optional<TransType> source = std::nullopt);
-inline const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, std::string_view clock, std::optional<TransType> source = std::nullopt)
+const ClockWaveform* clockWaveform(const Database& database, std::string_view pin, ClockId clock, std::optional<TransType> source = std::nullopt);
+inline const ClockWaveform* clockWaveform(const Database& database, std::string_view pin, std::string_view clock, std::optional<TransType> source = std::nullopt)
 {
   return clockWaveform(database, pin, clockIdOf(database, clock), source);
 }
-std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, ClockId clock, AnalysisType mode,
+std::vector<TransType> clockSourceTransitions(const Database& database, std::string_view pin, ClockId clock, AnalysisType mode,
                                               TransType local_edge);
-inline std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, std::string_view clock, AnalysisType mode,
+inline std::vector<TransType> clockSourceTransitions(const Database& database, std::string_view pin, std::string_view clock, AnalysisType mode,
                                                      TransType local_edge)
 {
   return clockSourceTransitions(database, pin, clockIdOf(database, clock), mode, local_edge);
 }
 bool isIdealClockPin(const Database& database, const std::string& pin);
+
+// Boundary resolvers for the interned TimingPathState identity fields; the
+// invalid id resolves to empty text, matching the old empty-string form.
+// All three degrade a foreign or stale id to empty text, the same outcome a
+// name-lookup miss had: ids are valid only within their owning Database.
+inline std::string_view pinNameOf(const Database& database, ecc::symbol::Id<PinTag> id)
+{
+  return database.network().pins().contains(id) ? database.network().pins().nameOf(id) : std::string_view{};
+}
+inline std::string_view launchClockName(const Database& database, LaunchClockId id)
+{
+  return database.clockNameSymbols().alive(id.value) ? database.clockNameSymbols().view(id.value) : std::string_view{};
+}
+inline std::string_view startPointName(const Database& database, StartPointId id)
+{
+  return database.startPointSymbols().alive(id.value) ? database.startPointSymbols().view(id.value) : std::string_view{};
+}
 
 // Name-ordered view of a point's clock states, reproducing the iteration order
 // the string-keyed map gave. Use only where downstream order is observable.
@@ -71,9 +88,9 @@ struct ClockPinValues
   double uncertainty = 0.0;
   std::string propagated_pin;
 };
-ClockPinValues clockPinValues(const Database& database, const std::string& pin, ClockId clock, AnalysisType analysis, TransType transition,
+ClockPinValues clockPinValues(const Database& database, std::string_view pin, ClockId clock, AnalysisType analysis, TransType transition,
                               AnalysisType check = AnalysisType::kNone, std::optional<TransType> source = std::nullopt, const TimingPoint* point = nullptr);
-inline ClockPinValues clockPinValues(const Database& database, const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+inline ClockPinValues clockPinValues(const Database& database, std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition,
                                      AnalysisType check = AnalysisType::kNone, std::optional<TransType> source = std::nullopt,
                                      const TimingPoint* point = nullptr)
 {
@@ -86,7 +103,7 @@ class ClockPinValuesQuery
  public:
   enum class CacheMode { kNone, kSnapshot };
   explicit ClockPinValuesQuery(const Database& database, CacheMode mode = CacheMode::kNone) : _database(database), _mode(mode) {}
-  const ClockPinValues& values(const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+  const ClockPinValues& values(std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition,
                                AnalysisType check = AnalysisType::kNone, std::optional<TransType> source = std::nullopt);
 
  private:
@@ -119,9 +136,9 @@ class TimingStateQuery
                              std::optional<TransType> source = std::nullopt) const;
   double clockPathBound(const std::string& pin_name, std::string_view clock_name, TransType transition, std::optional<TransType> source = std::nullopt) const;
   bool canPrunePathStates() const;
-  using PathStateGroup = std::tuple<TimingPathState::Group, std::vector<int32_t>, std::size_t, std::string>;
+  using PathStateGroup = std::tuple<TimingPathState::Group, std::vector<int32_t>, std::size_t, StartPointId>;
   PathStateGroup pathStateGroup(const TimingPathState& state, const std::vector<int32_t>* progress = nullptr) const;
-  bool prunePathStates(TimingPoint& point, std::size_t remaining_arcs, const std::vector<std::string_view>* allowed_clocks = nullptr) const;
+  bool prunePathStates(TimingPoint& point, std::size_t remaining_arcs, const std::vector<LaunchClockId>* allowed_clocks = nullptr) const;
   double roundTime(double time);
   std::vector<TransType> getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);
   double getArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type);

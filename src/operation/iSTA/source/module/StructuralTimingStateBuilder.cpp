@@ -106,11 +106,11 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
                 const auto progress = matcher.advanceState(through_index, source_state.get_exception_state_list(), arc.get_sink_pin(), output_transition,
                                                            arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
                 PathTagTable::Key tag_key;
-                tag_key.clock_name = source_state.get_clock_name();
+                tag_key.clock_name = launchClockName(database, source_state.get_clock_name());
                 tag_key.launch_transition = source_state.get_launch_clock_trans_type();
                 tag_key.exception_state_list = progress;
                 tag_key.clock_source_path = source_state.get_is_clock_source_path();
-                tag_key.crpr_path = source_state.crprPathTag();
+                tag_key.crpr_path = pinNameOf(database, source_state.crprPinId());
                 tag_key.launch_clock_edge_index = source_state.get_launch_clock_edge_index();
                 const uint32_t tag = database.pathTags().intern(tag_key);
                 auto& target_map = sink.get_path_state_map()[analysis][source_type][output_transition];
