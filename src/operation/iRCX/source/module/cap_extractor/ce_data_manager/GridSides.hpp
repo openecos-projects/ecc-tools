@@ -1,15 +1,15 @@
 #pragma once
-#include "MultiNeighborCache.hpp"
+#include "GridNeighborhood.hpp"
 namespace ircx::pattern {
-struct FallbackSides
+struct GridSides
 {
   TopoEdge* lower = nullptr;
   TopoEdge* upper = nullptr;
   double lower_spacing = 0, upper_spacing = 0;
 };
-inline FallbackSides fallbackSides(TopoEdge& master, const MultiNeighborCache::Piece& part, double unit)
+inline GridSides gridSides(TopoEdge& master, const GridNeighborhood::Piece& part, double unit)
 {
-  FallbackSides out;
+  GridSides out;
   out.lower = part.nleft ? part.neighbors.front() : nullptr;
   out.upper = part.neighbors.size() > part.nleft ? part.neighbors[part.nleft] : nullptr;
   bool h = master.get_line_segment().get_is_horizontal();
@@ -20,13 +20,5 @@ inline FallbackSides fallbackSides(TopoEdge& master, const MultiNeighborCache::P
   if (out.upper)
     out.upper_spacing = unit * (low(*out.upper) - high(master));
   return out;
-}
-inline double fallbackCouplingWeight(const TopoEdge& neighbor, bool two_sides)
-{
-  return neighbor.get_is_special_net() && two_sides ? .5 : 1.;
-}
-inline bool sameSignalNet(const TopoEdge& neighbor, int32_t master_net)
-{
-  return !neighbor.get_is_special_net() && neighbor.get_net_idx() == master_net;
 }
 }  // namespace ircx::pattern

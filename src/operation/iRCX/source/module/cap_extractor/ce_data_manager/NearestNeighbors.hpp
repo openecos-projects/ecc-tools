@@ -1,35 +1,27 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
-#include <map>
 #include <vector>
 namespace ircx::pattern {
-struct RankedItem
+struct NearestItem
 {
   std::int64_t lo, hi;
-  std::size_t id, owner;
+  std::size_t id;
   std::int64_t x0, x1;
 };
-struct RankedRun
+struct NearestRun
 {
   std::int64_t lo, hi;
   std::vector<std::size_t> ids;
 };
-inline std::vector<RankedRun> rankedRuns(std::int64_t lo, std::int64_t hi, const std::vector<RankedItem>& nearest_first, std::size_t rank)
+inline std::vector<NearestRun> nearestRuns(std::int64_t lo, std::int64_t hi, const std::vector<NearestItem>& nearest_first)
 {
-  std::vector<RankedRun> runs{{lo, hi, {}}};
-  std::map<std::size_t, RankedItem> seen;
+  std::vector<NearestRun> runs{{lo, hi, {}}};
   for (const auto& item : nearest_first) {
-    seen.emplace(item.id, item);
-    std::vector<RankedRun> next;
+    std::vector<NearestRun> next;
     for (const auto& r : runs) {
       const auto a = std::max(r.lo, item.lo), b = std::min(r.hi, item.hi);
-      bool duplicate = false;
-      for (auto id : r.ids) {
-        auto old = seen.at(id);
-        duplicate |= old.owner == item.owner && old.x0 == item.x0 && old.x1 == item.x1;
-      }
-      if (a >= b || r.ids.size() >= rank || duplicate) {
+      if (a >= b || !r.ids.empty()) {
         next.push_back(r);
         continue;
       }
@@ -42,10 +34,10 @@ inline std::vector<RankedRun> rankedRuns(std::int64_t lo, std::int64_t hi, const
         next.push_back({b, r.hi, r.ids});
     }
     runs = std::move(next);
-    if (std::all_of(runs.begin(), runs.end(), [&](const auto& r) { return r.ids.size() == rank; }))
+    if (std::all_of(runs.begin(), runs.end(), [&](const auto& r) { return !r.ids.empty(); }))
       break;
   }
-  std::vector<RankedRun> merged;
+  std::vector<NearestRun> merged;
   for (auto& r : runs) {
     if (!merged.empty() && merged.back().hi == r.lo && merged.back().ids == r.ids)
       merged.back().hi = r.hi;

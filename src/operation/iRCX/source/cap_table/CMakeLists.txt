@@ -1,0 +1,4 @@
+add_library(ircx_cap_table INTERFACE)
+target_link_libraries(ircx_cap_table INTERFACE ircx_logger)
+target_include_directories(ircx_cap_table INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ircx_cap_table INTERFACE cxx_std_20)

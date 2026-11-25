@@ -40,6 +40,10 @@ if(BUILD_TESTING)
   foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping spef_writer_sections spef_writer_names)
     add_test(NAME ircx_interface_${scenario} COMMAND ircx_interface_test ${scenario})
   endforeach()
+  foreach(scenario grid override corners coupling overlap reject_a reject_b reject_empty reject_mixed
+                   override_corners removed_mode removed_prebuilt removed_rank removed_table)
+    add_test(NAME ircx_interface_captab_${scenario} COMMAND ircx_interface_test captab_${scenario})
+  endforeach()
 
   add_executable(ircx_spef_test RCXSPEFTest.cpp)
   target_link_libraries(ircx_spef_test PRIVATE ircx_spef_writer ircx_aux spef)
@@ -53,12 +57,6 @@ if(BUILD_TESTING)
   target_link_libraries(ircx_pattern_test PRIVATE ircx_cap_extractor)
   target_compile_options(ircx_pattern_test PRIVATE -UNDEBUG)
   add_test(NAME ircx_pattern_test COMMAND ircx_pattern_test)
-endif()
-
-if(BUILD_TESTING)
-  add_executable(ircx_capacitance_table_test RCXCapacitanceTableTest.cpp)
-  target_link_libraries(ircx_capacitance_table_test PRIVATE ircx_cap_extractor)
-  add_test(NAME ircx_capacitance_table_test COMMAND ircx_capacitance_table_test)
 endif()
 
 if(BUILD_TESTING)

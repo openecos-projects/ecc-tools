@@ -3,10 +3,10 @@
 #include <fstream>
 #include <random>
 
-#include "MultiNeighborCache.hpp"
+#include "GridNeighborhood.hpp"
 #include "PatternCrossLayers.hpp"
-#include "PatternFallback.hpp"
-#include "PatternGrid.hpp"
+#include "GridSides.hpp"
+#include "grid/PatternGrid.hpp"
 #include "ReciprocalCap.hpp"
 using namespace ircx;
 TopoEdge edge(int net, int x0, int y0, int x1, int y1)
@@ -59,45 +59,43 @@ int main()
   const auto layers = pattern::crossLayers({near, far}, 0, 100);
   assert(layers.first == 2 && layers.second == 6);
   assert(pattern::crossLayers({near}, 0, 101).second == -1);
-  std::ofstream("pattern_fixture.captab") << "IRCX_CAP_TABLE_V1\n8 1\nM1 .1 .1 .1 0 .1 0\n1\nM1 SUBSTRATE - 1000 100 0 0\t.2\nEND\n";
-  setenv("IRCX_MULTI_MODE", "prebuilt", 1);
-  setenv("IRCX_PATTERN_TABLE", "pattern_fixture.captab", 1);
-  setenv("IRCX_PATTERN_GRID", "unused_in_geometry_test", 1);
-  setenv("IRCX_MULTI_RANK", "3", 1);
   TopoPool pool;
   pool.add_net({}, {edge(0, 0, 0, 1000, 101)});
-  pool.add_net({}, {edge(1, 0, 201, 1000, 301)});
+  pool.add_net({}, {edge(1, 200, 201, 800, 301)});
   pool.add_net({}, {edge(2, 0, 401, 1000, 501)});
   pool.add_net({}, {edge(3, 200, 601, 800, 701)});
   pool.add_net({}, {edge(4, 0, 801, 1000, 901)});
-  pattern::MultiNeighborCache cache(pool);
-  auto p = cache.pieces(pool.get_edge(0), 0, 1000, .001, "M1", "SUBSTRATE", "");
+  pattern::GridNeighborhood cache(pool);
+  auto p = cache.pieces(pool.get_edge(0), 0, 1000, .001);
   assert(p.size() == 3 && p[0].lo == 0 && p[0].hi == 200 && p[1].hi == 800 && p[2].hi == 1000);
-  assert(p[0].neighbors[2] == &pool.get_edge(4) && p[1].neighbors[2] == &pool.get_edge(3));
-  assert(p[1].key == "M1 SUBSTRATE - 2000 202 0 3 301 501 701 901 1101 1301");
+  assert(p[0].neighbors == std::vector<TopoEdge*>{&pool.get_edge(2)});
+  assert(p[1].neighbors == std::vector<TopoEdge*>{&pool.get_edge(1)});
+  assert(p[2].neighbors == p[0].neighbors);
   TopoPool duplicate;
   duplicate.add_net({}, {edge(0, 0, 400, 1000, 500)});
   duplicate.add_net({}, {edge(1, 0, 200, 600, 300), edge(1, 400, 200, 1000, 300)});
-  pattern::MultiNeighborCache canonical(duplicate);
+  pattern::GridNeighborhood canonical(duplicate);
   long owned_length = 0, masked = 0;
   for (int i = 1; i <= 2; ++i)
-    for (auto& part : canonical.pieces(duplicate.get_edge(i), i == 1 ? 0 : 400, i == 1 ? 600 : 1000, .001, "M1", "SUBSTRATE", "")) {
-      if (part.key == "__ZERO")
+    for (auto& part : canonical.pieces(duplicate.get_edge(i), i == 1 ? 0 : 400, i == 1 ? 600 : 1000, .001)) {
+      if (part.duplicate)
         masked += part.hi - part.lo;
       else
         owned_length += part.hi - part.lo;
     }
   assert(owned_length == 1000 && masked == 200);
-  auto owned = canonical.pieces(duplicate.get_edge(0), 0, 1000, .001, "M1", "SUBSTRATE", "");
-  auto sides = pattern::fallbackSides(duplicate.get_edge(0), owned.front(), .001);
+  auto owned = canonical.pieces(duplicate.get_edge(0), 0, 1000, .001);
+  auto sides = pattern::gridSides(duplicate.get_edge(0), owned.front(), .001);
   assert(sides.lower == &duplicate.get_edge(1) && sides.upper == nullptr);
   assert(sides.lower_spacing == .1);
   TopoPool mixed;
   mixed.add_net({}, {edge(0, 0, 200, 1000, 300), edge(0, 0, 400, 1000, 500)});
   mixed.add_special_edge_list({edge(0, 0, 0, 1000, 100)});
-  assert(pattern::fallbackCouplingWeight(mixed.get_edge(1), true) == 1);
-  assert(pattern::fallbackCouplingWeight(mixed.get_special_edge_pool()[0], true) == .5);
-  assert(!pattern::sameSignalNet(mixed.get_special_edge_pool()[0], 0));
+  pattern::GridNeighborhood mixed_cache(mixed);
+  const auto mixed_parts = mixed_cache.pieces(mixed.get_edge(0), 0, 1000, .001);
+  const auto mixed_sides = pattern::gridSides(mixed.get_edge(0), mixed_parts.front(), .001);
+  assert(mixed_sides.lower == &mixed.get_special_edge_pool()[0]);
+  assert(mixed_sides.upper == &mixed.get_edge(1));
   // Compare the spatial-index selection with independently enumerated slices.
   std::mt19937 random(17);
   for (int trial = 0; trial < 30; ++trial) {
@@ -111,8 +109,8 @@ int main()
       boundaries.push_back(lo);
       boundaries.push_back(hi);
     }
-    pattern::MultiNeighborCache spatial(sample);
-    auto actual = spatial.pieces(sample.get_edge(0), 0, 1000, .001, "M1", "SUBSTRATE", "");
+    pattern::GridNeighborhood spatial(sample);
+    auto actual = spatial.pieces(sample.get_edge(0), 0, 1000, .001);
     std::sort(boundaries.begin(), boundaries.end());
     for (std::size_t i = 1; i < boundaries.size(); ++i) {
       const double midpoint = (boundaries[i - 1] + boundaries[i]) / 2.;
@@ -132,9 +130,9 @@ int main()
       std::sort(left.begin(), left.end());
       std::sort(right.begin(), right.end());
       std::vector<TopoEdge*> want;
-      for (std::size_t n = 0; n < std::min<std::size_t>(3, left.size()); ++n)
+      for (std::size_t n = 0; n < std::min<std::size_t>(1, left.size()); ++n)
         want.push_back(left[n].second);
-      for (std::size_t n = 0; n < std::min<std::size_t>(3, right.size()); ++n)
+      for (std::size_t n = 0; n < std::min<std::size_t>(1, right.size()); ++n)
         want.push_back(right[n].second);
       auto run = std::find_if(actual.begin(), actual.end(), [&](auto& r) { return r.lo <= midpoint && midpoint < r.hi; });
       assert(run != actual.end() && run->neighbors == want);
@@ -148,12 +146,4 @@ int main()
   zero.add(true, 0, 10, 20);
   zero.add(false, 0, 10, 0);
   assert(zero.value() == 10);
-  // Removed experimental modes must fail explicitly.
-  for (const char* mode : {"apply", "collect"}) {
-    setenv("IRCX_MULTI_MODE", mode, 1);
-    bool rejected=false;
-    try {pattern::MultiNeighborCache bad(pool);} catch (const std::runtime_error&) {rejected=true;}
-    assert(rejected);
-  }
-  std::remove("pattern_fixture.captab");
 }
