@@ -114,7 +114,7 @@ static std::size_t requiredAllocations(std::size_t name_size)
       arc.set_sink_pin("p" + std::to_string(i + 1));
       arc.set_source_vertex_idx(i);
       arc.set_sink_vertex_idx(i + 1);
-      arc.get_input_output_delay_map()[AnalysisType::kMax][TransType::kRise][TransType::kRise] = .125;
+      arc.get_input_output_delay_map().set(AnalysisType::kMax, TransType::kRise, TransType::kRise, .125);
       vertex.get_outgoing_arc_list().push_back(graph.arcs().size());
       graph.arcs().push_back(arc);
     } else {

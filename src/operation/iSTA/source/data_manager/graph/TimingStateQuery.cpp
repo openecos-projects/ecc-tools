@@ -452,12 +452,8 @@ double TimingStateQuery::roundTime(double time)
 std::vector<TransType> TimingStateQuery::getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   std::vector<TransType> output_trans_type_list;
-  if (arc.get_input_output_delay_map().count(analysis_type) == 0 || arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) == 0) {
-    return output_trans_type_list;
-  }
-  for (std::pair<const TransType, double>& delay_pair : arc.get_input_output_delay_map()[analysis_type][input_trans_type]) {
-    output_trans_type_list.push_back(delay_pair.first);
-  }
+  arc.get_input_output_delay_map().eachOutput(analysis_type, input_trans_type,
+                                              [&output_trans_type_list](TransType out, double) { output_trans_type_list.push_back(out); });
   return output_trans_type_list;
 }
 
@@ -465,8 +461,8 @@ double TimingStateQuery::getArcDelay(Arc& arc, AnalysisType analysis_type, Trans
 {
   if (arc.rcFailed(analysis_type, input_trans_type))
     return 0.;
-  if (arc.get_trans_delay_map().count(analysis_type) > 0 && arc.get_trans_delay_map()[analysis_type].count(input_trans_type) > 0) {
-    return arc.get_trans_delay_map()[analysis_type][input_trans_type];
+  if (const auto delay = arc.get_trans_delay_map().get(analysis_type, input_trans_type)) {
+    return *delay;
   }
   if (analysis_type == AnalysisType::kMin) {
     return arc.get_delay_min();
@@ -478,13 +474,11 @@ double TimingStateQuery::getArcDelay(Arc& arc, AnalysisType analysis_type, Trans
 {
   if (arc.rcFailed(analysis_type, output_trans_type))
     return 0.;
-  if (arc.get_graph_delay_map().count(analysis_type) > 0 && arc.get_graph_delay_map()[analysis_type].count(input_trans_type) > 0
-      && arc.get_graph_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0) {
-    return arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type];
+  if (const auto delay = arc.get_graph_delay_map().get(analysis_type, input_trans_type, output_trans_type)) {
+    return *delay;
   }
-  if (arc.get_input_output_delay_map().count(analysis_type) > 0 && arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) > 0
-      && arc.get_input_output_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0) {
-    return arc.get_input_output_delay_map()[analysis_type][input_trans_type][output_trans_type];
+  if (const auto delay = arc.get_input_output_delay_map().get(analysis_type, input_trans_type, output_trans_type)) {
+    return *delay;
   }
   return getArcDelay(arc, analysis_type, input_trans_type);
 }

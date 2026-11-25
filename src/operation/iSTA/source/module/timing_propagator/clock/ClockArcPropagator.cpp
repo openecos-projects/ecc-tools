@@ -94,10 +94,9 @@ void ClockArcPropagator::updateClockPathState(std::string_view clock_name, Trans
 
 void ClockArcPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay)
 {
-  if (arc.get_graph_delay_map().count(analysis_type) == 0 || arc.get_graph_delay_map()[analysis_type].count(input_trans_type) == 0
-      || arc.get_graph_delay_map()[analysis_type][input_trans_type].count(output_trans_type) == 0
-      || isBetterDelay(arc_delay, arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type], analysis_type)) {
-    arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type] = arc_delay;
+  const auto current = arc.get_graph_delay_map().get(analysis_type, input_trans_type, output_trans_type);
+  if (!current || isBetterDelay(arc_delay, *current, analysis_type)) {
+    arc.get_graph_delay_map().set(analysis_type, input_trans_type, output_trans_type, arc_delay);
   }
 }
 
@@ -125,12 +124,8 @@ double ClockArcPropagator::roundTime(double time)
 std::vector<TransType> ClockArcPropagator::getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   std::vector<TransType> output_trans_type_list;
-  if (arc.get_input_output_delay_map().count(analysis_type) == 0 || arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) == 0) {
-    return output_trans_type_list;
-  }
-  for (std::pair<const TransType, double>& delay_pair : arc.get_input_output_delay_map()[analysis_type][input_trans_type]) {
-    output_trans_type_list.push_back(delay_pair.first);
-  }
+  arc.get_input_output_delay_map().eachOutput(analysis_type, input_trans_type,
+                                              [&output_trans_type_list](TransType out, double) { output_trans_type_list.push_back(out); });
   return output_trans_type_list;
 }
 

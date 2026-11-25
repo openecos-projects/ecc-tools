@@ -159,7 +159,7 @@ void pathStateTieBreak()
 // T4: Arc::update_timing_arc_delay — the fallback/zero-slew state machine.
 double arcDelayAt(Arc& arc, int32_t variant, AnalysisType mode, TransType in, TransType out)
 {
-  return arc.get_timing_arc_delay_map().at(variant).at(mode).at(in).at(out);
+  return arc.findTimingArcDelay(variant)->get(mode, in, out).value();
 }
 
 void arcDelayStateMachine()
@@ -197,7 +197,7 @@ void arcDelayStateMachine()
     arc.update_timing_arc_delay(1, AnalysisType::kMin, TransType::kFall, TransType::kFall, 3.0, false, true);
     require(arcDelayAt(arc, 1, AnalysisType::kMin, TransType::kFall, TransType::kFall) == 3.0, "late probe bypassed the min rule");
     // Variants and edges are independent keys.
-    require(arc.get_timing_arc_delay_map().count(0) == 0, "delay leaked across variants");
+    require(arc.findTimingArcDelay(0) == nullptr, "delay leaked across variants");
   }
 }
 

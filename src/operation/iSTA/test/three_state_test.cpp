@@ -137,10 +137,12 @@ void conditionalPath(const LibertyLibrary& library)
   for (auto& arc : db.graph().arcs()) {
     if (arc.get_type() != ArcType::kCell) continue;
     for (auto analysis : {AnalysisType::kMax, AnalysisType::kMin}) {
-      auto& lanes = arc.get_input_output_delay_map().at(analysis);
-      require(!lanes.contains(TransType::kFall) || lanes.at(TransType::kFall).empty(),
+      require(!arc.get_input_output_delay_map().get(analysis, TransType::kFall, TransType::kRise)
+               && !arc.get_input_output_delay_map().get(analysis, TransType::kFall, TransType::kFall),
               "false when condition created a zero-delay control lane");
-      require(lanes.at(TransType::kRise).size() == 2, "active conditional control lanes were removed");
+      require(arc.get_input_output_delay_map().get(analysis, TransType::kRise, TransType::kRise)
+                  && arc.get_input_output_delay_map().get(analysis, TransType::kRise, TransType::kFall),
+              "active conditional control lanes were removed");
     }
   }
   ClockPropagator(db, STADC).propagate();

@@ -59,7 +59,7 @@ static void reconvergentCandidates(bool variation)
     arc.set_sink_pin("end");
     for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
       for (auto edge : {TransType::kRise, TransType::kFall})
-        arc.get_input_output_delay_map()[mode][edge][edge] = 0.;
+        arc.get_input_output_delay_map().set(mode, edge, edge, 0.);
     vertex.get_outgoing_arc_list().push_back(graph.arcs().size());
     graph.arcs().push_back(arc);
   }
@@ -127,7 +127,7 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
     arc.set_sink_vertex_idx(3);
     for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
       for (auto edge : {TransType::kRise, TransType::kFall})
-        arc.get_input_output_delay_map()[mode][edge][edge] = .1;
+        arc.get_input_output_delay_map().set(mode, edge, edge, .1);
     vertex.get_outgoing_arc_list().push_back(graph.arcs().size());
     graph.arcs().push_back(arc);
   }
@@ -165,7 +165,7 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
     arc.set_sink_vertex_idx(4);
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (auto edge : {TransType::kRise, TransType::kFall})
-        arc.get_input_output_delay_map()[mode][edge][edge] = downstream;
+        arc.get_input_output_delay_map().set(mode, edge, edge, downstream);
     graph.vertices()[3].get_outgoing_arc_list().push_back(graph.arcs().size());
     graph.arcs().push_back(arc);
     for (auto& io : outputs)
@@ -323,7 +323,7 @@ static void cumulativeMergeTolerance(bool hold)
     arc.set_sink_vertex_idx(to);
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (auto edge : {TransType::kRise, TransType::kFall})
-        arc.get_input_output_delay_map()[mode][edge][edge] = delay;
+        arc.get_input_output_delay_map().set(mode, edge, edge, delay);
     graph.vertices()[from].get_outgoing_arc_list().push_back(graph.arcs().size());
     graph.vertices()[to].get_incoming_arc_list().push_back(graph.arcs().size());
     graph.arcs().push_back(arc);
@@ -460,7 +460,7 @@ int main()
       }
     for (auto& arc : db.graph().arcs())
       if (arc.get_type() == ArcType::kCell)
-        near(arc.get_graph_delay_map().at(AnalysisType::kMax).at(TransType::kRise).at(TransType::kRise), 2., "nominal cache contaminated");
+        near(arc.get_graph_delay_map().get(AnalysisType::kMax, TransType::kRise, TransType::kRise).value(), 2., "nominal cache contaminated");
   }
   // A negative nominal arc gets later under a late derate, never more negative.
   for (auto edge : {TransType::kRise, TransType::kFall})

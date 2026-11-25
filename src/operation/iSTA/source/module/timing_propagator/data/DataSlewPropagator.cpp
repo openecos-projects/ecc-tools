@@ -177,13 +177,12 @@ void DataSlewPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_typ
                                             bool force)
 {
   if (force && std::isfinite(arc_delay)) {
-    arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type] = arc_delay;
+    arc.get_graph_delay_map().set(analysis_type, input_trans_type, output_trans_type, arc_delay);
     return;
   }
-  if (arc.get_graph_delay_map().count(analysis_type) == 0 || arc.get_graph_delay_map()[analysis_type].count(input_trans_type) == 0
-      || arc.get_graph_delay_map()[analysis_type][input_trans_type].count(output_trans_type) == 0
-      || isBetterDelay(arc_delay, arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type], analysis_type)) {
-    arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type] = arc_delay;
+  const auto current = arc.get_graph_delay_map().get(analysis_type, input_trans_type, output_trans_type);
+  if (!current || isBetterDelay(arc_delay, *current, analysis_type)) {
+    arc.get_graph_delay_map().set(analysis_type, input_trans_type, output_trans_type, arc_delay);
   }
 }
 

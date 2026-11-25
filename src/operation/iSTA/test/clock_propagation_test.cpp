@@ -166,7 +166,7 @@ void sharedArc(bool slow_first, AnalysisType mode, TransType edge, bool derate =
   arc.set_source_pin("u:A");
   arc.set_sink_pin("u:Y");
   arc.setLibertyArcId(LibertyArcId{"BUF", 0});
-  arc.get_input_output_delay_map()[mode][edge][output] = 0.;
+  arc.get_input_output_delay_map().set(mode, edge, output, 0.);
   db.graph().arcs().push_back(arc);
   std::vector<std::string> sources{"u:A"};
   ClockSource slow("slow", sources, true, clockId(db, "slow")), fast("fast", sources, true, clockId(db, "fast"));

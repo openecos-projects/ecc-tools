@@ -127,14 +127,12 @@ double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timi
 double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   if (timing_cell_arc.get_timing_arc_list().empty()) {
-    arc.get_trans_type_map()[input_trans_type] = input_trans_type;
     if (analysis_type == AnalysisType::kMin) {
       return timing_cell_arc.get_delay_min();
     }
     return timing_cell_arc.get_delay_max();
   }
   TransType output_trans_type = _selection.getOutputTransType(timing_cell_arc, input_trans_type);
-  arc.get_trans_type_map()[input_trans_type] = output_trans_type;
   if (!_selection.isMatchTimingType(timing_cell_arc, output_trans_type)) {
     return timing_cell_arc.get_delay();
   }

@@ -68,6 +68,11 @@ class ClockWaveGrid
   }
   void clear() { _present = 0; }
   bool empty() const { return _present == 0; }
+  friend bool operator==(const ClockWaveGrid& lhs, const ClockWaveGrid& rhs)
+  {
+    return lhs._present == rhs._present && (!lhs._present || lhs._values == rhs._values);
+  }
+  friend bool operator!=(const ClockWaveGrid& lhs, const ClockWaveGrid& rhs) { return !(lhs == rhs); }
   // Iteration order is enum-ordinal: (kMax,kRise), (kMax,kFall), (kMin,kRise),
   // (kMin,kFall) — identical to the nested std::map order this replaces.
   template <typename F>

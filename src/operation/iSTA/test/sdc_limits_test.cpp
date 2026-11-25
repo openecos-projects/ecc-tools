@@ -29,7 +29,7 @@ int main(int argc, char** argv)
     arc.set_type(ArcType::kCell);
     arc.set_source_pin(cell + ":A");
     arc.set_sink_pin(cell + ":Y");
-    arc.get_input_output_delay_map()[AnalysisType::kMax][TransType::kRise][TransType::kRise] = 2.;
+    arc.get_input_output_delay_map().set(AnalysisType::kMax, TransType::kRise, TransType::kRise, 2.);
     return TimingStateQuery(db).getDataArcDelay(arc, AnalysisType::kMax, TransType::kRise, TransType::kRise);
   };
   auto near

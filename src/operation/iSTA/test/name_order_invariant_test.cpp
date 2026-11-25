@@ -79,7 +79,7 @@ void addInstanceWithCellArc(const std::string& instance_name)
   arc.set_owner_name(instance_name);
   arc.set_source_pin(in_pin);
   arc.set_sink_pin(out_pin);
-  arc.get_input_output_delay_map()[AnalysisType::kMax][TransType::kRise][TransType::kRise] = 0.1;
+  arc.get_input_output_delay_map().set(AnalysisType::kMax, TransType::kRise, TransType::kRise, 0.1);
 }
 
 // I3: GraphConnectivityBuilder::buildGraphVertexList iterates

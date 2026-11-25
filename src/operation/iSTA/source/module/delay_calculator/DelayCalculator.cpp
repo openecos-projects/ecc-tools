@@ -93,7 +93,7 @@ void DelayCalculator::completeCellArcDelays(Graph& graph)
       continue;
     std::set<int32_t> missing;
     for (auto& variant : family->get_timing_arc_list())
-      if (!variant.get_sdf_cond().empty() && !arc.get_timing_arc_delay_map().contains(variant.get_arc_idx()))
+      if (!variant.get_sdf_cond().empty() && !arc.findTimingArcDelay(variant.get_arc_idx()))
         missing.insert(variant.get_arc_idx());
     if (missing.empty())
       continue;
@@ -140,8 +140,10 @@ void DelayCalculator::initializeArcTiming(Arc& arc)
   arc.clearRcFailures();
   initializeAnalysisArcTiming(arc, AnalysisType::kMax);
   initializeAnalysisArcTiming(arc, AnalysisType::kMin);
-  arc.set_delay_max(std::max(arc.get_trans_delay_map()[AnalysisType::kMax][TransType::kRise], arc.get_trans_delay_map()[AnalysisType::kMax][TransType::kFall]));
-  arc.set_delay_min(std::min(arc.get_trans_delay_map()[AnalysisType::kMin][TransType::kRise], arc.get_trans_delay_map()[AnalysisType::kMin][TransType::kFall]));
+  arc.set_delay_max(std::max(arc.get_trans_delay_map().getOr(AnalysisType::kMax, TransType::kRise, 0.0),
+                             arc.get_trans_delay_map().getOr(AnalysisType::kMax, TransType::kFall, 0.0)));
+  arc.set_delay_min(std::min(arc.get_trans_delay_map().getOr(AnalysisType::kMin, TransType::kRise, 0.0),
+                             arc.get_trans_delay_map().getOr(AnalysisType::kMin, TransType::kFall, 0.0)));
   arc.set_delay(arc.get_delay_max());
 }
 
@@ -155,18 +157,16 @@ void DelayCalculator::initializeTransArcTiming(Arc& arc, AnalysisType analysis_t
 {
   if (arc.get_type() == ArcType::kNet) {
     double delay = _wire.calcNetArcDelay(arc, analysis_type, input_trans_type);
-    arc.get_input_output_delay_map()[analysis_type][input_trans_type][input_trans_type] = delay;
-    arc.get_trans_delay_map()[analysis_type][input_trans_type] = delay;
-    arc.get_trans_type_map()[input_trans_type] = input_trans_type;
+    arc.get_input_output_delay_map().set(analysis_type, input_trans_type, input_trans_type, delay);
+    arc.get_trans_delay_map().set(analysis_type, input_trans_type, delay);
     return;
   }
 
   TimingCellArc* timing_cell_arc = _selection.cellArc(arc);
   if (timing_cell_arc == nullptr || timing_cell_arc->get_timing_arc_list().empty()) {
     double delay = calcCellArcDelay(arc, analysis_type, input_trans_type);
-    arc.get_input_output_delay_map()[analysis_type][input_trans_type][input_trans_type] = delay;
-    arc.get_trans_delay_map()[analysis_type][input_trans_type] = delay;
-    arc.get_trans_type_map()[input_trans_type] = input_trans_type;
+    arc.get_input_output_delay_map().set(analysis_type, input_trans_type, input_trans_type, delay);
+    arc.get_trans_delay_map().set(analysis_type, input_trans_type, delay);
     return;
   }
   if (!_selection.isClockArcTriggerTrans(*timing_cell_arc, input_trans_type)) {
@@ -179,12 +179,10 @@ void DelayCalculator::initializeTransArcTiming(Arc& arc, AnalysisType analysis_t
       continue;
     }
     double delay = _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type, output_trans_type, 0.0, true);
-    arc.get_input_output_delay_map()[analysis_type][input_trans_type][output_trans_type] = delay;
-    if (arc.get_trans_delay_map()[analysis_type].count(input_trans_type) == 0
-        || (analysis_type == AnalysisType::kMin && delay < arc.get_trans_delay_map()[analysis_type][input_trans_type])
-        || (analysis_type == AnalysisType::kMax && delay > arc.get_trans_delay_map()[analysis_type][input_trans_type])) {
-      arc.get_trans_delay_map()[analysis_type][input_trans_type] = delay;
-      arc.get_trans_type_map()[input_trans_type] = output_trans_type;
+    arc.get_input_output_delay_map().set(analysis_type, input_trans_type, output_trans_type, delay);
+    const auto current = arc.get_trans_delay_map().get(analysis_type, input_trans_type);
+    if (!current || (analysis_type == AnalysisType::kMin && delay < *current) || (analysis_type == AnalysisType::kMax && delay > *current)) {
+      arc.get_trans_delay_map().set(analysis_type, input_trans_type, delay);
     }
   }
 }
@@ -220,14 +218,12 @@ double DelayCalculator::calcCellArcDelay(Arc& arc, AnalysisType analysis_type)
 double DelayCalculator::calcCellArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   if (arc.get_type() == ArcType::kNet) {
-    arc.get_trans_type_map()[input_trans_type] = input_trans_type;
     return _wire.calcNetArcDelay(arc, analysis_type, input_trans_type);
   }
   TimingCellArc* timing_cell_arc = _selection.cellArc(arc);
   if (timing_cell_arc != nullptr) {
     return _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type);
   }
-  arc.get_trans_type_map()[input_trans_type] = input_trans_type;
   return 1.0;
 }
 
@@ -240,12 +236,11 @@ double DelayCalculator::calcArcDelay(Arc& arc, AnalysisType analysis_type, Trans
   if (timing_cell_arc != nullptr) {
     return _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type, output_trans_type, input_slew);
   }
-  if (arc.get_input_output_delay_map().count(analysis_type) > 0 && arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) > 0
-      && arc.get_input_output_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0) {
-    return arc.get_input_output_delay_map()[analysis_type][input_trans_type][output_trans_type];
+  if (const auto delay = arc.get_input_output_delay_map().get(analysis_type, input_trans_type, output_trans_type)) {
+    return *delay;
   }
-  if (arc.get_trans_delay_map().count(analysis_type) > 0 && arc.get_trans_delay_map()[analysis_type].count(input_trans_type) > 0) {
-    return arc.get_trans_delay_map()[analysis_type][input_trans_type];
+  if (const auto delay = arc.get_trans_delay_map().get(analysis_type, input_trans_type)) {
+    return *delay;
   }
   if (analysis_type == AnalysisType::kMin) {
     return arc.get_delay_min();

@@ -26,8 +26,8 @@ static void storedWireDelay()
     pin.set_is_port(true);
     pin.set_pin_name(name);
   }
-  arc.get_graph_delay_map()[AnalysisType::kMax][TransType::kRise][TransType::kRise] = 0.25;
-  arc.get_input_output_delay_map()[AnalysisType::kMax][TransType::kRise][TransType::kRise] = 9.0;
+  arc.get_graph_delay_map().set(AnalysisType::kMax, TransType::kRise, TransType::kRise, 0.25);
+  arc.get_input_output_delay_map().set(AnalysisType::kMax, TransType::kRise, TransType::kRise, 9.0);
   SdfValueExtractor values(db);
   if (values.arcDelay(arc).get_rise_max_delay() != 0.25)
     throw std::runtime_error("stored graph delay lost priority");
@@ -93,11 +93,11 @@ static void cellArcAndCheckValues()
   arc.set_sink_pin("u:Y");
   arc.setLibertyArcId(LibertyArcId{"gate", 0});
   for (int index : {0, 1}) {
-    auto& values = arc.get_timing_arc_delay_map()[index];
-    values[AnalysisType::kMin][TransType::kRise][TransType::kRise] = 3.0 - index;
-    values[AnalysisType::kMax][TransType::kRise][TransType::kRise] = 4.0 + index;
-    values[AnalysisType::kMin][TransType::kFall][TransType::kFall] = 6.0 - index;
-    values[AnalysisType::kMax][TransType::kFall][TransType::kFall] = 7.0 + index;
+    auto& values = arc.timingArcDelaySlot(index).first;
+    values.set(AnalysisType::kMin, TransType::kRise, TransType::kRise, 3.0 - index);
+    values.set(AnalysisType::kMax, TransType::kRise, TransType::kRise, 4.0 + index);
+    values.set(AnalysisType::kMin, TransType::kFall, TransType::kFall, 6.0 - index);
+    values.set(AnalysisType::kMax, TransType::kFall, TransType::kFall, 7.0 + index);
   }
   SdfValueExtractor extractor(db);
   auto records = extractor.graphCellArcDelays(arc);
@@ -184,8 +184,8 @@ static void conditionalArcValues()
   auto& point = db.graph().points()["u:A"];
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
     for (auto edge : {TransType::kRise, TransType::kFall}) {
-      arc.get_timing_arc_delay_map()[0][mode][edge][edge] = .25;
-      arc.get_graph_delay_map()[mode][edge][edge] = .25;
+      arc.timingArcDelaySlot(0).first.set(mode, edge, edge, .25);
+      arc.get_graph_delay_map().set(mode, edge, edge, .25);
       auto& wave = point.get_clock_state(clockId(db, "M")).waveformSlot(edge);
       wave.physical_slew_map.set(mode, edge, mode == AnalysisType::kMin ? .2 : .6);
       wave.slew_map.set(mode, edge, .01); // Published ideal slew is not the physical waveform.
@@ -204,7 +204,7 @@ static void conditionalArcValues()
   const auto cached = arc.get_timing_arc_delay_map();
   calculator.completeCellArcDelays(db.graph());
   require(arc.get_timing_arc_delay_map() == cached, "repeated export changed completed delays");
-  arc.get_timing_arc_delay_map().erase(1);
+  arc.eraseTimingArcDelay(1);
   records = SdfValueExtractor(db).graphCellArcDelays(arc);
   require(records.size() == 1 && records.begin()->first.condition == "S == 1'b0",
           "writer relabelled an aggregate as an unevaluated condition");
