@@ -159,6 +159,8 @@ bool needsSparse(Database& database)
   const char* force_sparse = std::getenv("ECC_TIMING_FORCE_SPARSE");
   if (force_sparse != nullptr && std::string(force_sparse) == "1")
     return true;
+  if (!database.graph().clockGatingChecks().empty())
+    return true;
   auto& constraint = database.sdc();
   if (constraint.get_clock_map().size() > 1)
     return true;
@@ -186,8 +188,6 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   STALOG.info(Loc::current(), "Compiling ", early ? "min" : "max", " sparse timing snapshot...");
   view.enabled = true;
   view.early = early;
-  for (const auto& [endpoint, checks] : database.graph().clockGatingChecks())
-    view.unsupported.push_back("inferred clock-gating check requires a gate-window rule at " + endpoint);
   if (!early)
     snapshot.schema_version = 3;
   auto& exceptions = database.sdc().get_path_exception_list();
@@ -544,10 +544,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         continue;
 
       const auto& check = endpoint->check();
-      if (check.type == TimingCheckType::kClockGatingSetup) {
-        view.unsupported.push_back("inferred clock-gating check requires a gate-window rule at " + state.pin);
-        continue;
-      }
+      const bool gate_window = check.type == TimingCheckType::kClockGatingSetup;
       const std::string capture = endpoint->captureClock();
       if (!domains.contains(capture)) {
         view.unsupported.push_back("unknown capture clock at " + state.pin);
@@ -555,7 +552,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       }
 
       int32_t endpoint_arc = -1;
-      if (!check.capture_pin.empty()) {
+      if (!check.capture_pin.empty() && !gate_window) {
         const auto check_type = static_cast<int32_t>(check.type);
         const int32_t selected_library_arc
             = selectedCheckLibraryArcId(database, state.pin, check.capture_pin, check.type, check.capture_pin_transition, check.selected_check_arc_idx);
@@ -586,7 +583,10 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       if (chosen != nullptr && !exceptions.empty())
         row.constraint = static_cast<int32_t>(chosen - exceptions.data());
       if (row.valid) {
-        row.check_coefficient = check.capture_pin.empty() ? 0.0 : -1.0;
+        // Inferred gates have no Liberty constraint LUT. PathChecker has
+        // already selected the opening edge and applied the constant margin,
+        // uncertainty and exceptions; preserve that complete required time.
+        row.check_coefficient = endpoint_arc < 0 ? 0.0 : -1.0;
         row.clock_slew_ps = check.capture_pin.empty() ? 0.0
                                                       : state_query.getClockSlew(check.capture_pin, capture, AnalysisType::kMax, check.capture_pin_transition,
                                                                                  check.capture_transition)
@@ -607,6 +607,11 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         row.intercept_ps = (endpoint->required() - row.check_coefficient * check.check_time) * snapshot.time_unit_ps;
         if (!std::isfinite(row.intercept_ps))
           view.unsupported.push_back("non-finite required rule at " + state.pin);
+        if (gate_window) {
+          auto& qualification = snapshot.pins.at(pin_ids.at(state.pin)).max_qualification;
+          qualification.valid[edge] = true;
+          qualification.reason[edge] = TimingMaxQualificationReason::kValid;
+        }
       }
       view.checks.push_back(row);
     }

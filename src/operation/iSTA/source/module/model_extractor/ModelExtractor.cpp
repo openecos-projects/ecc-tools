@@ -51,7 +51,7 @@ void ModelExtractor::extractLibrary(TimingModel& tc_model, AnalysisType analysis
   buildPorts(tc_lib);
   extractClockArcs(tc_lib);
   _check_arc_extractor.extract(tc_lib, analysis_type);
-  _delay_arc_extractor.extract(tc_lib, analysis_type);
+  _delay_arc_extractor.extract(tc_lib, analysis_type, _check);
   tc_model.get_lib_list().push_back(tc_lib);
 }
 

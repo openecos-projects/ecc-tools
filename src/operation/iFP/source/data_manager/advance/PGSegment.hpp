@@ -43,6 +43,7 @@ class PGSegment
   bool get_generated() const { return _generated; }
   bool is_rail_repair() const { return _rail_repair; }
   bool is_macro_gap_stripe() const { return _macro_gap_stripe; }
+  bool is_macro_pin_via() const { return _macro_pin_via; }
 
   // const getter
   const std::string& get_net_name() const { return _net_name; }
@@ -78,6 +79,7 @@ class PGSegment
   void set_generated(bool generated) { _generated = generated; }
   void mark_rail_repair() { _rail_repair = true; }
   void mark_macro_gap_stripe() { _macro_gap_stripe = true; }
+  void mark_macro_pin_via() { _macro_pin_via = true; }
 
   // function
   bool is_line() const { return _type != PGSegmentType::kNone && _type != PGSegmentType::kVia; }
@@ -105,6 +107,7 @@ class PGSegment
   bool _generated = false;
   bool _rail_repair = false;
   bool _macro_gap_stripe = false;
+  bool _macro_pin_via = false;
 };
 
 }  // namespace ifp

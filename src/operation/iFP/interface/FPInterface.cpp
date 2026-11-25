@@ -69,6 +69,55 @@ void checkKeys(const nlohmann::json& json, std::initializer_list<const char*> al
   }
 }
 
+std::vector<idb::IdbLayerCut*> resolvePGViaCutLayers(const PGSegment& pg_segment)
+{
+  auto* idb_layout = dmInst->get_idb_layout();
+  if (idb_layout == nullptr || idb_layout->get_layers() == nullptr) {
+    return {};
+  }
+  auto* layers = idb_layout->get_layers();
+  auto* bottom = layers->find_layer(pg_segment.get_bottom_layer_name());
+  auto* top = layers->find_layer(pg_segment.get_top_layer_name());
+  if (bottom == nullptr || top == nullptr || !bottom->is_routing() || !top->is_routing() || bottom == top) {
+    return {};
+  }
+  if (bottom->get_order() > top->get_order()) {
+    std::swap(bottom, top);
+  }
+  auto cuts = layers->find_cut_layer_list(bottom->get_name(), top->get_name());
+  if (!pg_segment.get_cut_layer_name().empty()
+      && (cuts.size() != 1 || cuts.front()->get_name() != pg_segment.get_cut_layer_name())) {
+    return {};
+  }
+  idb::IdbLayer* current = bottom;
+  for (auto* cut : cuts) {
+    auto* rule = cut->get_via_rule();
+    if (rule == nullptr || rule->get_layer_bottom() != current || rule->get_layer_top() == nullptr) {
+      return {};
+    }
+    current = rule->get_layer_top();
+  }
+  if (current != top) {
+    return {};
+  }
+  return cuts;
+}
+
+std::pair<int32_t, int32_t> resolveCutPitch(idb::IdbLayerCut* idb_cut_layer, idb::IdbViaRuleGenerate* idb_via_rule)
+{
+  const int32_t cut_size_x = idb_via_rule->get_cut_rect()->get_width();
+  const int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
+  int32_t cut_pitch_x = idb_via_rule->get_spacing_x();
+  int32_t cut_pitch_y = idb_via_rule->get_spacing_y();
+  const std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
+  if (!idb_cut_spacing_list.empty()) {
+    const int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
+    cut_pitch_x = std::max(cut_pitch_x, cut_size_x + cut_spacing);
+    cut_pitch_y = std::max(cut_pitch_y, cut_size_y + cut_spacing);
+  }
+  return {cut_pitch_x, cut_pitch_y};
+}
+
 }  // namespace
 
 FPInterface* FPInterface::_fp_interface_instance = nullptr;
@@ -100,6 +149,7 @@ void FPInterface::initFP(std::map<std::string, std::any> config_map)
   _run_failed = false;
   _pg_via_min_size_cache.clear();
   _pg_via_stack_cache.clear();
+  _pg_via_shapes_cache.clear();
   _adjusted_via_count = 0;
   Logger::initInst();
   // clang-format off
@@ -1677,17 +1727,68 @@ void FPInterface::outputPGSegmentList()
 
 std::vector<InstancePinShape> FPInterface::getPGViaShapes(PGSegment& pg_segment)
 {
-  std::vector<InstancePinShape> shapes;
-  for (auto* via : getPGViaStack(pg_segment)) {
-    for (auto layer_shape : {via->get_bottom_layer_shape(), via->get_top_layer_shape()}) {
-      for (auto* rect : layer_shape.get_rect_list()) {
-        InstancePinShape shape;
-        shape.set_layer_name(layer_shape.get_layer()->get_name());
-        shape.set_rect(pg_segment.get_start_x() + rect->get_low_x(), pg_segment.get_start_y() + rect->get_low_y(),
-                       pg_segment.get_start_x() + rect->get_high_x(), pg_segment.get_start_y() + rect->get_high_y());
-        shapes.push_back(shape);
-      }
+  auto* idb_layout = dmInst->get_idb_layout();
+  if (idb_layout == nullptr || idb_layout->get_layers() == nullptr) {
+    return {};
+  }
+  const int32_t grid = std::max(idb_layout->get_munufacture_grid(), 1);
+  const std::string cache_key = FPUTIL.getString(pg_segment.get_bottom_layer_name(), "|", pg_segment.get_top_layer_name(), "|",
+                                                 pg_segment.get_cut_layer_name(), "|", pg_segment.get_via_width(), "|", pg_segment.get_via_height(), "|",
+                                                 grid);
+  auto cache_iter = _pg_via_shapes_cache.find(cache_key);
+  if (cache_iter == _pg_via_shapes_cache.end()) {
+    const auto cuts = resolvePGViaCutLayers(pg_segment);
+    if (cuts.empty()) {
+      return {};
     }
+    auto* idb_design = dmInst->get_idb_design();
+    auto* idb_via_list = idb_design != nullptr ? idb_design->get_via_list() : nullptr;
+    std::vector<PGViaLayerRect> relative_shapes;
+    relative_shapes.reserve(cuts.size() * 2);
+    for (auto* cut : cuts) {
+      const std::string via_name
+          = cut->get_name() + "_" + std::to_string(pg_segment.get_via_width()) + "x" + std::to_string(pg_segment.get_via_height());
+      idb::IdbVia* existing = idb_via_list != nullptr ? idb_via_list->find_via(via_name) : nullptr;
+      if (existing != nullptr) {
+        for (auto layer_shape : {existing->get_bottom_layer_shape(), existing->get_top_layer_shape()}) {
+          for (auto* rect : layer_shape.get_rect_list()) {
+            relative_shapes.push_back(
+                {layer_shape.get_layer()->get_name(), rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y()});
+          }
+        }
+        continue;
+      }
+      // Compute enclosure shapes directly from the via rule without registering
+      // speculative candidate masters into the design's VIAS list.
+      auto* rule = cut->get_via_rule();
+      const PGViaGeometry geometry = getIDBViaGeometry(cut, pg_segment);
+      if (geometry.cut_row_num == 0 || geometry.cut_col_num == 0) {
+        return {};
+      }
+      const auto [cut_pitch_x, cut_pitch_y] = resolveCutPitch(cut, rule);
+      const int32_t cut_width = rule->get_cut_rect()->get_width() + (geometry.cut_col_num - 1) * cut_pitch_x;
+      const int32_t cut_height = rule->get_cut_rect()->get_height() + (geometry.cut_row_num - 1) * cut_pitch_y;
+      const int32_t cut_ll_x = -cut_width / 2;
+      const int32_t cut_ll_y = -cut_height / 2;
+      const int32_t cut_ur_x = cut_ll_x + cut_width;
+      const int32_t cut_ur_y = cut_ll_y + cut_height;
+      relative_shapes.push_back({rule->get_layer_bottom()->get_name(), cut_ll_x - geometry.bottom_enclosure_x,
+                                 cut_ll_y - geometry.bottom_enclosure_y, cut_ur_x + geometry.bottom_enclosure_x,
+                                 cut_ur_y + geometry.bottom_enclosure_y});
+      relative_shapes.push_back({rule->get_layer_top()->get_name(), cut_ll_x - geometry.top_enclosure_x, cut_ll_y - geometry.top_enclosure_y,
+                                 cut_ur_x + geometry.top_enclosure_x, cut_ur_y + geometry.top_enclosure_y});
+    }
+    cache_iter = _pg_via_shapes_cache.emplace(cache_key, std::move(relative_shapes)).first;
+  }
+
+  std::vector<InstancePinShape> shapes;
+  shapes.reserve(cache_iter->second.size());
+  for (const auto& rect : cache_iter->second) {
+    InstancePinShape shape;
+    shape.set_layer_name(rect.layer_name);
+    shape.set_rect(pg_segment.get_start_x() + rect.ll_x, pg_segment.get_start_y() + rect.ll_y, pg_segment.get_start_x() + rect.ur_x,
+                   pg_segment.get_start_y() + rect.ur_y);
+    shapes.push_back(std::move(shape));
   }
   return shapes;
 }
@@ -1714,14 +1815,28 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
     return;
   }
 
-  std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>> pg_net_layer_coord_to_stripe_segment_list_map;
+  struct LayerStripeIndex
+  {
+    std::map<int32_t, std::vector<PGSegment*>> vertical_by_x;
+    std::map<int32_t, std::vector<PGSegment*>> horizontal_by_y;
+    int32_t max_vertical_half_width = 0;
+    int32_t max_horizontal_half_width = 0;
+  };
+  std::map<std::string, LayerStripeIndex> stripe_index_by_net_layer;
   for (PGSegment& pg_segment : pg_segment_list) {
     if (!pg_segment.is_line() || pg_segment.get_type() == PGSegmentType::kFollowPin) {
       continue;
     }
-    std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", pg_segment.get_layer_name());
-    int32_t line_coord = pg_segment.is_vertical() ? pg_segment.get_start_x() : pg_segment.get_start_y();
-    pg_net_layer_coord_to_stripe_segment_list_map[pg_net_layer_key][line_coord].push_back(&pg_segment);
+    const std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", pg_segment.get_layer_name());
+    auto& index = stripe_index_by_net_layer[pg_net_layer_key];
+    const int32_t half_width = pg_segment.get_width() / 2;
+    if (pg_segment.is_vertical()) {
+      index.vertical_by_x[pg_segment.get_start_x()].push_back(&pg_segment);
+      index.max_vertical_half_width = std::max(index.max_vertical_half_width, half_width);
+    } else if (pg_segment.is_horizontal()) {
+      index.horizontal_by_y[pg_segment.get_start_y()].push_back(&pg_segment);
+      index.max_horizontal_half_width = std::max(index.max_horizontal_half_width, half_width);
+    }
   }
 
   size_t via_ordinal = 0;
@@ -1733,34 +1848,29 @@ void FPInterface::adjustPGLineSegmentListByViaEnclosure()
       continue;
     }
 
-    std::vector<idb::IdbLayerCut*> idb_cut_layer_list;
-    if (!pg_segment.get_cut_layer_name().empty()) {
-      idb::IdbLayer* idb_layer = idb_layout->get_layers()->find_layer(pg_segment.get_cut_layer_name());
-      idb::IdbLayerCut* idb_cut_layer = dynamic_cast<idb::IdbLayerCut*>(idb_layer);
-      if (idb_cut_layer != nullptr) {
-        idb_cut_layer_list.push_back(idb_cut_layer);
-      }
-    } else {
-      idb_cut_layer_list = idb_layout->get_layers()->find_cut_layer_list(pg_segment.get_bottom_layer_name(), pg_segment.get_top_layer_name());
-    }
-
-    for (idb::IdbLayerCut* idb_cut_layer : idb_cut_layer_list) {
-      idb::IdbVia* idb_via = getIDBVia(idb_cut_layer, pg_segment);
-      if (idb_via == nullptr) {
+    // Match every stripe whose transverse span covers the via enclosure,
+    // including off-center vias near macro pin edges.
+    for (const auto& shape : getPGViaShapes(pg_segment)) {
+      const std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", shape.get_layer_name());
+      auto layer_iter = stripe_index_by_net_layer.find(pg_net_layer_key);
+      if (layer_iter == stripe_index_by_net_layer.end()) {
         continue;
       }
-      idb::IdbLayerShape idb_bottom_layer_shape = idb_via->get_bottom_layer_shape();
-      idb::IdbRect idb_bottom_enclosure = idb_bottom_layer_shape.get_bounding_box();
-      adjustLineSegmentListByViaEnclosure(
-          pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_bottom_layer_shape.get_layer()->get_name(),
-          pg_segment.get_start_x() + idb_bottom_enclosure.get_low_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_low_y(),
-          pg_segment.get_start_x() + idb_bottom_enclosure.get_high_x(), pg_segment.get_start_y() + idb_bottom_enclosure.get_high_y());
-
-      idb::IdbLayerShape idb_top_layer_shape = idb_via->get_top_layer_shape();
-      idb::IdbRect idb_top_enclosure = idb_top_layer_shape.get_bounding_box();
-      adjustLineSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, idb_top_layer_shape.get_layer()->get_name(),
-                                          pg_segment.get_start_x() + idb_top_enclosure.get_low_x(), pg_segment.get_start_y() + idb_top_enclosure.get_low_y(),
-                                          pg_segment.get_start_x() + idb_top_enclosure.get_high_x(), pg_segment.get_start_y() + idb_top_enclosure.get_high_y());
+      auto& index = layer_iter->second;
+      if (!index.vertical_by_x.empty()) {
+        const int32_t min_center = shape.get_ur_x() - index.max_vertical_half_width;
+        const int32_t max_center = shape.get_ll_x() + index.max_vertical_half_width;
+        for (auto it = index.vertical_by_x.lower_bound(min_center); it != index.vertical_by_x.end() && it->first <= max_center; ++it) {
+          adjustLineSegmentByViaEnclosure(it->second, shape.get_ll_x(), shape.get_ll_y(), shape.get_ur_x(), shape.get_ur_y());
+        }
+      }
+      if (!index.horizontal_by_y.empty()) {
+        const int32_t min_center = shape.get_ur_y() - index.max_horizontal_half_width;
+        const int32_t max_center = shape.get_ll_y() + index.max_horizontal_half_width;
+        for (auto it = index.horizontal_by_y.lower_bound(min_center); it != index.horizontal_by_y.end() && it->first <= max_center; ++it) {
+          adjustLineSegmentByViaEnclosure(it->second, shape.get_ll_x(), shape.get_ll_y(), shape.get_ur_x(), shape.get_ur_y());
+        }
+      }
     }
   }
   _adjusted_via_count = via_count;
@@ -1785,40 +1895,18 @@ std::vector<idb::IdbVia*> FPInterface::getPGViaStack(PGSegment& pg_segment)
     return cache_iter->second;
   }
 
-  auto* idb_layout = dmInst->get_idb_layout();
-  if (idb_layout == nullptr || idb_layout->get_layers() == nullptr) {
-    return {};
-  }
-  auto* layers = idb_layout->get_layers();
-  auto* bottom = layers->find_layer(pg_segment.get_bottom_layer_name());
-  auto* top = layers->find_layer(pg_segment.get_top_layer_name());
-  if (bottom == nullptr || top == nullptr || !bottom->is_routing() || !top->is_routing() || bottom == top) {
-    return {};
-  }
-  if (bottom->get_order() > top->get_order()) {
-    std::swap(bottom, top);
-  }
-  auto cuts = layers->find_cut_layer_list(bottom->get_name(), top->get_name());
-  if (!pg_segment.get_cut_layer_name().empty()
-      && (cuts.size() != 1 || cuts.front()->get_name() != pg_segment.get_cut_layer_name())) {
+  const auto cuts = resolvePGViaCutLayers(pg_segment);
+  if (cuts.empty()) {
     return {};
   }
   std::vector<idb::IdbVia*> stack;
-  idb::IdbLayer* current = bottom;
+  stack.reserve(cuts.size());
   for (auto* cut : cuts) {
-    auto* rule = cut->get_via_rule();
-    if (rule == nullptr || rule->get_layer_bottom() != current || rule->get_layer_top() == nullptr) {
-      return {};
-    }
     auto* via = getIDBVia(cut, pg_segment);
     if (via == nullptr) {
       return {};
     }
     stack.push_back(via);
-    current = rule->get_layer_top();
-  }
-  if (current != top) {
-    return {};
   }
   _pg_via_stack_cache[cache_key] = stack;
   return stack;
@@ -1910,14 +1998,7 @@ idb::IdbVia* FPInterface::buildIDBVia(std::string via_name, idb::IdbLayerCut* id
 
   int32_t cut_size_x = idb_via_rule->get_cut_rect()->get_width();
   int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
-  int32_t cut_spacing_x = idb_via_rule->get_spacing_x();
-  int32_t cut_spacing_y = idb_via_rule->get_spacing_y();
-  std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
-  if (!idb_cut_spacing_list.empty()) {
-    int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
-    cut_spacing_x = std::max(cut_spacing_x, cut_size_x + cut_spacing);
-    cut_spacing_y = std::max(cut_spacing_y, cut_size_y + cut_spacing);
-  }
+  auto [cut_spacing_x, cut_spacing_y] = resolveCutPitch(idb_cut_layer, idb_via_rule);
   cut_spacing_x -= cut_size_x;
   cut_spacing_y -= cut_size_y;
 
@@ -1973,17 +2054,10 @@ PGViaGeometry FPInterface::getIDBViaGeometry(idb::IdbLayerCut* idb_cut_layer, PG
 
   int32_t cut_size_x = idb_via_rule->get_cut_rect()->get_width();
   int32_t cut_size_y = idb_via_rule->get_cut_rect()->get_height();
-  int32_t cut_pitch_x = idb_via_rule->get_spacing_x();
-  int32_t cut_pitch_y = idb_via_rule->get_spacing_y();
-  if (cut_size_x <= 0 || cut_size_y <= 0 || cut_pitch_x <= 0 || cut_pitch_y <= 0) {
+  if (cut_size_x <= 0 || cut_size_y <= 0 || idb_via_rule->get_spacing_x() <= 0 || idb_via_rule->get_spacing_y() <= 0) {
     return result;
   }
-  std::vector<idb::IdbLayerCutSpacing*> idb_cut_spacing_list = idb_cut_layer->get_spacings();
-  if (!idb_cut_spacing_list.empty()) {
-    int32_t cut_spacing = idb_cut_spacing_list.front()->get_spacing();
-    cut_pitch_x = std::max(cut_pitch_x, cut_size_x + cut_spacing);
-    cut_pitch_y = std::max(cut_pitch_y, cut_size_y + cut_spacing);
-  }
+  auto [cut_pitch_x, cut_pitch_y] = resolveCutPitch(idb_cut_layer, idb_via_rule);
 
   int32_t bottom_overhang_1 = std::max(idb_via_rule->get_enclosure_bottom()->get_overhang_1(), 0);
   int32_t bottom_overhang_2 = std::max(idb_via_rule->get_enclosure_bottom()->get_overhang_2(), 0);
@@ -2082,38 +2156,6 @@ bool FPInterface::adjustIDBViaEnclosureArea(idb::IdbLayerRouting* idb_layer, int
   enclosure_x = best_x;
   enclosure_y = best_y;
   return true;
-}
-
-void FPInterface::adjustLineSegmentListByViaEnclosure(
-    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_stripe_segment_list_map, PGSegment& pg_segment,
-    std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
-{
-  adjustStripeSegmentListByViaEnclosure(pg_net_layer_coord_to_stripe_segment_list_map, pg_segment, layer_name, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x,
-                                        enclosure_ur_y);
-}
-
-bool FPInterface::adjustStripeSegmentListByViaEnclosure(
-    std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>& pg_net_layer_coord_to_line_segment_list_map, PGSegment& pg_segment,
-    std::string layer_name, int32_t enclosure_ll_x, int32_t enclosure_ll_y, int32_t enclosure_ur_x, int32_t enclosure_ur_y)
-{
-  std::string pg_net_layer_key = FPUTIL.getString(pg_segment.get_net_name(), "|", layer_name);
-  std::map<std::string, std::map<int32_t, std::vector<PGSegment*>>>::iterator pg_net_layer_map_iter
-      = pg_net_layer_coord_to_line_segment_list_map.find(pg_net_layer_key);
-  if (pg_net_layer_map_iter == pg_net_layer_coord_to_line_segment_list_map.end()) {
-    return false;
-  }
-
-  bool covered = false;
-  std::map<int32_t, std::vector<PGSegment*>>& coord_to_line_segment_list_map = pg_net_layer_map_iter->second;
-  std::map<int32_t, std::vector<PGSegment*>>::iterator x_coord_iter = coord_to_line_segment_list_map.find(pg_segment.get_start_x());
-  if (x_coord_iter != coord_to_line_segment_list_map.end()) {
-    covered = adjustLineSegmentByViaEnclosure(x_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y);
-  }
-  std::map<int32_t, std::vector<PGSegment*>>::iterator y_coord_iter = coord_to_line_segment_list_map.find(pg_segment.get_start_y());
-  if (y_coord_iter != coord_to_line_segment_list_map.end()) {
-    covered = adjustLineSegmentByViaEnclosure(y_coord_iter->second, enclosure_ll_x, enclosure_ll_y, enclosure_ur_x, enclosure_ur_y) || covered;
-  }
-  return covered;
 }
 
 bool FPInterface::adjustLineSegmentByViaEnclosure(std::vector<PGSegment*>& line_segment_list, int32_t enclosure_ll_x, int32_t enclosure_ll_y,

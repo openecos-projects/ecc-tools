@@ -53,7 +53,7 @@ struct SparseTimingCheck
 {
   int32_t state = -1;
   int32_t capture_domain = -1;
-  int32_t endpoint_arc = -1;  // timing_check_arcs index, -1 for an I/O check
+  int32_t endpoint_arc = -1;  // timing_check_arcs index, -1 for a constant I/O or inferred gate-window rule
   int32_t transition = 0;     // 0 rise, 1 fall
   int32_t constraint = -1;    // chosen path exception, -1 for normal setup
   SparseTimingRuleKind kind = SparseTimingRuleKind::kNormal;
