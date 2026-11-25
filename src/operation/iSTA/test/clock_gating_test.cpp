@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 
 #include "ClockGatingChecker.hpp"
+#include "DataManager.hpp"
 #include "DelayCalculator.hpp"
 #include "MinTimingDataExporter.hpp"
 #include "PathChecker.hpp"
+#include "SparseTimingSnapshot.hpp"
 #include "TimingDataExporter.hpp"
 #include "sdc/ExceptionMatcher.hpp"
 using namespace ista;
@@ -89,6 +92,101 @@ Database design(bool high, bool invert_clock, bool invert_output)
   db.graph().endpoints().push_back("ff:D");  // Existing structural endpoint must survive reset.
   return db;
 }
+
+void checkExport(const Database& source, TimingPathState path)
+{
+  // Test both full STA and structural preparation, including the single-clock
+  // case that must select the sparse contract solely because of this gate.
+  for (bool structural : {false, true}) {
+    for (bool single_clock : {false, true}) {
+      for (auto exception : {std::optional<TimingExceptionType>{}, std::optional{TimingExceptionType::kMinDelay}, std::optional{TimingExceptionType::kMaxDelay},
+                             std::optional{TimingExceptionType::kFalsePath}}) {
+        DataManager::initInst();
+        auto& db = STADM.getDatabase();
+        db = source;
+        if (single_clock) {
+          db.sdc().get_clock_map().erase("launch");
+          path.set_clock_name("clk");
+        } else {
+          path.set_clock_name("launch");
+        }
+        if (structural)
+          for (auto& [name, point] : db.graph().points())
+            for (auto& [clock, state] : point.get_clock_state_map()) {
+              state.waveforms.clear();
+              state.is_structural = true;
+            }
+        if (exception) {
+          TimingException budget;
+          budget.set_type(*exception);
+          budget.set_delay(.4);
+          budget.set_to_objects({{ExceptionObjectType::kPin, "gate:E"}});
+          db.sdc().get_path_exception_list().push_back(budget);
+        }
+        ClockGatingChecker(db).infer();
+        for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
+          for (auto edge : {TransType::kRise, TransType::kFall}) {
+            auto& state = db.graph().points().at("gate:E").get_path_state_map()[mode][PathSourceType::kInput][edge]["gate"];
+            state = path;
+            state.set_trans_type(edge);
+            state.set_path_state_tag("gate");
+            state.set_exception_state_list(ExceptionMatcher(db.sdc(), db.network()).initState("in", path.get_clock_name(), TransType::kRise, mode, edge));
+            auto& launch = db.graph().points().at("ff:CK").get_path_state_map()[mode][PathSourceType::kRegister][edge]["clock"];
+            launch.set_start_point("ff:CK");
+            launch.set_clock_name("clk");
+            launch.set_trans_type(edge);
+            launch.set_arrival(0.);
+            launch.set_path_state_tag("clock");
+          }
+        auto snapshot = TimingDataExporter::exportData(db, STADM.getConfig());
+        if (structural) {
+          exportMinTimingModel(snapshot, db, STADM.getConfig());
+          SparseTimingExportAdapter::compileModel(snapshot);
+        } else {
+          exportMinTimingData(snapshot, db, STADM.getConfig());
+          SparseTimingExportAdapter::compile(snapshot);
+        }
+        require(snapshot.schema_version == 3 && snapshot.sparse.enabled, "gate check did not select sparse export");
+        for (const auto& message : snapshot.sparse.unsupported)
+          require(false, message.c_str());
+        for (const auto& message : snapshot.sparse_min.unsupported)
+          require(false, message.c_str());
+        require(snapshot.timing_check_arcs.empty(), "inferred gate fabricated a Liberty constraint LUT");
+        if (exception == TimingExceptionType::kFalsePath) {
+          require(snapshot.sparse.checks.empty() && snapshot.min_contexts.empty(), "false-path gate leaked into optimization");
+        } else {
+          require(snapshot.sparse.checks.size() == 2 && snapshot.min_contexts.size() == 2, "gate lost a setup/hold transition");
+          DelayCalculator delay(db, STADM.getConfig());
+          PathChecker checker(db, delay);
+          for (const auto& rule : snapshot.sparse.checks) {
+            const auto edge = rule.transition == 0 ? TransType::kRise : TransType::kFall;
+            const auto& state = db.graph().points().at("gate:E").get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][edge]["gate"];
+            const auto expected = checker.checkPath(state, "gate:E", AnalysisType::kMax);
+            require(expected && rule.valid && rule.endpoint_arc == -1, "gate opening rule lost its native context");
+            near(rule.check_coefficient, 0., "gate opening rule requires a fabricated LUT");
+            near(rule.intercept_ps, expected->required() * snapshot.time_unit_ps, "gate setup export changed required time");
+            near(rule.reference_required_ps, rule.intercept_ps, "gate setup model disagrees with native reference");
+          }
+          for (const auto& context : snapshot.min_contexts) {
+            const auto edge = context.data_transition == 1 ? TransType::kRise : TransType::kFall;
+            const auto& state = db.graph().points().at("gate:E").get_path_state_map()[AnalysisType::kMin][PathSourceType::kInput][edge]["gate"];
+            const auto expected = checker.checkPath(state, "gate:E", AnalysisType::kMin);
+            require(expected && context.check_type == static_cast<int32_t>(TimingCheckType::kClockGatingHold), "gate hold lost its check class");
+            require(context.capture_pin == "gate:C" && context.capture_clock == expected->captureClock(), "gate hold lost capture identity");
+            near(context.required_ps, expected->required() * snapshot.time_unit_ps, "gate hold export changed required time");
+            near(context.normal_required_ps, expected->check().required * snapshot.time_unit_ps, "gate hold lost the unadjusted window");
+          }
+          auto pin = std::find_if(snapshot.pins.begin(), snapshot.pins.end(), [](const auto& p) { return p.name == "gate:E"; });
+          require(
+              pin != snapshot.pins.end() && pin->max_qualification.valid == std::array{true, true} && pin->min_qualification.valid == std::array{true, true},
+              "exported gate rules did not qualify both endpoint transitions");
+        }
+        DataManager::destroyInst();
+      }
+    }
+  }
+}
+
 void checkGate(bool high, bool invert_clock, bool invert_output)
 {
   auto db = design(high, invert_clock, invert_output);
@@ -137,7 +235,7 @@ void checkGate(bool high, bool invert_clock, bool invert_output)
   db.sdc().get_path_exception_list().clear();
   path.set_exception_state_list({});
   require(checker.checkPath(path, "gate:E", AnalysisType::kMin).has_value(), "export fixture has no native gate check");
-  db.graph().points().at("gate:E").get_path_state_map()[AnalysisType::kMin][PathSourceType::kInput][TransType::kRise]["gate"] = path;
+  checkExport(db, path);
   // Model preparation has clock topology but deliberately no numeric waveforms.
   for (auto& [name, point] : db.graph().points())
     for (auto& [clock, state] : point.get_clock_state_map()) {
@@ -146,17 +244,6 @@ void checkGate(bool high, bool invert_clock, bool invert_output)
     }
   ClockGatingChecker(db).infer();
   require(db.graph().clockGatingChecks().size() == 1, "structural model silently lost gate endpoints");
-  auto snapshot = TimingDataExporter::exportData(db, config);
-  exportMinTimingModel(snapshot, db, config);
-  require(snapshot.min_contexts.empty(), "unknown gate check enum leaked into external hold schema");
-  require(std::any_of(snapshot.diagnostics.begin(), snapshot.diagnostics.end(),
-                      [](const auto& message) { return message.find("inferred clock-gating check") != std::string::npos; }),
-          "external model did not disclose unsupported gate check");
-  auto exported_pin = std::find_if(snapshot.pins.begin(), snapshot.pins.end(), [](const auto& pin) { return pin.name == "gate:E"; });
-  require(exported_pin != snapshot.pins.end() && !exported_pin->max_qualification.valid[0] && !exported_pin->min_qualification.valid[0]
-              && exported_pin->max_qualification.reason[0] == TimingMaxQualificationReason::kUnsupportedConstraint
-              && exported_pin->min_qualification.reason[0] == TimingMinQualificationReason::kUnsupportedConstraint,
-          "external model falsely qualified gate without a compatible check rule");
   db.graph().simValues().setValue("gate:E", TimingCaseValue::kZero);
   ClockGatingChecker(db).infer();
   require(db.graph().clockGatingChecks().empty(), "constant enable kept a gate check");
