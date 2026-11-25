@@ -139,8 +139,20 @@ class Graph
     auto iter = _driver_points.find(pin_name);
     return iter == nullptr ? _points.at(pin_name) : *iter;
   }
-  TimingPoint& sourcePoint(const Arc& arc) { return arc.get_type() == ArcType::kNet ? driverPoint(arc.get_source_pin()) : _points.at(arc.get_source_pin()); }
-  TimingPoint& sinkPoint(const Arc& arc) { return arc.get_type() == ArcType::kCell ? driverPoint(arc.get_sink_pin()) : _points.at(arc.get_sink_pin()); }
+  TimingPoint& sourcePoint(const Arc& arc)
+  {
+    // Graph-built arcs resolve by vertex index (one vector hop); arcs pushed
+    // by hand without a built vertex list keep the name path.
+    if (arc.get_source_vertex_idx() >= 0)
+      return _vertices[arc.get_source_vertex_idx()].get_timing_point();
+    return arc.get_type() == ArcType::kNet ? driverPoint(arc.get_source_pin()) : _points.at(arc.get_source_pin());
+  }
+  TimingPoint& sinkPoint(const Arc& arc)
+  {
+    if (arc.get_sink_vertex_idx() >= 0)
+      return _vertices[arc.get_sink_vertex_idx()].get_timing_point();
+    return arc.get_type() == ArcType::kCell ? driverPoint(arc.get_sink_pin()) : _points.at(arc.get_sink_pin());
+  }
   const TimingPoint& driverPoint(const std::string& pin_name) const
   {
     auto iter = _driver_points.find(pin_name);
@@ -148,10 +160,14 @@ class Graph
   }
   const TimingPoint& sourcePoint(const Arc& arc) const
   {
+    if (arc.get_source_vertex_idx() >= 0)
+      return _vertices[arc.get_source_vertex_idx()].get_timing_point();
     return arc.get_type() == ArcType::kNet ? driverPoint(arc.get_source_pin()) : _points.at(arc.get_source_pin());
   }
   const TimingPoint& sinkPoint(const Arc& arc) const
   {
+    if (arc.get_sink_vertex_idx() >= 0)
+      return _vertices[arc.get_sink_vertex_idx()].get_timing_point();
     return arc.get_type() == ArcType::kCell ? driverPoint(arc.get_sink_pin()) : _points.at(arc.get_sink_pin());
   }
 
