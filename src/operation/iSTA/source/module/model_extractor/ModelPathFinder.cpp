@@ -16,11 +16,42 @@
 // ***************************************************************************************
 #include "ModelPathFinder.hpp"
 
+#include <cmath>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "PathChecker.hpp"
+#include "PathTracer.hpp"
+
 namespace ista {
+std::vector<TimingPath> ModelPathFinder::findOutputPaths(AnalysisType analysis_type, PathChecker& check)
+{
+  TimingStateQuery query(_database);
+  PathTracer tracer(_database);
+  std::vector<TimingPath> paths;
+  // Reports select one worst path across transitions and related pins. A
+  // Liberty model needs each retained launch and output transition instead.
+  for (auto& endpoint : _database.graph().endpoints()) {
+    if (!isOutputPort(endpoint) || !query.isConstrainedEndPoint(endpoint))
+      continue;
+    auto& point = _database.graph().points().at(endpoint);
+    for (auto source : {PathSourceType::kInput, PathSourceType::kRegister}) {
+      for (auto transition : {TransType::kRise, TransType::kFall}) {
+        if (!query.hasPathState(point, analysis_type, source, transition))
+          continue;
+        for (const auto& [tag, state] : query.getPathStateMap(point, analysis_type, source, transition)) {
+          if (!std::isfinite(state.get_arrival()))
+            continue;
+          if (auto end = check.checkPath(state, endpoint, analysis_type))
+            paths.push_back(tracer.buildTimingPath(endpoint, analysis_type, source, *end));
+        }
+      }
+    }
+  }
+  return paths;
+}
+
 std::vector<TimingPath*> ModelPathFinder::getTimingPathList(AnalysisType analysis_type)
 {
   Database& database = _database;
