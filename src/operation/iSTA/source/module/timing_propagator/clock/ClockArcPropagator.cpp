@@ -60,12 +60,12 @@ void ClockArcPropagator::propagateArrival(ClockSource& clock, std::size_t arc_id
   }
   auto& source_state = source_point.get_clock_state(clock.get_clock_name());
   auto& sink_state = sink_point.get_clock_state(clock.get_clock_name());
-  for (const auto& [source_edge, source] : source_state.waveforms) {
+  source_state.eachWaveform([&](TransType source_edge, ClockWaveform& source) {
     if (!source.physicalArrival(analysis_type, input_trans_type) || !source.physicalSlew(analysis_type, input_trans_type))
-      continue;
+      return;
     for (auto output : getOutputTransTypeList(arc, analysis_type, input_trans_type))
-      updateClockPathState(clock.get_clock_name(), source_edge, arc, source, sink_state.waveforms[source_edge], analysis_type, input_trans_type, output);
-  }
+      updateClockPathState(clock.get_clock_name(), source_edge, arc, source, sink_state.waveformSlot(source_edge), analysis_type, input_trans_type, output);
+  });
   sink_state.summarize();
 }
 
@@ -80,12 +80,12 @@ void ClockArcPropagator::updateClockPathState(std::string_view clock_name, Trans
   const double arrival = roundTime(*source.physicalArrival(analysis_type, input_trans_type) + delay);
   const auto current = sink.physicalArrival(analysis_type, output_trans_type);
   if (!current || isBetterArrival(arrival, *current, analysis_type)) {
-    sink.physical_arrival_map[analysis_type][output_trans_type] = arrival;
-    sink.predecessor_source_map[analysis_type][output_trans_type] = source_edge;
-    sink.physical_predecessor_map[analysis_type][output_trans_type] = arc.get_source_pin();
-    sink.predecessor_vertex_map[analysis_type][output_trans_type] = arc.get_source_vertex_idx();
-    sink.physical_predecessor_arc_delay_map[analysis_type][output_trans_type] = delay;
-    sink.physical_predecessor_trans_type_map[analysis_type][output_trans_type] = input_trans_type;
+    sink.physical_arrival_map.set(analysis_type, output_trans_type, arrival);
+    sink.predecessor_source_map.set(analysis_type, output_trans_type, source_edge);
+    sink.physical_predecessor_map.set(analysis_type, output_trans_type, arc.get_source_pin());
+    sink.predecessor_vertex_map.set(analysis_type, output_trans_type, arc.get_source_vertex_idx());
+    sink.physical_predecessor_arc_delay_map.set(analysis_type, output_trans_type, delay);
+    sink.physical_predecessor_trans_type_map.set(analysis_type, output_trans_type, input_trans_type);
   }
 }
 
@@ -167,12 +167,12 @@ void ClockArcPropagator::propagateSlew(ClockSource& clock, std::size_t arc_idx, 
   }
   auto& source_state = source_point.get_clock_state(clock.get_clock_name());
   auto& sink_state = sink_point.get_clock_state(clock.get_clock_name());
-  for (const auto& [source_edge, source] : source_state.waveforms) {
+  source_state.eachWaveform([&](TransType source_edge, ClockWaveform& source) {
     if (!source.physicalSlew(analysis_type, input_trans_type))
-      continue;
+      return;
     for (auto output : getOutputTransTypeList(arc, analysis_type, input_trans_type))
-      updateClockSlewDelay(clock.get_clock_name(), source_edge, arc, source, sink_state.waveforms[source_edge], analysis_type, input_trans_type, output);
-  }
+      updateClockSlewDelay(clock.get_clock_name(), source_edge, arc, source, sink_state.waveformSlot(source_edge), analysis_type, input_trans_type, output);
+  });
   sink_state.summarize();
 }
 
@@ -188,6 +188,6 @@ void ClockArcPropagator::updateClockSlewDelay(std::string_view clock_name, Trans
   updateGraphArcDelay(arc, analysis_type, input_trans_type, output_trans_type, result->get_delay());
   const auto current = sink.physicalSlew(analysis_type, output_trans_type);
   if (!current || isBetterSlew(result->get_slew(), *current, analysis_type))
-    sink.physical_slew_map[analysis_type][output_trans_type] = result->get_slew();
+    sink.physical_slew_map.set(analysis_type, output_trans_type, result->get_slew());
 }
 }  // namespace ista

@@ -35,7 +35,7 @@ void waveformPresence()
 {
   ClockState state;
   require(!state.arrival(AnalysisType::kMax, TransType::kRise), "absent arrival read as valid");
-  state.arrival_map[AnalysisType::kMax][TransType::kRise] = 0.0;
+  state.arrival_map.set(AnalysisType::kMax, TransType::kRise, 0.0);
   require(state.arrival(AnalysisType::kMax, TransType::kRise) == 0.0, "stored zero read as absent");
   require(!state.arrival(AnalysisType::kMax, TransType::kFall), "write leaked to the other edge");
   require(!state.arrival(AnalysisType::kMin, TransType::kRise), "write leaked to the other mode");
@@ -47,25 +47,25 @@ void waveformPresence()
 void summarizeEnvelope()
 {
   ClockState state;
-  auto& rise = state.waveforms[TransType::kRise];
-  rise.physical_arrival_map[AnalysisType::kMax][TransType::kRise] = 2.0;
-  rise.physical_slew_map[AnalysisType::kMax][TransType::kRise] = 0.2;
-  rise.arrival_map[AnalysisType::kMax][TransType::kRise] = 2.5;
-  rise.slew_map[AnalysisType::kMax][TransType::kRise] = 0.25;
-  rise.predecessor_map[AnalysisType::kMax][TransType::kRise] = "rise_src";
-  auto& fall = state.waveforms[TransType::kFall];
-  fall.physical_arrival_map[AnalysisType::kMax][TransType::kRise] = 3.0;
-  fall.physical_slew_map[AnalysisType::kMax][TransType::kRise] = 0.15;
-  fall.arrival_map[AnalysisType::kMax][TransType::kRise] = 1.5;
-  fall.slew_map[AnalysisType::kMax][TransType::kRise] = 0.1;
-  fall.predecessor_map[AnalysisType::kMax][TransType::kRise] = "fall_src";
+  auto& rise = state.waveformSlot(TransType::kRise);
+  rise.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 2.0);
+  rise.physical_slew_map.set(AnalysisType::kMax, TransType::kRise, 0.2);
+  rise.arrival_map.set(AnalysisType::kMax, TransType::kRise, 2.5);
+  rise.slew_map.set(AnalysisType::kMax, TransType::kRise, 0.25);
+  rise.predecessor_map.set(AnalysisType::kMax, TransType::kRise, "rise_src");
+  auto& fall = state.waveformSlot(TransType::kFall);
+  fall.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 3.0);
+  fall.physical_slew_map.set(AnalysisType::kMax, TransType::kRise, 0.15);
+  fall.arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.5);
+  fall.slew_map.set(AnalysisType::kMax, TransType::kRise, 0.1);
+  fall.predecessor_map.set(AnalysisType::kMax, TransType::kRise, "fall_src");
   state.summarize();
   // Max envelope picks the larger value per field, per source waveform.
-  require(state.physical_arrival_map.at(AnalysisType::kMax).at(TransType::kRise) == 3.0, "physical arrival envelope lost the worse value");
-  require(state.physical_slew_map.at(AnalysisType::kMax).at(TransType::kRise) == 0.2, "physical slew envelope lost the worse value");
-  require(state.arrival_map.at(AnalysisType::kMax).at(TransType::kRise) == 2.5, "arrival envelope lost the worse value");
-  require(state.slew_map.at(AnalysisType::kMax).at(TransType::kRise) == 0.25, "slew envelope lost the worse value");
-  require(state.predecessor_map.at(AnalysisType::kMax).at(TransType::kRise) == "rise_src", "predecessor did not follow the arrival winner");
+  require(state.physical_arrival_map.get(AnalysisType::kMax, TransType::kRise).value() == 3.0, "physical arrival envelope lost the worse value");
+  require(state.physical_slew_map.get(AnalysisType::kMax, TransType::kRise).value() == 0.2, "physical slew envelope lost the worse value");
+  require(state.arrival_map.get(AnalysisType::kMax, TransType::kRise).value() == 2.5, "arrival envelope lost the worse value");
+  require(state.slew_map.get(AnalysisType::kMax, TransType::kRise).value() == 0.25, "slew envelope lost the worse value");
+  require(state.predecessor_map.get(AnalysisType::kMax, TransType::kRise).value() == "rise_src", "predecessor did not follow the arrival winner");
   // The envelope carries nothing the source waveforms never had.
   require(!state.arrival(AnalysisType::kMin, TransType::kRise), "envelope fabricated a min value");
   require(!state.arrival(AnalysisType::kMax, TransType::kFall), "envelope fabricated a fall value");
@@ -75,17 +75,17 @@ void summarizeEnvelope()
 void physicalEdgeExtraction()
 {
   ClockWaveform wave;
-  wave.physical_arrival_map[AnalysisType::kMax][TransType::kRise] = 1.0;
-  wave.physical_arrival_map[AnalysisType::kMax][TransType::kFall] = 2.0;
-  wave.physical_predecessor_map[AnalysisType::kMax][TransType::kFall] = "pred_fall";
-  wave.predecessor_vertex_map[AnalysisType::kMax][TransType::kRise] = 7;
-  wave.arrival_map[AnalysisType::kMax][TransType::kRise] = 9.0;  // effective, not physical
+  wave.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.0);
+  wave.physical_arrival_map.set(AnalysisType::kMax, TransType::kFall, 2.0);
+  wave.physical_predecessor_map.set(AnalysisType::kMax, TransType::kFall, "pred_fall");
+  wave.predecessor_vertex_map.set(AnalysisType::kMax, TransType::kRise, 7);
+  wave.arrival_map.set(AnalysisType::kMax, TransType::kRise, 9.0);  // effective, not physical
   const ClockWaveform rise = wave.physicalEdge(TransType::kRise);
   require(rise.physicalArrival(AnalysisType::kMax, TransType::kRise) == 1.0, "physicalEdge lost the selected edge");
   require(!rise.physicalArrival(AnalysisType::kMax, TransType::kFall), "physicalEdge kept the other edge");
   require(!rise.physicalArrival(AnalysisType::kMin, TransType::kRise), "physicalEdge fabricated the other mode");
   require(rise.physical_predecessor_map.empty(), "physicalEdge kept the other edge's predecessor");
-  require(rise.predecessor_vertex_map.at(AnalysisType::kMax).at(TransType::kRise) == 7, "physicalEdge lost the vertex link");
+  require(rise.predecessor_vertex_map.get(AnalysisType::kMax, TransType::kRise).value() == 7, "physicalEdge lost the vertex link");
   require(rise.arrival_map.empty(), "physicalEdge copied effective values");
 }
 
@@ -94,9 +94,9 @@ void physicalEdgeExtraction()
 void clearAndRepublish()
 {
   ClockState state;
-  state.physical_arrival_map[AnalysisType::kMax][TransType::kRise] = 1.0;
-  state.arrival_map[AnalysisType::kMax][TransType::kRise] = 2.0;
-  state.arrival_map[AnalysisType::kMin][TransType::kRise] = 0.5;  // stale effective-only entry
+  state.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.0);
+  state.arrival_map.set(AnalysisType::kMax, TransType::kRise, 2.0);
+  state.arrival_map.set(AnalysisType::kMin, TransType::kRise, 0.5);  // stale effective-only entry
   state.arrival_map.clear();
   state.arrival_map = state.physical_arrival_map;
   require(state.arrival(AnalysisType::kMax, TransType::kRise) == 1.0, "republish lost the physical value");

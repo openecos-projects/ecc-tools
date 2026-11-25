@@ -83,7 +83,7 @@ static void missingAndZeroClockSlew()
   point.setDefaultClock("clock");
   StartpointInitializer(db, delay).seed(starts);
   require(point.get_data_slew_map().empty(), "missing divider waveform was seeded as zero");
-  point.get_clock_state("clock").slew_map[AnalysisType::kMin][TransType::kRise] = 0.0;
+  point.get_clock_state("clock").slew_map.set(AnalysisType::kMin, TransType::kRise, 0.0);
   StartpointInitializer(db, delay).seed(starts);
   require(point.get_data_slew_map().contains(AnalysisType::kMin) && point.get_data_slew_map().at(AnalysisType::kMin).at(TransType::kRise) == 0.0,
           "explicit zero clock slew was mistaken for a missing waveform");
@@ -91,16 +91,16 @@ static void missingAndZeroClockSlew()
 
   point.set_is_clock_point(true);
   instance.set_output_pin_name("divider:Q");
-  point.get_clock_state("clock").slew_map[AnalysisType::kMax][TransType::kRise] = 0.3;
-  point.get_clock_state("second").slew_map[AnalysisType::kMax][TransType::kRise] = 0.7;
+  point.get_clock_state("clock").slew_map.set(AnalysisType::kMax, TransType::kRise, 0.3);
+  point.get_clock_state("second").slew_map.set(AnalysisType::kMax, TransType::kRise, 0.7);
   for (const auto* clock_name : {"clock", "second"}) {
     auto& clock = db.sdc().get_clock_map()[clock_name];
     clock.set_clock_name(clock_name);
     clock.set_period(10.0);
     auto& state = point.get_clock_state(clock_name);
-    state.waveforms[TransType::kRise] = state;
+    state.waveformSlot(TransType::kRise) = state;
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
-      state.waveforms[TransType::kRise].arrival_map[mode][TransType::kRise] = 0.;
+      state.waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);
   }
   StartpointInitializer(db, delay).seed(starts);
   const auto& paths = point.get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister).at(TransType::kRise);

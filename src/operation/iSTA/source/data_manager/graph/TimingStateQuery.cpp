@@ -153,9 +153,10 @@ std::vector<TransType> clockSourceTransitions(const Database& database, const st
     return {local_edge};  // Virtual or unconstrained clock.
   std::vector<TransType> result;
   const auto* clock_state = point->find_clock_state(clock);
-  for (const auto& [source, wave] : clock_state->waveforms)
+  clock_state->eachWaveform([&](TransType source, const ClockWaveform& wave) {
     if (wave.arrival(mode, local_edge))
       result.push_back(source);
+  });
   // Model preparation deliberately has no numeric clock propagation.  Keep
   // the logical capture edge usable by PathChecker without manufacturing an
   // arrival/slew value.  A complete STA with an unreachable clock still
@@ -171,11 +172,15 @@ bool isIdealClockPin(const Database& database, const std::string& pin)
     for (const auto& [clock, state] : point.get_clock_state_map()) {
       if (state.is_source_path_only || !database.sdc().get_clock_map().contains(clock))
         continue;
-      for (const auto& [source, wave] : state.waveforms)
-        for (const auto& [analysis, edges] : wave.physical_slew_map)
-          for (const auto& [edge, slew] : edges)
-            if (!clockPinValues(database, pin, clock, analysis, edge, AnalysisType::kNone, source, &point).propagated)
-              return true;
+      bool unpropagated = false;
+      state.eachWaveform([&](TransType source, const ClockWaveform& wave) {
+        wave.physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
+          if (!unpropagated && !clockPinValues(database, pin, clock, analysis, edge, AnalysisType::kNone, source, &point).propagated)
+            unpropagated = true;
+        });
+      });
+      if (unpropagated)
+        return true;
     }
     return false;
   };
@@ -276,22 +281,20 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
     const auto* state = clock_state ? clock_state->waveform(source_edge) : nullptr;
     if (!state)
       break;
-    auto pred = state->physical_predecessor_map.find(analysis);
-    if (pred == state->physical_predecessor_map.end() || !pred->second.contains(trace_edge))
+    const auto pred = state->physical_predecessor_map.get(analysis, trace_edge);
+    if (!pred)
       break;
-    current = pred->second.at(trace_edge);
-    const auto vertices = state->predecessor_vertex_map.find(analysis);
-    if (vertices != state->predecessor_vertex_map.end() && vertices->second.contains(trace_edge)) {
-      const auto index = vertices->second.at(trace_edge);
-      point = index >= 0 && static_cast<size_t>(index) < database.graph().vertices().size() ? &database.graph().vertices()[index].get_timing_point() : nullptr;
+    current = *pred;
+    if (const auto index = state->predecessor_vertex_map.get(analysis, trace_edge)) {
+      const auto vertex_index = *index;
+      point = vertex_index >= 0 && static_cast<size_t>(vertex_index) < database.graph().vertices().size() ? &database.graph().vertices()[vertex_index].get_timing_point() : nullptr;
     } else {
       point = clockPoint(database, current, clock_name);
     }
     if (source_edge)
       source_edge = state->predecessorSource(analysis, trace_edge, *source_edge);
-    auto edges = state->physical_predecessor_trans_type_map.find(analysis);
-    if (edges != state->physical_predecessor_trans_type_map.end() && edges->second.contains(trace_edge))
-      trace_edge = edges->second.at(trace_edge);
+    if (const auto next_edge = state->physical_predecessor_trans_type_map.get(analysis, trace_edge))
+      trace_edge = *next_edge;
   }
   return result;
 }
@@ -329,18 +332,17 @@ double TimingStateQuery::clockPathBound(const std::string& pin_name, std::string
       const auto late = state->arrival(AnalysisType::kMax, edge);
       if (early && late && std::isfinite(*early) && std::isfinite(*late) && *early != *late)
         bound = std::max(bound, std::abs(*late - *early));
-      const auto predecessors = state->predecessor_vertex_map.find(mode);
-      if (predecessors == state->predecessor_vertex_map.end() || !predecessors->second.contains(edge))
+      const auto predecessor = state->predecessor_vertex_map.get(mode, edge);
+      if (!predecessor)
         break;
-      const auto vertex = predecessors->second.at(edge);
+      const auto vertex = *predecessor;
       if (vertex < 0 || static_cast<std::size_t>(vertex) >= _database.graph().vertices().size())
         break;
       point = &_database.graph().vertices()[vertex].get_timing_point();
       if (origin)
         origin = state->predecessorSource(mode, edge, *origin);
-      const auto edges = state->predecessor_trans_type_map.find(mode);
-      if (edges != state->predecessor_trans_type_map.end() && edges->second.contains(edge))
-        edge = edges->second.at(edge);
+      if (const auto next_edge = state->predecessor_trans_type_map.get(mode, edge))
+        edge = *next_edge;
     }
   }
   return bound;
@@ -359,20 +361,24 @@ bool TimingStateQuery::canPrunePathStates() const
   if (!sdc.clockPinConstraints().empty() || sdc.get_clock_map().empty() || _database.graph().endpoints().empty())
     return false;
   for (const auto& vertex : _database.graph().vertices())
-    for (const auto& [clock, state] : vertex.get_timing_point().get_clock_state_map())
+    for (const auto& [clock, state] : vertex.get_timing_point().get_clock_state_map()) {
+      bool unique = true;
       for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
         // Keep the local launch transition unique within a source-edge tag.
-        for (const auto& [source, wave] : state.waveforms)
+        state.eachWaveform([&](TransType source, const ClockWaveform& wave) {
           if (wave.arrival(mode, TransType::kRise) && wave.arrival(mode, TransType::kFall))
-            return false;
+            unique = false;
+        });
         for (auto edge : {TransType::kRise, TransType::kFall}) {
           int count = 0;
-          for (const auto& [source, wave] : state.waveforms)
-            count += wave.arrival(mode, edge).has_value();
+          state.eachWaveform([&](TransType source, const ClockWaveform& wave) { count += wave.arrival(mode, edge).has_value(); });
           if (count > 1)
-            return false;
+            unique = false;
         }
       }
+      if (!unique)
+        return false;
+    }
   return true;
 }
 

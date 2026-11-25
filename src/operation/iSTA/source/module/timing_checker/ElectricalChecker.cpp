@@ -105,9 +105,9 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
         for (const auto& clock : dataClocks(point, analysis, edge))
           record(ElectricalRule::kTransition, pin, clock, false, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, false, edge));
     for (const auto& [clock, state] : point.get_clock_state_map())
-      for (const auto& [analysis, edges] : state.physical_slew_map)
-        for (const auto& [edge, slew] : edges)
-          record(ElectricalRule::kTransition, pin, clock, true, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, true, edge));
+      state.physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
+        record(ElectricalRule::kTransition, pin, clock, true, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, true, edge));
+      });
   }
   for (const auto& id : db.network().nets().sortedIds()) {
     const Net& net = db.network().nets().get(id);

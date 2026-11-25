@@ -128,7 +128,7 @@ int main(int argc, char** argv)
   clock_point.set_is_clock_point(true);
   clock_point.setDefaultClock("capture");
   clock_point.setLaunchClock("capture");
-  clock_point.get_clock_state("capture").waveforms[TransType::kRise].arrival_map[AnalysisType::kMin][TransType::kRise] = 0.;
+  clock_point.get_clock_state("capture").waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 0.);
   TimingClockUncertainty uncertainty;
   uncertainty.set_from_clocks({"launch"});
   uncertainty.set_to_clocks({"capture"});

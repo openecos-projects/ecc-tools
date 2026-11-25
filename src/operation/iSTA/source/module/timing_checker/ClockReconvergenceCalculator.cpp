@@ -176,17 +176,18 @@ std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalc
     clock_path_pin_list.push_back({vertex_idx, current_trans_type, source});
     const auto* clock = vertex.get_timing_point().find_clock_state(clock_name);
     const ClockWaveform* state = clock ? clock->waveform(source) : nullptr;
-    if (state == nullptr || !state->predecessor_map.contains(analysis_type) || !state->predecessor_map.at(analysis_type).contains(current_trans_type)) {
+    if (state == nullptr || !state->predecessor_map.get(analysis_type, current_trans_type)) {
       break;
     }
     TransType predecessor_trans_type = current_trans_type;
-    if (state->predecessor_trans_type_map.contains(analysis_type) && state->predecessor_trans_type_map.at(analysis_type).contains(current_trans_type)) {
-      predecessor_trans_type = state->predecessor_trans_type_map.at(analysis_type).at(current_trans_type);
+    if (const auto trans = state->predecessor_trans_type_map.get(analysis_type, current_trans_type)) {
+      predecessor_trans_type = *trans;
     }
-    if (!state->predecessor_vertex_map.contains(analysis_type) || !state->predecessor_vertex_map.at(analysis_type).contains(current_trans_type)) {
+    const auto predecessor_vertex = state->predecessor_vertex_map.get(analysis_type, current_trans_type);
+    if (!predecessor_vertex) {
       break;
     }
-    vertex_idx = state->predecessor_vertex_map.at(analysis_type).at(current_trans_type);
+    vertex_idx = *predecessor_vertex;
     if (source)
       source = state->predecessorSource(analysis_type, current_trans_type, *source);
     current_trans_type = predecessor_trans_type;

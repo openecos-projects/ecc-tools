@@ -170,12 +170,12 @@ void sharedArc(bool slow_first, AnalysisType mode, TransType edge, bool derate =
   ClockSource slow("slow", sources, true), fast("fast", sources, true);
   for (auto name : {"slow", "fast"}) {
     auto& state = db.graph().points().at("u:A").get_clock_state(name);
-    state.waveforms[edge].physical_arrival_map[mode][edge] = 0.;
-    state.waveforms[edge].physical_slew_map[mode][edge] = name == std::string("slow") ? 2. : .1;
+    state.waveformSlot(edge).physical_arrival_map.set(mode, edge, 0.);
+    state.waveformSlot(edge).physical_slew_map.set(mode, edge, name == std::string("slow") ? 2. : .1);
     if (mixed) {
       // Opposite source phases reconverged into the same local transition.
-      state.waveforms[output].physical_arrival_map[mode][edge] = 5.;
-      state.waveforms[output].physical_slew_map[mode][edge] = .45;
+      state.waveformSlot(output).physical_arrival_map.set(mode, edge, 5.);
+      state.waveformSlot(output).physical_slew_map.set(mode, edge, .45);
     }
     state.summarize();
     db.graph().points().at("u:Y").get_clock_state(name);
@@ -188,13 +188,13 @@ void sharedArc(bool slow_first, AnalysisType mode, TransType edge, bool derate =
     auto& state = db.graph().points().at("u:Y").get_clock_state(name);
     double expected = (std::string(name) == "slow" ? 3.0 : 1.1) * factor;
     if (mixed) {
-      if (state.waveforms.size() != 2 || std::fabs(*state.waveforms.at(output).physicalArrival(mode, output) - 6.45) > 1e-9
-          || std::fabs(*state.waveforms.at(edge).physicalArrival(mode, output) - expected) > 1e-9)
+      if (state.waveformCount() != 2 || std::fabs(*state.waveform(output)->physicalArrival(mode, output) - 6.45) > 1e-9
+          || std::fabs(*state.waveform(edge)->physicalArrival(mode, output) - expected) > 1e-9)
         throw std::runtime_error("opposite clock source phases shared a delay winner or cache entry");
       continue;
     }
-    if (std::fabs(state.physical_arrival_map.at(mode).at(edge) - expected) > 1e-9
-        || std::fabs(state.physical_predecessor_arc_delay_map.at(mode).at(edge) - expected) > 1e-9)
+    if (std::fabs(state.physical_arrival_map.get(mode, edge).value() - expected) > 1e-9
+        || std::fabs(state.physical_predecessor_arc_delay_map.get(mode, edge).value() - expected) > 1e-9)
       throw std::runtime_error("named clock consumed another clock's aggregated arc delay");
   }
 }

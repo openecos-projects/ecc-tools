@@ -21,7 +21,7 @@ void ClockGatingChecker::infer()
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
       for (const auto& [clock, state] : point->get_clock_state_map())
-        if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
+        if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms()))
           return true;
     return false;
   };
@@ -33,7 +33,7 @@ void ClockGatingChecker::infer()
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
       for (const auto& [clock, state] : point->get_clock_state_map())
-        if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
+        if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms()))
           pending.emplace_back(pin, clock);
   };
   for (const auto& id : network.instances().sortedIds()) {
@@ -73,7 +73,7 @@ void ClockGatingChecker::infer()
         continue;
       const auto& point = graph.sourcePoint(arc);
       for (const auto& [clock, state] : point.get_clock_state_map())
-        if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty())
+        if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms())
             && _database.sdc().clockAllowsNetArc(network, clock, arc.get_source_pin(), name))
           pending.emplace_back(arc.get_source_pin(), clock);
     }
@@ -90,7 +90,7 @@ void ClockGatingChecker::infer()
       auto& arc = graph.arcs()[index];
       const auto* point = clockPoint(_database, arc.get_source_pin(), clock);
       const auto* state = point ? point->find_clock_state(clock) : nullptr;
-      if (arc.get_is_clock_arc() || query.isDisableArc(arc) || !state || state->is_source_path_only || (!state->is_structural && state->waveforms.empty()))
+      if (arc.get_is_clock_arc() || query.isDisableArc(arc) || !state || state->is_source_path_only || (!state->is_structural && !state->hasWaveforms()))
         continue;
       if (arc.get_type() == ArcType::kNet && !_database.sdc().clockAllowsNetArc(network, clock, arc.get_source_pin(), arc.get_sink_pin()))
         continue;

@@ -299,7 +299,7 @@ void testGeneratedInsertion()
   STADM.getDatabase().graph().clearTiming();
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
   const auto& target = db.graph().points().at("b/inner/sink:A").get_clock_state("gen");
-  require(target.physical_arrival_map.at(AnalysisType::kMax).at(TransType::kRise) > 0, "generated insertion delay lost");
+  require(target.physical_arrival_map.get(AnalysisType::kMax, TransType::kRise).value() > 0, "generated insertion delay lost");
   require(!target.physical_predecessor_map.empty(), "generated source path fell back to zero insertion");
   auto& target_point = db.graph().points().at("b/inner/sink:A");
   require(target_point.findDefaultClockState() == &target, "generated default state missing before data propagation");

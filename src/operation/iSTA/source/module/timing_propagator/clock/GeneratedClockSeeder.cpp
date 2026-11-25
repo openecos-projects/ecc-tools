@@ -43,7 +43,7 @@ void GeneratedClockSeeder::seed(ClockSource& clock)
     for (const auto& pin : clock.get_source_list()) {
       auto& state = database.graph().driverPoint(pin).get_clock_state(clock.get_clock_name());
       for (auto edge : {TransType::kRise, TransType::kFall})
-        state.waveforms[edge] = state.physicalEdge(edge);
+        state.waveformSlot(edge) = state.physicalEdge(edge);
       state.summarize();
     }
     return;
@@ -70,8 +70,8 @@ void GeneratedClockSeeder::seed(ClockSource& clock)
       for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
         auto pin = pin_name;
         const auto driver = port && !fixed_transition ? _delay.inputPortTiming(pin, mode, edge) : std::nullopt;
-        state.waveforms[edge].physical_arrival_map[mode][edge] = driver ? driver->get_delay() : 0.;
-        state.waveforms[edge].physical_slew_map[mode][edge] = driver ? driver->get_slew() : port ? _delay.inputPortSlew(pin, mode, edge) : 0.;
+        state.waveformSlot(edge).physical_arrival_map.set(mode, edge, driver ? driver->get_delay() : 0.);
+        state.waveformSlot(edge).physical_slew_map.set(mode, edge, driver ? driver->get_slew() : port ? _delay.inputPortSlew(pin, mode, edge) : 0.);
       }
     state.summarize();
   }
@@ -168,7 +168,7 @@ bool GeneratedClockSeeder::seedFromMaster(ClockSource& clock, const TimingClock&
     ClockState& generated_state = point.get_clock_state(clock.get_clock_name());
     generated_state.is_source_path_only = !marked;
     if (const ClockState* master_state = point.find_clock_state(master_name); master_state != nullptr && isMasterSeed(vertex)) {
-      generated_state.waveforms = master_state->waveforms;
+      master_state->eachWaveform([&generated_state](TransType edge, const ClockWaveform& wave) { generated_state.waveformSlot(edge) = wave; });
       generated_state.summarize();
     }
   }
@@ -205,11 +205,9 @@ bool GeneratedClockSeeder::hasPhysicalClockState(const TimingPoint& timing_point
   const ClockState* state = timing_point.find_clock_state(clock_name);
   if (state == nullptr)
     return false;
-  for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin}) {
-    const auto analysis_iter = state->physical_arrival_map.find(analysis_type);
-    if (analysis_iter != state->physical_arrival_map.end() && !analysis_iter->second.empty())
+  for (AnalysisType analysis_type : {AnalysisType::kMax, AnalysisType::kMin})
+    if (state->physical_arrival_map.get(analysis_type, TransType::kRise) || state->physical_arrival_map.get(analysis_type, TransType::kFall))
       return true;
-  }
   return false;
 }
 }  // namespace ista

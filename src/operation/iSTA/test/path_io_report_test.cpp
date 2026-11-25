@@ -165,10 +165,10 @@ static void clockPathJson()
     auto& state = db.graph().points()[pin_name].get_clock_state("clk");
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
       for (auto edge : {TransType::kRise, TransType::kFall}) {
-        auto& waveform = state.waveforms[edge];
-        waveform.predecessor_map[mode][TransType::kRise] = predecessor;
-        waveform.predecessor_vertex_map[mode][TransType::kRise] = predecessor_vertex;
-        waveform.predecessor_trans_type_map[mode][TransType::kRise] = TransType::kRise;
+        auto& waveform = state.waveformSlot(edge);
+        waveform.predecessor_map.set(mode, TransType::kRise, predecessor);
+        waveform.predecessor_vertex_map.set(mode, TransType::kRise, predecessor_vertex);
+        waveform.predecessor_trans_type_map.set(mode, TransType::kRise, TransType::kRise);
       }
     }
   }

@@ -47,9 +47,8 @@ static void reconvergentCandidates(bool variation)
     point.setLaunchClock("clk");
     auto& state = point.get_clock_state("clk");
     for (auto edge : {TransType::kRise, TransType::kFall}) {
-      state.waveforms[edge].arrival_map[AnalysisType::kMin][edge] = name == "a:CK" ? 1. : 1.2;
-      state.waveforms[edge].arrival_map[AnalysisType::kMax][edge]
-          = variation ? (name == "a:CK" ? 2. : 1.3) : state.waveforms[edge].arrival_map[AnalysisType::kMin][edge];
+      state.waveformSlot(edge).arrival_map.set(AnalysisType::kMin, edge, name == "a:CK" ? 1. : 1.2);
+      state.waveformSlot(edge).arrival_map.set(AnalysisType::kMax, edge, variation ? (name == "a:CK" ? 2. : 1.3) : state.waveformSlot(edge).arrival_map.get(AnalysisType::kMin, edge).value_or(0.));
     }
     state.summarize();
     Arc arc;
@@ -114,8 +113,8 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
     point.setLaunchClock("clk");
     auto& state = point.get_clock_state("clk");
     for (auto edge : {TransType::kRise, TransType::kFall}) {
-      state.waveforms[edge].arrival_map[AnalysisType::kMin][edge] = name == "a:CK" ? 1. : name == "b:CK" ? 1.2 : 0.;
-      state.waveforms[edge].arrival_map[AnalysisType::kMax][edge] = name == "a:CK" ? 2. : name == "b:CK" ? 1.3 : .05;
+      state.waveformSlot(edge).arrival_map.set(AnalysisType::kMin, edge, name == "a:CK" ? 1. : name == "b:CK" ? 1.2 : 0.);
+      state.waveformSlot(edge).arrival_map.set(AnalysisType::kMax, edge, name == "a:CK" ? 2. : name == "b:CK" ? 1.3 : .05);
     }
     state.summarize();
     Arc arc;
@@ -235,8 +234,8 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
   for (const double late : {2.25, 1.75}) {
     for (Database* design : {&db, &exhaustive}) {
       auto& state = design->graph().points().at("a:CK").get_clock_state("clk");
-      state.waveforms.at(TransType::kRise).arrival_map[AnalysisType::kMax][TransType::kRise] = late;
-      state.waveforms.at(TransType::kFall).arrival_map[AnalysisType::kMax][TransType::kFall] = late - .125;
+      state.waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMax, TransType::kRise, late);
+      state.waveformSlot(TransType::kFall).arrival_map.set(AnalysisType::kMax, TransType::kFall, late - .125);
       state.summarize();
     }
     required.propagate();
@@ -303,8 +302,8 @@ static void cumulativeMergeTolerance(bool hold)
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         const double early = name == "a:CK" ? .9 : .900005;
         const double late = name == "a:CK" ? 1. : .900005;
-        state.waveforms[edge].arrival_map[AnalysisType::kMin][edge] = hold ? 2. - late : early;
-        state.waveforms[edge].arrival_map[AnalysisType::kMax][edge] = hold ? 2. - early : late;
+        state.waveformSlot(edge).arrival_map.set(AnalysisType::kMin, edge, hold ? 2. - late : early);
+        state.waveformSlot(edge).arrival_map.set(AnalysisType::kMax, edge, hold ? 2. - early : late);
       }
       state.summarize();
     }

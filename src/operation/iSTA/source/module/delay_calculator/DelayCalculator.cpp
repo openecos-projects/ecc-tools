@@ -110,9 +110,10 @@ void DelayCalculator::completeCellArcDelays(Graph& graph)
           if (lane != data.end() && lane->second.contains(input))
             slews.insert(lane->second.at(input));
           for (const auto& [clock, state] : source->get_clock_state_map())
-            for (const auto& [edge, wave] : state.waveforms)
+            state.eachWaveform([&](TransType edge, const ClockWaveform& wave) {
               if (const auto slew = wave.physicalSlew(mode, input))
                 slews.insert(*slew);
+            });
         }
         if (slews.empty())
           slews.insert(0.);

@@ -79,8 +79,8 @@ static std::size_t requiredAllocations(std::size_t name_size)
   auto& clock_point = graph.points()[capture];
   clock_point.set_is_clock_point(true);
   auto& waveform = clock_point.get_clock_state("clk");
-  waveform.waveforms[TransType::kRise].arrival_map[AnalysisType::kMin][TransType::kRise] = 1.;
-  waveform.waveforms[TransType::kRise].arrival_map[AnalysisType::kMax][TransType::kRise] = 1.5;
+  waveform.waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 1.);
+  waveform.waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.5);
   waveform.summarize();
   db.network().pins()[capture].set_full_name(capture);
   db.network().pins()[capture].set_load_vertex_idx(count);

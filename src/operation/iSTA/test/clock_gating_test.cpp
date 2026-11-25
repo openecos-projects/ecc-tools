@@ -84,9 +84,9 @@ Database design(bool high, bool invert_clock, bool invert_output)
     point.set_is_clock_point(true);
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (auto edge : {TransType::kRise, TransType::kFall}) {
-        auto& wave = point.get_clock_state("clk").waveforms[edge];
-        wave.arrival_map[mode][edge] = 0.;
-        wave.slew_map[mode][edge] = .03;
+        auto& wave = point.get_clock_state("clk").waveformSlot(edge);
+        wave.arrival_map.set(mode, edge, 0.);
+        wave.slew_map.set(mode, edge, .03);
       }
   }
   db.graph().endpoints().push_back("ff:D");  // Existing structural endpoint must survive reset.
@@ -240,7 +240,7 @@ void checkGate(bool high, bool invert_clock, bool invert_output)
   // Model preparation has clock topology but deliberately no numeric waveforms.
   for (const auto& id : db.graph().points().sortedIds())
     for (auto& [clock, state] : db.graph().points().get(id).get_clock_state_map()) {
-      state.waveforms.clear();
+      state.clearWaveforms();
       state.is_structural = true;
     }
   ClockGatingChecker(db).infer();
@@ -334,13 +334,13 @@ int main()
     auto db = design(true, false, false);
     auto& state = db.graph().points().at("gate:C").get_clock_state("clk");
     for (auto source : {TransType::kRise, TransType::kFall}) {
-      auto& wave = state.waveforms[source];
+      auto& wave = state.waveformSlot(source);
       wave.arrival_map.clear();
       wave.slew_map.clear();
       for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
         const auto local = source == TransType::kRise ? TransType::kFall : TransType::kRise;
-        wave.arrival_map[mode][local] = 0.;
-        wave.slew_map[mode][local] = .03;
+        wave.arrival_map.set(mode, local, 0.);
+        wave.slew_map.set(mode, local, .03);
       }
     }
     ClockGatingChecker(db).infer();

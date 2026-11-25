@@ -46,7 +46,7 @@ void testCaptureClocks()
   }
   for (const auto* clock : {"a", "b"})
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
-      ck.get_clock_state(clock).waveforms[TransType::kRise].arrival_map[mode][TransType::kRise] = 0.;
+      ck.get_clock_state(clock).waveformSlot(TransType::kRise).arrival_map.set(mode, TransType::kRise, 0.);
   ck.get_clock_state("source_only").is_source_path_only = true;
   db.sdc().get_clock_map()["source_only"].set_setup_uncertainty(100.0);
   TimingCheckArc check;

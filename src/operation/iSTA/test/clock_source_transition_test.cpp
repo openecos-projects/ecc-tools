@@ -13,7 +13,7 @@ int main()
   // predecessor of CK is rise, but its source waveform edge is fall.
   for (AnalysisType analysis : {AnalysisType::kMin, AnalysisType::kMax}) {
     auto addWaveform = [&](TransType source, TransType local) {
-      database.graph().points()["CK"].get_clock_state("clk").waveforms[source].arrival_map[analysis][local] = 0.0;
+      database.graph().points()["CK"].get_clock_state("clk").waveformSlot(source).arrival_map.set(analysis, local, 0.0);
     };
     addWaveform(TransType::kFall, TransType::kRise);
     addWaveform(TransType::kRise, TransType::kFall);

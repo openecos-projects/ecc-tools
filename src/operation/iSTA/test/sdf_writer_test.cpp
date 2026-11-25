@@ -133,8 +133,8 @@ static void cellArcAndCheckValues()
   auto& clock = db.graph().points()["u:CK"];
   clock.setLaunchClock("clock");
   clock.setDefaultClock("clock");
-  clock.get_clock_state("clock").slew_map[AnalysisType::kMin][TransType::kRise] = 0.0;
-  clock.get_clock_state("clock").slew_map[AnalysisType::kMax][TransType::kRise] = 1.0;
+  clock.get_clock_state("clock").slew_map.set(AnalysisType::kMin, TransType::kRise, 0.0);
+  clock.get_clock_state("clock").slew_map.set(AnalysisType::kMax, TransType::kRise, 1.0);
   auto width_values = extractor.checkValues(instance, width, table_arc, TransType::kRise);
   require(width_values.minimum == 2.0 && width_values.maximum == 4.0, "WIDTH reversed corners were not ordered");
   cell.get_sdf_check_arc_list().push_back(width);
@@ -184,9 +184,9 @@ static void conditionalArcValues()
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       arc.get_timing_arc_delay_map()[0][mode][edge][edge] = .25;
       arc.get_graph_delay_map()[mode][edge][edge] = .25;
-      auto& wave = point.get_clock_state("M").waveforms[edge];
-      wave.physical_slew_map[mode][edge] = mode == AnalysisType::kMin ? .2 : .6;
-      wave.slew_map[mode][edge] = .01; // Published ideal slew is not the physical waveform.
+      auto& wave = point.get_clock_state("M").waveformSlot(edge);
+      wave.physical_slew_map.set(mode, edge, mode == AnalysisType::kMin ? .2 : .6);
+      wave.slew_map.set(mode, edge, .01); // Published ideal slew is not the physical waveform.
     }
   }
   const auto aggregate = arc.get_graph_delay_map();

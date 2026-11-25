@@ -28,8 +28,8 @@ int main()
   auto& state = db.graph().points()["block/ff:CK"].get_clock_state("clk");
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
     for (auto edge : {TransType::kRise, TransType::kFall}) {
-      state.waveforms[edge].arrival_map[mode][edge] = 0.;
-      state.waveforms[edge].slew_map[mode][edge] = .05;
+      state.waveformSlot(edge).arrival_map.set(mode, edge, 0.);
+      state.waveformSlot(edge).slew_map.set(mode, edge, .05);
     }
   for (auto type : {TimingCheckType::kWidth, TimingCheckType::kPeriod}) {
     TimingCheckArc arc;
@@ -82,7 +82,7 @@ int main()
   clock.set_source_latency(AnalysisType::kMax, clockVariation(AnalysisType::kMax), TransType::kFall, .4);
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
     for (auto edge : {TransType::kRise, TransType::kFall})
-      state.waveforms[edge].arrival_map[mode][edge] = clock.get_source_latency(mode, clockVariation(mode), edge);
+      state.waveformSlot(edge).arrival_map.set(mode, edge, clock.get_source_latency(mode, clockVariation(mode), edge));
   for (const auto& result : ClockChecker(db).check()) {
     near(result.actual, result.type == TimingCheckType::kPeriod ? 2. : 1., "ideal latency CRPR missing");
     near(result.reconvergence, .1, "wrong ideal latency CRPR");
@@ -97,7 +97,7 @@ int main()
   // PT's single-pin pulse lookup uses the checked edge's slew on both
   // related/constrained axes, not the closing edge's different slew.
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
-    state.waveforms[TransType::kFall].slew_map[mode][TransType::kFall] = .08;
+    state.waveformSlot(TransType::kFall).slew_map.set(mode, TransType::kFall, .08);
   auto& tables = cell.get_sdf_check_arc_list().front().get_timing_arc_list().front().get_check_table_map();
   for (auto edge : {TransType::kRise, TransType::kFall}) {
     auto& table = tables[edge];
