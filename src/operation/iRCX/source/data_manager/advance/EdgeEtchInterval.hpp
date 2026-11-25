@@ -17,6 +17,7 @@
 #pragma once
 
 #include "RCXHeader.hpp"
+#include "ProcessGeometry.hpp"
 
 namespace ircx {
 
@@ -34,60 +35,19 @@ class EdgeEtchInterval
   double get_upper_spacing() const { return _upper_spacing; }
   double get_thickness() const { return _thickness; }
   double get_height() const { return _height; }
-  double get_resistance_center() const { return _resistance_center; }
-  double get_resistance_width() const { return _resistance_width; }
-  double get_resistance_lower_spacing() const { return _resistance_lower_spacing; }
-  double get_resistance_upper_spacing() const { return _resistance_upper_spacing; }
-  double get_resistance_thickness() const { return _resistance_thickness; }
-  double get_capacitance_center() const { return _capacitance_center; }
-  double get_capacitance_width() const { return _capacitance_width; }
-  double get_capacitance_lower_spacing() const { return _capacitance_lower_spacing; }
-  double get_capacitance_upper_spacing() const { return _capacitance_upper_spacing; }
-  double get_capacitance_thickness() const { return _capacitance_thickness; }
+  const std::vector<EffectiveWireSegment>& get_resistance_segments() const { return _resistance_segments; }
+  const std::vector<EffectiveWireSegment>& get_capacitance_segments() const { return _capacitance_segments; }
+  void set_resistance_segments(std::vector<EffectiveWireSegment> segments) { _resistance_segments = std::move(segments); }
+  void set_capacitance_segments(std::vector<EffectiveWireSegment> segments) { _capacitance_segments = std::move(segments); }
   // setter
   void set_start_coord(double start_coord) { _start_coord = start_coord; }
   void set_end_coord(double end_coord) { _end_coord = end_coord; }
-  void set_center(double center)
-  {
-    _center = center;
-    _resistance_center = center;
-    _capacitance_center = center;
-  }
-  void set_width(double width)
-  {
-    _width = width;
-    _resistance_width = width;
-    _capacitance_width = width;
-  }
-  void set_lower_spacing(double lower_spacing)
-  {
-    _lower_spacing = lower_spacing;
-    _resistance_lower_spacing = lower_spacing;
-    _capacitance_lower_spacing = lower_spacing;
-  }
-  void set_upper_spacing(double upper_spacing)
-  {
-    _upper_spacing = upper_spacing;
-    _resistance_upper_spacing = upper_spacing;
-    _capacitance_upper_spacing = upper_spacing;
-  }
-  void set_thickness(double thickness)
-  {
-    _thickness = thickness;
-    _resistance_thickness = thickness;
-    _capacitance_thickness = thickness;
-  }
+  void set_center(double center) { _center = center; }
+  void set_width(double width) { _width = width; }
+  void set_lower_spacing(double spacing) { _lower_spacing = spacing; }
+  void set_upper_spacing(double spacing) { _upper_spacing = spacing; }
+  void set_thickness(double thickness) { _thickness = thickness; }
   void set_height(double height) { _height = height; }
-  void set_resistance_center(double resistance_center) { _resistance_center = resistance_center; }
-  void set_resistance_width(double resistance_width) { _resistance_width = resistance_width; }
-  void set_resistance_lower_spacing(double resistance_lower_spacing) { _resistance_lower_spacing = resistance_lower_spacing; }
-  void set_resistance_upper_spacing(double resistance_upper_spacing) { _resistance_upper_spacing = resistance_upper_spacing; }
-  void set_resistance_thickness(double resistance_thickness) { _resistance_thickness = resistance_thickness; }
-  void set_capacitance_center(double capacitance_center) { _capacitance_center = capacitance_center; }
-  void set_capacitance_width(double capacitance_width) { _capacitance_width = capacitance_width; }
-  void set_capacitance_lower_spacing(double capacitance_lower_spacing) { _capacitance_lower_spacing = capacitance_lower_spacing; }
-  void set_capacitance_upper_spacing(double capacitance_upper_spacing) { _capacitance_upper_spacing = capacitance_upper_spacing; }
-  void set_capacitance_thickness(double capacitance_thickness) { _capacitance_thickness = capacitance_thickness; }
   // function
 
  private:
@@ -99,16 +59,10 @@ class EdgeEtchInterval
   double _upper_spacing = -1.0;
   double _thickness = -1.0;
   double _height = -1.0;
-  double _resistance_center = -1.0;
-  double _resistance_width = -1.0;
-  double _resistance_lower_spacing = -1.0;
-  double _resistance_upper_spacing = -1.0;
-  double _resistance_thickness = -1.0;
-  double _capacitance_center = -1.0;
-  double _capacitance_width = -1.0;
-  double _capacitance_lower_spacing = -1.0;
-  double _capacitance_upper_spacing = -1.0;
-  double _capacitance_thickness = -1.0;
+  // Drawn coordinates above remain immutable during process evaluation.
+  // Effective segments below use scaled physical coordinates in micrometres.
+  std::vector<EffectiveWireSegment> _resistance_segments;
+  std::vector<EffectiveWireSegment> _capacitance_segments;
 };
 
 }  // namespace ircx

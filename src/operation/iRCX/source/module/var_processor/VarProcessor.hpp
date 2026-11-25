@@ -52,8 +52,7 @@ class VarProcessor
   void buildCornerNetEtchProfilePool();
   void buildNetEtchProfile(int32_t corner_idx, int32_t net_idx);
   void applyCornerNetEffectiveGeometryList();
-  std::string applyNetEffectiveGeometry(int32_t corner_idx, int32_t net_idx);
-  std::string applyEdgeEffectiveGeometry(const ProcessConductor& conductor, EdgeEtchInterval& edge_interval);
+  ProcessResult<void, std::string> applyCornerEffectiveGeometry(std::size_t corner_index);
   const ProcessConductor* getProcessConductor(CornerData& corner_data, int32_t design_layer_idx);
 };
 

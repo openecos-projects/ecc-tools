@@ -100,7 +100,7 @@ class ResistanceFixture
 
   void loadConfiguration(const std::string& corners)
   {
-    write("mapping.map", "M1 metal1\nM2 metal2\nV1 via1\n");
+    write("mapping.map", mapping_text);
     write("empty.captab", "");
     write("rcx.json", R"({"thread_num":2,"mapping_file":"mapping.map","output":"output","corners":)" + corners + "}");
     std::map<std::string, std::any> config{{"-config", (_directory / "rcx.json").string()}};
@@ -110,7 +110,8 @@ class ResistanceFixture
     layers.register_design_layer(1, "V1");
   }
 
-  void addGeometry(bool is_via = false, int32_t cut_x = 100, int32_t cut_y = 200, bool vertical = false, bool reversed = false)
+  void addGeometry(bool is_via = false, int32_t cut_x = 100, int32_t cut_y = 200, bool vertical = false, bool reversed = false,
+                   bool adjacent = false)
   {
     auto& database = RCXDM.getDatabase();
     database.get_net_env_list().resize(2);
@@ -126,7 +127,8 @@ class ResistanceFixture
         edge.set_via_name("cut");
         edge.set_shape(GTLRectInt(0, 0, cut_x, cut_y));
       } else {
-        edge.set_shape(vertical ? GTLRectInt(-100, 0, 100, 1000) : GTLRectInt(0, -100, 1000, 100));
+        const int32_t center = adjacent ? 300 * net_idx : 0;
+        edge.set_shape(vertical ? GTLRectInt(-100, 0, 100, 1000) : GTLRectInt(0, center - 100, 1000, center + 100));
       }
       database.get_topo_pool().add_net(std::move(nodes), {edge});
       EdgeEnvInterval interval;
@@ -134,7 +136,15 @@ class ResistanceFixture
       interval.set_end_coord(1000);
       database.get_net_env_list()[net_idx].append_edge_interval_list({interval});
     }
-    RCXVP.process();
+    if (adjacent) {
+      auto& lower = database.get_net_env_list()[0].get_edge_interval_list(0)[0];
+      auto& upper = database.get_net_env_list()[1].get_edge_interval_list(0)[0];
+      lower.set_upper_adjacent_edge(&database.get_topo_pool().get_net_edge_list(1)[0]);
+      lower.set_upper_spacing(300);
+      upper.set_lower_adjacent_edge(&database.get_topo_pool().get_net_edge_list(0)[0]);
+      upper.set_lower_spacing(300);
+    }
+    if (!defer_geometry) RCXVP.process();
   }
 
   void extractAndExpect(double expected)
@@ -158,7 +168,7 @@ class ResistanceFixture
         expectNear(new_intervals[i].get_end_coord(), old_intervals[i].get_end_coord());
         expectNear(new_intervals[i].get_lower_spacing(), old_intervals[i].get_lower_spacing());
         expectNear(new_intervals[i].get_upper_spacing(), old_intervals[i].get_upper_spacing());
-        expectNear(new_intervals[i].get_capacitance_width(), old_intervals[i].get_capacitance_width());
+        expectNear(new_intervals[i].get_capacitance_segments().front().geometry.width, old_intervals[i].get_capacitance_segments().front().geometry.width);
       }
     }
   }
@@ -166,12 +176,16 @@ class ResistanceFixture
   void expectInvalidGeometry()
   {
     try {
+      if (defer_geometry) RCXVP.process();
       RCXRE.extract();
     } catch (const std::runtime_error&) {
       return;
     }
     throw std::runtime_error("invalid resistance geometry was accepted");
   }
+
+  std::string mapping_text = "M1 metal1\nM2 metal2\nV1 via1\n";
+  bool defer_geometry = false;
 
  private:
   void write(const std::string& name, const std::string& content)
@@ -210,6 +224,18 @@ using Test = std::pair<std::string, std::function<void()>>;
 std::vector<Test> processInputTests()
 {
   return {
+      {"sectioned maps retain conducting pairs and ignore nonconductive sections",
+       [] {
+         ResistanceFixture fixture;
+         fixture.mapping_text = "conducting_layers\nM1 metal1 # routing\nM2 metal2\nvia_layers\nV1 via1\n"
+                                "marker_layers\nMARK ignored\nremove_layers\nPO\nCT\n";
+         fixture.loadProcess("CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12 }");
+         fixture.addGeometry();
+         fixture.extractAndExpect(.6);
+         const auto& mapping = RCXDM.getDatabase().get_layer_table().get_design_name_to_process_name_map();
+         if (mapping.size() != 3 || mapping.contains("MARK"))
+           throw std::runtime_error("nonconductive mapping was imported");
+       }},
       {"cache distinguishes files and accepts the obsolete extension spelling",
        [] {
          ResistanceFixture fixture;
@@ -430,6 +456,105 @@ std::vector<Test> processInputTests()
 std::vector<Test> wireTests()
 {
   return {
+      {"later etch stages use both neighbors updated walls", [] {
+         ResistanceFixture fixture;
+         fixture.loadProcess(R"(CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING { WIDTHS {.2} VALUES {.01} }
+           ETCH_VS_WIDTH_AND_SPACING { SPACINGS {.1 .12} VALUES {0 .01} }
+         })");
+         fixture.addGeometry(false, 100, 200, false, false, true);
+         fixture.extractAndExpect(.75);
+       }},
+      {"special wires contribute their updated facing walls", [] {
+         ResistanceFixture fixture;
+         fixture.defer_geometry = true;
+         fixture.loadProcess(R"(CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING { WIDTHS {.2} VALUES {.01} }
+           ETCH_VS_WIDTH_AND_SPACING { SPACINGS {.1 .12} VALUES {0 .01} }
+         })");
+         fixture.addGeometry(false, 100, 200, false, false, true);
+         auto& database = RCXDM.getDatabase();
+         auto& topology = database.get_topo_pool();
+         TopoEdge special;
+         special.set_layer_idx(0);
+         special.set_shape(GTLRectInt(0, 500, 1000, 700));
+         topology.add_special_edge_list({special});
+         auto& interval = database.get_net_env_list()[1].get_edge_interval_list(0)[0];
+         interval.set_upper_adjacent_edge(&topology.get_special_edge_pool()[0]);
+         interval.set_upper_spacing(300);
+         EdgeEnvInterval special_interval;
+         special_interval.set_start_coord(0);
+         special_interval.set_end_coord(1000);
+         special_interval.set_lower_adjacent_edge(&topology.get_net_edge_list(1)[0]);
+         special_interval.set_lower_spacing(300);
+         database.get_special_edge_env_list() = {{special_interval}};
+         RCXVP.process();
+         fixture.extractAndExpect(.75);
+         RCXVP.process();
+         fixture.extractAndExpect(.75);
+       }},
+      {"resistance integrates neighbor-induced pieces without repeating etch", [] {
+         ResistanceFixture fixture;
+         fixture.defer_geometry = true;
+         fixture.loadProcess(R"(CONDUCTOR metal1 {THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.1 .3} VALUES {.01 .03}}
+           ETCH_VS_WIDTH_AND_SPACING {WIDTHS {.16 .18} VALUES {.01 .02}}
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.15 .16} VALUES {0 .01}}})");
+         fixture.addGeometry();
+         auto& database = RCXDM.getDatabase();
+         auto& topology = database.get_topo_pool();
+         auto* master = &topology.get_net_edge_list(0)[0];
+         auto* neighbor = &topology.get_net_edge_list(1)[0];
+         neighbor->set_shape(GTLRectInt(0, -400, 1000, -200));
+         TopoEdge upper, outer;
+         upper.set_layer_idx(0); outer.set_layer_idx(0);
+         upper.set_shape(GTLRectInt(0, 200, 1000, 400));
+         outer.set_shape(GTLRectInt(500, -700, 1000, -500));
+         topology.add_special_edge_list({upper, outer});
+         auto* upper_edge = &topology.get_special_edge_pool()[0];
+         auto* outer_edge = &topology.get_special_edge_pool()[1];
+         auto interval = [](int32_t start, int32_t end, TopoEdge* lower, TopoEdge* upper) {
+           EdgeEnvInterval value;
+           value.set_start_coord(start); value.set_end_coord(end);
+           value.set_lower_adjacent_edge(lower); value.set_upper_adjacent_edge(upper);
+           value.set_lower_spacing(300); value.set_upper_spacing(300);
+           return value;
+         };
+         database.get_net_env_list().assign(2, NetEnv{});
+         database.get_net_env_list()[0].append_edge_interval_list({interval(0, 1000, neighbor, upper_edge)});
+         database.get_net_env_list()[1].append_edge_interval_list({interval(0, 500, nullptr, master), interval(500, 1000, outer_edge, master)});
+         database.get_special_edge_env_list() = {{interval(0, 1000, master, nullptr)}, {interval(500, 1000, nullptr, neighbor)}};
+         RCXVP.process();
+         RCXRE.extract();
+         expectNear(database.get_rc_data().get_corner_net_resistance_list({0, 0}).at(0), .8901098901098901);
+         const auto intervals = database.get_corner_net_etch_profile_pool().get_item({0, 0}).get_edge_interval_list(0);
+         if (intervals.size() != 1 || intervals[0].get_resistance_segments().size() != 2)
+           throw std::runtime_error("neighbor boundaries changed environment indexes");
+       }},
+      {"capacitance etch preserves drawn and resistance geometry", [] {
+         ResistanceFixture fixture;
+         fixture.loadProcess("CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12 CAPACITIVE_ONLY_ETCH=.02 }");
+         fixture.addGeometry();
+         const auto& interval = RCXDM.getDatabase().get_corner_net_etch_profile_pool().get_item({0, 0}).get_edge_interval_list(0)[0];
+         expectNear(interval.get_width(), .2);
+         expectNear(interval.get_resistance_segments().front().geometry.width, .2);
+         expectNear(interval.get_capacitance_segments().front().geometry.width, .16);
+         fixture.extractAndExpect(.6);
+       }},
+      {"odd database widths preserve rectangle sidewall positions", [] {
+         ResistanceFixture fixture;
+         fixture.defer_geometry = true;
+         fixture.loadProcess("CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12 }");
+         fixture.addGeometry(false, 100, 200, false, false, true);
+         auto& database = RCXDM.getDatabase();
+         database.get_topo_pool().get_net_edge_list(0)[0].set_shape(GTLRectInt(0, -50, 1000, 50));
+         database.get_topo_pool().get_net_edge_list(1)[0].set_shape(GTLRectInt(0, 50, 1000, 151));
+         RCXVP.process();
+         const auto& upper = database.get_corner_net_etch_profile_pool().get_item({0, 1}).get_edge_interval_list(0)[0];
+         expectNear(upper.get_center(), .1005);
+         expectNear(upper.get_lower_spacing(), 0);
+         expectNear(upper.get_resistance_segments().front().lower_spacing, 0);
+       }},
       {"no scalar etch", [] { checkWire("RPSQ=0.12", 0.6); }},
       {"resistive shrink", [] { checkWire("RPSQ=0.12 RESISTIVE_ONLY_ETCH=0.02", 0.75); }},
       {"resistive expansion", [] { checkWire("RPSQ=0.12 RESISTIVE_ONLY_ETCH=-0.025", 0.48); }},
@@ -480,6 +605,7 @@ std::vector<Test> invalidTests()
   return {
       {"collapsed wire", [] {
          ResistanceFixture fixture;
+         fixture.defer_geometry = true;
          fixture.loadProcess("CONDUCTOR metal1 { THICKNESS=0.1 RPSQ=0.12 RESISTIVE_ONLY_ETCH=0.1 }");
          fixture.addGeometry();
          fixture.expectInvalidGeometry();
@@ -524,6 +650,7 @@ void checkExistingScaledGeometry(double scale)
   auto model = std::make_shared<ProcessTechnology>(*corner.get_process_technology());
   model->geometry_scale = scale;
   corner.set_process_technology(std::move(model));
+  fixture.defer_geometry = !std::isfinite(scale) || scale <= 0;
   fixture.addGeometry();
   if (!std::isfinite(scale) || scale <= 0.0) {
     fixture.expectInvalidGeometry();

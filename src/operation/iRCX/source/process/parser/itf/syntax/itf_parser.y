@@ -1,5 +1,5 @@
 %skeleton "lalr1.cc"
-%require "3.8"
+%require "3.7"
 %define api.namespace {ircx::itf::syntax::detail}
 %define api.parser.class {Parser}
 %define api.value.type variant

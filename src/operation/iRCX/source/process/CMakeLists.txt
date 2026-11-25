@@ -6,7 +6,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
 endif()
 
 find_package(FLEX 2.6 REQUIRED)
-find_package(BISON 3.8 REQUIRED)
+find_package(BISON 3.7 REQUIRED)
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 BISON_TARGET(IRCXItfGrammar parser/itf/syntax/itf_parser.y "${CMAKE_CURRENT_BINARY_DIR}/generated/itf_parser.cpp"
   DEFINES_FILE "${CMAKE_CURRENT_BINARY_DIR}/generated/itf_parser.hpp"

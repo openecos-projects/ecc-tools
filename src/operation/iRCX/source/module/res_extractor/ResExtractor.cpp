@@ -155,24 +155,20 @@ ProcessResult<double> ResExtractor::extractWireResistance(CornerData& corner_dat
   segment_end *= scale;
   double resistance = 0.0;
   for (const EdgeEtchInterval& edge_interval : edge_interval_list) {
-    double overlap_start = std::max(edge_interval.get_start_coord() * scale, segment_start);
-    double overlap_end = std::min(edge_interval.get_end_coord() * scale, segment_end);
-    if (overlap_end <= overlap_start) {
-      continue;
+    const double width = edge.get_width() * micron_per_dbu * scale;
+    const double lower_spacing = edge_interval.get_lower_spacing() < 0 ? -1 : edge_interval.get_lower_spacing() * scale;
+    const double upper_spacing = edge_interval.get_upper_spacing() < 0 ? -1 : edge_interval.get_upper_spacing() * scale;
+    if (edge_interval.get_resistance_segments().empty())
+      return std::string("missing finalized resistance geometry");
+    for (const auto& segment : edge_interval.get_resistance_segments()) {
+      const double start = std::max(segment.start, segment_start);
+      const double end = std::min(segment.end, segment_end);
+      if (end <= start) continue;
+      const auto value = evaluateWireResistanceFromGeometry(conductor, {width, lower_spacing, upper_spacing}, segment.geometry,
+          end - start, corner_data.get_tmpr(), corner_data.get_global_tmpr());
+      if (!value) return value.error;
+      resistance += *value;
     }
-
-    double length = overlap_end - overlap_start;
-    // Reconstruct resistance geometry even at scale 1: shared intervals may
-    // already contain capacitive-only etch and must not be modified here.
-    double width = edge.get_width() * micron_per_dbu * scale;
-    const double lower_spacing
-        = edge_interval.get_lower_spacing() < 0.0 ? edge_interval.get_lower_spacing() : edge_interval.get_lower_spacing() * scale;
-    const double upper_spacing
-        = edge_interval.get_upper_spacing() < 0.0 ? edge_interval.get_upper_spacing() : edge_interval.get_upper_spacing() * scale;
-    auto value = evaluateWireResistance(conductor, {width, lower_spacing, upper_spacing}, length, corner_data.get_tmpr(), corner_data.get_global_tmpr());
-    if (!value)
-      return value.error;
-    resistance += *value;
   }
   return resistance;
 }

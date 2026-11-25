@@ -793,19 +793,12 @@ def drc(manifest: dict[str, Any]) -> dict[str, Path]:
 def rcx(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
-    _require(ecc_py.init_rcx(manifest["config"]["rcx_ecc"], pdk="ics55"), "init_rcx")
-    try:
-        _require(ecc_py.run_rcx(), "run_rcx")
-    finally:
-        ecc_py.destroy_rcx()
+    spef = Path(_run_rcx(manifest))
     output = _output(manifest, "rcx.def")
     _require(ecc_py.def_save(str(output)), "def_save")
-    spefs = sorted((Path(manifest["output_dir"]) / "spef_writer").glob("gcd_*.spef"))
-    if not spefs:
-        raise AssertionError("RCX did not produce a SPEF file")
-    for path in [output, *spefs]:
+    for path in (output, spef):
         _require_file(path)
-    return {"def": output, "spef": spefs[0]}
+    return {"def": output, "spef": spef}
 
 
 def sta(manifest: dict[str, Any]) -> dict[str, Path]:
@@ -893,7 +886,7 @@ def _sta_options(manifest: dict[str, Any], options: dict[str, Any]) -> dict[str,
 
 
 def _run_rcx(manifest: dict[str, Any]) -> str:
-    _require(ecc_py.init_rcx(manifest["config"]["rcx_ecc"], pdk="ics55"), "init_rcx")
+    _require(ecc_py.init_rcx(manifest["config"]["rcx_ecc"]), "init_rcx")
     try:
         _require(ecc_py.run_rcx(), "run_rcx")
     finally:

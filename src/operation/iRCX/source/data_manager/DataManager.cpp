@@ -313,6 +313,7 @@ void DataManager::buildLayerMapping(LayerTable& layer_table)
     RCXLOG.error(Loc::current(), "cannot open layer mapping file: " + _config.mapping_file_path);
   std::string line;
   std::size_t line_number = 0;
+  bool conductive_section = true;  // Files without section headers contain mapping pairs.
   while (std::getline(stream, line)) {
     ++line_number;
     if (const auto comment = line.find('#'); comment != std::string::npos) line.resize(comment);
@@ -320,6 +321,13 @@ void DataManager::buildLayerMapping(LayerTable& layer_table)
     std::istringstream mapping_stream(line);
     std::string design, process, extra;
     if (!(mapping_stream >> design)) continue;
+    if (design == "conducting_layers" || design == "via_layers" || design == "marker_layers" || design == "remove_layers") {
+      if (mapping_stream >> extra)
+        RCXLOG.error(Loc::current(), _config.mapping_file_path + ":" + std::to_string(line_number) + ": unexpected text after section header");
+      conductive_section = design == "conducting_layers" || design == "via_layers";
+      continue;
+    }
+    if (!conductive_section) continue;
     if (!(mapping_stream >> process) || (mapping_stream >> extra))
       RCXLOG.error(Loc::current(), _config.mapping_file_path + ":" + std::to_string(line_number) + ": expected design and process layer names");
     const auto& mapping = layer_table.get_design_name_to_process_name_map();

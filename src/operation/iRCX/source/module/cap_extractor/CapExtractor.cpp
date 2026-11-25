@@ -248,8 +248,10 @@ std::string CapExtractor::extractCapacitanceSpan(int32_t corner_idx, int32_t net
   double span_length = (end_coord - start_coord) * micron_per_dbu;
   TopoEdge* lower_adjacent_edge = env_interval.get_lower_adjacent_edge();
   TopoEdge* upper_adjacent_edge = env_interval.get_upper_adjacent_edge();
-  double lower_spacing = etch_interval.get_capacitance_lower_spacing();
-  double upper_spacing = etch_interval.get_capacitance_upper_spacing();
+  // Precharacterized tables are indexed by drawn gaps. Keep geometry variations
+  // out of their lookup keys to avoid applying process effects twice.
+  double lower_spacing = etch_interval.get_lower_spacing();
+  double upper_spacing = etch_interval.get_upper_spacing();
   if (fallback) {
     const auto sides = pattern::fallbackSides(edge, *fallback, micron_per_dbu);
     lower_adjacent_edge = sides.lower;

@@ -231,15 +231,15 @@ void checkSpefEscaping()
               && parsed_nets.count("u_core.cnt_$_NAND__Y") == 1,
           "SpefReader did not unescape SPEF net names back to netlist identifiers");
 
-  // Also cover the directory post-pass used for precompiled backends (e.g. libircx_ics55.so).
+  // Also cover sanitizing externally generated SPEF files in an output directory.
   const std::filesystem::path sanitize_dir = fixture.directory() / "sanitize_spef_dir/spef_writer";
   std::filesystem::create_directories(sanitize_dir);
-  const std::filesystem::path raw_spef_path = sanitize_dir / "ics55_raw.spef";
+  const std::filesystem::path raw_spef_path = sanitize_dir / "external_raw.spef";
   {
     std::ofstream raw_spef(raw_spef_path);
     require(raw_spef.is_open(), "cannot write raw SPEF fixture");
     raw_spef << "*SPEF \"IEEE 1481-1998\"\n"
-             << "*DESIGN \"ics55_raw\"\n"
+             << "*DESIGN \"external_raw\"\n"
              << "*DIVIDER /\n"
              << "*DELIMITER :\n"
              << "*BUS_DELIMITER []\n"

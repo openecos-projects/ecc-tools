@@ -49,6 +49,84 @@ int main()
 {
   using Test = std::pair<std::string, std::function<void()>>;
   const std::vector<Test> tests{
+      {"ordered profiles update both walls and are independent of wire order", [] {
+         const auto model = parse(R"(CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING {WIDTHS {.2} VALUES {.01}}
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.1 .12} VALUES {0 .01}}})");
+         const auto* conductor = &model.conductors[0];
+         std::vector<WireGeometryInput> wires{{conductor, 0, .2, {{0, 1, kNoWireNeighbor, 1}}},
+                                              {conductor, .3, .2, {{0, 1, 0, kNoWireNeighbor}}}};
+         for (bool reverse : {false, true}) {
+           if (reverse) {
+             std::swap(wires[0], wires[1]);
+             wires[0].spans[0].lower_neighbor = 1;
+             wires[1].spans[0].upper_neighbor = 0;
+           }
+           const auto result = evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance);
+           const auto& profiles = checked(result);
+           for (const auto& profile : profiles) near(profile[0].geometry.width, .16);
+           near(profiles[reverse ? 1 : 0][0].upper_spacing, .14);
+           near(profiles[reverse ? 0 : 1][0].lower_spacing, .14);
+         }
+       }},
+      {"neighbor span boundaries propagate through successive etch stages", [] {
+         const auto model = parse(R"(CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.1 .3} VALUES {.01 .03}}
+           ETCH_VS_WIDTH_AND_SPACING {WIDTHS {.16 .18} VALUES {.01 .02}}
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.15 .16} VALUES {0 .01}}})");
+         const auto* c = &model.conductors[0];
+         const std::vector<WireGeometryInput> wires{
+             {c, 0, .2, {{0, 1, 1, 2}}},
+             {c, -.3, .2, {{0, .5, kNoWireNeighbor, 0}, {.5, 1, 3, 0}}},
+             {c, .3, .2, {{0, 1, 0, kNoWireNeighbor}}},
+             {c, -.6, .2, {{.5, 1, kNoWireNeighbor, 1}}}};
+         const auto result = evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance);
+         const auto& master = checked(result)[0];
+         if (master.size() != 2 || master[0].source_span != 0 || master[1].source_span != 0)
+           throw std::runtime_error("effective spans lost their original environment ownership");
+         near(master[0].start, 0); near(master[0].end, .5);
+         near(master[1].start, .5); near(master[1].end, 1);
+         near(master[0].geometry.width, .14); near(master[1].geometry.width, .13);
+         near(master[1].geometry.center_shift, .005);
+       }},
+      {"invalid neighboring geometry cannot be treated as an absent neighbor", [] {
+         const auto model = parse("CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12 ETCH=-.06}");
+         const auto* c = &model.conductors[0];
+         std::vector<WireGeometryInput> wires{{c, 0, .2, {{0, 1, kNoWireNeighbor, 1}}},
+                                              {c, .3, .2, {{0, 1, 0, kNoWireNeighbor}}}};
+         rejects([&] { return evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance); });
+         wires[0].spans[0].upper_neighbor = 2;
+         rejects([&] { return evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance); });
+       }},
+      {"existing overlapping rectangles use the contact table boundary", [] {
+         const auto model = parse(R"(CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.01 1} VALUES {0 .01}}})");
+         const auto* c = &model.conductors[0];
+         const std::vector<WireGeometryInput> wires{{c, 0, .2, {{0, 1, kNoWireNeighbor, 1}}},
+                                                    {c, .05, .2, {{0, 1, 0, kNoWireNeighbor}}}};
+         const auto result = evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance);
+         near(checked(result)[0][0].geometry.width, .19);
+         near(checked(result)[0][0].upper_spacing, 0);
+       }},
+      {"existing touching rectangles retain a contact boundary during expansion", [] {
+         const auto model = parse("CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12 ETCH=-.02}");
+         const auto* c = &model.conductors[0];
+         const std::vector<WireGeometryInput> wires{{c, 0, .2, {{0, 1, kNoWireNeighbor, 1}}},
+                                                    {c, .2, .2, {{0, 1, 0, kNoWireNeighbor}}}};
+         const auto result = evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance);
+         near(checked(result)[0][0].geometry.width, .24);
+         near(checked(result)[0][0].upper_spacing, 0);
+       }},
+      {"empty etch and thickness tables cannot silently become zero variation", [] {
+         for (bool thickness : {false, true}) {
+           auto model = parse("CONDUCTOR M1 { THICKNESS=.1 RPSQ=.12 }");
+           auto& conductor = model.conductors[0];
+           ProcessEtchTable table;
+           table.set_effect_type(ProcessEffectType::kBoth);
+           (thickness ? conductor.get_thickness_change_table_list() : conductor.get_etch_table_list()).push_back(table);
+           rejects([&] { return evaluateWireGeometry(conductor, {.2, .1, .1}, ProcessEffectType::kResistance); });
+         }
+       }},
       {"readable physical models cannot silently use nominal geometry",
        [] {
          for (const auto& input : {"CONDUCTOR M1 {THICKNESS=.2 RPSQ=.12 SIDE_TANGENT=.1}", "metal M1 {Thickness .2 Resistance .12 SIDE_TANGENT .1}",
@@ -175,6 +253,8 @@ int main()
          auto m = parse("metal M1 { Thickness .1 Resistance .12 RESISTIVE_ONLY_ETCH .2 Coeff_RT1 -.02 }");
          rejects([&] { return evaluateWireResistance(m.conductors[0], {.2, .1, .3}, 1, 25, 25); });
          rejects([&] { return evaluateWireResistance(m.conductors[0], {.4, .1, .3}, 1, 125, 25); });
+         const auto expansion = parse("CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12 ETCH=-.02}");
+         rejects([&] { return evaluateWireGeometry(expansion.conductors[0], {.2, .01, .01}, ProcessEffectType::kResistance); });
        }},
   };
   int failures = 0;

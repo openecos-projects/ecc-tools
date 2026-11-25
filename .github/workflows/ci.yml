@@ -26,6 +26,13 @@ jobs:
       - name: Build wheel
         uses: ./.github/actions/build-wheel
 
+      - name: Run process parser regression
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          cmake --build build --target ircx_process_parser_test ircx_process_evaluator_test --parallel 2
+          ctest --test-dir build -R '^ircx_process_(parser|evaluator)_test$' --output-on-failure --no-tests=error
+
       - name: Run iMJ design tools regression
         env:
           SCCACHE_GHA_ENABLED: "true"
