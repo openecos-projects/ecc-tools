@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #pragma once
 
+#include <memory>
+
 #include "Config.hpp"
 #include "Database.hpp"
 
@@ -34,13 +36,13 @@ class DataManager
   void output();
   // getter
   Config& getConfig() { return _config; }
-  Database& getDatabase() { return _database; }
+  Database& getDatabase() { return *_database; }
 
  private:
   static DataManager* _dm_instance;
   // config & database
   Config _config;
-  Database _database;
+  std::unique_ptr<Database> _database = std::make_unique<Database>();
 
   DataManager() = default;
   DataManager(const DataManager& other) = delete;
@@ -52,26 +54,11 @@ class DataManager
 #if 1  // build
   void buildConfig();
   void buildDatabase();
-  void buildCornerDataList();
-  void buildCornerData(Corner& corner, double tmpr);
+  std::vector<CornerData> buildCornerDataList();
   std::string getTmprCornerName(std::string corner_name, double tmpr);
-  void buildProcessCorner(CornerData& corner_data, std::string itf_file_path);
-  void buildProcessConductor(CornerData& corner_data, std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::string conductor_name);
-  void buildProcessVia(CornerData& corner_data, std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::string via_name);
-  void registerProcessLayer(std::string& process_layer_name);
-  void getITFTokenList(std::string& itf_text, std::vector<std::string>& itf_token_list);
-  void appendITFToken(std::string& token, std::vector<std::string>& itf_token_list);
-  int32_t getITFBlockStart(std::vector<std::string>& itf_token_list, int32_t start_idx);
-  int32_t getITFBlockEnd(std::vector<std::string>& itf_token_list, int32_t block_start_idx);
-  bool getITFAssignmentNumber(std::vector<std::string>& itf_token_list, int32_t property_idx, double& property_value);
-  bool getITFAssignmentString(std::vector<std::string>& itf_token_list, int32_t property_idx, std::string& property_value);
-  void getITFNumberList(std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::vector<double>& number_list);
-  ProcessEffectType getITFEffectType(std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx);
-  void getITFTableValueList(std::vector<std::string>& itf_token_list, int32_t start_idx, int32_t end_idx, std::string row_name, std::string column_name,
-                            std::string value_name, std::vector<double>& row_list, std::vector<double>& column_list, std::vector<double>& value_list);
   void buildCapTable(CornerData& corner_data, std::string captab_file_path);
   void buildCapTableConfig(CornerData& corner_data, const std::string& header, const std::vector<std::string>& data_line_list);
-  void buildLayerMapping();
+  void buildLayerMapping(LayerTable& layer_table);
   void printConfig();
   void printDatabase();
 #endif

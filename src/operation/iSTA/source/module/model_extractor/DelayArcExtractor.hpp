@@ -27,7 +27,7 @@ class DelayArcExtractor
 {
  public:
   explicit DelayArcExtractor(Database& database) : _database(database), _model_path_query(database) {}
-  void extract(CharacterizedLibrary& tc_lib, AnalysisType analysis_type);
+  void extract(CharacterizedLibrary& tc_lib, AnalysisType analysis_type, PathChecker& check);
 
  private:
   double getWorseDelay(double current_delay, double delay, bool has_delay, AnalysisType analysis_type);

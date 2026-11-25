@@ -87,15 +87,9 @@ bool EnvBuilder::buildNetEnvList(EBModel& eb_model)
   net_env_list.clear();
   net_env_list.resize(net_num);
 
-  std::map<int32_t, RoutingLayer>& routing_layers = layout_data.get_routing_layer_map();
-  std::map<int32_t, EnvTrackIdx>& layer_to_prefer_track_idx_map = eb_model.get_layer_to_prefer_track_idx_map();
-  std::map<int32_t, EnvTrackIdx>& layer_to_nonprefer_track_idx_map = eb_model.get_layer_to_nonprefer_track_idx_map();
-  std::map<int32_t, int32_t>& layer_to_search_track_num_map = eb_model.get_layer_to_search_track_num_map();
-
   int32_t thread_num = RCXUTIL.getThreadNum(net_num, omp_get_max_threads());
 #pragma omp parallel for schedule(dynamic) num_threads(thread_num)
   for (int32_t net_idx = 0; net_idx < net_num; ++net_idx) {
-    EnvTrackOverlapMerger track_merger;
     EnvPixelOverlapMerger pixel_merger;
     NetEnv& net_env = net_env_list[net_idx];
 
@@ -108,20 +102,7 @@ bool EnvBuilder::buildNetEnvList(EBModel& eb_model)
       int32_t layer_idx = edge.get_layer_idx();
       LineSegment& query_line_segment = edge.get_line_segment();
 
-      std::vector<EnvTrackOverlap> upper_track_overlap_list;
-      std::vector<EnvTrackOverlap> lower_track_overlap_list;
-      bool is_prefer_horizontal = routing_layers[layer_idx].get_is_prefer_horizontal();
-      std::map<int32_t, EnvTrackIdx>& track_idx_map
-          = edge.get_line_segment().get_is_horizontal() == is_prefer_horizontal ? layer_to_prefer_track_idx_map : layer_to_nonprefer_track_idx_map;
-      std::map<int32_t, EnvTrackIdx>::iterator track_iter = track_idx_map.find(layer_idx);
-      if (track_iter != track_idx_map.end()) {
-        upper_track_overlap_list = track_iter->second.getOverlapList(query_line_segment, layer_to_search_track_num_map[layer_idx]);
-        lower_track_overlap_list = track_iter->second.getOverlapList(query_line_segment, -layer_to_search_track_num_map[layer_idx]);
-      }
-
-      std::vector<EdgeEnvInterval> edge_env_interval_list;
-      track_merger.merge(query_line_segment.get_lower(), query_line_segment.get_upper(), lower_track_overlap_list, upper_track_overlap_list,
-                         edge_env_interval_list);
+      std::vector<EdgeEnvInterval> edge_env_interval_list = buildSameLayerEnv(eb_model, edge);
 
       std::vector<EnvLayerPixelOverlapList> lower_layer_pixel_overlap_list = getCrossLayerPixelOverlapList(eb_model, query_line_segment, layer_idx, false);
       std::vector<EnvLayerPixelOverlapList> upper_layer_pixel_overlap_list = getCrossLayerPixelOverlapList(eb_model, query_line_segment, layer_idx, true);
@@ -139,7 +120,36 @@ bool EnvBuilder::buildNetEnvList(EBModel& eb_model)
     }
   }
 
+  auto& special_edges = topo_pool.get_special_edge_pool();
+  auto& special_env = RCXDM.getDatabase().get_special_edge_env_list();
+  special_env.clear();
+  special_env.resize(special_edges.size());
+#pragma omp parallel for schedule(dynamic) num_threads(thread_num)
+  for (std::size_t i = 0; i < special_edges.size(); ++i) {
+    if (!special_edges[i].get_is_via()) special_env[i] = buildSameLayerEnv(eb_model, special_edges[i]);
+  }
+
   return true;
+}
+
+std::vector<EdgeEnvInterval> EnvBuilder::buildSameLayerEnv(EBModel& eb_model, TopoEdge& edge)
+{
+  const auto& routing_layers = RCXDM.getDatabase().get_layout_data().get_routing_layer_map();
+  const auto layer = routing_layers.find(edge.get_layer_idx());
+  if (layer == routing_layers.end()) return {};
+  auto& tracks = edge.get_line_segment().get_is_horizontal() == layer->second.get_is_prefer_horizontal()
+      ? eb_model.get_layer_to_prefer_track_idx_map() : eb_model.get_layer_to_nonprefer_track_idx_map();
+  const auto track = tracks.find(edge.get_layer_idx());
+  const auto search = eb_model.get_layer_to_search_track_num_map().find(edge.get_layer_idx());
+  std::vector<EnvTrackOverlap> lower, upper;
+  if (track != tracks.end() && search != eb_model.get_layer_to_search_track_num_map().end()) {
+    upper = track->second.getOverlapList(edge.get_line_segment(), search->second);
+    lower = track->second.getOverlapList(edge.get_line_segment(), -search->second);
+  }
+  std::vector<EdgeEnvInterval> intervals;
+  EnvTrackOverlapMerger merger;
+  merger.merge(edge.get_line_segment().get_lower(), edge.get_line_segment().get_upper(), lower, upper, intervals);
+  return intervals;
 }
 
 std::vector<CrossLayerOverlap> EnvBuilder::getClippedCrossLayerOverlapList(const std::vector<CrossLayerOverlap>& cross_layer_overlap_list, int32_t start_coord,

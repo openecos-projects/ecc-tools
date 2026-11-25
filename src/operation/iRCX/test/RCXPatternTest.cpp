@@ -18,6 +18,7 @@ TopoEdge edge(int net, int x0, int y0, int x1, int y1)
 }
 int main()
 {
+  setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
   std::istringstream grid_data("P M1 SUBSTRATE - 1\n-1 -1 8 0 0\n-1 1 5 0 3\n-1 3 6 0 2\n1 -1 5 3 0\n1 1 2 3 3\n1 3 3 3 2\n3 -1 6 2 0\n3 1 3 2 3\n3 3 4 2 2\n");
   pattern::PatternGrid grid;
   grid.read(grid_data);
@@ -30,6 +31,13 @@ int main()
   auto clamped = grid.query("M1", "SUBSTRATE", "", 2, -1, 4);
   assert(clamped.width_clamped && clamped.gap_clamped && clamped.ground == 6 && clamped.right == 2);
   assert(!isolated.width_clamped && !isolated.gap_clamped);
+  std::string grid_error;
+  auto missing_grid = grid.queryChecked("missing", "SUBSTRATE", "", 1, -1, -1, grid_error);
+  assert(!missing_grid && !grid_error.empty());
+  auto invalid_coordinate = grid.queryChecked("M1", "SUBSTRATE", "", std::numeric_limits<double>::quiet_NaN(), -1, -1, grid_error);
+  assert(!invalid_coordinate && !grid_error.empty());
+  auto valid_grid = grid.queryChecked("M1", "SUBSTRATE", "", 1, -1, -1, grid_error);
+  assert(valid_grid && grid_error.empty() && valid_grid->ground == isolated.ground);
   std::istringstream bad_header("P M1 SUBSTRATE - 1 extra\n");
   bool header_rejected = false;
   try {

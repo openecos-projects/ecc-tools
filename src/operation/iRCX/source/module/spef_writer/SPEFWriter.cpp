@@ -21,6 +21,22 @@
 
 namespace ircx {
 
+namespace {
+
+std::size_t findPinDelimiter(std::string_view name)
+{
+  for (std::size_t idx = 0; idx < name.size(); ++idx) {
+    if (name[idx] == '\\' && idx + 1 < name.size()) {
+      ++idx;
+    } else if (name[idx] == ':') {
+      return idx;
+    }
+  }
+  return std::string_view::npos;
+}
+
+}  // namespace
+
 // public
 
 void SPEFWriter::initInst()
@@ -363,7 +379,7 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
   if (has_pin_node) {
     spef_file_stream << "*CONN\n";
     for (TopoNode& node : node_list) {
-      if (!node.get_is_pin_node() || node.get_pin_name().find(':') != std::string::npos) {
+      if (!node.get_is_pin_node() || findPinDelimiter(node.get_pin_name()) != std::string::npos) {
         continue;
       }
       double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
@@ -382,7 +398,7 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
     }
 
     for (TopoNode& node : node_list) {
-      if (!node.get_is_pin_node() || node.get_pin_name().find(':') == std::string::npos) {
+      if (!node.get_is_pin_node() || findPinDelimiter(node.get_pin_name()) == std::string::npos) {
         continue;
       }
       double x = RCXUTIL.x(node.get_point()) * micron_per_dbu;
@@ -405,11 +421,13 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
     }
   }
 
-  spef_file_stream << "\n*CAP\n";
   int32_t capacitance_idx = 1;
   for (auto& [node_coupling_key, coupling_capacitance] : node_coupling_capacitance_map) {
     if (coupling_capacitance <= 0.0) {
       continue;
+    }
+    if (capacitance_idx == 1) {
+      spef_file_stream << "\n*CAP\n";
     }
     spef_file_stream << capacitance_idx++ << " " << getNodeSPEFName(spef_name_map, node_list[node_coupling_key.get_local_node_idx()]) << " "
                      << node_coupling_key.get_peer_node_name() << " " << std::setprecision(6) << coupling_capacitance << "\n";
@@ -418,17 +436,22 @@ void SPEFWriter::writeDNet(SWModel& sw_model, std::ofstream& spef_file_stream, S
     if (node_ground_capacitance_list[node_idx] <= 0.0) {
       continue;
     }
+    if (capacitance_idx == 1) {
+      spef_file_stream << "\n*CAP\n";
+    }
     spef_file_stream << capacitance_idx++ << " " << getNodeSPEFName(spef_name_map, node_list[node_idx]) << " " << std::setprecision(6)
                      << node_ground_capacitance_list[node_idx] << "\n";
   }
 
-  spef_file_stream << "\n*RES\n";
   std::vector<double>& resistance_list = database.get_rc_data().get_corner_net_resistance_list(CornerNetIdx(corner_idx, net_idx));
   int32_t resistance_idx = 1;
   for (int32_t edge_idx = 0; edge_idx < static_cast<int32_t>(edge_list.size()); ++edge_idx) {
     TopoEdge& edge = edge_list[edge_idx];
     if (edge.get_start_node_idx() == -1 || edge.get_end_node_idx() == -1) {
       continue;
+    }
+    if (resistance_idx == 1) {
+      spef_file_stream << "\n*RES\n";
     }
     TopoNode& start_node = topo_pool.get_node(edge.get_start_node_idx());
     TopoNode& end_node = topo_pool.get_node(edge.get_end_node_idx());
@@ -464,7 +487,7 @@ std::string SPEFWriter::getNodeSPEFName(SPEFNameMap& spef_name_map, TopoNode& no
 {
   if (node.get_is_pin_node()) {
     std::string& pin_name = node.get_pin_name();
-    size_t delimiter_pos = pin_name.find(':');
+    size_t delimiter_pos = findPinDelimiter(pin_name);
     if (delimiter_pos == std::string::npos) {
       if (spef_name_map.get_port_name_to_idx_map().count(pin_name) != 0) {
         return RCXUTIL.getString("*", spef_name_map.get_port_name_to_idx_map()[pin_name]);
@@ -477,7 +500,7 @@ std::string SPEFWriter::getNodeSPEFName(SPEFNameMap& spef_name_map, TopoNode& no
     if (spef_name_map.get_instance_name_to_idx_map().count(instance_name) != 0) {
       return RCXUTIL.getString("*", spef_name_map.get_instance_name_to_idx_map()[instance_name], ":", escapeSPEFName(instance_pin_name));
     }
-    return escapeSPEFName(pin_name);
+    return RCXUTIL.getString(escapeSPEFName(instance_name), ":", escapeSPEFName(instance_pin_name));
   }
 
   Net& node_net = RCXDM.getDatabase().get_layout_data().get_net_list()[node.get_net_idx()];

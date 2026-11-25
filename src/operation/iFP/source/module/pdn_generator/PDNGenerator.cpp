@@ -18,6 +18,7 @@
 #include <cmath>
 #include <fnmatch.h>
 #include <numeric>
+#include <optional>
 #include <queue>
 
 #include "DataManager.hpp"
@@ -219,12 +220,138 @@ const PlanarRect& getMacroPGBlockageRect(const Instance& instance)
   return instance.get_placement_halo_rect();
 }
 
+PlanarRect viaFeasibleCenters(const std::string& bottom_layer, const PlanarRect& bottom_rect, const std::string& top_layer,
+                              const PlanarRect& top_rect, const PlanarRect& overlap, const std::vector<InstancePinShape>& via_shapes)
+{
+  PlanarRect centers = overlap;
+  for (const auto& shape : via_shapes) {
+    const auto& layer = shape.get_layer_name();
+    if (layer == bottom_layer || layer == top_layer) {
+      const PlanarRect& landing = layer == top_layer ? top_rect : bottom_rect;
+      centers = {std::max(centers.get_ll_x(), landing.get_ll_x() - shape.get_ll_x()),
+                 std::max(centers.get_ll_y(), landing.get_ll_y() - shape.get_ll_y()),
+                 std::min(centers.get_ur_x(), landing.get_ur_x() - shape.get_ur_x()),
+                 std::min(centers.get_ur_y(), landing.get_ur_y() - shape.get_ur_y())};
+    }
+  }
+  return centers;
+}
+
+struct ContainedViaLanding
+{
+  int32_t x = 0;
+  int32_t y = 0;
+  int32_t width = 0;
+  int32_t height = 0;
+};
+
+std::optional<ContainedViaLanding> fitLayerCrossingVia(const std::string& bottom_layer, const PlanarRect& bottom_rect,
+                                                       const std::string& top_layer, const PlanarRect& top_rect, const PlanarRect& overlap,
+                                                       int32_t min_width, int32_t min_height, int32_t grid)
+{
+  const int32_t overlap_width = overlap.get_width();
+  const int32_t overlap_height = overlap.get_height();
+  const int32_t center_x0 = (overlap.get_ll_x() + overlap.get_ur_x()) / 2;
+  const int32_t center_y0 = (overlap.get_ll_y() + overlap.get_ur_y()) / 2;
+
+  auto place_coord = [&](int32_t target, int32_t low, int32_t high) {
+    if (low <= target && target <= high) {
+      return target;
+    }
+    const int32_t min_grid = FPUTIL.alignUp(low, grid);
+    const int32_t max_grid = FPUTIL.alignDown(high, grid);
+    if (min_grid <= max_grid) {
+      return std::clamp(FPUTIL.alignDown(target, grid), min_grid, max_grid);
+    }
+    return std::clamp(target, low, high);
+  };
+
+  PGSegment probe;
+  probe.set_bottom_layer_name(bottom_layer);
+  probe.set_top_layer_name(top_layer);
+  probe.set_start_coord(0, 0);
+
+  struct ScoredLanding
+  {
+    ContainedViaLanding landing;
+    int64_t shift = INT64_MAX;
+    int32_t margin = INT32_MIN;
+  };
+  auto evaluate = [&](int32_t width, int32_t height) -> std::optional<ScoredLanding> {
+    if (width <= 0 || height <= 0) {
+      return std::nullopt;
+    }
+    probe.set_via_width(width);
+    probe.set_via_height(height);
+    const auto shapes = FPI.getPGViaShapes(probe);
+    if (shapes.empty()) {
+      return std::nullopt;
+    }
+    const PlanarRect centers = viaFeasibleCenters(bottom_layer, bottom_rect, top_layer, top_rect, overlap, shapes);
+    if (centers.get_ll_x() > centers.get_ur_x() || centers.get_ll_y() > centers.get_ur_y()) {
+      return std::nullopt;
+    }
+    const int32_t x = place_coord(center_x0, centers.get_ll_x(), centers.get_ur_x());
+    const int32_t y = place_coord(center_y0, centers.get_ll_y(), centers.get_ur_y());
+    const int64_t shift = std::abs(int64_t(x) - center_x0) + std::abs(int64_t(y) - center_y0);
+    const int32_t margin = std::min({x - centers.get_ll_x(), centers.get_ur_x() - x, y - centers.get_ll_y(), centers.get_ur_y() - y});
+    return ScoredLanding{{x, y, width, height}, shift, margin};
+  };
+
+  // Prefer the exact overlap footprint whenever it produces a contained via.
+  if (const auto exact = evaluate(overlap_width, overlap_height)) {
+    return exact->landing;
+  }
+
+  auto pick_best = [&](const std::array<std::pair<int32_t, int32_t>, 2>& candidates) -> std::optional<ContainedViaLanding> {
+    std::optional<ScoredLanding> best;
+    for (size_t idx = 0; idx < candidates.size(); ++idx) {
+      const auto [width, height] = candidates[idx];
+      if ((width == overlap_width && height == overlap_height) || (idx == 1 && candidates[1] == candidates[0])) {
+        continue;
+      }
+      const auto scored = evaluate(width, height);
+      if (!scored) {
+        continue;
+      }
+      if (!best || scored->shift < best->shift || (scored->shift == best->shift && scored->margin > best->margin)) {
+        best = scored;
+      }
+    }
+    return best ? std::optional<ContainedViaLanding>(best->landing) : std::nullopt;
+  };
+
+  if (const auto grown = pick_best({{{std::max(overlap_width, min_width), std::max(overlap_height, min_height)},
+                                     {std::max(overlap_width, min_height), std::max(overlap_height, min_width)}}})) {
+    return grown;
+  }
+  return pick_best({{{min_width, min_height}, {min_height, min_width}}});
+}
+
 bool fitVia(PGSegment& via, int32_t width, int32_t height)
 {
+  if (width <= 0 || height <= 0) {
+    return false;
+  }
   const auto [min_width, min_height] = FPI.getPGViaMinSize(via.get_bottom_layer_name(), via.get_top_layer_name());
-  via.set_via_width(std::max(width, min_width));
-  via.set_via_height(std::max(height, min_height));
-  return width > 0 && height > 0 && (min_width == 0 || min_height == 0 || !FPI.getPGViaStack(via).empty());
+  if (min_width == 0 || min_height == 0) {
+    via.set_via_width(width);
+    via.set_via_height(height);
+    return true;
+  }
+  via.set_via_width(width);
+  via.set_via_height(height);
+  if (!FPI.getPGViaShapes(via).empty()) {
+    return true;
+  }
+  const int32_t grown_width = std::max(width, min_width);
+  const int32_t grown_height = std::max(height, min_height);
+  if (grown_width == width && grown_height == height) {
+    return false;
+  }
+  via.set_via_width(grown_width);
+  via.set_via_height(grown_height);
+  return !FPI.getPGViaShapes(via).empty();
 }
 
 bool viaFits(const std::string& bottom, const std::string& top, int32_t width, int32_t height)
@@ -620,21 +747,19 @@ void PDNGenerator::trimStripeEnds(bool preserve_io_core_ends, const std::string&
             continue;
           }
           if (tangential == 0) {
-            // End-to-end touch is a real connection but has no overlap
-            // interval.  Retain one half stripe width so trimming keeps the
-            // endpoint attached (common for stripe -> IOWIRE extensions).
-            const int32_t half_width = stripe.get_width() / 2;
+            // End-to-end touch is a real connection with no overlap interval
+            // (common for stripe -> IOWIRE extensions); keep the endpoint attached.
             if (horizontal) {
               if (rect.get_ur_x() <= stripe.get_ll_x()) {
-                candidate.first_contact = std::min(candidate.first_contact, stripe.get_ll_x() - half_width);
+                candidate.first_contact = std::min(candidate.first_contact, stripe.get_ll_x());
               } else {
-                candidate.last_contact = std::max(candidate.last_contact, stripe.get_ur_x() + half_width);
+                candidate.last_contact = std::max(candidate.last_contact, stripe.get_ur_x());
               }
             } else {
               if (rect.get_ur_y() <= stripe.get_ll_y()) {
-                candidate.first_contact = std::min(candidate.first_contact, stripe.get_ll_y() - half_width);
+                candidate.first_contact = std::min(candidate.first_contact, stripe.get_ll_y());
               } else {
-                candidate.last_contact = std::max(candidate.last_contact, stripe.get_ur_y() + half_width);
+                candidate.last_contact = std::max(candidate.last_contact, stripe.get_ur_y());
               }
             }
             continue;
@@ -642,10 +767,11 @@ void PDNGenerator::trimStripeEnds(bool preserve_io_core_ends, const std::string&
           int32_t first = horizontal ? std::max(stripe.get_ll_x(), rect.get_ll_x()) : std::max(stripe.get_ll_y(), rect.get_ll_y());
           int32_t last = horizontal ? std::min(stripe.get_ur_x(), rect.get_ur_x()) : std::min(stripe.get_ur_y(), rect.get_ur_y());
           if (via != nullptr) {
-            // Retain the via center as well as its actual metal enclosure.
+            // Retain both the via center and its full metal enclosure; DEF
+            // SPECIALNETS stripes have flat ends without half-width extension.
             const int32_t center = horizontal ? via->get_start_x() : via->get_start_y();
-            first = std::min(first, center - stripe.get_width() / 2);
-            last = std::max(last, center + stripe.get_width() / 2);
+            first = std::min(first, center);
+            last = std::max(last, center);
           }
           candidate.first_contact = std::min(candidate.first_contact, first);
           candidate.last_contact = std::max(candidate.last_contact, last);
@@ -746,8 +872,8 @@ void PDNGenerator::trimStripeEnds(bool preserve_io_core_ends, const std::string&
     const bool horizontal = stripe.is_horizontal();
     const int32_t begin = horizontal ? stripe.get_start_x() : stripe.get_start_y();
     const int32_t end = horizontal ? stripe.get_end_x() : stripe.get_end_y();
-    int32_t new_begin = candidate.start ? std::max(begin, FPUTIL.alignDown(candidate.first_contact + stripe.get_width() / 2, grid)) : begin;
-    int32_t new_end = candidate.end ? std::min(end, FPUTIL.alignUp(candidate.last_contact - stripe.get_width() / 2, grid)) : end;
+    int32_t new_begin = candidate.start ? std::max(begin, FPUTIL.alignDown(candidate.first_contact, grid)) : begin;
+    int32_t new_end = candidate.end ? std::min(end, FPUTIL.alignUp(candidate.last_contact, grid)) : end;
     if (new_begin >= new_end) {
       continue;
     }
@@ -771,7 +897,7 @@ void PDNGenerator::trimStripeEnds(bool preserve_io_core_ends, const std::string&
         continue;
       }
     }
-    const int64_t area = int64_t(new_end - new_begin + stripe.get_width()) * stripe.get_width();
+    const int64_t area = int64_t(new_end - new_begin) * stripe.get_width();
     if (stripe_layer != nullptr && area < stripe_layer->get_min_area()) {
       FPLOG.warn(Loc::current(), "Retained PG stripe on '", stripe.get_net_name(), "' to preserve minimum area.");
       continue;
@@ -1682,7 +1808,7 @@ void PDNGenerator::mergeOverlappingViaStacks()
   std::map<ViaKey, std::vector<size_t>> groups;
   for (size_t index = 0; index < segments.size(); ++index) {
     const PGSegment& segment = segments[index];
-    if (segment.get_type() != PGSegmentType::kVia || !segment.get_generated() || segment.get_via_width() <= 0
+    if (segment.get_type() != PGSegmentType::kVia || !segment.get_generated() || segment.is_macro_pin_via() || segment.get_via_width() <= 0
         || segment.get_via_height() <= 0) {
       continue;
     }
@@ -1782,6 +1908,7 @@ void PDNGenerator::mergeOverlappingViaStacks()
     }
   }
   segments = std::move(kept);
+  FPI.resetPGViaAdjustment();
   FPLOG.info(Loc::current(), "Merged ", merged_count, " overlapping PG via stack(s).");
 }
 
@@ -2600,6 +2727,7 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
     by_net_layer[{segment.get_net_name(), segment.get_layer_name()}].push_back(index);
   }
 
+  const int32_t grid = std::max(1, database.get_manufacture_grid());
   std::set<std::pair<std::string, std::string>> seen_pairs;
   for (const PGLayerPair& pg_layer_pair : FPDM.getConfig().pg_layer_pair_list) {
     RoutingLayer* first_layer = findRoutingLayer(pg_layer_pair.get_first_layer_name());
@@ -2617,6 +2745,7 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
     if (!seen_pairs.insert({bottom_name, top_name}).second) {
       continue;
     }
+    const auto [min_width, min_height] = FPI.getPGViaMinSize(bottom_name, top_name);
 
     for (PGNet& pg_net : database.get_pg_net_list()) {
       auto bottom_iter = by_net_layer.find({pg_net.get_name(), bottom_name});
@@ -2637,8 +2766,19 @@ void PDNGenerator::buildLayerConnect(PGModel& pg_model)
           }
           int32_t x = (overlap_rect.get_ll_x() + overlap_rect.get_ur_x()) / 2;
           int32_t y = (overlap_rect.get_ll_y() + overlap_rect.get_ur_y()) / 2;
+          int32_t via_width = overlap_rect.get_width();
+          int32_t via_height = overlap_rect.get_height();
+          if (min_width > 0 && min_height > 0) {
+            if (const auto landing
+                = fitLayerCrossingVia(bottom_name, bottom_rect, top_name, top_rect, overlap_rect, min_width, min_height, grid)) {
+              x = landing->x;
+              y = landing->y;
+              via_width = landing->width;
+              via_height = landing->height;
+            }
+          }
           const bool mesh_crossing = bottom_stripe && top_segment.get_type() == PGSegmentType::kStripe;
-          if (addViaSegment(pg_model, pg_net.get_name(), bottom_name, top_name, "", x, y, overlap_rect.get_width(), overlap_rect.get_height()) && mesh_crossing
+          if (addViaSegment(pg_model, pg_net.get_name(), bottom_name, top_name, "", x, y, via_width, via_height) && mesh_crossing
               && bottom_name == pg_model.get_power_layer_pair().get_first_layer_name() && top_name == pg_model.get_power_layer_pair().get_second_layer_name()) {
             pg_model.get_power_net_coord_map()[pg_net.get_name()].emplace(x, y);
           }
@@ -3649,11 +3789,12 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           };
           auto escape_via = make_via(points[1]);
           auto end_via = make_via(points.back());
-          if (FPI.getPGViaStack(escape_via).empty() || FPI.getPGViaStack(end_via).empty()) {
-            return reject("DETOUR_VIA_FAILED");
-          }
           for (auto* via : {&escape_via, &end_via}) {
-            for (const auto& shape : FPI.getPGViaShapes(*via)) {
+            const auto via_shapes = FPI.getPGViaShapes(*via);
+            if (via_shapes.empty()) {
+              return reject("DETOUR_VIA_FAILED");
+            }
+            for (const auto& shape : via_shapes) {
               auto* via_layer = findRoutingLayer(shape.get_layer_name());
               if (via_layer == nullptr
                   || !geometry.clear(shape.get_layer_name(), shape, net_idx, std::max(0, via_layer->get_spacing()))) {
@@ -4102,7 +4243,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
   // macro.  The pin itself is the landing metal, so its own OBS is ignored.
   std::set<std::string> crossing_via_keys;
   int32_t crossing_via_count = 0;
-  auto tryCrossingVias = [&](const std::vector<const InstancePinShape*>& shapes, int32_t net_idx, int32_t owner) {
+  auto tryCrossingVias = [&](const std::vector<const InstancePinShape*>& shapes, int32_t net_idx, int32_t owner, bool is_macro) {
     const std::string& net = database.get_pg_net_list()[net_idx].get_name();
     int32_t legal_via_count = 0;
     for (const auto* pin : shapes) {
@@ -4151,44 +4292,67 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
         }
         const auto& target = targets[net_idx][hit.target];
         const std::string& target_layer = target.get_layer_name();
-        const int32_t rule_min_span = minVia(pin->get_layer_name(), target_layer);
-        const bool via_rule_available = rule_min_span > 0;
-        const int32_t min_span = via_rule_available ? rule_min_span : grid;
-        const PlanarRect overlap = getOverlapRect(pin_rect, segmentRect(target));
+        const auto [min_width, min_height] = FPI.getPGViaMinSize(pin->get_layer_name(), target_layer);
+        const int32_t min_span = std::max(min_width, min_height);
+        const PlanarRect target_rect = segmentRect(target);
+        const PlanarRect overlap = getOverlapRect(pin_rect, target_rect);
         const int32_t pin_span = std::min(pin->get_width(), pin->get_height());
-        int32_t span = FPUTIL.alignDown(std::min({overlap.get_width(), overlap.get_height(), pin_span - 2 * grid}), 2 * grid);
-        if (span < min_span) {
-          continue;
-        }
-        const int32_t x = FPUTIL.alignDown((overlap.get_ll_x() + overlap.get_ur_x()) / 2, grid);
-        const int32_t y = FPUTIL.alignDown((overlap.get_ll_y() + overlap.get_ur_y()) / 2, grid);
+        const int32_t span = FPUTIL.alignDown(std::min({overlap.get_width(), overlap.get_height(), pin_span - 2 * grid}), 2 * grid);
         PGSegment via;
         via.set_net_name(net);
         via.set_type(PGSegmentType::kVia);
         via.set_bottom_layer_name(pin->get_layer_name());
         via.set_top_layer_name(target_layer);
-        via.set_start_coord(x, y);
-        via.set_end_coord(x, y);
-        via.set_via_width(span);
-        via.set_via_height(span);
         via.set_generated(true);
-        const auto via_shapes = FPI.getPGViaShapes(via);
-        if (via_shapes.empty() && via_rule_available) {
-          continue;
-        }
-        bool legal = true;
-        for (const auto& shape : via_shapes) {
-          auto* layer = findRoutingLayer(shape.get_layer_name());
-          if (layer == nullptr
-              || !geometry.clear(shape.get_layer_name(), shape, net_idx, std::max(0, layer->get_spacing()), nullptr, owner)) {
-            legal = false;
-            break;
+        auto try_landing = [&](int32_t width, int32_t height) {
+          via.set_via_width(width);
+          via.set_via_height(height);
+          via.set_start_coord(0, 0);
+          const auto via_shapes = FPI.getPGViaShapes(via);
+          if (via_shapes.empty() && min_span > 0) {
+            return false;
+          }
+          const PlanarRect centers = viaFeasibleCenters(pin->get_layer_name(), pin_rect, target_layer, target_rect, overlap, via_shapes);
+          const int32_t min_x = FPUTIL.alignUp(centers.get_ll_x(), grid);
+          const int32_t min_y = FPUTIL.alignUp(centers.get_ll_y(), grid);
+          const int32_t max_x = snap(centers.get_ur_x());
+          const int32_t max_y = snap(centers.get_ur_y());
+          if (min_x > max_x || min_y > max_y) {
+            return false;
+          }
+          const int32_t center_x = std::clamp(snap(overlap.get_ll_x() + overlap.get_width() / 2), min_x, max_x);
+          const int32_t center_y = std::clamp(snap(overlap.get_ll_y() + overlap.get_height() / 2), min_y, max_y);
+          for (const auto& shape : via_shapes) {
+            const auto* layer = findRoutingLayer(shape.get_layer_name());
+            const PlanarRect placed(shape.get_ll_x() + center_x, shape.get_ll_y() + center_y, shape.get_ur_x() + center_x,
+                                    shape.get_ur_y() + center_y);
+            if (layer == nullptr || !geometry.clear(shape.get_layer_name(), placed, net_idx, std::max(0, layer->get_spacing()), nullptr, owner)) {
+              return false;
+            }
+          }
+          via.set_start_coord(center_x, center_y);
+          via.set_end_coord(center_x, center_y);
+          return true;
+        };
+        const int32_t overlap_width = overlap.get_width();
+        const int32_t overlap_height = overlap.get_height();
+        const bool array_fits = is_macro && min_span > 0
+                               && (try_landing(std::max(overlap_width, min_span), std::max(overlap_height, min_span))
+                                   || try_landing(overlap_width, overlap_height));
+        if (!array_fits) {
+          const bool square_fits = span >= std::max(grid, min_span) && try_landing(span, span);
+          const bool rectangular_fits = !square_fits && min_span > 0
+                                        && (try_landing(min_width, min_height)
+                                            || (min_width != min_height && try_landing(min_height, min_width)));
+          if (!square_fits && !rectangular_fits) {
+            continue;
           }
         }
-        if (!legal) {
-          continue;
+        if (is_macro) {
+          via.mark_macro_pin_via();
         }
-        const std::string key = FPUTIL.getString(net, "|", pin->get_layer_name(), "|", target_layer, "|", x, "|", y, "|", span);
+        const std::string key = FPUTIL.getString(net, "|", pin->get_layer_name(), "|", target_layer, "|", via.get_start_x(), "|",
+                                                via.get_start_y(), "|", via.get_via_width(), "|", via.get_via_height());
         if (crossing_via_keys.insert(key).second) {
           database.get_pg_segment_list().push_back(via);
           index_segment(via);
@@ -4255,7 +4419,8 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
       // tryCrossingVias already applies every crossing on the lowest upper
       // layer before returning, so any legal via means the port is tied to
       // that layer and the per-port fallback route is unnecessary.
-      const int32_t crossing_vias = owner_it == instance_owner.end() ? 0 : tryCrossingVias(shapes, net_idx, owner_it->second);
+      const int32_t crossing_vias = owner_it == instance_owner.end() ? 0
+                                   : tryCrossingVias(shapes, net_idx, owner_it->second, instances.at(terminal.first)->get_macro());
       if (crossing_vias > 0) {
         connected_components.insert(component);
         ++connected;

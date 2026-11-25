@@ -4,12 +4,14 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include "Logger.hpp"
 
 namespace ircx::pattern {
 struct GridCaps
@@ -36,8 +38,7 @@ class PatternGrid
     std::size_t first = absent ? 1 : 0;
     if (absent && x < 0)
       return std::tuple<double, double, double>{axis.front(), axis.front(), 0.};
-    if (first >= axis.size())
-      throw std::runtime_error("no present-side samples");
+    // read() validates at least one absent and one present sample per axis.
     if (x <= axis[first])
       return std::tuple<double, double, double>{axis[first], axis[first], 0.};
     if (x >= axis.back())
@@ -59,7 +60,7 @@ class PatternGrid
   {
     std::ifstream in(path);
     if (!in)
-      throw std::runtime_error("cannot open pattern grid: " + path);
+      RCXLOG.error(ircx::Loc::current(), "cannot open pattern grid: " + path);
     read(in);
   }
   void read(std::istream& in)
@@ -74,42 +75,42 @@ class PatternGrid
         std::string p, m, b, u;
         double w = 0;
         if (!(row >> p >> m >> b >> u >> w) || w <= 0 || !std::isfinite(w))
-          throw std::runtime_error("invalid grid header");
+          RCXLOG.error(ircx::Loc::current(), "invalid grid header");
         row >> std::ws;
         if (!row.eof())
-          throw std::runtime_error("extra grid header fields");
+          RCXLOG.error(ircx::Loc::current(), "extra grid header fields");
         auto& widths = groups_[key(m, b, u)];
         if (widths.count(w))
-          throw std::runtime_error("duplicate grid header");
+          RCXLOG.error(ircx::Loc::current(), "duplicate grid header");
         current = &widths[w];
       } else {
         double l = 0, r = 0;
         GridCaps c;
         if (!current || !(row >> l >> r >> c.ground >> c.left >> c.right))
-          throw std::runtime_error("invalid grid row");
+          RCXLOG.error(ircx::Loc::current(), "invalid grid row");
         c.ground_low = c.ground_high = c.ground / 2;
         row >> std::ws;
         if (!row.eof()) {
           if (!(row >> c.ground_low >> c.ground_high))
-            throw std::runtime_error("invalid directional ground components");
+            RCXLOG.error(ircx::Loc::current(), "invalid directional ground components");
           if (!std::isfinite(c.ground_low) || !std::isfinite(c.ground_high) || c.ground_low < 0 || c.ground_high < 0
               || std::abs(c.ground_low + c.ground_high - c.ground) > 1e-9 * std::max(1., c.ground))
-            throw std::runtime_error("directional ground components do not sum to ground");
+            RCXLOG.error(ircx::Loc::current(), "directional ground components do not sum to ground");
         }
         row >> std::ws;
         if (!row.eof())
-          throw std::runtime_error("extra grid row fields");
+          RCXLOG.error(ircx::Loc::current(), "extra grid row fields");
         for (double x : {l, r, c.ground, c.left, c.right})
           if (!std::isfinite(x))
-            throw std::runtime_error("nonfinite grid row");
+            RCXLOG.error(ircx::Loc::current(), "nonfinite grid row");
         if (c.ground < 0 || c.left < 0 || c.right < 0 || (l < 0 && l != -1) || (r < 0 && r != -1) || (l < 0 && c.left != 0) || (r < 0 && c.right != 0))
-          throw std::runtime_error("invalid grid capacitance or absent-side encoding");
+          RCXLOG.error(ircx::Loc::current(), "invalid grid capacitance or absent-side encoding");
         if (!current->data.emplace(std::make_pair(l, r), c).second)
-          throw std::runtime_error("duplicate grid row");
+          RCXLOG.error(ircx::Loc::current(), "duplicate grid row");
       }
     }
     if (groups_.empty())
-      throw std::runtime_error("empty grid");
+      RCXLOG.error(ircx::Loc::current(), "empty grid");
     for (auto& [name, widths] : groups_)
       for (auto& [width, g] : widths) {
         std::set<double> l, r;
@@ -118,14 +119,32 @@ class PatternGrid
           r.insert(coordinate.second);
         }
         if (l.size() < 2 || r.size() < 2 || *l.begin() != -1 || *r.begin() != -1 || g.data.size() != l.size() * r.size())
-          throw std::runtime_error("incomplete Cartesian grid");
+          RCXLOG.error(ircx::Loc::current(), "incomplete Cartesian grid");
         g.left.assign(l.begin(), l.end());
         g.right.assign(r.begin(), r.end());
       }
   }
   GridCaps query(const std::string& m, const std::string& b, const std::string& u, double w, double l, double r) const
   {
-    const auto& widths = groups_.at(key(m, b, u));
+    std::string error;
+    auto result = queryChecked(m, b, u, w, l, r, error);
+    if (!result)
+      RCXLOG.error(ircx::Loc::current(), error);
+    return *result;
+  }
+  std::optional<GridCaps> queryChecked(const std::string& m, const std::string& b, const std::string& u, double w, double l, double r, std::string& error) const
+  {
+    error.clear();
+    if (!std::isfinite(w) || !std::isfinite(l) || !std::isfinite(r) || w <= 0) {
+      error = "invalid pattern grid coordinate";
+      return std::nullopt;
+    }
+    const auto group = groups_.find(key(m, b, u));
+    if (group == groups_.end()) {
+      error = "missing pattern grid context: " + key(m, b, u);
+      return std::nullopt;
+    }
+    const auto& widths = group->second;
     auto high = widths.lower_bound(w), low = high;
     if (high == widths.end()) {
       high = std::prev(widths.end());

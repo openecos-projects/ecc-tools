@@ -5,20 +5,33 @@
 #include <cstddef>
 #include <fstream>
 #include <limits>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <utility>
-#include <vector>
 #include <map>
 #include <mutex>
-#include <shared_mutex>
-#include <unordered_map>
+#include <optional>
 #include <set>
+#include <shared_mutex>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "Logger.hpp"
 
 namespace captable {
-enum class Status { ok, geometry_fallback, domain_fallback };
-struct QueryResult { Status status=Status::ok; std::vector<double> caps; };
+enum class Status
+{
+  ok,
+  geometry_fallback,
+  domain_fallback,
+  error
+};
+struct QueryResult
+{
+  Status status = Status::ok;
+  std::vector<double> caps;
+  std::string error;
+};
 
 class Library {
   using Wire=std::pair<double,double>;
@@ -34,25 +47,33 @@ class Library {
   struct CacheShard {mutable std::shared_mutex mutex; std::unordered_map<std::string,QueryResult> values;};
   mutable std::array<CacheShard,64> cache_;
   static std::string word(std::istream& in) {
-    std::string s;if(!(in>>s))throw std::runtime_error("truncated capacitance table");return s;
+    std::string s;
+    if (!(in >> s))
+      RCXLOG.error(ircx::Loc::current(), "truncated capacitance table");
+    return s;
   }
   static double number(std::istream& in) {
-    double v=0;if(!(in>>v)||!std::isfinite(v))throw std::runtime_error("invalid table number");return v;
+    double v = 0;
+    if (!(in >> v) || !std::isfinite(v))
+      RCXLOG.error(ircx::Loc::current(), "invalid table number");
+    return v;
   }
   static std::size_t count(std::istream& in,std::size_t low,std::size_t high) {
     long long v=0;if(!(in>>v)||v<static_cast<long long>(low)||v>static_cast<long long>(high))
-      throw std::runtime_error("invalid table dimension");
+      RCXLOG.error(ircx::Loc::current(), "invalid table dimension");
     return static_cast<std::size_t>(v);
   }
   static std::vector<double> numbers(std::istream& in,std::size_t size) {
     std::vector<double> v(size);for(auto& x:v)x=number(in);return v;
   }
   static void increasing(const std::vector<double>& v) {
-    for(std::size_t i=1;i<v.size();++i)if(v[i]<=v[i-1])throw std::runtime_error("invalid etch axis");
+    for (std::size_t i = 1; i < v.size(); ++i)
+      if (v[i] <= v[i - 1])
+        RCXLOG.error(ircx::Loc::current(), "invalid etch axis");
   }
   std::size_t layerIndex(const std::string& name) const {
     for(std::size_t i=0;i<layers_.size();++i)if(layers_[i].name==name)return i;
-    throw std::runtime_error("unknown layer in capacitance table: "+name);
+    return layers_.size();
   }
   static bool decode(const std::string& key,Section& s) {
     std::istringstream in(key);double scale=0,width=0;int nl=0,nr=0;
@@ -71,10 +92,19 @@ class Library {
     }
     in>>std::ws;return in.eof();
   }
+  std::string contextError(const Section& s, std::size_t m) const
+  {
+    if (m == layers_.size())
+      return "unknown layer in capacitance table: " + s.master;
+    if (s.lower != "SUBSTRATE" && layerIndex(s.lower) >= m)
+      return "invalid lower context";
+    if (s.upper != "-" && (layerIndex(s.upper) == layers_.size() || layerIndex(s.upper) <= m))
+      return "invalid upper context";
+    return {};
+  }
   bool inDomain(const Section& s,std::size_t m) const {
-    if(s.lower!="SUBSTRATE"&&layerIndex(s.lower)>=m)throw std::runtime_error("invalid lower context");
-    if(s.upper!="-"&&layerIndex(s.upper)<=m)throw std::runtime_error("invalid upper context");
-    const auto& l=layers_[m];const double low=.5*std::min(l.width,l.wmin),high=std::max(8.,4*l.width),tol=1e-9;
+    const auto& l = layers_[m];
+    const double low = .5 * std::min(l.width, l.wmin), high = std::max(8., 4 * l.width), tol = 1e-9;
     auto widthOK=[&](double w){return w>=low-tol&&w<=high+tol;};
     if(!widthOK(s.width))return false;
     for(int side=0;side<2;++side){
@@ -141,7 +171,8 @@ class Library {
     std::vector<double> r{c[0]};r.insert(r.end(),c.begin()+1+nl,c.end());
     r.insert(r.end(),c.begin()+1,c.begin()+1+nl);return r;
   }
-  std::array<double,max_features> encode(const Section& s,std::size_t m) const {
+  std::optional<std::array<double, max_features>> encode(const Section& s, std::size_t m) const
+  {
     const auto& l=layers_[m];std::array<double,max_features> x{};
     std::size_t i=0;x[i++]=std::log(s.width/l.width);
     for(int side=0;side<2;++side){
@@ -154,20 +185,31 @@ class Library {
         edge=far;++rank;
       }
     }
-    for(double v:x)if(!std::isfinite(v))throw std::runtime_error("nonfinite table coordinate");
+    for (double v : x)
+      if (!std::isfinite(v))
+        return std::nullopt;
     return x;
   }
   void add(const Section& section,const std::vector<double>& c) {
     const auto m=layerIndex(section.master);
-    if(!inDomain(section,m))throw std::runtime_error("table sample outside declared domain");
-    auto s=section;if(!applyEtch(s,layers_[m]))throw std::runtime_error("invalid etched table sample");
-    Sample sample;sample.x=encode(s,m);
+    const auto error = contextError(section, m);
+    if (!error.empty())
+      RCXLOG.error(ircx::Loc::current(), error);
+    if (!inDomain(section, m))
+      RCXLOG.error(ircx::Loc::current(), "table sample outside declared domain");
+    auto s = section;
+    if (!applyEtch(s, layers_[m]))
+      RCXLOG.error(ircx::Loc::current(), "invalid etched table sample");
+    auto coordinates = encode(s, m);
+    if (!coordinates)
+      RCXLOG.error(ircx::Loc::current(), "nonfinite table coordinate");
+    Sample sample;
+    sample.x = *coordinates;
     for(std::size_t j=0;j<c.size();++j)sample.c[j]=c[j];
     groups_[groupKey(s,m)].push_back(sample);
   }
-  std::vector<double> interpolate(const std::vector<Sample>& samples,
-                                  const std::array<double,max_features>& x,
-                                  std::size_t nf,std::size_t nc) const {
+  QueryResult interpolate(const std::vector<Sample>& samples, const std::array<double, max_features>& x, std::size_t nf, std::size_t nc) const
+  {
     std::vector<std::pair<double,std::size_t>> distances;distances.reserve(samples.size());
     for(std::size_t i=0;i<samples.size();++i){
       double d=0;for(std::size_t j=0;j<nf;++j){const auto v=x[j]-samples[i].x[j];d+=v*v;}
@@ -177,7 +219,7 @@ class Library {
     std::partial_sort(distances.begin(),distances.begin()+k,distances.end());
     if(distances[0].first<1e-24){
       const auto& c=samples[distances[0].second].c;
-      return {c.begin(),c.begin()+nc};
+      return {Status::ok, {c.begin(), c.begin() + nc}, {}};
     }
     // Moving local affine interpolation of log coefficients. A fixed ridge
     // stabilizes sparse/collinear neighborhoods; no fitted weights are stored.
@@ -201,7 +243,8 @@ class Library {
     for(std::size_t j=0;j<n;++j)a[j][j]+=j?1e-4:1e-12;
     for(std::size_t col=0;col<n;++col){
       auto pivot=col;for(std::size_t j=col+1;j<n;++j)if(std::abs(a[j][col])>std::abs(a[pivot][col]))pivot=j;
-      if(!std::isfinite(a[pivot][col])||std::abs(a[pivot][col])<1e-20)throw std::runtime_error("singular table interpolation");
+      if (!std::isfinite(a[pivot][col]) || std::abs(a[pivot][col]) < 1e-20)
+        return {Status::error, {}, "singular table interpolation"};
       std::swap(a[col],a[pivot]);const auto v=a[col][col];
       for(std::size_t q=col;q<n+nc;++q)a[col][q]/=v;
       for(std::size_t j=0;j<n;++j)if(j!=col){const auto factor=a[j][col];for(std::size_t q=col;q<n+nc;++q)a[j][q]-=factor*a[col][q];}
@@ -209,35 +252,53 @@ class Library {
     std::vector<double> result(nc);
     for(std::size_t q=0;q<nc;++q){
       result[q]=std::exp(std::clamp(a[0][n+q],lower[q],upper[q]));
-      if(!std::isfinite(result[q]))throw std::runtime_error("nonfinite interpolated capacitance");
+      if (!std::isfinite(result[q]))
+        return {Status::error, {}, "nonfinite interpolated capacitance"};
     }
-    return result;
+    return {Status::ok, std::move(result), {}};
   }
   QueryResult evaluate(const std::string& key) const {
     Section s;if(!decode(key,s))return {Status::geometry_fallback,{}};
     const auto m=layerIndex(s.master);
+    const auto error = contextError(s, m);
+    if (!error.empty())
+      return {Status::error, {}, error};
     if(!inDomain(s,m))return {Status::domain_fallback,{}};
     if(!applyEtch(s,layers_[m]))return {Status::geometry_fallback,{}};
-    auto x=encode(s,m),xr=encode(reflect(s),m);
+    auto coordinates = encode(s, m), reflected = encode(reflect(s), m);
+    if (!coordinates || !reflected)
+      return {Status::error, {}, "nonfinite table coordinate"};
+    auto x = *coordinates, xr = *reflected;
     // One canonical orientation gives exact reflection symmetry, including ties.
     const bool flip=s.left.size()>s.right.size() || (s.left.size()==s.right.size() && xr<x);
     if(flip){s=reflect(s);x=xr;}
     const auto it=groups_.find(groupKey(s,m));
     if(it==groups_.end())return {Status::domain_fallback,{}};
     auto caps=interpolate(it->second,x,1+3*(s.left.size()+s.right.size()),1+s.left.size()+s.right.size());
-    if(flip)caps=reflectCaps(caps,s.left.size());
-    return {Status::ok,std::move(caps)};
+    if (caps.status == Status::error)
+      return caps;
+    if (flip)
+      caps.caps = reflectCaps(caps.caps, s.left.size());
+    return caps;
   }
  public:
   explicit Library(const std::string& path) {
-    std::ifstream in(path);if(!in)throw std::runtime_error("cannot read capacitance table");
-    if(word(in)!="IRCX_CAP_TABLE_V1")throw std::runtime_error("invalid capacitance table format");
-    window_=number(in);if(window_<=0)throw std::runtime_error("invalid pattern window");
+    std::ifstream in(path);
+    if (!in)
+      RCXLOG.error(ircx::Loc::current(), "cannot read capacitance table");
+    if (word(in) != "IRCX_CAP_TABLE_V1")
+      RCXLOG.error(ircx::Loc::current(), "invalid capacitance table format");
+    window_ = number(in);
+    if (window_ <= 0)
+      RCXLOG.error(ircx::Loc::current(), "invalid pattern window");
     const auto nl=count(in,1,128);
     for(std::size_t i=0;i<nl;++i){
       Layer l;l.name=word(in);l.width=number(in);l.wmin=number(in);l.smin=number(in);l.bottom=number(in);l.top=number(in);
-      if(l.width<=0||l.wmin<=0||l.smin<=0||l.top<=l.bottom)throw std::runtime_error("invalid process geometry");
-      for(const auto& previous:layers_)if(l.name==previous.name)throw std::runtime_error("duplicate process layer");
+      if (l.width <= 0 || l.wmin <= 0 || l.smin <= 0 || l.top <= l.bottom)
+        RCXLOG.error(ircx::Loc::current(), "invalid process geometry");
+      for (const auto& previous : layers_)
+        if (l.name == previous.name)
+          RCXLOG.error(ircx::Loc::current(), "duplicate process layer");
       const auto nt=count(in,0,32);
       for(std::size_t j=0;j<nt;++j){
         const auto nw=count(in,1,1024),ns=count(in,1,1024);Etch e;
@@ -249,17 +310,28 @@ class Library {
     const auto rows=count(in,1,10000000);std::string line;std::getline(in,line);
     std::set<std::string> keys;
     for(std::size_t i=0;i<rows;++i){
-      if(!std::getline(in,line)||line.size()>10000)throw std::runtime_error("truncated or invalid table row");
-      const auto tab=line.find('\t');if(tab==std::string::npos)throw std::runtime_error("table row needs tab separator");
+      if (!std::getline(in, line) || line.size() > 10000)
+        RCXLOG.error(ircx::Loc::current(), "truncated or invalid table row");
+      const auto tab = line.find('\t');
+      if (tab == std::string::npos)
+        RCXLOG.error(ircx::Loc::current(), "table row needs tab separator");
       const auto key=line.substr(0,tab);Section s;
-      if(!decode(key,s)||!keys.insert(key).second)throw std::runtime_error("invalid or duplicate table key");
+      if (!decode(key, s) || !keys.insert(key).second)
+        RCXLOG.error(ircx::Loc::current(), "invalid or duplicate table key");
       std::istringstream values(line.substr(tab+1));auto c=numbers(values,1+s.left.size()+s.right.size());
-      values>>std::ws;if(!values.eof())throw std::runtime_error("trailing table coefficients");
-      for(double v:c)if(v<0)throw std::runtime_error("negative table coefficient");
+      values >> std::ws;
+      if (!values.eof())
+        RCXLOG.error(ircx::Loc::current(), "trailing table coefficients");
+      for (double v : c)
+        if (v < 0)
+          RCXLOG.error(ircx::Loc::current(), "negative table coefficient");
       add(s,c);add(reflect(s),reflectCaps(c,s.left.size()));
     }
-    if(word(in)!="END")throw std::runtime_error("missing table terminator");
-    in>>std::ws;if(!in.eof())throw std::runtime_error("trailing table data");
+    if (word(in) != "END")
+      RCXLOG.error(ircx::Loc::current(), "missing table terminator");
+    in >> std::ws;
+    if (!in.eof())
+      RCXLOG.error(ircx::Loc::current(), "trailing table data");
     for(auto& [key,samples]:groups_){
       std::sort(samples.begin(),samples.end(),[](const auto&a,const auto&b){return a.x<b.x;});
       std::vector<Sample> unique;unique.reserve(samples.size());
@@ -273,9 +345,19 @@ class Library {
     }
   }
   QueryResult query(const std::string& key) const {
+    auto result = queryChecked(key);
+    if (result.status == Status::error)
+      RCXLOG.error(ircx::Loc::current(), result.error);
+    return result;
+  }
+  // Workers return diagnostics; the application reports them outside OpenMP.
+  QueryResult queryChecked(const std::string& key) const
+  {
     auto& shard=cache_[std::hash<std::string>{}(key)%cache_.size()];
     {std::shared_lock lock(shard.mutex);auto it=shard.values.find(key);if(it!=shard.values.end())return it->second;}
     auto result=evaluate(key);
+    if (result.status == Status::error)
+      return result;
     {std::unique_lock lock(shard.mutex);if(shard.values.size()<4096)shard.values.emplace(key,result);}
     return result;
   }

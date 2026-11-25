@@ -18,81 +18,49 @@
 
 #include <filesystem>
 
-#include "RCXBackendType.hpp"
 #include "RCXInterface.hpp"
-#include "SPEFSanitizer.hpp"
-#include "ircx_ics55.h"
-#include "idm.h"
 
 namespace python_interface {
 
 namespace {
 
-RCXBackendType active_backend = RCXBackendType::kNone;
-std::filesystem::path active_config_path;
+bool rcx_initialized = false;
 
 bool is_native_pdk(const std::optional<std::string>& pdk)
 {
   return !pdk.has_value() || pdk->empty();
 }
 
-bool is_ics55_pdk(const std::optional<std::string>& pdk)
-{
-  return pdk.has_value() && *pdk == "ics55";
-}
-
-bool validate_pdk(const std::optional<std::string>& pdk)
-{
-  return is_native_pdk(pdk) || is_ics55_pdk(pdk);
-}
-
 }  // namespace
 
 bool destroy_rcx()
 {
-  if (active_backend == RCXBackendType::kNative) {
+  if (rcx_initialized) {
     RCXI.destroyRCX();
-  } else if (active_backend == RCXBackendType::kIcs55) {
-    ircx_ics55_destroy();
   }
-  active_backend = RCXBackendType::kNone;
-  active_config_path.clear();
+  rcx_initialized = false;
   return true;
 }
 
 bool init_rcx(const std::filesystem::path& config, const std::optional<std::string>& pdk)
 {
   const std::string config_ = config.string();
-  active_backend = RCXBackendType::kNone;
-  active_config_path.clear();
+  rcx_initialized = false;
 
-  if (!validate_pdk(pdk)) {
+  if (!is_native_pdk(pdk)) {
     return false;
-  }
-
-  if (is_ics55_pdk(pdk)) {
-    ircx_ics55_init(config_.c_str(), dmInst->get_idb_design());
-    active_backend = RCXBackendType::kIcs55;
-    active_config_path = std::filesystem::absolute(config);
-    return true;
   }
 
   std::map<std::string, std::any> config_map;
   config_map["-config"] = config_;
   RCXI.initRCX(config_map);
-  active_backend = RCXBackendType::kNative;
+  rcx_initialized = true;
   return true;
 }
 
 bool run_rcx()
 {
-  if (active_backend == RCXBackendType::kIcs55) {
-    ircx_ics55_run();
-    // Sanitize SPEF written by the precompiled ics55 backend so IEEE 1481 rules hold there too.
-    return ircx::sanitizeSPEFOutputsForConfig(active_config_path);
-  }
-
-  if (active_backend != RCXBackendType::kNative) {
+  if (!rcx_initialized) {
     return false;
   }
 

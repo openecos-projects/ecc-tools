@@ -1310,6 +1310,278 @@ void addIDBViaRule(idb::IdbLefService& lef, std::string bottom_name, std::string
   cut->set_via_rule(rule);
 }
 
+bool testMacroCrossingViaLandings(const std::string& directory)
+{
+  auto* previous_lef = dmInst->get_idb_lef_service();
+  auto* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  addIDBViaRule(lef, "M99", "VIA_MACRO_TEST", "M10");
+  auto* cut = static_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("VIA_MACRO_TEST"));
+  auto* rule = cut->get_via_rule();
+  rule->set_cut_rect(-360, -360, 360, 360);
+  rule->set_spacing(2000, 2000);
+  rule->get_enclosure_bottom()->set_overhang_1(200);
+  rule->get_enclosure_bottom()->set_overhang_2(100);
+  rule->get_enclosure_top()->set_overhang_1(1000);
+  rule->get_enclosure_top()->set_overhang_2(40);
+
+  initFixture(directory);
+  FPDM.getConfig().pg_require_connected_pins = false;
+  addConnect("M99", "M10");
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 10000, 3000, 10000, 25000, 12000);
+
+  Instance macro;
+  macro.set_name("macro");
+  macro.set_macro(true);
+  macro.set_placed(true);
+  macro.set_bounding_rect(3000, 2300, 21000, 17000);
+  InstancePinShape pin;
+  pin.set_pin_name("PWR");
+  pin.set_layer_name("M99");
+  pin.set_rect(13800, 9500, 19000, 11500);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(1);
+  pin.set_rect(13800, 13000, 19000, 13600);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(2);
+  pin.set_rect(15400, 15000, 20500, 17000);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(3);
+  pin.set_rect(3000, 5500, 17000, 7500);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(4);
+  pin.set_rect(3000, 2300, 17000, 4300);
+  macro.get_pin_shape_list().push_back(pin);
+  FPDM.getDatabase().get_instance_name_to_idx_map()[macro.get_name()] = static_cast<int32_t>(FPDM.getDatabase().get_instance_list().size());
+  FPDM.getDatabase().get_instance_list().push_back(macro);
+
+  FPPG.generate();
+  bool passed = check(def.get_design()->get_via_list()->get_via_list().empty(),
+                      "Speculative macro crossing probes must not register unused VIAS masters");
+  passed = check(hasVia("VDD_A", "M99", "M10", 14640, 10500), "A narrow macro pin must connect where both via enclosures fit") && passed;
+  std::vector<std::pair<int32_t, size_t>> arrays;
+  for (auto& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kVia) {
+      passed = check(segment.is_macro_pin_via(), "Every macro crossing via must be protected from via-stack merging") && passed;
+      const auto stack = FPI.getPGViaStack(segment);
+      if (stack.size() == 1) {
+        arrays.emplace_back(segment.get_start_y() / 2000, stack.front()->get_cut_layer_shape().get_rect_list().size());
+      }
+    }
+  }
+  std::sort(arrays.begin(), arrays.end());
+  passed = check(arrays == std::vector<std::pair<int32_t, size_t>>{{1, 5}, {3, 6}, {5, 1}},
+                 "Macro crossings must pack six cuts in the stripe body, five at the tip, and one at the narrow edge")
+           && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
+bool testOffCenterMacroViaPreservesStripeEnd(const std::string& directory)
+{
+  auto* previous_lef = dmInst->get_idb_lef_service();
+  auto* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  // Mirror real T4M2_MET5 dimensions (cut 360x360, pitch 1000, MET5 100/50, T4M2 500/20).
+  addIDBViaRule(lef, "M99", "T4V2", "M10");
+  lef.get_layout()->set_manufacture_grid(1);
+  auto* cut = static_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("T4V2"));
+  auto* rule = cut->get_via_rule();
+  rule->set_cut_rect(-180, -180, 180, 180);
+  rule->set_spacing(1000, 1000);
+  rule->get_enclosure_bottom()->set_overhang_1(100);
+  rule->get_enclosure_bottom()->set_overhang_2(50);
+  rule->get_enclosure_top()->set_overhang_1(500);
+  rule->get_enclosure_top()->set_overhang_2(20);
+
+  initFixture(directory);
+  FPDM.getDatabase().set_micron_dbu(1000);
+  FPDM.getDatabase().set_manufacture_grid(1);
+  FPDM.getDatabase().get_core().set_rect(140000, 140000, 20205000, 320000);
+  FPDM.getConfig().pg_require_connected_pins = false;
+  addConnect("M99", "M10");
+
+  // Off-center edge stripe (685 DBU overlap -> T4V2_460x1360 at x=20037657) and
+  // full-body stripe (6000 DBU overlap -> T4V2_6000x1360 at x=20067000).
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 20035000, 140000, 20035000, 320000, 6000);
+  FPDM.getDatabase().get_pg_segment_list().back().set_generated(true);
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 20067000, 140000, 20067000, 320000, 6000);
+  FPDM.getDatabase().get_pg_segment_list().back().set_generated(true);
+
+  Instance macro;
+  macro.set_name("u_ord_000006");
+  macro.set_macro(true);
+  macro.set_placed(true);
+  macro.set_bounding_rect(20034800, 140000, 20205000, 310600);
+  InstancePinShape pin;
+  pin.set_pin_name("PWR");
+  pin.set_layer_name("M99");
+  pin.set_rect(20037315, 142500, 20198285, 143500);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_rect(20037315, 302500, 20198285, 303500);
+  macro.get_pin_shape_list().push_back(pin);
+  FPDM.getDatabase().get_instance_name_to_idx_map()[macro.get_name()] = static_cast<int32_t>(FPDM.getDatabase().get_instance_list().size());
+  FPDM.getDatabase().get_instance_list().push_back(macro);
+
+  FPPG.generate();
+
+  bool passed = check(def.get_design()->get_via_list()->get_via_list().empty(),
+                      "Generating macro crossings must not leak rejected candidate via masters");
+  int32_t edge_begin = -1;
+  int32_t edge_end = -1;
+  int32_t body_begin = -1;
+  int32_t body_end = -1;
+  int32_t via_count = 0;
+  for (auto& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kStripe && segment.get_layer_name() == "M10") {
+      if (segment.get_start_x() == 20035000) {
+        edge_begin = segment.get_start_y();
+        edge_end = segment.get_end_y();
+      } else if (segment.get_start_x() == 20067000) {
+        body_begin = segment.get_start_y();
+        body_end = segment.get_end_y();
+      }
+    } else if (segment.get_type() == PGSegmentType::kVia) {
+      ++via_count;
+      passed = check(segment.is_macro_pin_via(), "All macro crossing vias must carry the macro-pin-via flag") && passed;
+    }
+  }
+  passed = check(via_count == 4, "Expected four macro crossing vias across both stripes") && passed;
+  passed = check(edge_begin == 142320 && edge_end == 303680,
+                 "Trimming must retain the full T4M2 enclosure of off-center macro vias at both stripe ends")
+           && passed;
+  passed = check(body_begin == 142320 && body_end == 303680,
+                 "Trimming must retain the full T4M2 enclosure of centered 6-cut macro vias at both stripe ends")
+           && passed;
+
+  // Directly verify adjustPGLineSegmentListByViaEnclosure also rescues an
+  // off-center stripe whose endpoints were stopped at the via centers.
+  for (auto& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kStripe && segment.get_layer_name() == "M10" && segment.get_start_x() == 20035000) {
+      segment.set_start_y(143000);
+      segment.set_end_y(303000);
+    }
+  }
+  FPI.resetPGViaAdjustment();
+  FPI.adjustPGLineSegmentListByViaEnclosure();
+  for (auto& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.get_type() == PGSegmentType::kStripe && segment.get_layer_name() == "M10" && segment.get_start_x() == 20035000) {
+      passed = check(segment.get_start_y() == 142320 && segment.get_end_y() == 303680,
+                     "Enclosure adjustment must extend stripes for off-center vias")
+               && passed;
+    }
+  }
+
+  def.get_design()->get_special_net_list()->add_net("VDD_A");
+  FPI.outputPGSegmentList();
+  std::set<std::string> exported_vias;
+  for (auto* via : def.get_design()->get_via_list()->get_via_list()) {
+    exported_vias.insert(via->get_name());
+  }
+  passed = check(exported_vias == std::set<std::string>{"T4V2_460x1360", "T4V2_6000x1360"},
+                 "Exported VIAS list must contain only the committed macro via masters without rejected probes")
+           && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
+bool testLayerCrossingViaFitsWithinStripes(const std::string& directory)
+{
+  auto* previous_lef = dmInst->get_idb_lef_service();
+  auto* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  // Mirror CX55 T4M2_MET5 via rule: cut 360x360, pitch 1000, bottom 100/50, top 500/20.
+  addIDBViaRule(lef, "M99", "T4V2", "M10");
+  lef.get_layout()->set_manufacture_grid(5);
+  auto* cut = static_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("T4V2"));
+  auto* rule = cut->get_via_rule();
+  rule->set_cut_rect(-180, -180, 180, 180);
+  rule->set_spacing(1000, 1000);
+  rule->get_enclosure_bottom()->set_overhang_1(100);
+  rule->get_enclosure_bottom()->set_overhang_2(50);
+  rule->get_enclosure_top()->set_overhang_1(500);
+  rule->get_enclosure_top()->set_overhang_2(20);
+
+  initFixture(directory);
+  FPDM.getDatabase().set_micron_dbu(1000);
+  FPDM.getDatabase().set_manufacture_grid(5);
+  FPDM.getDatabase().get_core().set_rect(100000, 100000, 600000, 1800000);
+  addConnect("M99", "M10");
+
+  // Vertical M10 stripe [368000, 374000] x [1500000, 1717500] (width 6000) crossed by:
+  // 1) y=1605000: 1000x1000 right-edge overlap (exact croc_yosys / innovus_1020 case)
+  // 2) y=1621000: 500x1000 tight right-edge overlap (requires rotated bottom + top enclosure)
+  // 3) y=1717000: 1000x1000 flush at the top end of M10 (requires center shifting inside both stripes)
+  addLine("VSS_B", "M10", PGSegmentType::kStripe, 371000, 1500000, 371000, 1717500, 6000);
+  addLine("VSS_B", "M99", PGSegmentType::kStripe, 373000, 1605000, 500000, 1605000, 1000);
+  addLine("VSS_B", "M99", PGSegmentType::kStripe, 373500, 1621000, 500000, 1621000, 1000);
+  addLine("VSS_B", "M99", PGSegmentType::kStripe, 373000, 1717000, 500000, 1717000, 1000);
+
+  FPPG.generate();
+
+  std::vector<PGSegment> lines;
+  std::vector<PGSegment> vias;
+  for (const PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
+    if (segment.is_line()) {
+      lines.push_back(segment);
+    } else if (segment.get_type() == PGSegmentType::kVia) {
+      vias.push_back(segment);
+    }
+  }
+
+  bool passed = check(vias.size() == 3, "All three partial stripe crossings must receive legal vias");
+  bool found_croc_via = false;
+  for (PGSegment& via : vias) {
+    if (via.get_start_x() == 373500 && via.get_start_y() == 1605000) {
+      found_croc_via = true;
+      passed = check(via.get_via_width() == 1000 && via.get_via_height() == 1360,
+                     "1000x1000 right-edge crossing must orient the asymmetric top enclosure along the vertical stripe")
+               && passed;
+    }
+    const auto shapes = FPI.getPGViaShapes(via);
+    passed = check(shapes.size() == 2, "Each crossing via must resolve both bottom and top enclosure shapes") && passed;
+    for (const auto& shape : shapes) {
+      bool contained = false;
+      for (const auto& line : lines) {
+        if (line.get_net_name() == via.get_net_name() && line.get_layer_name() == shape.get_layer_name()
+            && line.get_ll_x() <= shape.get_ll_x() && shape.get_ur_x() <= line.get_ur_x()
+            && line.get_ll_y() <= shape.get_ll_y() && shape.get_ur_y() <= line.get_ur_y()) {
+          contained = true;
+          break;
+        }
+      }
+      passed = check(contained, "Every via enclosure must stay strictly inside its landing stripe without lateral or end overhang") && passed;
+    }
+  }
+  passed = check(found_croc_via, "Expected centered 1000x1360 via at the 1000x1000 right-edge crossing") && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
+}
+
 bool testStripeEndKeepsCollinearIoWire(const std::string& directory)
 {
   idb::IdbLefService* previous_lef = dmInst->get_idb_lef_service();
@@ -1644,6 +1916,9 @@ int main(int argc, char* argv[])
   passed = ifp::testUncoveredEdgeStripe(directory, 8800, true) && passed;
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
+  passed = ifp::testMacroCrossingViaLandings(directory) && passed;
+  passed = ifp::testOffCenterMacroViaPreservesStripeEnd(directory) && passed;
+  passed = ifp::testLayerCrossingViaFitsWithinStripes(directory) && passed;
   passed = ifp::testStripeEndKeepsCollinearIoWire(directory) && passed;
   passed = ifp::testIoWireSkipsLayerVia(directory) && passed;
   passed = ifp::testConfiguredRailWidth(directory) && passed;

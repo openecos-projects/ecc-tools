@@ -1,4 +1,11 @@
 {
     "thread_num": 8,
-    "output": "./output"
+    "output": "./output",
+    "mapping_file": "./fixtures/rcx/layers.map",
+    "corners": [{
+        "name": "TYPICAL",
+        "temperature": [25],
+        "itf_file": "./fixtures/rcx/nominal.itf",
+        "captab_file": "./fixtures/rcx/nominal.captab"
+    }]
 }

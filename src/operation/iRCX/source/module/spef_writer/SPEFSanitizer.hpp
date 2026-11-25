@@ -22,10 +22,12 @@
 
 namespace ircx {
 
-// Escape IEEE 1481-1998 identifier delimiters without double-escaping existing escapes.
+// Canonicalize a name/path for the native writer's '/' hierarchy and '[]' bus
+// delimiters, preserving existing escape pairs. Compose instance:pin separately.
 std::string escapeSPEFName(std::string_view name);
 
-// Stream-sanitize a written SPEF file to satisfy IEEE 1481-1998 section and escape rules.
+// Remove empty optional sections and escape unquoted '$' in backend SPEF output.
+// Preserve comments and quoted text; this is not a general SPEF validator.
 bool sanitizeSPEFFile(const std::filesystem::path& spef_path);
 
 // Sanitize all .spef files inside output_dir; returns false on directory or file errors.

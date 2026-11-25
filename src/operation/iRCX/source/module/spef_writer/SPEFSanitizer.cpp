@@ -26,6 +26,7 @@
 #include <iostream>
 #include <vector>
 
+#include "Logger.hpp"
 #include "json.hpp"
 
 namespace ircx {
@@ -69,43 +70,79 @@ bool startsWithAnyKeyword(std::string_view trimmed, std::initializer_list<std::s
   return false;
 }
 
-bool isCommentOrBlank(std::string_view trimmed)
-{
-  return trimmed.empty() || trimmed.starts_with("//");
-}
-
 bool isSpefHeaderLine(std::string_view trimmed)
 {
   return startsWithAnyKeyword(trimmed, {"*SPEF", "*DESIGN", "*DATE", "*VENDOR", "*PROGRAM", "*VERSION", "*DESIGN_FLOW", "*DIVIDER",
                                         "*DELIMITER", "*BUS_DELIMITER", "*PREFIX_BUS_DELIMITER", "*T_UNIT", "*C_UNIT", "*R_UNIT", "*L_UNIT"});
 }
 
-std::string escapeUnquotedDollarLine(const std::string& line, bool& changed)
+// Keep the original text and an equally sized code view. Comment characters
+// become spaces in code, so keywords inside comments cannot change sections.
+struct SPEFLine
 {
-  const std::string_view trimmed = trimAscii(line);
-  if (isCommentOrBlank(trimmed) || isSpefHeaderLine(trimmed) || line.find('$') == std::string::npos) {
-    return line;
+  std::string text;
+  std::string code;
+  std::string comments;
+};
+
+SPEFLine scanLine(const std::string& text, bool& in_block_comment)
+{
+  SPEFLine line{text, std::string(text.size(), ' '), text};
+  bool in_quotes = false;
+  for (std::size_t idx = 0; idx < text.size(); ++idx) {
+    const char ch = text[idx];
+    if (in_block_comment) {
+      if (ch == '*' && idx + 1 < text.size() && text[idx + 1] == '/') {
+        in_block_comment = false;
+        ++idx;
+      }
+      continue;
+    }
+    if (!in_quotes && ch == '/' && idx + 1 < text.size()) {
+      if (text[idx + 1] == '/') {
+        break;
+      }
+      if (text[idx + 1] == '*') {
+        in_block_comment = true;
+        ++idx;
+        continue;
+      }
+    }
+    line.code[idx] = ch;
+    line.comments[idx] = ' ';
+    if (ch == '\\' && idx + 1 < text.size()) {
+      ++idx;
+      line.code[idx] = text[idx];
+      line.comments[idx] = ' ';
+    } else if (ch == '"') {
+      in_quotes = !in_quotes;
+    }
+  }
+  return line;
+}
+
+std::string escapeUnquotedDollarLine(const SPEFLine& line, bool& changed)
+{
+  const std::string_view trimmed = trimAscii(line.code);
+  if (trimmed.empty() || isSpefHeaderLine(trimmed) || line.code.find('$') == std::string::npos) {
+    return line.text;
   }
 
   std::string escaped;
-  escaped.reserve(line.size() + 4);
+  escaped.reserve(line.text.size() + 4);
   bool in_quotes = false;
-  for (std::size_t idx = 0; idx < line.size(); ++idx) {
-    const char ch = line[idx];
-    if (!in_quotes && ch == '/' && idx + 1 < line.size() && line[idx + 1] == '/') {
-      escaped.append(line, idx);
-      break;
-    }
-    if (ch == '"' && !hasPrecedingEscape(line, idx)) {
+  for (std::size_t idx = 0; idx < line.text.size(); ++idx) {
+    const char ch = line.code[idx];
+    if (ch == '"' && !hasPrecedingEscape(line.code, idx)) {
       in_quotes = !in_quotes;
-      escaped.push_back(ch);
+      escaped.push_back(line.text[idx]);
       continue;
     }
-    if (!in_quotes && ch == '$' && !hasPrecedingEscape(line, idx)) {
+    if (!in_quotes && ch == '$' && !hasPrecedingEscape(line.code, idx)) {
       escaped.push_back('\\');
       changed = true;
     }
-    escaped.push_back(ch);
+    escaped.push_back(line.text[idx]);
   }
   return escaped;
 }
@@ -135,27 +172,42 @@ enum class SectionState {
   kPendingNameMap,
   kPendingPorts,
   kPendingConn,
+  kPendingElements,
 };
 
 }  // namespace
 
 std::string escapeSPEFName(std::string_view name)
 {
-  // IEEE 1481-1998 identifiers must escape hierarchy/bus delimiters inside
-  // flattened names and every '$' (e.g. Yosys-generated "$_NAND_" names).
-  const bool has_dot = name.find('.') != std::string_view::npos;
-  const bool has_dollar = name.find('$') != std::string_view::npos;
-  if (!has_dot && !has_dollar) {
-    return std::string(name);
-  }
-
+  // The native writer uses '/' for hierarchy and '[]' for bus bits. A bus
+  // index is structural only at the end of its path component (Syntax 92).
   std::string escaped;
   escaped.reserve(name.size() + 4);
   for (std::size_t idx = 0; idx < name.size(); ++idx) {
     const char ch = name[idx];
-    const bool is_dot_or_bracket = has_dot && (ch == '.' || ch == '[' || ch == ']');
-    const bool is_dollar = ch == '$';
-    if ((is_dot_or_bracket || is_dollar) && !hasPrecedingEscape(name, idx)) {
+    if (ch == '\\') {
+      escaped.push_back('\\');
+      escaped.push_back(idx + 1 < name.size() ? name[++idx] : '\\');
+      continue;
+    }
+    if (ch == '[' && idx > 0 && (name[idx - 1] != '/' || hasPrecedingEscape(name, idx - 1))) {
+      std::size_t end = idx + 1;
+      while (end < name.size() && name[end] >= '0' && name[end] <= '9') {
+        ++end;
+      }
+      if (end > idx + 1) {
+        if (end < name.size() && name[end] == ']') {
+          ++end;
+        }
+        if (end == name.size() || name[end] == '/') {
+          escaped.append(name.substr(idx, end - idx));
+          idx = end - 1;
+          continue;
+        }
+      }
+    }
+    const bool identifier_char = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_';
+    if (!identifier_char && ch != '/') {
       escaped.push_back('\\');
     }
     escaped.push_back(ch);
@@ -186,43 +238,54 @@ bool sanitizeSPEFFile(const std::filesystem::path& spef_path)
     std::filesystem::remove(tmp_path, ec);
   };
 
-  auto emit_line = [&](const std::string& line, bool& modified) {
+  auto emit_line = [&](const SPEFLine& line, bool& modified) {
     const std::string escaped = escapeUnquotedDollarLine(line, modified);
     out << escaped << '\n';
   };
 
   SectionState state = SectionState::kNormal;
-  std::string header_line;
-  std::vector<std::string> pending_lines;
+  SPEFLine header_line;
+  std::vector<SPEFLine> pending_lines;
   bool modified = false;
+
+  auto emit_comments = [&](const SPEFLine& line) {
+    // Removing a header or *N must not remove a block-comment opener/closer.
+    if (!trimAscii(line.comments).empty()) {
+      out << line.comments << '\n';
+    }
+  };
 
   auto flush_pending = [&](bool keep_header, bool drop_conn_nodes) {
     if (keep_header) {
       emit_line(header_line, modified);
     } else {
       modified = true;
+      emit_comments(header_line);
     }
-    for (const std::string& pending : pending_lines) {
-      if (drop_conn_nodes && startsWithKeyword(trimAscii(pending), "*N")) {
+    for (const SPEFLine& pending : pending_lines) {
+      if (drop_conn_nodes && startsWithKeyword(trimAscii(pending.code), "*N")) {
         modified = true;
+        emit_comments(pending);
         continue;
       }
       emit_line(pending, modified);
     }
-    header_line.clear();
+    header_line = {};
     pending_lines.clear();
     state = SectionState::kNormal;
   };
 
-  std::string line;
-  while (std::getline(in, line)) {
+  bool in_block_comment = false;
+  std::string text;
+  while (std::getline(in, text)) {
+    SPEFLine line = scanLine(text, in_block_comment);
     bool reprocess = true;
     while (reprocess) {
       reprocess = false;
-      const std::string_view trimmed = trimAscii(line);
+      const std::string_view trimmed = trimAscii(line.code);
 
       if (state == SectionState::kPendingNameMap) {
-        if (isCommentOrBlank(trimmed)) {
+        if (trimmed.empty()) {
           pending_lines.push_back(std::move(line));
           break;
         }
@@ -233,7 +296,7 @@ bool sanitizeSPEFFile(const std::filesystem::path& spef_path)
       }
 
       if (state == SectionState::kPendingPorts) {
-        if (isCommentOrBlank(trimmed)) {
+        if (trimmed.empty()) {
           pending_lines.push_back(std::move(line));
           break;
         }
@@ -258,6 +321,17 @@ bool sanitizeSPEFFile(const std::filesystem::path& spef_path)
         break;
       }
 
+      if (state == SectionState::kPendingElements) {
+        if (trimmed.empty()) {
+          pending_lines.push_back(std::move(line));
+          break;
+        }
+        const bool has_entry = std::isdigit(static_cast<unsigned char>(trimmed.front())) != 0;
+        flush_pending(has_entry, false);
+        reprocess = true;
+        continue;
+      }
+
       if (trimmed == "*NAME_MAP") {
         state = SectionState::kPendingNameMap;
         header_line = std::move(line);
@@ -267,13 +341,16 @@ bool sanitizeSPEFFile(const std::filesystem::path& spef_path)
       } else if (trimmed == "*CONN") {
         state = SectionState::kPendingConn;
         header_line = std::move(line);
+      } else if (trimmed == "*CAP" || trimmed == "*RES") {
+        state = SectionState::kPendingElements;
+        header_line = std::move(line);
       } else {
         emit_line(line, modified);
       }
     }
   }
 
-  if (state == SectionState::kPendingNameMap) {
+  if (state == SectionState::kPendingNameMap || state == SectionState::kPendingElements) {
     flush_pending(false, false);
   } else if (state == SectionState::kPendingPorts) {
     flush_pending(false, false);
@@ -360,12 +437,9 @@ bool sanitizeSPEFOutputsForConfig(const std::filesystem::path& config_path)
     return false;
   }
 
-  nlohmann::json config_json;
-  try {
-    config_json = nlohmann::json::parse(config_stream);
-  } catch (const std::exception& exc) {
-    std::cerr << "[iRCX] Failed to parse iRCX config '" << abs_config << "': " << exc.what() << "\n";
-    return false;
+  const auto config_json = nlohmann::json::parse(config_stream, nullptr, false);
+  if (config_stream.bad() || config_json.is_discarded() || !config_json.is_object()) {
+    RCXLOG.error(Loc::current(), "Failed to parse iRCX config for SPEF sanitization: ", abs_config);
   }
 
   if (!config_json.contains("output") || config_json["output"].is_null()) {

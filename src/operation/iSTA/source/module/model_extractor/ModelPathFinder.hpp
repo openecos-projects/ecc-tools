@@ -23,11 +23,13 @@
 #include "liberty/TimingModel.hpp"
 
 namespace ista {
+class PathChecker;
 class ModelPathFinder
 {
  public:
   explicit ModelPathFinder(Database& database) : _database(database) {}
   std::vector<TimingPath*> getTimingPathList(AnalysisType analysis_type);
+  std::vector<TimingPath> findOutputPaths(AnalysisType analysis_type, PathChecker& check);
   bool isInputPort(std::string& pin_name);
   bool isOutputPort(std::string& pin_name);
   bool isClockPort(std::string& pin_name);

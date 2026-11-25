@@ -68,7 +68,7 @@ class Logger
   }
 
   template <typename T, typename... Args>
-  void error(Loc location, const T& value, const Args&... args)
+  [[noreturn]] void error(Loc location, const T& value, const Args&... args)
   {
     std::string message = getString(value, args...);
     printLog(LogLevel::kError, location, value, args...);

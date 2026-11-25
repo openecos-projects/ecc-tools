@@ -65,7 +65,7 @@ auto hasCoord(const spef::Coord& coord) -> bool
 
 auto expandScanName(const spef::Exchange& exchange, std::string_view name) -> std::string
 {
-  return spef::removeEscapes(spef::stripQuotes(spef::expandName(exchange, std::string{name})));
+  return spef::stripQuotes(spef::expandName(exchange, std::string{name}));
 }
 
 auto extractGeometry(std::string_view text, int dbu) -> ScanGeometry
