@@ -60,7 +60,7 @@ int main()
   clock_key.clock_name = "clock";
   const uint32_t clock_tag = database.pathTags().intern(clock_key);
   for (auto edge : {TransType::kRise, TransType::kFall}) {
-    auto& path = capture.get_path_state_map()[AnalysisType::kMax][PathSourceType::kRegister][edge][clock_tag];
+    auto& path = capture.get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kRegister, edge)][clock_tag];
     path.set_path_state_tag(clock_tag);
     path.set_start_point(startPointId(database, "ff:CK"));
     path.set_clock_name(launchClockId(database, "capture"));
@@ -88,7 +88,7 @@ int main()
       PathTagTable::Key tag_key;
       tag_key.clock_name = tag;
       const uint32_t tag_id = database.pathTags().intern(tag_key);
-      auto& path = database.graph().points()["ff:D"].get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][edge][tag_id];
+      auto& path = database.graph().points()["ff:D"].get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, edge)][tag_id];
       path.set_path_state_tag(tag_id);
       path.set_start_point(startPointId(database, "in"));
       path.set_clock_name(launchClockId(database, "launch"));

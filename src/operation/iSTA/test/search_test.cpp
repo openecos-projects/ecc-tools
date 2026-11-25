@@ -68,7 +68,7 @@ void testCaptureClocks()
   for (auto analysis : {AnalysisType::kMax, AnalysisType::kMin}) {
     for (const auto* tag : {"a_path", "b_path"}) {
       const uint32_t tag_id = tagId(tag);
-      auto& path = db.graph().points()[endpoint].get_path_state_map()[analysis][PathSourceType::kInput][TransType::kRise][tag_id];
+      auto& path = db.graph().points()[endpoint].get_path_state_map()[pathStateCombo(analysis, PathSourceType::kInput, TransType::kRise)][tag_id];
       path.set_start_point(startPointId(db, "in"));
       path.set_clock_name(launchClockId(db, "launch"));
       path.set_path_state_tag(tag_id);
@@ -82,12 +82,13 @@ void testCaptureClocks()
   const auto find_paths = [&] {
     index.rebuild(db.sdc(), db.network());
     const ExceptionMatcher matcher(db.sdc(), db.network());
-    for (auto& [analysis, sources] : db.graph().points()[endpoint].get_path_state_map())
-      for (auto& [source, transitions] : sources)
-        for (auto& [transition, paths] : transitions)
-          for (auto& [tag, path] : paths)
-            path.set_exception_state_list(
+    for (auto& [combo, paths] : db.graph().points()[endpoint].get_path_state_map())
+      for (auto& [tag, path] : paths) {
+        const auto analysis = ista::pathStateComboMode(combo);
+        const auto transition = ista::pathStateComboTrans(combo);
+        path.set_exception_state_list(
                 matcher.initState(startPointName(db, path.get_start_point()), std::string(launchClockName(db, path.get_clock_name())), transition, analysis, path.get_launch_clock_trans_type()));
+      }
     return search.findPathEnds(endpoint);
   };
   auto paths = find_paths();
@@ -136,7 +137,7 @@ void testCaptureClocks()
           "path-delay exception lost capture-dependent check/uncertainty margin");
   db.sdc().get_path_exception_list().clear();
   db.sdc().get_clock_map()["b"].set_setup_uncertainty(0.0);
-  auto& states = db.graph().points()[endpoint].get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise];
+  auto& states = db.graph().points()[endpoint].get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise)];
   states.at(tagId("b_path")).set_arrival(3.0 + ista::kTimingTolerance / 4);
   paths = find_paths();
   require(paths[0].get_path_delay() == 3.0 && paths[0].get_capture_clock_name() == "a", "near-equal slack must preserve ordered path/capture selection");
@@ -215,7 +216,7 @@ int main()
       PathTagTable::Key root_key;
       root_key.clock_name = "root";
       const uint32_t root_tag = first.pathTags().intern(root_key);
-      auto& state = first.graph().points()[end].get_path_state_map()[analysis][source][ista::TransType::kRise][root_tag];
+      auto& state = first.graph().points()[end].get_path_state_map()[pathStateCombo(analysis, source, ista::TransType::kRise)][root_tag];
       state.set_start_point(startPointId(first, end));
       state.set_clock_name(launchClockId(first, "clk"));
       state.set_trans_type(ista::TransType::kRise);
@@ -235,14 +236,14 @@ int main()
       throw std::runtime_error("output required/slack, path construction or candidate order changed");
     }
   }
-  for (const auto& [analysis, sources] : first.graph().points()[end].get_path_state_map())
-    for (const auto& [source, transitions] : sources)
-      for (const auto& [transition, states] : transitions)
-        for (const auto& [tag, state] : states)
-          if (std::string(launchClockName(first, state.get_clock_name())) != "clk" || startPointName(first, state.get_start_point()) != end || state.get_path_state_tag() != tag
-              || state.get_predecessor_arc_idx() != std::numeric_limits<std::size_t>::max()
-              || state.get_arrival() != (analysis == ista::AnalysisType::kMax ? 3.0 : 1.0))
-            throw std::runtime_error("endpoint evaluation overwrote propagated path");
+  for (const auto& [combo, states] : first.graph().points()[end].get_path_state_map())
+    for (const auto& [tag, state] : states) {
+      const auto analysis = ista::pathStateComboMode(combo);
+      if (std::string(launchClockName(first, state.get_clock_name())) != "clk" || startPointName(first, state.get_start_point()) != end || state.get_path_state_tag() != tag
+          || state.get_predecessor_arc_idx() != std::numeric_limits<std::size_t>::max()
+          || state.get_arrival() != (analysis == ista::AnalysisType::kMax ? 3.0 : 1.0))
+        throw std::runtime_error("endpoint evaluation overwrote propagated path");
+    }
   testCaptureClocks();
   ista::Logger::destroyInst();
 }

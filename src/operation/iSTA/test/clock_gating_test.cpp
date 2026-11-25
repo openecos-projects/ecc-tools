@@ -238,7 +238,7 @@ void checkGate(bool high, bool invert_clock, bool invert_output)
   path.set_exception_state_list({});
   require(checker.checkPath(path, "gate:E", AnalysisType::kMin).has_value(), "export fixture has no native gate check");
   checkExport(db, path);
-  db.graph().points().at("gate:E").get_path_state_map()[AnalysisType::kMin][PathSourceType::kInput][TransType::kRise][path.get_path_state_tag()] = path;
+  db.graph().points().at("gate:E").get_path_state_map()[pathStateCombo(AnalysisType::kMin, PathSourceType::kInput, TransType::kRise)][path.get_path_state_tag()] = path;
   // Model preparation has clock topology but deliberately no numeric waveforms.
   for (const auto& id : db.graph().points().sortedIds())
     for (auto& [clock, state] : db.graph().points().get(id).get_clock_state_map()) {

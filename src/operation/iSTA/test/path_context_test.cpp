@@ -141,7 +141,7 @@ int main(int argc, char** argv)
   PathTagTable::Key tag_key;
   tag_key.clock_name = "path";
   const uint32_t path_tag = db.pathTags().intern(tag_key);
-  auto& state = db.graph().points()["ff:D"].get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise][path_tag];
+  auto& state = db.graph().points()["ff:D"].get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise)][path_tag];
   state.set_path_state_tag(path_tag);
   state.set_start_point(startPointId(db, "in"));
   state.set_clock_name(launchClockId(db, "launch"));

@@ -271,21 +271,17 @@ static void structuralFfPath()
           "clock state was not marked structural");
   for (const auto* pin : {"unclocked:CK", "unclocked:Q"}) {
     const auto& paths = database.graph().points().at(pin).get_path_state_map();
-    for (const auto mode : {AnalysisType::kMax, AnalysisType::kMin}) {
-      const auto analysis = paths.find(mode);
-      if (analysis == paths.end())
-        continue;
-      const auto inputs = analysis->second.find(PathSourceType::kInput);
-      if (inputs == analysis->second.end())
-        continue;
-      for (const auto& [edge, states] : inputs->second)
-        require(states.empty(), "structural data state crossed a sequential clock boundary");
-    }
+    for (const auto mode : {AnalysisType::kMax, AnalysisType::kMin})
+      for (const auto edge : {TransType::kRise, TransType::kFall}) {
+        const auto row = paths.find(pathStateCombo(mode, PathSourceType::kInput, edge));
+        if (row != paths.end())
+          require(row->second.empty(), "structural data state crossed a sequential clock boundary");
+      }
   }
 
-  const auto& data_paths = database.graph().points().at("ff:D").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
+  const auto& data_paths = database.graph().points().at("ff:D").get_path_state_map().at(pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise));
   bool found_data_path = false;
-  for (const auto& [tag, path] : data_paths.at(TransType::kRise)) {
+  for (const auto& [tag, path] : data_paths) {
     if (startPointName(database, path.get_start_point()) == "data") {
       found_data_path = true;
       require(path.get_arrival() == 0.0 && path.get_slew() == 0.0, "structural data path acquired numeric timing");
@@ -294,32 +290,32 @@ static void structuralFfPath()
   }
   require(found_data_path, "PI -> INV -> FF:D structural path was not preserved");
 
-  const auto& merge_paths = database.graph().points().at("merge:Y").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
+  const auto& merge_paths = database.graph().points().at("merge:Y").get_path_state_map().at(pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise));
   std::set<std::pair<int32_t, int32_t>> merge_progress;
-  for (const auto& [tag, path] : merge_paths.at(TransType::kRise))
+  for (const auto& [tag, path] : merge_paths)
     if (startPointName(database, path.get_start_point()) == "data" && path.get_exception_state_list().size() == 2)
       merge_progress.emplace(path.get_exception_state_list()[0], path.get_exception_state_list()[1]);
   require(merge_progress == std::set<std::pair<int32_t, int32_t>>{{0, -1}, {1, -1}},
           "setup through hit and bypass paths were not both retained at reconvergence");
 
   std::set<std::pair<int32_t, int32_t>> endpoint_progress;
-  const auto& endpoint_paths = database.graph().points().at("ff:D").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kInput);
-  for (const auto& [tag, path] : endpoint_paths.at(TransType::kRise))
+  const auto& endpoint_paths = database.graph().points().at("ff:D").get_path_state_map().at(pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise));
+  for (const auto& [tag, path] : endpoint_paths)
     if (startPointName(database, path.get_start_point()) == "data" && path.get_exception_state_list().size() == 2)
       endpoint_progress.emplace(path.get_exception_state_list()[0], path.get_exception_state_list()[1]);
   require(endpoint_progress == merge_progress, "through progress was lost before the timing-check endpoint");
 
   std::set<std::pair<int32_t, int32_t>> hold_progress;
-  const auto& min_merge_paths = database.graph().points().at("merge:Y").get_path_state_map().at(AnalysisType::kMin).at(PathSourceType::kInput);
-  for (const auto& [tag, path] : min_merge_paths.at(TransType::kRise))
+  const auto& min_merge_paths = database.graph().points().at("merge:Y").get_path_state_map().at(pathStateCombo(AnalysisType::kMin, PathSourceType::kInput, TransType::kRise));
+  for (const auto& [tag, path] : min_merge_paths)
     if (startPointName(database, path.get_start_point()) == "data" && path.get_exception_state_list().size() == 2)
       hold_progress.emplace(path.get_exception_state_list()[0], path.get_exception_state_list()[1]);
   require(hold_progress == std::set<std::pair<int32_t, int32_t>>{{-1, 0}, {-1, 1}},
           "hold-only through progress was copied from setup instead of propagated independently");
 
-  const auto& register_paths = database.graph().points().at("ff:Q").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister);
+  const auto& register_paths = database.graph().points().at("ff:Q").get_path_state_map().at(pathStateCombo(AnalysisType::kMax, PathSourceType::kRegister, TransType::kRise));
   bool found_register_path = false;
-  for (const auto& [tag, path] : register_paths.at(TransType::kRise)) {
+  for (const auto& [tag, path] : register_paths) {
     if (startPointName(database, path.get_start_point()) == "ff:Q") {
       found_register_path = true;
       require(std::abs(path.get_launch_source_latency() - 0.4) < 1E-12, "ideal source latency was lost in structural register state");
@@ -328,21 +324,19 @@ static void structuralFfPath()
     }
   }
   require(found_register_path, "clock PI -> FF:CK -> FF:Q structural path was not preserved");
-  const auto& min_register_paths = database.graph().points().at("ff:Q").get_path_state_map().at(AnalysisType::kMin).at(PathSourceType::kRegister);
-  for (const auto& [tag, path] : min_register_paths.at(TransType::kRise))
+  const auto& min_register_paths = database.graph().points().at("ff:Q").get_path_state_map().at(pathStateCombo(AnalysisType::kMin, PathSourceType::kRegister, TransType::kRise));
+  for (const auto& [tag, path] : min_register_paths)
     require(std::abs(path.get_launch_source_latency() - 0.2) < 1E-12 && std::abs(path.get_launch_time() - 1.2) < 1E-12,
             "structural early launch used late clock latency instead of min latency");
 
   const auto& latch_paths = database.graph().points().at("latch:Q").get_path_state_map();
-  for (const auto& [mode, sources] : latch_paths)
-    for (const auto& [source, edges] : sources)
-      for (const auto& [edge, states] : edges)
-        require(states.empty(), "dynamic unclocked latch acquired a transparent timing path");
+  for (const auto& [combo, states] : latch_paths)
+    require(states.empty(), "dynamic unclocked latch acquired a transparent timing path");
   database.sdc().get_case_analysis_map()["latch:GN"] = TimingCaseValue::kZero;
   analyzer.prepareStructure();
   const auto& open_paths = database.graph().points().at("latch:Q").get_path_state_map();
   for (const auto mode : {AnalysisType::kMax, AnalysisType::kMin})
-    require(!open_paths.at(mode).at(PathSourceType::kInput).at(TransType::kRise).empty(),
+    require(!open_paths.at(pathStateCombo(mode, PathSourceType::kInput, TransType::kRise)).empty(),
             "statically open latch lost its transparent data path");
 }
 

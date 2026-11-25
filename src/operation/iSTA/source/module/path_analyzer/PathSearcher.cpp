@@ -173,10 +173,11 @@ TimingPathState* PathSearcher::updateDiversionPathState(const std::string& pin_n
   tag_key.launch_clock_edge_index = source_path_state.get_launch_clock_edge_index();
   const uint32_t path_state_tag = database.pathTags().intern(tag_key);
   std::map<uint32_t, TimingPathState>& path_state_map = _query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
-  if (path_state_map.count(path_state_tag) > 0 && !_query.isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
+  auto [slot, inserted] = path_state_map.try_emplace(path_state_tag);
+  if (!inserted && !_query.isBetterArrival(arrival, slot->second.get_arrival(), analysis_type)) {
     return nullptr;
   }
-  TimingPathState& path_state = path_state_map[path_state_tag];
+  TimingPathState& path_state = slot->second;
   path_state = source_path_state;
   path_state.set_arrival(arrival);
   path_state.set_slew(_query.getDataSlew(timing_point, analysis_type, trans_type));

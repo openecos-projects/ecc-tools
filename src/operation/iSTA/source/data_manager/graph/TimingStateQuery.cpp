@@ -407,9 +407,9 @@ bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining
   // behind the witness at every later merge. Cover the entire continuation,
   // plus endpoint comparison/rounding, before discarding another launch tag.
   const double margin = (static_cast<double>(remaining_arcs) + 4.) * kTimingTolerance;
-  for (auto& [mode, sources] : point.get_path_state_map())
-    for (auto& [source, edges] : sources)
-      for (auto& [edge, states] : edges) {
+  for (auto& [combo, states] : point.get_path_state_map()) {
+      const auto mode = pathStateComboMode(combo);
+      {
         // A directly seeded state can carry a different slew. Its endpoint
         // check need not match the physical slew of arriving states.
         if (!states.empty()
@@ -440,6 +440,7 @@ bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining
             ++it;
         }
       }
+    }
   return pruned;
 }
 
@@ -547,21 +548,20 @@ bool TimingStateQuery::hasPathState(TimingPoint& timing_point, AnalysisType anal
 
 bool TimingStateQuery::hasPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type)
 {
-  return timing_point.get_path_state_map().count(analysis_type) > 0 && timing_point.get_path_state_map()[analysis_type].count(source_type) > 0
-         && timing_point.get_path_state_map()[analysis_type][source_type].count(trans_type) > 0
-         && !timing_point.get_path_state_map()[analysis_type][source_type][trans_type].empty();
+  const auto combo = timing_point.get_path_state_map().find(pathStateCombo(analysis_type, source_type, trans_type));
+  return combo != timing_point.get_path_state_map().end() && !combo->second.empty();
 }
 
 std::map<uint32_t, TimingPathState>& TimingStateQuery::getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
                                                                           TransType trans_type)
 {
-  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type];
+  return timing_point.get_path_state_map()[pathStateCombo(analysis_type, source_type, trans_type)];
 }
 
 TimingPathState& TimingStateQuery::getPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type,
                                                 uint32_t path_state_tag)
 {
-  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][path_state_tag];
+  return timing_point.get_path_state_map()[pathStateCombo(analysis_type, source_type, trans_type)][path_state_tag];
 }
 
 TimingPathState* TimingStateQuery::getWorstPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type)

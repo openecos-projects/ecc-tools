@@ -44,10 +44,8 @@ void DataArrivalPropagator::propagate()
     std::map<std::pair<StartPointId, LaunchClockId>, std::size_t> starts;
     std::map<std::vector<int>, std::size_t> classes;
     for (auto& vertex : graph.vertices())
-      for (auto& [mode, sources] : vertex.get_timing_point().get_path_state_map())
-        for (auto& [source, edges] : sources)
-          for (auto& [edge, states] : edges)
-            for (auto& [tag, state] : states) {
+      for (auto& [combo, states] : vertex.get_timing_point().get_path_state_map())
+        for (auto& [tag, state] : states) {
               const auto key = std::pair{state.get_start_point(), state.get_clock_name()};
               auto found = starts.find(key);
               if (found == starts.end()) {
@@ -65,11 +63,9 @@ void DataArrivalPropagator::propagate()
   std::set<LaunchClockId> clock_names;
   if (prune)
     for (const auto& vertex : graph.vertices())
-      for (const auto& [mode, sources] : vertex.get_timing_point().get_path_state_map())
-        for (const auto& [source, edges] : sources)
-          for (const auto& [edge, states] : edges)
-            for (const auto& [tag, state] : states)
-              clock_names.insert(state.get_clock_name());
+      for (const auto& [combo, states] : vertex.get_timing_point().get_path_state_map())
+        for (const auto& [tag, state] : states)
+          clock_names.insert(state.get_clock_name());
   const std::vector<LaunchClockId> clocks(clock_names.begin(), clock_names.end());
   prune = prune && !clocks.empty();
   std::vector<std::size_t> remaining_arcs(graph.vertices().size());
@@ -242,9 +238,9 @@ void DataArrivalPropagator::propagatePathStateArc(std::size_t arc_idx, AnalysisT
     tag_key.launch_clock_edge_index = source_path_state.get_launch_clock_edge_index();
     const uint32_t path_state_tag = database.pathTags().intern(tag_key);
     std::map<uint32_t, TimingPathState>& sink_path_state_map = _path_query.getPathStateMap(sink_point, analysis_type, source_type, output_trans_type);
-    if (sink_path_state_map.count(path_state_tag) == 0
-        || _path_query.isBetterArrival(candidate_arrival, sink_path_state_map[path_state_tag].get_arrival(), analysis_type)) {
-      TimingPathState& sink_path_state = sink_path_state_map[path_state_tag];
+    auto [slot, inserted] = sink_path_state_map.try_emplace(path_state_tag);
+    if (inserted || _path_query.isBetterArrival(candidate_arrival, slot->second.get_arrival(), analysis_type)) {
+      TimingPathState& sink_path_state = slot->second;
       sink_path_state = source_path_state;
       sink_path_state.set_arrival(candidate_arrival);
       sink_path_state.set_slew(_path_query.getDataSlew(sink_point, analysis_type, output_trans_type));

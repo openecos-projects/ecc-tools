@@ -23,11 +23,9 @@ class PathStatePruning
     const auto& graph = _database.graph();
     if (graph.clockGatingChecks().contains(endpoint))
       return false;
-    for (const auto& [mode, sources] : graph.points().at(endpoint).get_path_state_map())
-      for (const auto& [source, edges] : sources)
-        for (const auto& [edge, states] : edges)
-          if (!states.empty())
-            return false;  // A seeded endpoint can retain a path-specific slew.
+    for (const auto& [combo, states] : graph.points().at(endpoint).get_path_state_map())
+      if (!states.empty())
+        return false;  // A seeded endpoint can retain a path-specific slew.
     const auto& pin = _database.network().pins().at(endpoint);
     const auto& sdc = _database.sdc();
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})

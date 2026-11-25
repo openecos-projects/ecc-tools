@@ -99,7 +99,7 @@ static std::size_t requiredAllocations(std::size_t name_size)
     PathTagTable::Key clk_key;
     clk_key.clock_name = "clk";
     const uint32_t clk_tag = db.pathTags().intern(clk_key);
-    auto& path = point.get_path_state_map()[AnalysisType::kMax][PathSourceType::kRegister][TransType::kRise][clk_tag];
+    auto& path = point.get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kRegister, TransType::kRise)][clk_tag];
     path.set_clock_name(launchClockId(db, "clk"));
     path.set_start_point(startPointId(db, "p0"));
     path.set_trans_type(TransType::kRise);

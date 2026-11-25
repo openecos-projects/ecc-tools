@@ -85,14 +85,8 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
           for (const auto input_transition : {TransType::kRise, TransType::kFall}) {
             if (!allowsTransition(database.network(), database.graph().simValues(), arc.get_source_pin(), input_transition, arc.get_type() == ArcType::kNet))
               continue;
-            const auto source_analysis = source.get_path_state_map().find(analysis);
-            if (source_analysis == source.get_path_state_map().end())
-              continue;
-            const auto source_type_it = source_analysis->second.find(source_type);
-            if (source_type_it == source_analysis->second.end())
-              continue;
-            const auto path_it = source_type_it->second.find(input_transition);
-            if (path_it == source_type_it->second.end())
+            const auto path_it = source.get_path_state_map().find(pathStateCombo(analysis, source_type, input_transition));
+            if (path_it == source.get_path_state_map().end())
               continue;
             const auto outputs
                 = arc.get_type() == ArcType::kCell ? cellOutputTransitions(database, arc, input_transition) : std::vector<TransType>{input_transition};
@@ -113,7 +107,7 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
                 tag_key.crpr_path = pinNameOf(database, source_state.crprPinId());
                 tag_key.launch_clock_edge_index = source_state.get_launch_clock_edge_index();
                 const uint32_t tag = database.pathTags().intern(tag_key);
-                auto& target_map = sink.get_path_state_map()[analysis][source_type][output_transition];
+                auto& target_map = sink.get_path_state_map()[pathStateCombo(analysis, source_type, output_transition)];
                 if (target_map.contains(tag))
                   continue;
                 TimingPathState target = source_state;

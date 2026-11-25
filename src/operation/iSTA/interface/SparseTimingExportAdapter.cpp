@@ -134,27 +134,25 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
 std::map<StateKey, PathPair> pathStates(Database& database, TimingPoint& point, int32_t role, AnalysisType analysis_type)
 {
   std::map<StateKey, PathPair> result;
-  auto analysis = point.get_path_state_map().find(analysis_type);
-  if (analysis == point.get_path_state_map().end())
+  auto& state_map = point.get_path_state_map();
+  if (!hasPathStateOfMode(state_map, analysis_type))
     return result;
-  for (auto& [source, transitions] : analysis->second) {
+  forEachPathStateOfMode(state_map, analysis_type, [&](PathSourceType source, TransType transition, std::map<uint32_t, TimingPathState>& paths) {
     if (source == PathSourceType::kNone)
-      continue;
-    for (auto& [transition, paths] : transitions) {
-      if (transition != TransType::kRise && transition != TransType::kFall)
-        continue;
-      const int edge = transition == TransType::kRise ? 0 : 1;
-      for (auto& [tag, path] : paths) {
-        if (std::isfinite(path.get_arrival())) {
-          // Resolve the interned tag id back to its canonical string here, at
-          // the export boundary, so StateKey ordering (and therefore the
-          // snapshot digest) is unchanged from the string-keyed map era.
-          result[{static_cast<int32_t>(source), std::string(launchClockName(database, path.get_clock_name())),
-                  std::string(database.pathTags().view(tag)), role}][edge] = &path;
-        }
+      return;
+    if (transition != TransType::kRise && transition != TransType::kFall)
+      return;
+    const int edge = transition == TransType::kRise ? 0 : 1;
+    for (auto& [tag, path] : paths) {
+      if (std::isfinite(path.get_arrival())) {
+        // Resolve the interned tag id back to its canonical string here, at
+        // the export boundary, so StateKey ordering (and therefore the
+        // snapshot digest) is unchanged from the string-keyed map era.
+        result[{static_cast<int32_t>(source), std::string(launchClockName(database, path.get_clock_name())),
+                std::string(database.pathTags().view(tag)), role}][edge] = &path;
       }
     }
-  }
+  });
   return result;
 }
 

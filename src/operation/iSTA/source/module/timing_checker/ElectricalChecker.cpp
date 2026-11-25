@@ -28,14 +28,12 @@ double slewRange(const Library& library, TransType edge)
 std::set<std::string> dataClocks(const Database& database, const TimingPoint& point, AnalysisType analysis, TransType edge)
 {
   std::set<std::string> clocks;
-  auto mode = point.get_path_state_map().find(analysis);
-  if (mode != point.get_path_state_map().end())
-    for (const auto& [source, edges] : mode->second) {
-      const auto transition = edges.find(edge);
-      if (transition != edges.end())
-        for (const auto& [tag, state] : transition->second)
-          clocks.insert(std::string(launchClockName(database, state.get_clock_name())));
-    }
+  for (const auto& [combo, states] : point.get_path_state_map()) {
+    if (pathStateComboMode(combo) != analysis || pathStateComboTrans(combo) != edge)
+      continue;
+    for (const auto& [tag, state] : states)
+      clocks.insert(std::string(launchClockName(database, state.get_clock_name())));
+  }
   if (clocks.empty())
     clocks.insert("");
   return clocks;

@@ -334,11 +334,9 @@ block b(.CLK(clk),.Y(out)); block c(.CLK(clk),.Y(z)); endmodule
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
   DataPropagator(STADM.getDatabase(), STADC).propagate();
   auto& outside = db.graph().points().at("c/sink:A");
-  for (auto& [analysis, modes] : outside.get_path_state_map())
-    for (auto& [source, transitions] : modes)
-      for (auto& [transition, paths] : transitions)
-        for (auto& [tag, path] : paths)
-          require(std::string(launchClockName(db, path.get_clock_name())) != "master", "clock-as-data escaped its boundary");
+  for (auto& [combo, paths] : outside.get_path_state_map())
+    for (auto& [tag, path] : paths)
+      require(std::string(launchClockName(db, path.get_clock_name())) != "master", "clock-as-data escaped its boundary");
   require(!db.graph().points().at("b/sink:A").get_path_state_map().empty(), "clock-as-data path missing inside boundary");
   command("create_generated_clock -name invalid -source [get_pins c/CLK] -master_clock master -divide_by 2 [get_pins c/CLK]");
   command("set_propagated_clock [all_clocks]");
@@ -453,7 +451,7 @@ BUF merge_cell(.A(b_out),.B(data),.Y(merged)); block d(.CLK(merged),.Y(out)); en
   STADM.getDatabase().graph().clearTiming();
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
   DataPropagator(STADM.getDatabase(), STADC).propagate();
-  auto& paths = db.graph().points().at("d/sink:A").get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise];
+  auto& paths = db.graph().points().at("d/sink:A").get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise)];
   bool data_found = false;
   for (auto& [tag, path] : paths)
     if (std::string(launchClockName(db, path.get_clock_name())) == "master") {

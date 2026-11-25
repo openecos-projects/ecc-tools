@@ -146,13 +146,12 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
   std::unordered_set<std::string> endpoints(snapshot.end_points.begin(), snapshot.end_points.end());
   std::set<std::tuple<std::string, std::string, std::string, int32_t, int32_t, int32_t>> launch_keys;
   auto exportPoint = [&](const std::string& name, TimingPoint& point) {
-    const auto min_it = point.get_path_state_map().find(AnalysisType::kMin);
-    if (min_it == point.get_path_state_map().end())
+    if (!hasPathStateOfMode(point.get_path_state_map(), AnalysisType::kMin))
       return;
-    for (auto& [source_type, transitions] : min_it->second) {
-      for (auto& [transition, paths] : transitions) {
+    forEachPathStateOfMode(point.get_path_state_map(), AnalysisType::kMin,
+                           [&](PathSourceType source_type, TransType transition, std::map<uint32_t, TimingPathState>& paths) {
         if (transition == TransType::kNone)
-          continue;
+          return;
         const std::size_t edge = transition == TransType::kRise ? 0 : 1;
         for (auto& [tag, path] : paths) {
           if (!std::isfinite(path.get_arrival()))
@@ -271,8 +270,7 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             }
           }
         }
-      }
-    }
+        });
   };
 
   for (const auto& id : database.graph().points().sortedIds()) {

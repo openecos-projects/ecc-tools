@@ -66,7 +66,7 @@ static void reconvergentCandidates(bool variation)
   std::vector<std::string> starts{"a:CK", "b:CK"};
   StartpointInitializer(db, delay).seed(starts);
   DataArrivalPropagator(db).propagate();
-  auto& paths = graph.points().at("end").get_path_state_map().at(AnalysisType::kMin).at(PathSourceType::kRegister).at(TransType::kRise);
+  auto& paths = graph.points().at("end").get_path_state_map().at(pathStateCombo(AnalysisType::kMin, PathSourceType::kRegister, TransType::kRise));
   if (paths.size() != (variation ? 2u : 1u))
     throw std::runtime_error("CPPR launch contexts merged, or zero-variation paths unnecessarily separated");
   if (variation) {
@@ -188,18 +188,16 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
   Database exhaustive = db;
   for (const auto& pid : exhaustive.graph().points().sortedIds()) {
     auto& point = exhaustive.graph().points().get(pid);
-    for (auto& [mode, sources] : point.get_path_state_map())
-      for (auto& [source, edges] : sources)
-        for (auto& [edge, paths] : edges)
-          for (auto& [tag, path] : paths)
-            path.setClockPathBound(std::numeric_limits<double>::infinity());
+    for (auto& [combo, paths] : point.get_path_state_map())
+      for (auto& [tag, path] : paths)
+        path.setClockPathBound(std::numeric_limits<double>::infinity());
   }
   DelayCalculator exhaustive_delay(exhaustive, config);
   DataArrivalPropagator(exhaustive).propagate();
   PathChecker exhaustive_check(exhaustive, exhaustive_delay);
   RequiredPropagator(exhaustive, exhaustive_check).propagate();
   DataArrivalPropagator(db).propagate();
-  const auto& states = graph.points().at("end").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister).at(TransType::kRise);
+  const auto& states = graph.points().at("end").get_path_state_map().at(pathStateCombo(AnalysisType::kMax, PathSourceType::kRegister, TransType::kRise));
   if (states.size() != 2)
     throw std::runtime_error("provably dominated launch was propagated instead of bounded CPPR pruning");
   PathChecker checker(db, delay);
@@ -211,11 +209,12 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
   }
   auto worst = [](Database& design, PathChecker& checks, const std::string& endpoint, AnalysisType mode) {
     double result = std::numeric_limits<double>::infinity();
-    for (const auto& [source, edges] : design.graph().points().at(endpoint).get_path_state_map().at(mode))
-      for (const auto& [edge, paths] : edges)
-        for (const auto& [tag, path] : paths)
-          if (const auto end = checks.checkPath(path, endpoint, mode))
-            result = std::min(result, end->slack());
+    ista::forEachPathStateOfMode(design.graph().points().at(endpoint).get_path_state_map(), mode,
+                                 [&](ista::PathSourceType, ista::TransType, std::map<uint32_t, ista::TimingPathState>& paths) {
+                                   for (const auto& [tag, path] : paths)
+                                     if (const auto end = checks.checkPath(path, endpoint, mode))
+                                       result = std::min(result, end->slack());
+                                 });
     if (!std::isfinite(result))
       throw std::runtime_error("fixture has no checked setup/hold path");
     return result;
@@ -245,7 +244,7 @@ static void dominatedLaunch(double downstream = 0., bool opposite_capture = fals
     if (opposite_capture) {
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         bool checked = false;
-        for (const auto& [tag, path] : graph.points().at("end").get_path_state_map().at(AnalysisType::kMax).at(PathSourceType::kRegister).at(edge)) {
+        for (const auto& [tag, path] : graph.points().at("end").get_path_state_map().at(pathStateCombo(AnalysisType::kMax, PathSourceType::kRegister, edge))) {
           if (pinNameOf(db, path.get_crpr_clock_pin()) != "a:CK")
             continue;
           const auto end = checker.checkPath(path, "end", AnalysisType::kMax);
@@ -354,11 +353,9 @@ static void cumulativeMergeTolerance(bool hold)
   Database exhaustive = db;
   for (const auto& pid : exhaustive.graph().points().sortedIds()) {
     auto& point = exhaustive.graph().points().get(pid);
-    for (auto& [mode, sources] : point.get_path_state_map())
-      for (auto& [source, edges] : sources)
-        for (auto& [edge, paths] : edges)
-          for (auto& [tag, path] : paths)
-            path.setClockPathBound(std::numeric_limits<double>::infinity());
+    for (auto& [combo, paths] : point.get_path_state_map())
+      for (auto& [tag, path] : paths)
+        path.setClockPathBound(std::numeric_limits<double>::infinity());
   }
   DataArrivalPropagator(db).propagate();
   DataArrivalPropagator(exhaustive).propagate();
@@ -367,10 +364,15 @@ static void cumulativeMergeTolerance(bool hold)
   auto worst = [hold](Database& design, PathChecker& checker) {
     double slack = std::numeric_limits<double>::infinity();
     const auto mode = hold ? AnalysisType::kMin : AnalysisType::kMax;
-    for (const auto& [edge, states] : design.graph().points().at("end").get_path_state_map().at(mode).at(PathSourceType::kRegister))
-      for (const auto& [tag, state] : states)
+    for (const auto edge : {TransType::kRise, TransType::kFall}) {
+      const auto& state_map = design.graph().points().at("end").get_path_state_map();
+      const auto row = state_map.find(pathStateCombo(mode, PathSourceType::kRegister, edge));
+      if (row == state_map.end())
+        continue;
+      for (const auto& [tag, state] : row->second)
         if (const auto end = checker.checkPath(state, "end", mode))
           slack = std::min(slack, end->slack());
+    }
     if (!std::isfinite(slack))
       throw std::runtime_error("tolerance fixture has no checked setup/hold path");
     return slack;
@@ -449,7 +451,7 @@ int main()
     TimingAnalyzer(db, delay).analyze();
     for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
       for (auto edge : {TransType::kRise, TransType::kFall}) {
-        const auto& paths = db.graph().points().at("out").get_path_state_map().at(mode).at(PathSourceType::kInput).at(edge);
+        const auto& paths = db.graph().points().at("out").get_path_state_map().at(pathStateCombo(mode, PathSourceType::kInput, edge));
         if (paths.empty())
           throw std::runtime_error("no propagated paths");
         for (const auto& [tag, path] : paths)
@@ -466,7 +468,7 @@ int main()
   TimingAnalyzer(db, delay).analyze();
   for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
     for (auto edge : {TransType::kRise, TransType::kFall})
-      for (const auto& [tag, path] : db.graph().points().at("out").get_path_state_map().at(mode).at(PathSourceType::kInput).at(edge))
+      for (const auto& [tag, path] : db.graph().points().at("out").get_path_state_map().at(pathStateCombo(mode, PathSourceType::kInput, edge)))
         near(path.get_arrival(), mode == AnalysisType::kMax ? 1.2 : .8, "negative nominal derate reversed early/late ordering");
   Logger::destroyInst();
 }

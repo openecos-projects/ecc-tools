@@ -616,7 +616,8 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   tag_key.launch_clock_edge_index = edge_index;
   const uint32_t path_state_tag = database.pathTags().intern(tag_key);
   std::map<uint32_t, TimingPathState>& path_state_map = _path_query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
-  if (path_state_map.count(path_state_tag) > 0 && !_path_query.isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
+  auto [slot, inserted] = path_state_map.try_emplace(path_state_tag);
+  if (!inserted && !_path_query.isBetterArrival(arrival, slot->second.get_arrival(), analysis_type)) {
     return;
   }
 
@@ -626,7 +627,7 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
     if (clock != database.sdc().get_clock_map().end())
       source_latency = clockPinValues(_database, crpr_pin, clock_name, analysis_type, clock_trans_type, AnalysisType::kNone, launch_transition).source_latency;
   }
-  TimingPathState& path_state = path_state_map[path_state_tag];
+  TimingPathState& path_state = slot->second;
   path_state.set_arrival(arrival);
   path_state.set_slew(slew);
   path_state.set_launch_time(launch_time);
