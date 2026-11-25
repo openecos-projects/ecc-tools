@@ -42,7 +42,7 @@ void inoutSource()
     for (const auto* name : {"launch", "capture"}) {
       auto& sink = graph.points().at(name).get_clock_state("core").waveformSlot(TransType::kFall);
       sink.arrival_map.set(mode, TransType::kRise, wave.arrival_map.get(mode, TransType::kFall).value() + .2);
-      sink.predecessor_map.set(mode, TransType::kRise, "clk");
+      sink.predecessor_map.set(mode, TransType::kRise, db.network().pins().id("clk").value());
       sink.predecessor_vertex_map.set(mode, TransType::kRise, pin.get_driver_vertex_idx());
       sink.predecessor_trans_type_map.set(mode, TransType::kRise, TransType::kFall);
     }
@@ -90,7 +90,7 @@ int main()
       auto& state = graph.points()[name].get_clock_state(clock);
       for (auto analysis : {AnalysisType::kMin, AnalysisType::kMax}) {
         for (auto edge : {TransType::kRise, TransType::kFall}) {
-          state.predecessor_map.set(analysis, edge, "root");
+          state.predecessor_map.set(analysis, edge, database.network().pins().id("root").value());
           state.predecessor_vertex_map.set(analysis, edge, 0);
           state.predecessor_trans_type_map.set(analysis, edge, edge);
         }
@@ -126,7 +126,7 @@ int main()
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         auto& state = graph.points()["root"].get_clock_state(clock);
-        state.predecessor_map.set(mode, edge, "source");
+        state.predecessor_map.set(mode, edge, database.network().pins().id("source").value());
         state.predecessor_vertex_map.set(mode, edge, 3);
         state.predecessor_trans_type_map.set(mode, edge, edge);
       }

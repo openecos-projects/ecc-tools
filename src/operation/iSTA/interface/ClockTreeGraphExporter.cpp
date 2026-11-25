@@ -364,10 +364,8 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
             timing.analysis = "late";
             timing.source_edge = edgeName(kSourceEdge);
             timing.local_edge = edgeName(local);
-            if (const auto name = waveform->physical_predecessor_map.get(kAnalysis, local)) {
-              const auto pin = database.network().pins().find(*name);
-              timing.predecessor = pin == database.network().pins().end() ? *name : nodeName(*pin);
-            }
+            if (const auto pin_id = waveform->physical_predecessor_map.get(kAnalysis, local))
+              timing.predecessor = nodeName(database.network().pins().get(*pin_id));
             if (arrival.has_value()) {
               timing.arrival_ns = std::max(0.0, *arrival - root_arrival);
             }

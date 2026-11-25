@@ -46,26 +46,31 @@ void waveformPresence()
 // mode/edge winner, and the predecessor bookkeeping follows the winning source.
 void summarizeEnvelope()
 {
+  Database db;
+  db.network().pins()["rise_src"];  // register the pins so their ids exist
+  db.network().pins()["fall_src"];
+  const auto rise_src = db.network().pins().id("rise_src").value();
+  const auto fall_src = db.network().pins().id("fall_src").value();
   ClockState state;
   auto& rise = state.waveformSlot(TransType::kRise);
   rise.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 2.0);
   rise.physical_slew_map.set(AnalysisType::kMax, TransType::kRise, 0.2);
   rise.arrival_map.set(AnalysisType::kMax, TransType::kRise, 2.5);
   rise.slew_map.set(AnalysisType::kMax, TransType::kRise, 0.25);
-  rise.predecessor_map.set(AnalysisType::kMax, TransType::kRise, "rise_src");
+  rise.predecessor_map.set(AnalysisType::kMax, TransType::kRise, rise_src);
   auto& fall = state.waveformSlot(TransType::kFall);
   fall.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 3.0);
   fall.physical_slew_map.set(AnalysisType::kMax, TransType::kRise, 0.15);
   fall.arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.5);
   fall.slew_map.set(AnalysisType::kMax, TransType::kRise, 0.1);
-  fall.predecessor_map.set(AnalysisType::kMax, TransType::kRise, "fall_src");
+  fall.predecessor_map.set(AnalysisType::kMax, TransType::kRise, fall_src);
   state.summarize();
   // Max envelope picks the larger value per field, per source waveform.
   require(state.physical_arrival_map.get(AnalysisType::kMax, TransType::kRise).value() == 3.0, "physical arrival envelope lost the worse value");
   require(state.physical_slew_map.get(AnalysisType::kMax, TransType::kRise).value() == 0.2, "physical slew envelope lost the worse value");
   require(state.arrival_map.get(AnalysisType::kMax, TransType::kRise).value() == 2.5, "arrival envelope lost the worse value");
   require(state.slew_map.get(AnalysisType::kMax, TransType::kRise).value() == 0.25, "slew envelope lost the worse value");
-  require(state.predecessor_map.get(AnalysisType::kMax, TransType::kRise).value() == "rise_src", "predecessor did not follow the arrival winner");
+  require(state.predecessor_map.get(AnalysisType::kMax, TransType::kRise).value() == rise_src, "predecessor did not follow the arrival winner");
   // The envelope carries nothing the source waveforms never had.
   require(!state.arrival(AnalysisType::kMin, TransType::kRise), "envelope fabricated a min value");
   require(!state.arrival(AnalysisType::kMax, TransType::kFall), "envelope fabricated a fall value");
@@ -74,10 +79,13 @@ void summarizeEnvelope()
 // T2c: physicalEdge extracts exactly one edge of the physical bookkeeping.
 void physicalEdgeExtraction()
 {
+  Database db;
+  db.network().pins()["pred_fall"];
+  const auto pred_fall = db.network().pins().id("pred_fall").value();
   ClockWaveform wave;
   wave.physical_arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.0);
   wave.physical_arrival_map.set(AnalysisType::kMax, TransType::kFall, 2.0);
-  wave.physical_predecessor_map.set(AnalysisType::kMax, TransType::kFall, "pred_fall");
+  wave.physical_predecessor_map.set(AnalysisType::kMax, TransType::kFall, pred_fall);
   wave.predecessor_vertex_map.set(AnalysisType::kMax, TransType::kRise, 7);
   wave.arrival_map.set(AnalysisType::kMax, TransType::kRise, 9.0);  // effective, not physical
   const ClockWaveform rise = wave.physicalEdge(TransType::kRise);

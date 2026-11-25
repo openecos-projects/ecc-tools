@@ -82,7 +82,10 @@ void ClockArcPropagator::updateClockPathState(std::string_view clock_name, Trans
   if (!current || isBetterArrival(arrival, *current, analysis_type)) {
     sink.physical_arrival_map.set(analysis_type, output_trans_type, arrival);
     sink.predecessor_source_map.set(analysis_type, output_trans_type, source_edge);
-    sink.physical_predecessor_map.set(analysis_type, output_trans_type, arc.get_source_pin());
+    // The source pin of a graph arc always exists in the network; if a
+    // synthetic arc ever lacks it, the predecessor simply stays absent.
+    if (const auto pin_id = _database.network().pins().id(arc.get_source_pin()))
+      sink.physical_predecessor_map.set(analysis_type, output_trans_type, *pin_id);
     sink.predecessor_vertex_map.set(analysis_type, output_trans_type, arc.get_source_vertex_idx());
     sink.physical_predecessor_arc_delay_map.set(analysis_type, output_trans_type, delay);
     sink.physical_predecessor_trans_type_map.set(analysis_type, output_trans_type, input_trans_type);

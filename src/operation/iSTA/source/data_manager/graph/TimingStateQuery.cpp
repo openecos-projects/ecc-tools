@@ -284,7 +284,7 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
     const auto pred = state->physical_predecessor_map.get(analysis, trace_edge);
     if (!pred)
       break;
-    current = *pred;
+    current = std::string(database.network().pins().nameOf(*pred));
     if (const auto index = state->predecessor_vertex_map.get(analysis, trace_edge)) {
       const auto vertex_index = *index;
       point = vertex_index >= 0 && static_cast<size_t>(vertex_index) < database.graph().vertices().size() ? &database.graph().vertices()[vertex_index].get_timing_point() : nullptr;

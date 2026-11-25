@@ -166,7 +166,7 @@ static void clockPathJson()
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
       for (auto edge : {TransType::kRise, TransType::kFall}) {
         auto& waveform = state.waveformSlot(edge);
-        waveform.predecessor_map.set(mode, TransType::kRise, predecessor);
+        waveform.predecessor_map.set(mode, TransType::kRise, db.network().pins().id(predecessor).value());
         waveform.predecessor_vertex_map.set(mode, TransType::kRise, predecessor_vertex);
         waveform.predecessor_trans_type_map.set(mode, TransType::kRise, TransType::kRise);
       }

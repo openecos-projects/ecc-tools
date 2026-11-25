@@ -5,10 +5,15 @@
 #include <cstdint>
 #include <optional>
 
+#include "Id.h"
 #include "common/AnalysisType.hpp"
 #include "common/TransType.hpp"
 
 namespace ista {
+
+struct PinTag;
+// Predecessor pin identity as an interned id into Network::pins(); the
+// grid's presence bit, not the id value, marks absence.
 
 // Slot index for a (mode, edge) pair. Only kMax/kMin x kRise/kFall exist as
 // keys; anything else (kNone) behaves as "no key", matching a std::map miss.
@@ -89,10 +94,10 @@ struct ClockWaveform
   ClockWaveGrid<double> slew_map;
   ClockWaveGrid<double> physical_arrival_map;
   ClockWaveGrid<double> physical_slew_map;
-  ClockWaveGrid<std::string> predecessor_map;
+  ClockWaveGrid<ecc::symbol::Id<PinTag>> predecessor_map;
   ClockWaveGrid<double> predecessor_arc_delay_map;
   ClockWaveGrid<TransType> predecessor_trans_type_map;
-  ClockWaveGrid<std::string> physical_predecessor_map;
+  ClockWaveGrid<ecc::symbol::Id<PinTag>> physical_predecessor_map;
   ClockWaveGrid<int32_t> predecessor_vertex_map;
   ClockWaveGrid<TransType> predecessor_source_map;
   ClockWaveGrid<double> physical_predecessor_arc_delay_map;
