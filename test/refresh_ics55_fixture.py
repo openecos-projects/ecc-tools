@@ -87,7 +87,8 @@ def main():
             return "./icsprout55-pdk/" + str(path.relative_to(workspace_pdk_root))
         return "./output"
 
-    configs = ["cts", "db", "drc", "floorplan", "rcx", "route", "sta"]
+    # RCX uses the repository's synthetic process fixture, independent of the workspace.
+    configs = ["cts", "db", "drc", "floorplan", "route", "sta"]
     for name in configs:
         source = workspace / f"config/{name}_ecc.json"
         if name == "route" and not source.is_file():
@@ -123,7 +124,7 @@ def main():
                 "sha256": hashes,
                 "note": (
                     f"Generated from completed ECC {args.variant} flow; GCD SDC retains the native API test's "
-                    "50 MHz unconstrained-I/O contract."
+                    "50 MHz unconstrained-I/O contract. RCX uses the repository's synthetic process fixture."
                 ),
             },
             indent=2,

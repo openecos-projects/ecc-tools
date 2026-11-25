@@ -4,6 +4,7 @@ set(IRCX_MODULE ${IRCX_SOURCE}/module)
 set(IRCX_TOOLKIT ${IRCX_SOURCE}/toolkit)
 
 ## build
+add_subdirectory(process)
 add_subdirectory(${IRCX_DATA_MANAGER})
 add_subdirectory(${IRCX_MODULE})
 add_subdirectory(${IRCX_TOOLKIT})

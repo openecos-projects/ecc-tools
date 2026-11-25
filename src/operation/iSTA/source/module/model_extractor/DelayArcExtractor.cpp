@@ -42,7 +42,13 @@ class DelayArcCandidate
   void set_source_port(const std::string& source_port) { _source_port = source_port; }
   void set_sink_port(const std::string& sink_port) { _sink_port = sink_port; }
   void set_timing_type(const std::string& timing_type) { _timing_type = timing_type; }
-  void set_timing_sense(const std::string& timing_sense) { _timing_sense = timing_sense; }
+  void mergeTimingSense(const std::string& sense)
+  {
+    if (_timing_sense.empty())
+      _timing_sense = sense;
+    else if (_timing_sense != sense)
+      _timing_sense = "non_unate";
+  }
   void set_rise_delay(const double rise_delay) { _rise_delay = rise_delay; }
   void set_fall_delay(const double fall_delay) { _fall_delay = fall_delay; }
   void set_has_rise_delay(const bool has_rise_delay) { _has_rise_delay = has_rise_delay; }
@@ -61,31 +67,29 @@ class DelayArcCandidate
 };
 }  // namespace
 
-void DelayArcExtractor::extract(CharacterizedLibrary& tc_lib, AnalysisType analysis_type)
+void DelayArcExtractor::extract(CharacterizedLibrary& tc_lib, AnalysisType analysis_type, PathChecker& check)
 {
   std::map<std::tuple<std::string, std::string, std::string>, DelayArcCandidate> candidate_map;
-  for (TimingPath* timing_path : _model_path_query.getTimingPathList(analysis_type)) {
-    if (_model_path_query.isOutputPort(timing_path->get_end_point())) {
-      std::string source_port = getDelayArcRelatedPin(*timing_path);
-      if (source_port.empty()) {
-        continue;
-      }
-      std::string sink_port = timing_path->get_end_point();
-      std::string timing_type = getDelayArcTimingType(*timing_path);
-      std::tuple<std::string, std::string, std::string> candidate_key = std::make_tuple(source_port, sink_port, timing_type);
-      DelayArcCandidate& candidate = candidate_map[candidate_key];
-      candidate.set_source_port(source_port);
-      candidate.set_sink_port(sink_port);
-      candidate.set_timing_type(timing_type);
-      candidate.set_timing_sense(getDelayArcTimingSense(*timing_path));
-      double delay = getDelayArcValue(*timing_path);
-      if (timing_path->get_trans_type() == TransType::kFall) {
-        candidate.set_fall_delay(getWorseDelay(candidate.get_fall_delay(), delay, candidate.get_has_fall_delay(), analysis_type));
-        candidate.set_has_fall_delay(true);
-      } else {
-        candidate.set_rise_delay(getWorseDelay(candidate.get_rise_delay(), delay, candidate.get_has_rise_delay(), analysis_type));
-        candidate.set_has_rise_delay(true);
-      }
+  for (TimingPath& timing_path : _model_path_query.findOutputPaths(analysis_type, check)) {
+    std::string source_port = getDelayArcRelatedPin(timing_path);
+    if (source_port.empty()) {
+      continue;
+    }
+    std::string sink_port = timing_path.get_end_point();
+    std::string timing_type = getDelayArcTimingType(timing_path);
+    std::tuple<std::string, std::string, std::string> candidate_key = std::make_tuple(source_port, sink_port, timing_type);
+    DelayArcCandidate& candidate = candidate_map[candidate_key];
+    candidate.set_source_port(source_port);
+    candidate.set_sink_port(sink_port);
+    candidate.set_timing_type(timing_type);
+    candidate.mergeTimingSense(getDelayArcTimingSense(timing_path));
+    double delay = getDelayArcValue(timing_path);
+    if (timing_path.get_trans_type() == TransType::kFall) {
+      candidate.set_fall_delay(getWorseDelay(candidate.get_fall_delay(), delay, candidate.get_has_fall_delay(), analysis_type));
+      candidate.set_has_fall_delay(true);
+    } else {
+      candidate.set_rise_delay(getWorseDelay(candidate.get_rise_delay(), delay, candidate.get_has_rise_delay(), analysis_type));
+      candidate.set_has_rise_delay(true);
     }
   }
   for (std::pair<const std::tuple<std::string, std::string, std::string>, DelayArcCandidate>& candidate_pair : candidate_map) {
@@ -164,6 +168,10 @@ TransType DelayArcExtractor::getRegisterClockTransType(TimingPath& timing_path)
 
 std::string DelayArcExtractor::getDelayArcTimingSense(TimingPath& timing_path)
 {
+  // A register's active clock edge can launch either data transition.
+  if (_model_path_query.isRegisterStartPoint(timing_path.get_start_point())) {
+    return "non_unate";
+  }
   if (timing_path.get_point_list().empty()) {
     return "positive_unate";
   }

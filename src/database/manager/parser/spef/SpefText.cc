@@ -219,10 +219,11 @@ std::string removeEscapes(const std::string& name)
 {
   std::string result;
   result.reserve(name.size());
-  for (char ch : name) {
-    if (ch != '\\') {
-      result.push_back(ch);
+  for (std::size_t idx = 0; idx < name.size(); ++idx) {
+    if (name[idx] == '\\' && idx + 1 < name.size()) {
+      ++idx;
     }
+    result.push_back(name[idx]);
   }
   return result;
 }

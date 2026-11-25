@@ -10,7 +10,6 @@ add_library(ircx_interface
     ${IRCX_INTERFACE}/RCXInterface.cpp
 )
 
-add_subdirectory(${IRCX_INTERFACE}/ics55)
 add_subdirectory(${IRCX_INTERFACE}/spef_tools)
 
 target_link_libraries(ircx_interface

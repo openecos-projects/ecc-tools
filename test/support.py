@@ -23,7 +23,7 @@ INPUTS = {
     "sizing_mutation": ("route_in.def.gz", "route_in.v.gz"),
     "buffer_mutation": ("route_in.def.gz", "route_in.v.gz"),
     "full_refresh_mutation": ("route_in.def.gz", "route_in.v.gz"),
-    "rcx": ("route_in.def.gz", "route_in.v.gz"),
+    "rcx": ("harden_in.def.gz",),
     "routing": ("route_in.def.gz",),
     "sta": ("route_in.def.gz", "route_in.v.gz"),
     "verilog_round_trip": ("floorplan_in.v.gz",),
@@ -226,6 +226,8 @@ def _rewrite_value(
         return str(roots.pdk_root / value.removeprefix("./icsprout55-pdk/"))
     if value.startswith("./fixtures/gcd/"):
         return str(roots.fixture_root / value.removeprefix("./fixtures/gcd/"))
+    if value.startswith("./fixtures/rcx/"):
+        return str(roots.repo_root / "test" / value.removeprefix("./"))
     if value == "./fixtures/gcd/config/gcd.sdc":
         return str(roots.fixture_root / "config" / "gcd.sdc")
     if value == "./output":

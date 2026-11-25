@@ -1,6 +1,7 @@
 add_library(ipw_sdc_command
     ${IPW_MODULE}/sdc_command/SdcCommand.cpp
     ${IPW_MODULE}/sdc_command/object/ClockTargets.cpp
+    ${IPW_MODULE}/sdc_command/object/ClockSources.cpp
     ${IPW_MODULE}/sdc_command/clock/ClockUncertaintyStore.cpp
     ${IPW_MODULE}/sdc_command/SetUnits.cpp
     ${IPW_MODULE}/sdc_command/WriteSdc.cpp

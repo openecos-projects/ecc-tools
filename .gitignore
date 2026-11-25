@@ -70,6 +70,11 @@ test/**
 !test/timing/
 !test/timing/endpoint_qualification_test.cpp
 !test/fixtures/
+!test/fixtures/rcx/
+!test/fixtures/rcx/README.md
+!test/fixtures/rcx/layers.map
+!test/fixtures/rcx/nominal.itf
+!test/fixtures/rcx/nominal.captab
 !test/fixtures/gcd/
 !test/fixtures/gcd/provenance.json
 !test/fixtures/gcd/config/

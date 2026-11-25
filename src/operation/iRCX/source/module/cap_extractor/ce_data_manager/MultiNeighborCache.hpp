@@ -1,22 +1,24 @@
 // Adapted from the frozen paper manuscript rank3 collector (2026-10-09).
 #pragma once
-#include <atomic>
 #include <array>
-#include <memory>
+#include <atomic>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <unordered_map>
 
+#include "Logger.hpp"
 #include "PatternCapacitanceTable.hpp"
 #include "RankedNeighbors.hpp"
 #include "TopoPool.hpp"
@@ -71,15 +73,19 @@ class MultiNeighborCache
     active_ = true;
     grid_ = std::string(mode) == "grid";
     if (!grid_ && std::string(mode) != "prebuilt")
-      throw std::runtime_error("invalid multi mode");
+      RCXLOG.error(ircx::Loc::current(), "invalid multi mode");
     const char* rank = std::getenv("IRCX_MULTI_RANK");
-    if (rank)
-      rank_ = std::stoi(rank);
+    if (rank) {
+      const auto end = rank + std::strlen(rank);
+      const auto parsed = std::from_chars(rank, end, rank_);
+      if (parsed.ec != std::errc{} || parsed.ptr != end)
+        RCXLOG.error(Loc::current(), "invalid neighbor rank");
+    }
     if (grid_ && rank_ != 1) {
-      throw std::runtime_error("grid mode requires rank 1");
+      RCXLOG.error(ircx::Loc::current(), "grid mode requires rank 1");
     }
     if (rank_ < 1 || rank_ > 3)
-      throw std::runtime_error("invalid neighbor rank");
+      RCXLOG.error(ircx::Loc::current(), "invalid neighbor rank");
     auto add = [&](auto& edge) {
       if (edge.get_is_via())
         return;
@@ -116,9 +122,9 @@ class MultiNeighborCache
       const char* path = std::getenv("IRCX_PATTERN_TABLE");
       const char* grid = std::getenv("IRCX_PATTERN_GRID");
       if (!path || !*path)
-        throw std::runtime_error("missing prebuilt capacitance table");
+        RCXLOG.error(ircx::Loc::current(), "missing prebuilt capacitance table");
       if (!grid || !*grid)
-        throw std::runtime_error("prebuilt mode requires independent grid fallback");
+        RCXLOG.error(ircx::Loc::current(), "prebuilt mode requires independent grid fallback");
       library_ = std::make_unique<const captable::Library>(path);
     }
 
@@ -161,19 +167,24 @@ class MultiNeighborCache
   // Each caller owns its result: concurrent and consecutive queries cannot alias.
   std::vector<double> caps(const std::string& key, std::int64_t length = 0) const
   {
-    static const std::vector<double> zero{0.}, fallback{};
+    auto result = queryCaps(key, length);
+    if (result.status == captable::Status::error)
+      RCXLOG.error(Loc::current(), result.error);
+    return result.caps;
+  }
+  captable::QueryResult queryCaps(const std::string& key, std::int64_t length = 0) const
+  {
     if (key == "__ZERO")
-      return zero;
-    if (key == "__FALLBACK")
-      return fallback;
-    if (library_) {
-      auto result = library_->query(key);
-      const auto status = static_cast<std::size_t>(result.status);
-      ++library_queries_[status];
-      library_dbu_[status] += length;
-      return result.caps;
-    }
-    return fallback;
+      return {captable::Status::ok, {0.}, {}};
+    if (key == "__FALLBACK" || !library_)
+      return {captable::Status::geometry_fallback, {}, {}};
+    auto result = library_->queryChecked(key);
+    if (result.status == captable::Status::error)
+      return result;
+    const auto status = static_cast<std::size_t>(result.status);
+    ++library_queries_[status];
+    library_dbu_[status] += length;
+    return result;
   }
   std::vector<Piece> pieces(ircx::TopoEdge& master, std::int64_t lo, std::int64_t hi, double micron_per_dbu, const std::string& layer, const std::string& below,
                             const std::string& above)

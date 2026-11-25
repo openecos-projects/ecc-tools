@@ -52,7 +52,7 @@ auto owningNetName(const std::string& node_name) -> std::string
 
 auto normalizeSpefName(const spef::Exchange& exchange, const std::string& name) -> std::string
 {
-  return spef::removeEscapes(spef::stripQuotes(spef::expandName(exchange, name)));
+  return spef::stripQuotes(spef::expandName(exchange, name));
 }
 
 auto sameEdgeRef(const EdgeRef& lhs, const EdgeRef& rhs) -> bool

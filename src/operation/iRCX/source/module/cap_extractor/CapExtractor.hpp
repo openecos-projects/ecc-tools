@@ -70,18 +70,18 @@ class CapExtractor
   void addDirectedCoupling(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, TopoEdge* neighbor, int32_t lo, int32_t hi, double cap);
   void extractCapacitance();
   void extractCornerCapacitance(int32_t corner_idx);
-  void extractNetCapacitance(int32_t corner_idx, int32_t net_idx);
-  void extractEdgeCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx);
-  void extractEdgeIntervalCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, int32_t interval_idx);
-  void extractCapacitanceSpan(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, int32_t interval_idx, int32_t start_coord, int32_t end_coord,
-                              bool allow_multi = true, const pattern::MultiNeighborCache::Piece* fallback = nullptr);
+  std::string extractNetCapacitance(int32_t corner_idx, int32_t net_idx);
+  std::string extractEdgeCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx);
+  std::string extractEdgeIntervalCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, int32_t interval_idx);
+  std::string extractCapacitanceSpan(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, int32_t interval_idx, int32_t start_coord, int32_t end_coord,
+                                     bool allow_multi = true, const pattern::MultiNeighborCache::Piece* fallback = nullptr);
   void getCrossLayerName(std::vector<CrossLayerOverlap>& cross_layer_overlap_list, int32_t start_coord, int32_t end_coord, std::string& below_layer_name,
                          std::string& above_layer_name, bool physical = false);
   void addGroundCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, TopoEdge* adjacent_edge, double ground_capacitance);
   void addCouplingCapacitance(int32_t corner_idx, int32_t net_idx, int32_t edge_idx, TopoEdge* adjacent_edge, double coupling_capacitance, int32_t lo,
                               int32_t hi);
-  ProcessConductor* getProcessConductor(CornerData& corner_data, int32_t design_layer_idx);
-  CapTableConfig* getCapTableConfig(CornerData& corner_data, std::string& process_layer_name, std::string& below_layer_name, std::string& above_layer_name);
+  const ProcessConductor* getProcessConductor(CornerData& corner_data, int32_t design_layer_idx);
+  CapTableConfig* getCapTableConfig(CornerData& corner_data, const std::string& process_layer_name, const std::string& below_layer_name, const std::string& above_layer_name);
   void getCapacitance(CapTableConfig& cap_table_config, double spacing, double& coupling_capacitance, double& ground_capacitance);
   void getFarthestCapacitance(CapTableConfig& cap_table_config, double& coupling_capacitance, double& ground_capacitance);
 };

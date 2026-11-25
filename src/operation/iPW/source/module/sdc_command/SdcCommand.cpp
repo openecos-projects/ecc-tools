@@ -691,7 +691,7 @@ unsigned TclCreateClock::exec()
   std::vector<std::string> source_list;
   if (object_option->is_set_val()) {
     try {
-      source_list = findClockSources(database, object_option->getStringList());
+      source_list = findClockSources(database, getOptionObjects("objects"));
     } catch (const std::exception& error) {
       setTclError(error.what());
       return 0;
@@ -769,8 +769,8 @@ unsigned TclCreateGeneratedClock::exec()
   std::vector<std::string> sources;
   std::vector<std::string> targets;
   try {
-    sources = findClockSources(database, getOptionOrArg("-source")->getStringList());
-    targets = findClockSources(database, getOptionOrArg("objects")->getStringList());
+    sources = findClockSources(database, getOptionObjects("-source"));
+    targets = findClockSources(database, getOptionObjects("objects"));
   } catch (const std::exception& error) {
     setTclError(error.what());
     return 0;
@@ -2644,7 +2644,10 @@ std::vector<std::string> findClockSources(Database& database, const std::vector<
 {
   std::set<std::string> sources;
   for (const std::string& object : objects) {
-    for (const std::string& match : findObjects(database, {object}, QueryObjectType::kAny)) {
+    const auto matches = getObjectType(database, object) == QueryObjectType::kAny
+                             ? findObjects(database, {object}, QueryObjectType::kAny)
+                             : std::vector<std::string>{object};
+    for (const std::string& match : matches) {
       const QueryObjectType type = getObjectType(database, match);
       if (type == QueryObjectType::kPort || type == QueryObjectType::kPin) {
         sources.insert(match);
