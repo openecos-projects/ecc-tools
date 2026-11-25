@@ -83,6 +83,11 @@ target_link_libraries(test_ista_liberty_writer PRIVATE ista_liberty_writer liber
 add_test(NAME ista_liberty_writer COMMAND test_ista_liberty_writer)
 set_tests_properties(ista_liberty_writer PROPERTIES TIMEOUT 30)
 
+add_executable(test_ista_model_delay_arc EXCLUDE_FROM_ALL model_delay_arc_test.cpp)
+target_link_libraries(test_ista_model_delay_arc PRIVATE ista_model_extractor ista_path_analyzer ista_delay_calculator)
+add_test(NAME ista_model_delay_arc COMMAND test_ista_model_delay_arc)
+set_tests_properties(ista_model_delay_arc PROPERTIES TIMEOUT 30)
+
 add_executable(test_ista_path_groups EXCLUDE_FROM_ALL path_groups_test.cpp)
 target_link_libraries(test_ista_path_groups PRIVATE ista_path_analyzer)
 add_test(NAME ista_path_groups COMMAND test_ista_path_groups)
