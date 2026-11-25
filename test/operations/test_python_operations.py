@@ -47,7 +47,21 @@ def test_rcx(test_roots):
 
     assert_nonempty_file(result.output_path("def"))
     assert_nonempty_file(spef)
-    assert "*SPEF" in spef.read_text(encoding="utf-8")
+    text = spef.read_text(encoding="utf-8")
+    assert "*SPEF" in text
+    net_caps = [float(line.split()[-1]) for line in text.splitlines() if line.startswith("*D_NET ")]
+    assert net_caps and any(value > 0 for value in net_caps), "RCX produced no nonzero net capacitance"
+    section = ""
+    resistance = []
+    for line in text.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        if fields[0].startswith("*"):
+            section = fields[0]
+        elif section == "*RES":
+            resistance.append(float(fields[-1]))
+    assert resistance and any(value > 0 for value in resistance), "RCX produced no nonzero resistance"
 
 
 def test_sta(test_roots):

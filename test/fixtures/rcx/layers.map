@@ -1,0 +1,14 @@
+# Synthetic process mapping for native API integration tests.
+MET1 M1
+MET2 M2
+MET3 M3
+MET4 M4
+MET5 M5
+T4M2 M6
+RDL M7
+VIA1 V1
+VIA2 V2
+VIA3 V3
+VIA4 V4
+T4V2 V5
+RV V6

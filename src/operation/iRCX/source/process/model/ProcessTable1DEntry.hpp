@@ -15,13 +15,27 @@
 // ***************************************************************************************
 #pragma once
 
-namespace python_interface {
 
-enum class RCXBackendType
+
+namespace ircx {
+
+class ProcessTable1DEntry
 {
-  kNone,
-  kNative,
-  kIcs55
+ public:
+  ProcessTable1DEntry() = default;
+  ProcessTable1DEntry(double key, double value) : _key(key), _value(value) {}
+  ~ProcessTable1DEntry() = default;
+  // getter
+  double get_key() const { return _key; }
+  double get_value() const { return _value; }
+  // setter
+  void set_key(double key) { _key = key; }
+  void set_value(double value) { _value = value; }
+  // function
+
+ private:
+  double _key = -1.0;
+  double _value = -1.0;
 };
 
-}  // namespace python_interface
+}  // namespace ircx

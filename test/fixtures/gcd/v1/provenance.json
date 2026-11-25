@@ -26,9 +26,9 @@
     "config/floorplan_ecc.json": "ee827dd9f191a1723df80599addd3799f1248575362592df340d7f2578ebf96b",
     "config/gcd.gds.map": "513a9aefb48de2b3eadec1dd2fa1fb1c84bb0460cf40bf32cc56797b86a8b05d",
     "config/gcd.sdc": "49364b34e49ad48034de45e4136b9c7a4b30bf23abe482fbd12880fec266671f",
-    "config/rcx_ecc.json": "e398cc9f37aab4e0eda062a86ad349a57c99422141befe3682383191f913fe59",
+    "config/rcx_ecc.json": "ac7b9bb6621c579850e44091b21c57c0ca218e4cbaf3ab61c8057c686cced18a",
     "config/route_ecc.json": "5ca1ab6fb392c86b273898636ac95640f384ef51e8099265c8bbf939a6908ce6",
     "config/sta_ecc.json": "a9676981dbd06b2af7ac8d3bba35542903295a11d464285783f5c7fb0dc78175"
   },
-  "note": "Generated from completed ECC v1 flow; GCD SDC retains the native API test's 50 MHz unconstrained-I/O contract."
+  "note": "Generated from completed ECC v1 flow; GCD SDC retains the native API test's 50 MHz unconstrained-I/O contract. RCX uses the repository's synthetic process fixture."
 }
