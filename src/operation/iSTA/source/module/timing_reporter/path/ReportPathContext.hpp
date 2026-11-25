@@ -61,8 +61,6 @@ class ReportPathContext
   bool isInternalStartPoint(TimingPath& timing_path);
   bool isTieDrivenConstantOutput(const Instance& instance);
   std::optional<bool> getTieDriverValue(const std::string& pin_name);
-  bool isTieHighCell(const Instance& instance);
-  bool isTieLowCell(const Instance& instance);
   std::string getEndPointCheckText(TimingPath& timing_path);
   const Database& _database;
 };

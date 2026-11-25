@@ -156,15 +156,12 @@ std::vector<LVSConnectivitySummaryRow> LVSReporter::getConnectivitySummaryRowLis
   std::set<std::string> power_open_terminal_name_set = getPowerOpenTerminalNameSet(ConnectType::kPower);
   std::set<std::string> power_short_terminal_name_set
       = getPowerShortTerminalNameSet(ConnectType::kPower, power_ground_short_component_id_set);
-  int64_t power_open_num = 0;
-  for (const std::string& terminal_name : power_open_terminal_name_set) {
-    if (!LVSUTIL.exist(power_short_terminal_name_set, terminal_name)) {
-      power_open_num++;
-    }
-  }
+  int64_t power_open_num = static_cast<int64_t>(power_open_terminal_name_set.size());
+  std::set<std::string> power_fault_terminal_name_set = power_open_terminal_name_set;
+  power_fault_terminal_name_set.insert(power_short_terminal_name_set.begin(), power_short_terminal_name_set.end());
   int64_t power_total_num = static_cast<int64_t>(power_instance_pin_net_map.size());
   int64_t power_short_num = static_cast<int64_t>(power_short_terminal_name_set.size());
-  int64_t power_connected_num = power_total_num - power_open_num - power_short_num;
+  int64_t power_connected_num = power_total_num - static_cast<int64_t>(power_fault_terminal_name_set.size());
   if (power_connected_num < 0) {
     power_connected_num = 0;
   }
@@ -174,15 +171,12 @@ std::vector<LVSConnectivitySummaryRow> LVSReporter::getConnectivitySummaryRowLis
   std::set<std::string> ground_open_terminal_name_set = getPowerOpenTerminalNameSet(ConnectType::kGround);
   std::set<std::string> ground_short_terminal_name_set
       = getPowerShortTerminalNameSet(ConnectType::kGround, power_ground_short_component_id_set);
-  int64_t ground_open_num = 0;
-  for (const std::string& terminal_name : ground_open_terminal_name_set) {
-    if (!LVSUTIL.exist(ground_short_terminal_name_set, terminal_name)) {
-      ground_open_num++;
-    }
-  }
+  int64_t ground_open_num = static_cast<int64_t>(ground_open_terminal_name_set.size());
+  std::set<std::string> ground_fault_terminal_name_set = ground_open_terminal_name_set;
+  ground_fault_terminal_name_set.insert(ground_short_terminal_name_set.begin(), ground_short_terminal_name_set.end());
   int64_t ground_total_num = static_cast<int64_t>(ground_instance_pin_net_map.size());
   int64_t ground_short_num = static_cast<int64_t>(ground_short_terminal_name_set.size());
-  int64_t ground_connected_num = ground_total_num - ground_open_num - ground_short_num;
+  int64_t ground_connected_num = ground_total_num - static_cast<int64_t>(ground_fault_terminal_name_set.size());
   if (ground_connected_num < 0) {
     ground_connected_num = 0;
   }
@@ -433,6 +427,8 @@ void LVSReporter::outputJson(const LRModel& lr_model, const std::vector<const Vi
   *json_file << "{\n";
   *json_file << "  \"entity\": " << entity_json.dump(2) << ",\n";
   *json_file << "  \"connectivity\": " << connectivity_json.dump(2) << ",\n";
+  nlohmann::json non_routing_supply = physical_graph.get_non_routing_supply_pin_net_map();
+  *json_file << "  \"non_routing_supply_terminals\": " << non_routing_supply.dump(2) << ",\n";
   *json_file << "  \"violations\": [";
   for (int32_t violation_idx = 0; violation_idx < static_cast<int32_t>(violation_list.size()); violation_idx++) {
     const Violation& violation = *violation_list[violation_idx];

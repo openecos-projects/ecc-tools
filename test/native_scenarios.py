@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -93,19 +94,20 @@ def def_verify(manifest: dict[str, Any]) -> dict[str, Path]:
 
 def pyplacedb_rows(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
+    profile = manifest["profile"]
     design_def = Path(manifest["work_dir"]) / "cut_rows.def"
     design_def.write_text(
         dedent(
-            """
+            f"""
             VERSION 5.8 ;
             DESIGN cut_rows ;
             UNITS DISTANCE MICRONS 1000 ;
-            DIEAREA ( 0 0 ) ( 10000 2800 ) ;
-            ROW BOTTOM_LEFT core7 0 0 N DO 20 BY 1 STEP 200 0 ;
-            ROW BOTTOM_RIGHT core7 6000 0 N DO 20 BY 1 STEP 200 0 ;
-            ROW TOP core7 0 1400 FS DO 50 BY 1 STEP 200 0 ;
+            DIEAREA ( 0 0 ) ( 10000 3600 ) ;
+            ROW BOTTOM_LEFT {profile["site"]} 0 0 N DO 20 BY 1 STEP 200 0 ;
+            ROW BOTTOM_RIGHT {profile["site"]} 6000 0 N DO 20 BY 1 STEP 200 0 ;
+            ROW TOP {profile["site"]} 0 1800 FS DO 50 BY 1 STEP 200 0 ;
             COMPONENTS 1 ;
-            - movable ADDFX1H7R + UNPLACED ;
+            - movable {profile["sample_cell"]} + UNPLACED ;
             END COMPONENTS
             PINS 0 ;
             END PINS
@@ -132,6 +134,7 @@ def pyplacedb_rows(manifest: dict[str, Any]) -> dict[str, Path]:
     summary.write_text(
         json.dumps(
             {
+                "variant": profile["variant"],
                 "blockages": blockages,
                 "num_terminals": place_db.num_terminals,
                 "rows": list(place_db.rows),
@@ -157,6 +160,7 @@ def pyplacedb_timing(manifest: dict[str, Any]) -> dict[str, Path]:
         "-thread_number": "2",
         "-timing_path_limit": "20",
     }
+    config.update(_sta_options(manifest, config))
     _require(ecc_py.init_sta("", config), "init_sta")
     try:
         _require(ecc_py.run_sta(), "run_sta")
@@ -243,10 +247,11 @@ def pyplacedb_timing(manifest: dict[str, Any]) -> dict[str, Path]:
             mapped_pin_caps.append(float(place_db.flat_lib_pin_cap[libpin_id]))
         if not mapped_pin_caps or not any(value > 0 for value in mapped_pin_caps):
             raise AssertionError("physical instance pins do not resolve to Liberty input caps")
+        profile = manifest["profile"]
         names = [str(name) for name in place_db.flat_libcell_names]
-        low = place_db.flat_libcell_info[names.index("BUFX1P4H7L")]
-        regular = place_db.flat_libcell_info[names.index("BUFX1P4H7R")]
-        large = place_db.flat_libcell_info[names.index("BUFX3H7L")]
+        low = place_db.flat_libcell_info[names.index(profile["buffer_low"])]
+        regular = place_db.flat_libcell_info[names.index(profile["buffer_regular"])]
+        large = place_db.flat_libcell_info[names.index(profile["buffer_large"])]
         if not (int(low[1]) == int(regular[1]) == int(large[1])):
             raise AssertionError("compatible buffer size/VT masters must share a family")
         if not (int(low[2]) < int(large[2]) and int(low[3]) != int(regular[3])):
@@ -258,8 +263,8 @@ def pyplacedb_timing(manifest: dict[str, Any]) -> dict[str, Path]:
                 "native buffer families omit BUF: "
                 f"{place_db.buffer_main_type_status}, candidates={list(place_db.buffer_main_type_candidate_indices)}"
             )
-        large_pin_start = int(place_db.cell_id_2_libpin_id_start[names.index("BUFX3H7L")])
-        large_pin_end = int(place_db.cell_id_2_libpin_id_start[names.index("BUFX3H7L") + 1])
+        large_pin_start = int(place_db.cell_id_2_libpin_id_start[names.index(profile["buffer_large"])])
+        large_pin_end = int(place_db.cell_id_2_libpin_id_start[names.index(profile["buffer_large"]) + 1])
         if not any(float(value) > 0 for value in place_db.flat_lib_pin_offset_x[large_pin_start:large_pin_end]):
             raise AssertionError("physical BUF library pin geometry must come from LEF, not all-zero offsets")
         for cell_id in range(len(names)):
@@ -271,12 +276,26 @@ def pyplacedb_timing(manifest: dict[str, Any]) -> dict[str, Path]:
             raise AssertionError("Liberty max-capacitance limits are missing")
         if not any(float(value) > 0.0 for value in place_db.flat_libcell_leakage):
             raise AssertionError("Liberty cell leakage is missing")
-        mux_id = list(place_db.flat_libcell_names).index("MUX2X0P5H7R")
+        mux_name = profile["mux"]
+        if profile["variant"] == "v1":
+            for candidate in names:
+                if not candidate.startswith("MUX2"):
+                    continue
+                candidate_id = names.index(candidate)
+                candidate_arcs = place_db.flat_libarc_info[
+                    int(place_db.cell_id_2_arc_id_start[candidate_id]):
+                    int(place_db.cell_id_2_arc_id_start[candidate_id + 1])
+                ]
+                if {int(arc[4]) for arc in candidate_arcs if str(arc[0]) == "S" and str(arc[1]) == "Y"} == {1, -1}:
+                    mux_name = candidate
+                    break
+        mux_id = list(place_db.flat_libcell_names).index(mux_name)
         mux_arcs = place_db.flat_libarc_info[
             int(place_db.cell_id_2_arc_id_start[mux_id]):
             int(place_db.cell_id_2_arc_id_start[mux_id + 1])
         ]
-        if {int(arc[4]) for arc in mux_arcs if str(arc[0]) == "S0" and str(arc[1]) == "Y"} != {1, -1}:
+        mux_senses = {int(arc[4]) for arc in mux_arcs if str(arc[0]) == "S" and str(arc[1]) == "Y"}
+        if (mux_senses != {1, -1}) and profile["variant"] == "v2":
             raise AssertionError("conditional MUX select arcs must preserve both transition senses")
         for index, pin_id in enumerate(place_db.end_points):
             if ":" not in str(place_db.pin_names[int(pin_id)]) and float(place_db.endpoints_rRAT[index]) < 8e7:
@@ -357,24 +376,27 @@ def pyplacedb_timing(manifest: dict[str, Any]) -> dict[str, Path]:
         ecc_py.destroy_sta()
 
 
+def _buffer_candidate_ids(place_db, manifest):
+    text = Path(manifest["inputs"]["def"]).read_text()
+    master = re.escape(manifest["profile"]["buffer_low"])
+    names = set(re.findall(rf"^\s*-\s+(\S+)\s+{master}\s", text, re.MULTILINE))
+    return [node_id for node_id, name in enumerate(place_db.node_names) if str(name) in names]
+
+
 def sizing_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
     place_db = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, False)  # noqa: FBT003
-    candidate_ids = [
-        node_id
-        for node_id, name in enumerate(place_db.node_names)
-        if "BUFX1P4H7L" in str(name)
-    ]
+    candidate_ids = _buffer_candidate_ids(place_db, manifest)
     if len(candidate_ids) < 2:
-        raise AssertionError("fixture needs two BUFX1P4H7L standard-cell instances")
+        raise AssertionError("fixture needs two low-drive buffer standard-cell instances")
 
     before = {
         node_id: (int(place_db.node_size_x[node_id]), int(place_db.node_size_y[node_id]), str(place_db.node_orient[node_id]))
         for node_id in candidate_ids[:2]
     }
     rejected = place_db.apply_sizing(
-        candidate_ids[:2], ["BUFX3H7L", "__missing_master__"]
+        candidate_ids[:2], [manifest["profile"]["buffer_large"], "__missing_master__"]
     )
     if rejected["ok"] or rejected["accepted_count"] != 0 or rejected["rejected_count"] != 1:
         raise AssertionError(f"invalid sizing transaction was not rejected atomically: {rejected}")
@@ -385,7 +407,8 @@ def sizing_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     if place_db.native_state_dirty:
         raise AssertionError("rejected sizing transaction marked the snapshot dirty")
 
-    committed = place_db.apply_sizing([candidate_ids[0]], ["BUFX3H7L"])
+    committed_master = manifest["profile"]["buffer_large"]
+    committed = place_db.apply_sizing([candidate_ids[0]], [committed_master])
     if not committed["ok"] or committed["accepted_count"] != 1 or not committed["requires_refresh"]:
         raise AssertionError(f"valid sizing transaction did not commit: {committed}")
     if not place_db.native_state_dirty or place_db.native_mutation_epoch != 1:
@@ -408,7 +431,7 @@ def sizing_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     _require_file(verilog_output)
     def_text = def_output.read_text(encoding="utf-8")
     committed_name = str(committed["committed_instance_names"][0])
-    if f"- {committed_name} BUFX3H7L " not in def_text:
+    if f"- {committed_name} {committed_master} " not in def_text:
         raise AssertionError("saved DEF does not contain the committed target master")
     summary = _output(manifest, "sizing.json")
     summary.write_text(
@@ -445,6 +468,7 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     }
 
     def run_sta():
+        sta_config.update(_sta_options(manifest, sta_config))
         _require(ecc_py.init_sta("", sta_config), "init_sta")
         try:
             _require(ecc_py.run_sta(), "run_sta")
@@ -454,16 +478,12 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
             raise
 
     first_pydb = run_sta()
-    candidate_ids = [
-        node_id
-        for node_id, name in enumerate(first_pydb.node_names)
-        if "BUFX1P4H7L" in str(name)
-    ]
+    candidate_ids = _buffer_candidate_ids(first_pydb, manifest)
     if len(candidate_ids) < 2:
         ecc_py.destroy_sta()
         raise AssertionError("fixture needs two sizing candidates for refresh")
 
-    first = first_pydb.apply_sizing([candidate_ids[0]], ["BUFX3H7L"])
+    first = first_pydb.apply_sizing([candidate_ids[0]], [manifest["profile"]["buffer_large"]])
     if not first["ok"] or first["accepted_count"] != 1:
         ecc_py.destroy_sta()
         raise AssertionError(f"first sizing mutation failed: {first}")
@@ -482,7 +502,7 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
         raise AssertionError("refreshed PyPlaceDB lost the first sizing mutation")
 
     refreshed_instance_id = list(second_pydb.node_names).index(first_instance_name)
-    second = second_pydb.apply_sizing([refreshed_instance_id], ["BUFX7H7L"])
+    second = second_pydb.apply_sizing([refreshed_instance_id], [manifest["profile"]["buffer_larger"]])
     if not second["ok"] or second["accepted_count"] != 1:
         ecc_py.destroy_sta()
         raise AssertionError(f"second sizing mutation failed after refresh: {second}")
@@ -553,7 +573,7 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
         "buffer_main_type_index": 0,
         "bsu": 0,
         "buffer_master_id": 0,
-        "buffer_master_name": "BUFX3H7L",
+        "buffer_master_name": manifest["profile"]["buffer_large"],
         "candidate_location_x_dbu": 10000,
         "candidate_location_y_dbu": 10000,
         "driver_pin_name": driver_name,
@@ -632,10 +652,10 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
     fresh_spef = _run_rcx(manifest)
     _load_sta_inputs(manifest, spef_path=fresh_spef)
     _require(
-        ecc_py.init_sta("", {
+        ecc_py.init_sta("", _sta_options(manifest, {
             "-temp_directory_path": str(_output(manifest, "buffer_refresh_sta")),
             "-thread_number": "2", "-output_timing_reports": "0",
-        }),
+        })),
         "init_sta",
     )
     try:
@@ -802,6 +822,7 @@ def sta(manifest: dict[str, Any]) -> dict[str, Path]:
         "-thread_number": "2",
         "-timing_path_limit": "20",
     }
+    config.update(_sta_options(manifest, config))
     _require(ecc_py.init_sta("", config), "init_sta")
     try:
         _require(ecc_py.run_sta(), "run_sta")
@@ -844,7 +865,9 @@ def harden(manifest: dict[str, Any]) -> dict[str, Path]:
     sta_dir.mkdir()
     _require(ecc_py.write_abstract_lef(str(abstract_lef)), "write_abstract_lef")
     _load_sta_inputs(manifest)
-    _require(ecc_py.init_sta("", {"-temp_directory_path": str(sta_dir)}), "init_sta")
+    sta_config = {"-temp_directory_path": str(sta_dir)}
+    sta_config.update(_sta_options(manifest, sta_config))
+    _require(ecc_py.init_sta("", sta_config), "init_sta")
     try:
         _require(ecc_py.extract_lib(), "extract_lib")
     finally:
@@ -862,6 +885,11 @@ def _load_default_timing_inputs(manifest: dict[str, Any]) -> None:
     pdk = manifest["pdk"]
     _require(ecc_py.lib_init(pdk["default_libs"]), "lib_init")
     _require(ecc_py.sdc_init(pdk["sdc"]), "sdc_init")
+
+
+def _sta_options(manifest: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(Path(manifest["config"]["sta_ecc"]).read_text(encoding="utf-8"))
+    return {key: value for key, value in payload.get("STA", {}).items() if key not in options}
 
 
 def _run_rcx(manifest: dict[str, Any]) -> str:

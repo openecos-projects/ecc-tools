@@ -230,7 +230,7 @@ std::string removeEscapes(const std::string& name)
 std::string expandName(const Exchange& exchange, const std::string& name)
 {
   if (!text::startsWithNameIndex(name)) {
-    return name;
+    return removeEscapes(name);
   }
 
   const std::size_t begin = 1;
@@ -244,17 +244,13 @@ std::string expandName(const Exchange& exchange, const std::string& name)
 
   std::string expanded = removeEscapes(map_it->second);
   if (colon != std::string::npos) {
-    expanded += name.substr(colon);
+    expanded += removeEscapes(name.substr(colon));
   }
   return expanded;
 }
 
 void expandAllNames(Exchange& exchange)
 {
-  if (exchange.index_to_name_map.empty()) {
-    return;
-  }
-
   for (auto& port : exchange.ports) {
     port.name = expandName(exchange, port.name);
   }

@@ -25,6 +25,15 @@
 #include "Utility.hpp"
 #include "ViolationType.hpp"
 
+namespace ilvs {
+
+struct DataManagerTestAccess
+{
+  static void buildPhysicalGraph(DataManager& data_manager) { data_manager.buildPhysicalGraph(); }
+};
+
+}  // namespace ilvs
+
 ilvs::Net makeNet(const std::vector<std::string>& terminal_name_list)
 {
   ilvs::Net net;
@@ -65,6 +74,21 @@ void addSupplyVia(ilvs::NetRoutingGraph& routing_graph, std::vector<int32_t>& co
 void addPowerTerminal(ilvs::DesignData& design_data, const std::string& terminal_name)
 {
   design_data.get_terminal_connect_type_map()[terminal_name] = ilvs::ConnectType::kPower;
+}
+
+void buildPGComponentFixture(ilvs::PhysicalGraph& physical_graph)
+{
+  // These synthetic fixtures explicitly supply both global and net-local connectivity.
+  for (const auto* net_names : {&physical_graph.get_power_net_name_set(), &physical_graph.get_ground_net_name_set()}) {
+    for (const std::string& net_name : *net_names) {
+      int32_t net_id = physical_graph.getOrCreateNetId(net_name);
+      const auto* global_ids = physical_graph.getNetRoutingShapeComponentIdList(net_id);
+      if (global_ids != nullptr) {
+        physical_graph.getOrCreatePGNetRoutingShapeComponentIdList(net_id) = *global_ids;
+      }
+    }
+  }
+  physical_graph.get_pg_terminal_component_map() = physical_graph.get_terminal_component_map();
 }
 
 void buildNetlistData(ilvs::Database& database)
@@ -155,7 +179,68 @@ void buildDefData(ilvs::Database& database)
   physical_graph.get_component_shape_ref_map()[300] = {{power_net_id, 0}, {ground_net_id, 0}};
   physical_graph.get_short_component_id_list() = {42, 300};
   physical_graph.set_optimized_component_data_valid(true);
+  buildPGComponentFixture(physical_graph);
   database.set_def_data(std::move(def_data));
+}
+
+void test_io_supply_ring_waiver(ilvs::Database& database)
+{
+  database.reset();
+
+  ilvs::DefData def_data;
+  def_data.set_design_name("io_supply");
+  def_data.get_die().set_real_ll(0, 0);
+  def_data.get_die().set_real_ur(1000, 1000);
+  ilvs::PhysicalGraph& physical_graph = def_data.get_physical_graph();
+  physical_graph.get_power_net_name_set() = {"VDD", "VDDIO"};
+  physical_graph.get_ground_net_name_set() = {"VSS", "VSSIO"};
+
+  ilvs::NetRoutingGraph& power_graph = physical_graph.getOrCreateNetRoutingGraph("VDD");
+  int32_t power_net_id = physical_graph.getNetId("VDD");
+  std::vector<int32_t>& power_component_id_list = physical_graph.getOrCreateNetRoutingShapeComponentIdList(power_net_id);
+  int32_t power_routing_shape_idx = 0;
+  addSupplyVia(power_graph, power_component_id_list, power_routing_shape_idx, 100, 490, 490, 510, 510);
+
+  ilvs::NetRoutingGraph& ground_graph = physical_graph.getOrCreateNetRoutingGraph("VSS");
+  int32_t ground_net_id = physical_graph.getNetId("VSS");
+  std::vector<int32_t>& ground_component_id_list = physical_graph.getOrCreateNetRoutingShapeComponentIdList(ground_net_id);
+  int32_t ground_routing_shape_idx = 0;
+  addSupplyVia(ground_graph, ground_component_id_list, ground_routing_shape_idx, 200, 490, 490, 510, 510);
+
+  physical_graph.get_power_instance_pin_net_map()["U1/VDD"] = "VDD";
+  physical_graph.get_power_instance_pin_net_map()["U2/VDD"] = "VDD";
+  physical_graph.get_power_instance_pin_net_map()["IO_POWER_vddio_left_0/VDDIO"] = "VDDIO";
+  physical_graph.get_power_instance_pin_net_map()["g_iocell_x/VDDIO"] = "VDDIO";
+  physical_graph.get_ground_instance_pin_net_map()["U1/VSS"] = "VSS";
+  physical_graph.get_ground_instance_pin_net_map()["U2/VSS"] = "VSS";
+  physical_graph.get_ground_instance_pin_net_map()["IO_POWER_vssio_left_0/VSSIO"] = "VSSIO";
+  physical_graph.get_ground_instance_pin_net_map()["IO_POWER_vssio_right_0/VSSIO"] = "VSSIO";
+
+  physical_graph.get_terminal_component_map()["U1/VDD"] = 100;
+  physical_graph.get_terminal_component_map()["U2/VDD"] = 101;
+  physical_graph.get_terminal_component_map()["IO_POWER_vddio_left_0/VDDIO"] = 400;
+  physical_graph.get_terminal_component_map()["g_iocell_x/VDDIO"] = 400;
+  physical_graph.get_terminal_component_map()["U1/VSS"] = 200;
+  physical_graph.get_terminal_component_map()["U2/VSS"] = 201;
+  physical_graph.get_terminal_component_map()["IO_POWER_vssio_left_0/VSSIO"] = 500;
+  physical_graph.get_terminal_component_map()["IO_POWER_vssio_right_0/VSSIO"] = 501;
+
+  buildPGComponentFixture(physical_graph);
+  database.set_def_data(std::move(def_data));
+
+  ilvs::PDNChecker::initInst();
+  LVSPC.check();
+  ilvs::PDNChecker::destroyInst();
+
+  ilvs::Summary& summary = database.get_summary();
+  assert(summary.pc_summary.open_vdd_num == 1);
+  assert(summary.pc_summary.open_vss_num == 3);
+  std::map<ilvs::ViolationType, int32_t> violation_type_num_map;
+  for (ilvs::Violation& violation : summary.pc_summary.violation_list) {
+    violation_type_num_map[violation.get_violation_type()]++;
+  }
+  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVDD] == 1);
+  assert(violation_type_num_map[ilvs::ViolationType::kPowerOpenVSS] == 3);
 }
 
 std::string getFileContent(const std::filesystem::path& file_path)
@@ -165,6 +250,309 @@ std::string getFileContent(const std::filesystem::path& file_path)
   LVSUTIL.closeFileStream(file);
   return file_content;
 }
+
+namespace {
+
+ilvs::PhysicalGraph& graph()
+{
+  return LVSDM.getDatabase().get_def_data().get_physical_graph();
+}
+
+int wire(const std::string& net, ilvs::RoutingShape shape)
+{
+  auto& shapes = graph().getOrCreateNetRoutingGraph(net).get_routing_shape_list();
+  shapes.push_back(shape);
+  return static_cast<int>(shapes.size()) - 1;
+}
+
+void via(const std::string& net, int bottom_layer, int top_layer, int x1, int y1, int x2, int y2)
+{
+  int bottom = wire(net, makeRoutingShape(bottom_layer, x1, y1, x2, y2));
+  int top = wire(net, makeRoutingShape(top_layer, x1, y1, x2, y2));
+  graph().getOrCreateNetRoutingGraph(net).get_via_shape_idx_pair_list().emplace_back(bottom, top);
+}
+
+void terminal(const std::string& net, const std::string& name, ilvs::RoutingShape shape)
+{
+  auto& routing = graph().getOrCreateNetRoutingGraph(net);
+  int index = static_cast<int>(routing.get_routing_shape_list().size());
+  routing.get_terminal_shape_idx_map()[name].push_back(index);
+  routing.get_routing_shape_list().push_back(shape);
+  routing.set_terminal_routing_shape_num(index + 1);
+  if (graph().get_power_net_name_set().count(net)) {
+    graph().get_power_instance_pin_net_map()[name] = net;
+  } else if (graph().get_ground_net_name_set().count(net)) {
+    graph().get_ground_instance_pin_net_map()[name] = net;
+  }
+}
+
+void supplies()
+{
+  via("VDD", 9, 10, 490, 490, 510, 510);
+  via("VSS", 9, 10, 520, 490, 540, 510);
+}
+
+void expect(bool condition, const std::string& message)
+{
+  if (!condition) {
+    throw std::runtime_error(message);
+  }
+}
+
+void check(int open_vdd, int open_vss, int shorts)
+{
+  ilvs::DataManagerTestAccess::buildPhysicalGraph(LVSDM);
+  LVSRC.check();
+  LVSPC.check();
+  const auto& summary = LVSDM.getDatabase().get_summary();
+  expect(summary.pc_summary.open_vdd_num == open_vdd,
+         "VDD open: expected " + std::to_string(open_vdd) + ", got " + std::to_string(summary.pc_summary.open_vdd_num));
+  expect(summary.pc_summary.open_vss_num == open_vss,
+         "VSS open: expected " + std::to_string(open_vss) + ", got " + std::to_string(summary.pc_summary.open_vss_num));
+  expect(summary.rc_summary.short_net_num == shorts,
+         "short components: expected " + std::to_string(shorts) + ", got " + std::to_string(summary.rc_summary.short_net_num));
+}
+
+using OpenGroups = std::multiset<std::pair<std::string, std::vector<std::string>>>;
+
+OpenGroups openGroups()
+{
+  OpenGroups groups;
+  for (const auto& violation : LVSDM.getDatabase().get_summary().pc_summary.violation_list) {
+    auto terminals = violation.get_terminal_name_list();
+    std::sort(terminals.begin(), terminals.end());
+    groups.emplace(violation.get_net_name(), std::move(terminals));
+  }
+  return groups;
+}
+
+void expectOpenGroups(const OpenGroups& expected)
+{
+  expect(openGroups() == expected, "wrong PG open grouping or terminal ownership");
+}
+
+void expectReport(const std::string& name, int opens, int shorts, int connected, int total)
+{
+  auto output_dir = std::filesystem::current_path() / "test_lvs_flow_output" / "pg_connectivity";
+  std::filesystem::create_directories(output_dir);
+  LVSDM.getConfig().lr_temp_directory_path = output_dir.string() + "/";
+  LVSLR.report();
+  auto report = nlohmann::json::parse(getFileContent(output_dir / "ilvs.json"));
+  for (const auto& row : report.at("connectivity")) {
+    if (row.at("connectivity") == name) {
+      expect(row.at("open").at("count") == opens, "report dropped PG opens that also short");
+      expect(row.at("short").at("count") == shorts, "incorrect PG short count");
+      expect(row.at("connected").at("count") == connected, "report double-subtracted overlapping PG faults");
+      expect(row.at("total") == total, "incorrect PG total count");
+      return;
+    }
+  }
+  throw std::runtime_error("missing PG connectivity row");
+}
+
+int test_pg_connectivity()
+{
+  ilvs::RoutingChecker::initInst();
+  ilvs::PDNChecker::initInst();
+  ilvs::LVSReporter::initInst();
+  const std::vector<std::pair<std::string, std::function<void()>>> tests = {
+      {"own_net_vias_connect_both_supplies", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(8, 490, 490, 510, 510));
+         terminal("VSS", "U/VSS", makeRoutingShape(8, 520, 490, 540, 510));
+         supplies();
+         via("VDD", 8, 9, 490, 490, 510, 510);
+         via("VSS", 8, 9, 520, 490, 540, 510);
+         check(0, 0, 0);
+       }},
+      {"overlapping_layers_without_pg_via_are_open", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(8, 490, 490, 510, 510));
+         supplies();
+         check(1, 0, 0);
+       }},
+      {"disconnected_power_and_ground_pins_are_open", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(9, 100, 100, 110, 110));
+         terminal("VSS", "U/VSS", makeRoutingShape(9, 200, 100, 210, 110));
+         supplies();
+         check(1, 1, 0);
+         expectOpenGroups({{"VDD", {"U/VDD"}}, {"VSS", {"U/VSS"}}});
+       }},
+      {"signal_wire_bypass_cannot_hide_vdd_open", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(9, 100, 495, 110, 505));
+         supplies();
+         wire("signal", makeRoutingShape(9, 105, 499, 500, 501));
+         check(1, 0, 1);
+         expectOpenGroups({{"VDD", {"U/VDD"}}});
+       }},
+      {"signal_pin_bypass_cannot_hide_vss_open", [] {
+         terminal("VSS", "U/VSS", makeRoutingShape(9, 700, 495, 710, 505));
+         terminal("signal", "U/A", makeRoutingShape(9, 530, 499, 705, 501));
+         supplies();
+         check(0, 1, 1);
+         expectOpenGroups({{"VSS", {"U/VSS"}}});
+       }},
+      {"pg_short_does_not_create_open_on_complete_supply", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(9, 100, 495, 110, 505));
+         supplies();
+         wire("VDD", makeRoutingShape(9, 105, 499, 500, 501));
+         wire("signal", makeRoutingShape(9, 104, 498, 106, 500));
+         check(0, 0, 1);
+       }},
+      {"same_pg_terminal_multilayer_rects_keep_internal_connectivity", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(8, 0, 0, 10, 10));
+         terminal("VDD", "U/VDD", makeRoutingShape(9, 490, 490, 510, 510));
+         terminal("VDD", "V/VDD", makeRoutingShape(8, 10, 0, 20, 10));
+         supplies();
+         check(0, 0, 0);
+       }},
+      {"missing_pg_terminal_geometry_is_open", [] {
+         graph().get_power_instance_pin_net_map()["MISSING/VDD"] = "VDD";
+         supplies();
+         check(1, 0, 0);
+         expectOpenGroups({{"VDD", {"MISSING/VDD"}}});
+       }},
+      {"missing_supply_reference_reports_connected_pg_pins_as_open", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(9, 0, 0, 10, 10));
+         terminal("VDD", "V/VDD", makeRoutingShape(9, 10, 0, 20, 10));
+         check(2, 0, 0);
+         expectOpenGroups({{"VDD", {"U/VDD", "V/VDD"}}});
+       }},
+      {"supply_reference_tie_does_not_depend_on_foreign_short", [] {
+         // A foreign shape is inserted first so the right island has a lower global component ID.
+         wire("signal", makeRoutingShape(9, 512, 497, 514, 503));
+         terminal("VDD", "LEFT/VDD", makeRoutingShape(9, 480, 495, 490, 505));
+         terminal("VDD", "RIGHT/VDD", makeRoutingShape(9, 510, 495, 520, 505));
+         via("VDD", 9, 10, 480, 495, 490, 505);
+         via("VDD", 9, 10, 510, 495, 520, 505);
+         check(1, 0, 1);
+         expectOpenGroups({{"VDD", {"RIGHT/VDD"}}});
+       }},
+      {"another_power_net_cannot_inherit_supply_through_short", [] {
+         graph().get_power_net_name_set().insert("VDD_AUX");
+         terminal("VDD", "CORE/VDD", makeRoutingShape(9, 490, 490, 510, 510));
+         terminal("VDD_AUX", "AUX/VDD", makeRoutingShape(9, 510, 490, 515, 510));
+         supplies();
+         check(1, 0, 1);
+         expectOpenGroups({{"VDD_AUX", {"AUX/VDD"}}});
+       }},
+      {"complete_io_power_and_ground_rings_are_waived", [] {
+         graph().get_power_net_name_set().insert("VDDIO");
+         graph().get_ground_net_name_set().insert("VSSIO");
+         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10));
+         terminal("VDDIO", "IO2/VDDIO", makeRoutingShape(1, 10, 0, 20, 10));
+         terminal("VSSIO", "IO1/VSSIO", makeRoutingShape(1, 0, 20, 10, 30));
+         terminal("VSSIO", "IO2/VSSIO", makeRoutingShape(1, 10, 20, 20, 30));
+         supplies();
+         check(0, 0, 0);
+       }},
+      {"io_ring_with_missing_terminal_geometry_is_not_waived", [] {
+         graph().get_power_net_name_set().insert("VDDIO");
+         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10));
+         graph().get_power_instance_pin_net_map()["IO2/VDDIO"] = "VDDIO";
+         supplies();
+         check(2, 0, 0);
+       }},
+      {"signal_bypass_cannot_waive_broken_io_ring", [] {
+         graph().get_power_net_name_set().insert("VDDIO");
+         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10));
+         terminal("VDDIO", "IO2/VDDIO", makeRoutingShape(1, 20, 0, 30, 10));
+         supplies();
+         wire("signal", makeRoutingShape(1, 9, 4, 21, 6));
+         check(2, 0, 1);
+         expectOpenGroups({{"VDDIO", {"IO1/VDDIO"}}, {"VDDIO", {"IO2/VDDIO"}}});
+       }},
+      {"signal_pin_bypass_cannot_waive_broken_io_ground_ring", [] {
+         graph().get_ground_net_name_set().insert("VSSIO");
+         terminal("VSSIO", "IO1/VSSIO", makeRoutingShape(1, 0, 0, 10, 10));
+         terminal("VSSIO", "IO2/VSSIO", makeRoutingShape(1, 20, 0, 30, 10));
+         terminal("signal", "U/A", makeRoutingShape(1, 9, 4, 21, 6));
+         supplies();
+         check(0, 2, 1);
+         expectOpenGroups({{"VSSIO", {"IO1/VSSIO"}}, {"VSSIO", {"IO2/VSSIO"}}});
+       }},
+      {"shorted_global_component_preserves_separate_open_islands", [] {
+         terminal("VDD", "LEFT/VDD", makeRoutingShape(9, 100, 495, 110, 505));
+         terminal("VDD", "RIGHT/VDD", makeRoutingShape(9, 300, 495, 310, 505));
+         supplies();
+         wire("signal", makeRoutingShape(9, 105, 499, 500, 501));
+         check(2, 0, 1);
+         expectOpenGroups({{"VDD", {"LEFT/VDD"}}, {"VDD", {"RIGHT/VDD"}}});
+       }},
+      {"report_keeps_open_short_overlap_and_counts_union", [] {
+         graph().get_power_net_name_set().insert("VDDIO");
+         terminal("VDD", "ISLAND/VDD", makeRoutingShape(9, 100, 495, 110, 505));
+         terminal("VDD", "SUPPLIED/VDD", makeRoutingShape(9, 490, 490, 510, 510));
+         terminal("VDDIO", "CLEAN/VDDIO", makeRoutingShape(8, 700, 700, 710, 710));
+         terminal("VSS", "U/VSS", makeRoutingShape(9, 520, 490, 540, 510));
+         supplies();
+         wire("VSS", makeRoutingShape(9, 105, 499, 530, 501));
+         check(1, 0, 1);
+         expectReport("Power VDD", 1, 2, 1, 3);
+         expectReport("Power VSS", 0, 1, 0, 1);
+         auto report = nlohmann::json::parse(
+             getFileContent(std::filesystem::current_path() / "test_lvs_flow_output" / "pg_connectivity" / "ilvs.json"));
+         auto open = std::find_if(report.at("violations").begin(), report.at("violations").end(), [](const auto& violation) {
+           return violation.at("type") == "PowerOpenVDD";
+         });
+         expect(open != report.at("violations").end(), "missing PG open detail in JSON report");
+         expect(!open->contains("pg_net_component"), "unexpected PG component field in JSON report");
+         expect(open->at("components").size() == 1, "missing global component for short correlation");
+         const auto& shapes = open->at("shapes");
+         for (const auto& rect : {nlohmann::json::array({100, 495, 110, 505}), nlohmann::json::array({105, 499, 530, 501})}) {
+           expect(std::any_of(shapes.begin(), shapes.end(), [&](const auto& shape) { return shape.at("rect") == rect; }),
+                  "PG open detail lost geometry from its global component");
+         }
+         const std::string rpt = getFileContent(std::filesystem::current_path() / "test_lvs_flow_output" / "pg_connectivity" / "ilvs.rpt");
+         const auto open_section = rpt.find("Type: PowerOpenVDD");
+         expect(open_section != std::string::npos, "missing PG open detail in RPT report");
+         const auto section_end = rpt.find("\n[", open_section);
+         const auto detail = rpt.substr(open_section, section_end - open_section);
+         expect(detail.find("PG Net Component:") == std::string::npos, "unexpected PG component label in RPT report");
+         expect(detail.find("100 495 110 505") != std::string::npos, "missing PG island coordinates in RPT report");
+         expect(detail.find("105 499 530 501") != std::string::npos, "missing global component geometry in RPT report");
+       }},
+      {"graph_rebuild_discards_previous_pg_open_components", [] {
+         terminal("VDD", "U/VDD", makeRoutingShape(9, 100, 495, 110, 505));
+         supplies();
+         check(1, 0, 0);
+         wire("VDD", makeRoutingShape(9, 105, 499, 500, 501));
+         check(0, 0, 0);
+       }},
+  };
+  int failed = 0;
+  std::map<std::string, OpenGroups> single_thread_groups;
+  omp_set_dynamic(0);
+  for (int threads : {1, 3}) {
+    omp_set_num_threads(threads);
+    for (const auto& [name, run] : tests) {
+      LVSDM.getDatabase().reset();
+      LVSDM.getConfig().thread_number = threads;
+      auto& def = LVSDM.getDatabase().get_def_data();
+      def.get_die().set_real_ll(0, 0);
+      def.get_die().set_real_ur(1000, 1000);
+      graph().reserveNetNum(10);
+      graph().get_power_net_name_set().insert("VDD");
+      graph().get_ground_net_name_set().insert("VSS");
+      try {
+        run();
+        if (threads == 1) {
+          single_thread_groups[name] = openGroups();
+        } else if (single_thread_groups.count(name)) {
+          expect(openGroups() == single_thread_groups.at(name), "PG open groups differ between one and three threads");
+        }
+        std::cout << "RESULT PASS " << name << " threads=" << threads << '\n';
+      } catch (const std::exception& error) {
+        ++failed;
+        std::cout << "RESULT FAIL " << name << " threads=" << threads << ": " << error.what() << '\n';
+      }
+    }
+  }
+  ilvs::LVSReporter::destroyInst();
+  ilvs::PDNChecker::destroyInst();
+  ilvs::RoutingChecker::destroyInst();
+  return failed;
+}
+
+}  // namespace
 
 int main()
 {
@@ -276,8 +664,11 @@ int main()
   assert(json_content.find("33.33") != std::string::npos);
   assert(json_content.find("\"violations\"") != std::string::npos);
 
+  test_io_supply_ring_waiver(database);
+  int failed = test_pg_connectivity();
+
   ilvs::DataManager::destroyInst();
   ilvs::LVSInterface::destroyInst();
   ilvs::Logger::destroyInst();
-  return 0;
+  return failed == 0 ? 0 : 1;
 }

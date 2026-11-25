@@ -157,7 +157,8 @@ bool hasVerticalSegmentSpanning(const std::string& net, const std::string& layer
   return false;
 }
 
-bool checkPowerFile(const std::string& directory, const std::map<std::string, std::vector<PlanarCoord>>& expected)
+bool checkPowerFile(const std::string& directory, const std::map<std::string, std::vector<PlanarCoord>>& expected,
+                    const std::string& bottom_layer = "M10", const std::string& top_layer = "M2")
 {
   std::ifstream file(directory + "/power.ploc");
   std::string line;
@@ -181,7 +182,7 @@ bool checkPowerFile(const std::string& directory, const std::map<std::string, st
       if (!check(static_cast<bool>(stream >> name >> x >> y >> layer >> net) && !(stream >> extra), "PLOC must have five columns")) {
         return false;
       }
-      if (!check(name == expected_net + "_" + std::to_string(idx) && source_names.insert(name).second && net == expected_net && layer == "M2",
+      if (!check(name == expected_net + "_" + std::to_string(idx) && source_names.insert(name).second && net == expected_net && layer == top_layer,
                  "Incorrect supply name, net or highest stripe layer")) {
         return false;
       }
@@ -191,7 +192,7 @@ bool checkPowerFile(const std::string& directory, const std::map<std::string, st
                  "Absolute micron coordinates must round-trip to the via position")) {
         return false;
       }
-      if (!check(hasVia(net, "M10", "M2", coord_list[idx].get_x(), coord_list[idx].get_y()), "Supply point has no matching via")) {
+      if (!check(hasVia(net, bottom_layer, top_layer, coord_list[idx].get_x(), coord_list[idx].get_y()), "Supply point has no matching via")) {
         return false;
       }
     }
@@ -527,6 +528,111 @@ bool testStripePlacementHalo(const std::string& directory)
   return passed;
 }
 
+bool testMacroGapStripePruning(const std::string& directory)
+{
+  auto init_macro_gap_mesh = [&](double upper_offset) {
+    initPlacementHaloFixture(directory);
+    addPlacementHaloMacro(100000, 100000, 200000, 200000, 5000, 1000);
+    addPlacementHaloMacro(100000, 230000, 200000, 330000, 5000, 1000);
+
+    PGStripe lower_stripe;
+    lower_stripe.set_layer_name("MET4");
+    lower_stripe.set_width_micron(0.5);
+    lower_stripe.set_pitch_micron(500.0);
+    lower_stripe.set_offset_micron(74.75);
+    FPDM.getConfig().pg_stripe_list.push_back(lower_stripe);
+
+    PGStripe upper_stripe;
+    upper_stripe.set_layer_name("MET5");
+    upper_stripe.set_width_micron(0.5);
+    upper_stripe.set_pitch_micron(500.0);
+    upper_stripe.set_offset_micron(upper_offset);
+    FPDM.getConfig().pg_stripe_list.push_back(upper_stripe);
+    addConnect("MET4", "MET5");
+  };
+
+  init_macro_gap_mesh(107.25);
+  FPPG.generate();
+  bool passed = true;
+  passed = check(!hasVerticalSegmentSpanning("VDD", "MET4", 150000, 205000, 225000),
+                 "A macro-gap stripe connected to only one upper stripe must be removed")
+           && passed;
+  passed = check(!hasVia("VDD", "MET4", "MET5", 150000, 215000), "The exclusive via of a removed macro-gap stripe must be removed") && passed;
+  passed = check(hasHorizontalSegmentSpanning("MET5", 215000, 0, 400000), "Removing a macro-gap stripe must not trim the upper stripe") && passed;
+  passed = checkPowerFile(directory, {}, "MET4", "MET5") && passed;
+
+  init_macro_gap_mesh(107.25);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 120000, 215000, 180000, 215000, 1000);
+  addConnect("MET1", "MET4");
+  FPPG.generate();
+  passed = check(hasVerticalSegmentSpanning("VDD", "MET4", 150000, 205000, 225000), "A macro-gap stripe tapped by a lower rail must remain") && passed;
+  passed = check(hasVia("VDD", "MET1", "MET4", 150000, 215000), "A macro-gap rail tap via must remain") && passed;
+  passed = check(hasVia("VDD", "MET4", "MET5", 150000, 215000), "The upper mesh via for a rail-fed stripe must remain") && passed;
+  passed = checkPowerFile(directory, {{"VDD", {PlanarCoord(150000, 215000)}}}, "MET4", "MET5") && passed;
+
+  init_macro_gap_mesh(107.25);
+  Instance fallback_macro;
+  fallback_macro.set_name("PG_PIN_NO_MASTER");
+  fallback_macro.set_master_name("MISSING_MASTER");
+  fallback_macro.set_macro(true);
+  fallback_macro.set_placed(true);
+  fallback_macro.set_bounding_rect(0, 0, 1000, 1000);
+  fallback_macro.get_placement_halo_rect().set_rect(0, 0, 1000, 1000);
+  fallback_macro.get_routing_halo_rect().set_rect(0, 0, 1000, 1000);
+  InstancePinShape fallback_pin;
+  fallback_pin.set_pin_name("VDD");
+  fallback_pin.set_layer_name("MET4");
+  fallback_pin.set_rect(149500, 214500, 150500, 215500);
+  fallback_macro.get_pin_shape_list().push_back(fallback_pin);
+  Database& database = FPDM.getDatabase();
+  database.get_instance_name_to_idx_map()[fallback_macro.get_name()] = static_cast<int32_t>(database.get_instance_list().size());
+  database.get_instance_list().push_back(fallback_macro);
+  FPPG.generate();
+  passed = check(hasVerticalSegmentSpanning("VDD", "MET4", 150000, 205000, 225000), "A stripe touching a bound fallback macro pin must remain") && passed;
+  passed = check(hasVia("VDD", "MET4", "MET5", 150000, 215000), "The upper mesh via for a fallback macro pin must remain") && passed;
+
+  init_macro_gap_mesh(107.25);
+  Net io_net;
+  io_net.set_name("VDD");
+  NetPin io_net_pin;
+  io_net_pin.set_pin_name("PWR_PORT");
+  io_net_pin.set_io(true);
+  io_net.get_net_pin_list().push_back(io_net_pin);
+  FPDM.getDatabase().get_net_list().push_back(io_net);
+  IOPin io_pin;
+  io_pin.set_name("PWR_PORT");
+  io_pin.set_placed(true);
+  IOPort io_port;
+  io_port.set_layer_name("MET4");
+  io_port.set_rect(149500, 214500, 150500, 215500);
+  io_pin.get_port_list().push_back(io_port);
+  FPDM.getDatabase().get_io_pin_name_to_idx_map()["PWR_PORT"] = 0;
+  FPDM.getDatabase().get_io_pin_list().push_back(io_pin);
+  FPPG.generate();
+  passed = check(hasVerticalSegmentSpanning("VDD", "MET4", 150000, 205000, 225000), "A macro-gap stripe touching an IO PG pin must remain") && passed;
+  passed = check(hasVia("VDD", "MET4", "MET5", 150000, 215000), "The upper mesh via for an IO-connected stripe must remain") && passed;
+  passed = checkPowerFile(directory, {{"VDD", {PlanarCoord(150000, 215000)}}}, "MET4", "MET5") && passed;
+
+  init_macro_gap_mesh(107.25);
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 220000, 400000, 220000, 1000);
+  FPDM.getDatabase().get_pg_segment_list().back().set_generated(true);
+  FPPG.generate();
+  passed = check(hasVerticalSegmentSpanning("VDD", "MET4", 150000, 205000, 225000), "A stripe bridging two upper mesh lines must remain") && passed;
+  passed = check(hasVia("VDD", "MET4", "MET5", 150000, 215000) && hasVia("VDD", "MET4", "MET5", 150000, 220000),
+                 "Both upper mesh connections of a bridge stripe must remain")
+           && passed;
+  passed = checkPowerFile(directory, {{"VDD", {PlanarCoord(150000, 215000), PlanarCoord(150000, 220000)}}}, "MET4", "MET5") && passed;
+
+  init_macro_gap_mesh(102.0);
+  FPPG.generate();
+  passed = check(!hasVerticalSegmentSpanning("VDD", "MET4", 150000, 205000, 225000),
+                 "A mere edge-touch to an upper stripe must not keep a macro-gap stripe")
+           && passed;
+  passed = check(!hasVia("VDD", "MET4", "MET5", 150000, 204500), "An edge-touch must not create a via") && passed;
+  passed = checkPowerFile(directory, {}, "MET4", "MET5") && passed;
+  return passed;
+}
+
 bool testActualViaOverlap(const std::string& directory)
 {
   initPlacementHaloFixture(directory);
@@ -622,18 +728,23 @@ PlanarRect initNarrowGapRailFixture(const std::string& directory, int32_t channe
     addLine(rail_idx % 2 == 0 ? "VDD" : "VSS", "MET1", PGSegmentType::kFollowPin, channel.get_ll_x(), y, channel.get_ur_x(), y, 160);
   }
   // Remote trunks establish MET5 as the supply layer without covering any channel rail.
+  addLine("VSS", "MET4", PGSegmentType::kStripe, 8000, 0, 8000, 400000, 1000);
   for (std::string net : {"VDD", "VSS"}) {
     const int32_t x = net == "VDD" ? 4000 : 6000;
     const int32_t supply_y = channel.get_ur_y() + (net == "VDD" ? 4000 : 8000);
     addLine(net, "MET4", PGSegmentType::kStripe, x, 0, x, 400000, 1000);
     addLine(net, "MET5", PGSegmentType::kStripe, 0, supply_y, 400000, supply_y, 1000);
+    FPDM.getDatabase().get_pg_segment_list().back().set_generated(true);
   }
   return channel;
 }
 
-bool checkNarrowGapRailRepair(const std::string& directory, int32_t channel_width, bool reverse_net_order)
+bool checkNarrowGapRailRepair(const std::string& directory, int32_t channel_width, bool reverse_net_order, bool occupied = false)
 {
   const PlanarRect channel = initNarrowGapRailFixture(directory, channel_width, reverse_net_order);
+  if (occupied) {
+    FPDM.getConfig().pg_stripe_list.front().set_offset_micron(5.25);
+  }
   const std::string scenario = std::to_string(channel_width) + " DBU channel, " + (reverse_net_order ? "VSS first: " : "VDD first: ");
   try {
     FPPG.generate();
@@ -665,6 +776,9 @@ bool checkNarrowGapRailRepair(const std::string& directory, int32_t channel_widt
 
   const PGSegment& power = *repairs.at("VDD");
   const PGSegment& ground = *repairs.at("VSS");
+  if (occupied) {
+    passed = check(ground.get_start_x() == 20800, scenario + "The generated VSS trunk should move only 200 DBU to free a lane") && passed;
+  }
   const int32_t spacing = std::abs(power.get_start_x() - ground.get_start_x()) - (power.get_width() + ground.get_width()) / 2;
   passed = check(spacing >= 100, scenario + "Opposite-net repair stripes must keep MET4 spacing") && passed;
   if (channel_width == 2100) {
@@ -701,6 +815,7 @@ bool testNarrowGapRailRepair(const std::string& directory)
   bool passed = true;
   for (bool reverse_net_order : {false, true}) {
     passed = checkNarrowGapRailRepair(directory, 2200, reverse_net_order) && passed;
+    passed = checkNarrowGapRailRepair(directory, 2400, reverse_net_order, true) && passed;
   }
   return passed;
 }
@@ -718,14 +833,21 @@ bool testTooNarrowGapRailRepair(const std::string& directory)
 {
   bool passed = true;
   for (bool reverse_net_order : {false, true}) {
-    initNarrowGapRailFixture(directory, 2000, reverse_net_order);
-    bool rejected = false;
-    try {
-      FPPG.generate();
-    } catch (const std::runtime_error& error) {
-      rejected = std::string(error.what()).find("without a physical connection") != std::string::npos;
+    for (bool fixed_trunk : {false, true}) {
+      initNarrowGapRailFixture(directory, fixed_trunk ? 2400 : 2000, reverse_net_order);
+      if (fixed_trunk) {
+        addLine("VSS", "MET4", PGSegmentType::kStripe, 21000, 0, 21000, 400000, 1000);
+      }
+      bool rejected = false;
+      try {
+        FPPG.generate();
+      } catch (const std::runtime_error& error) {
+        rejected = std::string(error.what()).find("without a physical connection") != std::string::npos;
+      }
+      passed = check(rejected && (!fixed_trunk || hasVia("VSS", "MET1", "MET4", 21000, 12000)),
+                     "An infeasible channel must fail without moving fixed stripes or relaxing width and spacing")
+               && passed;
     }
-    passed = check(rejected, "A 2000 DBU channel cannot fit both 1000 DBU repair stripes and 100 DBU spacing; final validation must reject it") && passed;
   }
   return passed;
 }
@@ -782,6 +904,29 @@ bool testRepairClearanceBoundary(const std::string& directory)
   passed = check(hasVia("VDD", "MET1", "MET4", 21500, 10000), "The clearance-slot repair must connect to its rail") && passed;
   passed = check(hasVia("VDD", "MET4", "MET5", 21500, 20000), "The clearance-slot repair must connect to its supply") && passed;
   return passed;
+}
+
+void initFloatingRailFixture(const std::string& directory, int32_t rail_width)
+{
+  initRepairReviewFixture(directory);
+  addLine("VDD", "MET1", PGSegmentType::kFollowPin, 40000, 40000, 48000, 40000, rail_width);
+  addLine("VDD", "MET4", PGSegmentType::kStripe, 90000, 20000, 90000, 80000, 1000);
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 30000, 60000, 130000, 60000, 1000);
+}
+
+bool testFloatingRailInMacroGap(const std::string& directory)
+{
+  initFloatingRailFixture(directory, 160);
+  addLine("VDD", "MET4", PGSegmentType::kStripe, 42000, 38000, 42000, 42000, 1000);
+  addPlacementHaloMacro(20000, 46000, 42630, 50000, 0, 0);
+  addPlacementHaloMacro(43690, 46000, 55000, 50000, 0, 0);
+  FPPG.generate();
+  for (int32_t center = 43130; center <= 43190; center += 10) {
+    if (hasVia("VDD", "MET1", "MET4", center, 40000) && hasVia("VDD", "MET4", "MET5", center, 60000)) {
+      return true;
+    }
+  }
+  return check(false, "A rail on a floating stripe must reach supply through the off-track macro gap");
 }
 
 bool testBlockedRepairGroupSplit(const std::string& directory)
@@ -965,11 +1110,11 @@ bool testRepeatedRepairTopStripes(const std::string& directory)
   return passed;
 }
 
-bool testUncoveredEdgeStripe(const std::string& directory)
+bool testUncoveredEdgeStripe(const std::string& directory, int32_t rail_end = 800, bool floating = false)
 {
   initPlacementHaloFixture(directory);
   Row row;
-  row.set_rect(100, 10000, 800, 11000);
+  row.set_rect(100, 10000, rail_end, 11000);
   row.set_y(10000);
   row.set_orient(PlacementOrientation::kN);
   FPDM.getDatabase().get_row_list().push_back(row);
@@ -986,6 +1131,9 @@ bool testUncoveredEdgeStripe(const std::string& directory)
   addConnect("MET1", "MET4");
   addConnect("MET4", "MET5");
 
+  if (floating) {
+    addLine("VSS", "MET4", PGSegmentType::kStripe, 3000, 9700, 3000, 10300, 600);
+  }
   addLine("VDD", "MET1", PGSegmentType::kFollowPin, 0, 11000, 400000, 11000, 160);
   addLine("VDD", "MET5", PGSegmentType::kStripe, 0, 20000, 400000, 20000, 1000);
   addLine("VSS", "MET5", PGSegmentType::kStripe, 0, 11000, 400000, 11000, 1000);
@@ -994,7 +1142,7 @@ bool testUncoveredEdgeStripe(const std::string& directory)
   bool passed = check(hasVerticalSegmentSpanning("VSS", "MET4", 500, 0, 400000), "Uncovered VSS rail must receive a core-edge stripe");
   passed = check(hasVerticalSegmentSpanning("VSS", "MET4", 9500, 0, 400000), "Existing VSS mesh stripe must remain") && passed;
   passed = check(!hasVerticalSegmentSpanning("VDD", "MET4", 500, 0, 400000), "Covered VDD edge must not receive another stripe") && passed;
-  passed = check(hasVia("VSS", "MET1", "MET4", 450, 10000), "VSS edge stripe must connect at the center of its overlap with the narrow row rail") && passed;
+  passed = check(hasVia("VSS", "MET1", "MET4", (100 + std::min(rail_end, 1000)) / 2, 10000), "VSS edge stripe must connect at the rail overlap") && passed;
   passed = check(hasVia("VSS", "MET4", "MET5", 500, 11000), "VSS edge stripe must connect to the VSS mesh") && passed;
   for (PGSegment& segment : FPDM.getDatabase().get_pg_segment_list()) {
     if (segment.get_type() == PGSegmentType::kFollowPin) {
@@ -1160,6 +1308,64 @@ void addIDBViaRule(idb::IdbLefService& lef, std::string bottom_name, std::string
   rule->get_enclosure_top()->set_overhang_1(40);
   rule->get_enclosure_top()->set_overhang_2(35);
   cut->set_via_rule(rule);
+}
+
+bool testMacroCrossingViaLandings(const std::string& directory)
+{
+  auto* previous_lef = dmInst->get_idb_lef_service();
+  auto* previous_def = dmInst->get_idb_def_service();
+  idb::IdbLefService lef;
+  idb::IdbDefService def(lef.get_layout());
+  dmInst->set_idb_lef_service(&lef);
+  dmInst->set_idb_def_service(&def);
+  FPInterface::destroyInst();
+
+  addIDBViaRule(lef, "M99", "VIA_MACRO_TEST", "M10");
+  auto* cut = static_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("VIA_MACRO_TEST"));
+  auto* rule = cut->get_via_rule();
+  rule->set_cut_rect(-360, -360, 360, 360);
+  rule->set_spacing(2000, 2000);
+  rule->get_enclosure_bottom()->set_overhang_1(200);
+  rule->get_enclosure_bottom()->set_overhang_2(100);
+  rule->get_enclosure_top()->set_overhang_1(1000);
+  rule->get_enclosure_top()->set_overhang_2(40);
+
+  initFixture(directory);
+  FPDM.getConfig().pg_require_connected_pins = false;
+  addConnect("M99", "M10");
+  addLine("VDD_A", "M10", PGSegmentType::kStripe, 10000, 3000, 10000, 25000, 12000);
+
+  Instance macro;
+  macro.set_name("macro");
+  macro.set_macro(true);
+  macro.set_placed(true);
+  macro.set_bounding_rect(13500, 9000, 21000, 17000);
+  InstancePinShape pin;
+  pin.set_pin_name("PWR");
+  pin.set_layer_name("M99");
+  pin.set_rect(13800, 9500, 19000, 11500);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(1);
+  pin.set_rect(13800, 13000, 19000, 13600);
+  macro.get_pin_shape_list().push_back(pin);
+  pin.set_port_idx(2);
+  pin.set_rect(15400, 15000, 20500, 17000);
+  macro.get_pin_shape_list().push_back(pin);
+  FPDM.getDatabase().get_instance_list().push_back(macro);
+
+  FPPG.generate();
+  bool passed = check(hasVia("VDD_A", "M99", "M10", 14640, 10500), "A narrow macro pin must connect where both via enclosures fit");
+  const auto& segments = FPDM.getDatabase().get_pg_segment_list();
+  passed = check(std::count_if(segments.begin(), segments.end(), [](const PGSegment& segment) {
+                   return segment.get_type() == PGSegmentType::kVia;
+                 }) == 1,
+                 "Only the macro port with room for both enclosures may receive a via")
+           && passed;
+
+  FPInterface::destroyInst();
+  dmInst->set_idb_def_service(previous_def);
+  dmInst->set_idb_lef_service(previous_lef);
+  return passed;
 }
 
 bool testStripeEndKeepsCollinearIoWire(const std::string& directory)
@@ -1339,7 +1545,7 @@ bool testViaMinimumArea(const std::string& directory)
   lef.get_layout()->get_die()->add_point(0, 0);
   lef.get_layout()->get_die()->add_point(10000, 10000);
   def.get_design()->set_design_name("via_min_area");
-  for (int32_t layer_idx = 1; layer_idx < 4; layer_idx++) {
+  for (int32_t layer_idx = 1; layer_idx < 5; layer_idx++) {
     addIDBViaRule(lef, "MET" + std::to_string(layer_idx), "VIA" + std::to_string(layer_idx), "MET" + std::to_string(layer_idx + 1));
     idb::IdbLayerCut* cut = dynamic_cast<idb::IdbLayerCut*>(lef.get_layout()->get_layers()->find_layer("VIA" + std::to_string(layer_idx)));
     cut->get_via_rule()->get_enclosure_bottom()->set_overhang_2(5);
@@ -1411,6 +1617,14 @@ bool testViaMinimumArea(const std::string& directory)
     passed = check(rect.get_width() == 370 && rect.get_height() == 142, "DEF round-trip must preserve repaired enclosure dimensions") && passed;
   }
 
+  initFloatingRailFixture(directory, 100);
+  addLine("VDD", "MET4", PGSegmentType::kStripe, 42000, 38000, 42000, 60500, 400);
+  addLine("VDD", "MET5", PGSegmentType::kStripe, 43950, 48000, 44050, 48000, 100);
+  FPPG.generate();
+  passed = check(!hasVia("VDD", "MET1", "MET4", 42000, 40000) && hasVia("VDD", "MET1", "MET4", 44000, 40000) && hasVia("VDD", "MET4", "MET5", 44000, 60000),
+                 "Skip rejected rail and supply via stacks and use a legal crossing")
+           && passed;
+
   FPInterface::destroyInst();
   dmInst->set_idb_def_service(previous_def);
   dmInst->set_idb_lef_service(previous_lef);
@@ -1443,6 +1657,7 @@ bool testTechnologyEdgeStripe(const std::string& directory)
       passed = check(segment.get_via_height() == 160, "Core-edge repair must fit the rail height through all three lower vias") && passed;
     }
   }
+  passed = checkNarrowGapRailRepair(directory, 2200, false) && passed;
 
   FPInterface::destroyInst();
   dmInst->set_idb_def_service(previous_def);
@@ -1471,6 +1686,7 @@ int main(int argc, char* argv[])
   passed = ifp::testConnectionTypes(directory) && passed;
   passed = ifp::testMissingConnections(directory) && passed;
   passed = ifp::testStripePlacementHalo(directory) && passed;
+  passed = ifp::testMacroGapStripePruning(directory) && passed;
   passed = ifp::testActualViaOverlap(directory) && passed;
   passed = ifp::testRailExtensionHalo(directory) && passed;
   passed = ifp::testGapRailRepair(directory) && passed;
@@ -1478,12 +1694,15 @@ int main(int argc, char* argv[])
   passed = ifp::testExactFitGapRailRepair(directory) && passed;
   passed = ifp::testTooNarrowGapRailRepair(directory) && passed;
   passed = ifp::testRepairClearanceBoundary(directory) && passed;
+  passed = ifp::testFloatingRailInMacroGap(directory) && passed;
   passed = ifp::testBlockedRepairGroupSplit(directory) && passed;
   passed = ifp::testSplitRepairCandidateInheritance(directory) && passed;
   passed = ifp::testRepeatedRepairTopStripes(directory) && passed;
   passed = ifp::testUncoveredEdgeStripe(directory) && passed;
+  passed = ifp::testUncoveredEdgeStripe(directory, 8800, true) && passed;
   passed = ifp::testOverlappingViaStacks(directory) && passed;
   passed = ifp::testDanglingFollowPinTrim(directory) && passed;
+  passed = ifp::testMacroCrossingViaLandings(directory) && passed;
   passed = ifp::testStripeEndKeepsCollinearIoWire(directory) && passed;
   passed = ifp::testIoWireSkipsLayerVia(directory) && passed;
   passed = ifp::testConfiguredRailWidth(directory) && passed;

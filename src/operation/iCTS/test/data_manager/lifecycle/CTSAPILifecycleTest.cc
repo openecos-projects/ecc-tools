@@ -392,8 +392,8 @@ UNITS DISTANCE MICRONS 1000 ;
 DIEAREA ( 0 0 ) ( 2000 2000 ) ;
 COMPONENTS 3 ;
 - sink DFF_X1 + PLACED ( 500 500 ) N ;
-- boundary_buf BUF_X1 + PLACED ( 500 500 ) N ;
-- boundary_inv INV_X1 + PLACED ( 500 500 ) N ;
+- boundary_buf BUF_X1 + FIXED ( 500 500 ) N ;
+- boundary_inv INV_X1 + FIXED ( 500 500 ) N ;
 END COMPONENTS
 PINS 1 ;
 - clk_in + NET clk_net + DIRECTION INPUT + USE CLOCK
@@ -425,8 +425,8 @@ COMPONENTS 15 ;
 - traced_sink_10 DFF_X1 + PLACED ( 500 500 ) N ;
 - traced_sink_11 DFF_X1 + PLACED ( 500 500 ) N ;
 - traced_sink_12 DFF_X1 + PLACED ( 500 500 ) N ;
-- boundary_buf BUF_X1 + PLACED ( 500 500 ) N ;
-- boundary_inv INV_X1 + PLACED ( 500 500 ) N ;
+- boundary_buf BUF_X1 + FIXED ( 500 500 ) N ;
+- boundary_inv INV_X1 + FIXED ( 500 500 ) N ;
 END COMPONENTS
 PINS 1 ;
 - clk_in + NET clk_net + DIRECTION INPUT + USE CLOCK
@@ -460,7 +460,7 @@ UNITS DISTANCE MICRONS 1000 ;
 DIEAREA ( 0 0 ) ( 2000 2000 ) ;
 COMPONENTS 2 ;
 - sink DFF_X1 + PLACED ( 500 500 ) N ;
-- boundary_buf BUF_X1 + PLACED ( 500 500 ) N ;
+- boundary_buf BUF_X1 + FIXED ( 500 500 ) N ;
 END COMPONENTS
 PINS 1 ;
 - clk_in + NET clk_net + DIRECTION INPUT + USE CLOCK

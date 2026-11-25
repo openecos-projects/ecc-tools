@@ -28,13 +28,16 @@ if(BUILD_TESTING)
   target_link_libraries(ircx_interface_test
       PRIVATE
       ircx_interface
+      ircx_aux
+      ircx_spef_writer
       ircx_data_manager
       ircx_utility
       idm
+      spef
   )
 
   add_test(NAME ircx_interface_test COMMAND ircx_interface_test)
-  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database)
+  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping)
     add_test(NAME ircx_interface_${scenario} COMMAND ircx_interface_test ${scenario})
   endforeach()
 endif()

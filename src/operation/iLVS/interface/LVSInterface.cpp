@@ -268,8 +268,16 @@ void LVSInterface::wrapIOPinList(idb::IdbDesign* design, DesignData& design_data
   if (idb::IdbPins* io_pin_list = design->get_io_pin_list(); io_pin_list != nullptr) {
     for (idb::IdbPin* pin : io_pin_list->get_pin_list()) {
       std::string terminal_name = wrapDesignTerminal(pin);
-      if (!terminal_name.empty()) {
-        design_data.get_io_terminal_name_list().push_back(terminal_name);
+      if (terminal_name.empty()) {
+        continue;
+      }
+      design_data.get_io_terminal_name_list().push_back(terminal_name);
+      if (pin->get_term() != nullptr) {
+        if (pin->get_term()->get_type() == idb::IdbConnectType::kPower) {
+          design_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kPower;
+        } else if (pin->get_term()->get_type() == idb::IdbConnectType::kGround) {
+          design_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kGround;
+        }
       }
     }
   }
@@ -553,6 +561,23 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, const int32_t
   } else if (is_ground_net) {
     def_data.get_terminal_connect_type_map()[terminal_name] = ConnectType::kGround;
   }
+  // Well/implant terminals have no metal connection to the routing graph.
+  // Keep their logical supply assignment, and report the missing extraction
+  // coverage separately. Empty, unknown, cut-only, and mixed metal pins still
+  // participate in PDN checks so malformed or disconnected power pins fail.
+  bool substrate_only = !pin->get_port_box_list().empty();
+  for (idb::IdbLayerShape* shape : pin->get_port_box_list()) {
+    auto* layer = shape == nullptr ? nullptr : shape->get_layer();
+    if (layer == nullptr || shape->get_rect_list().empty()
+        || (layer->get_type() != idb::IdbLayerType::kLayerMasterslice && layer->get_type() != idb::IdbLayerType::kLayerImplant)) {
+      substrate_only = false;
+      break;
+    }
+  }
+  if ((is_power_net || is_ground_net) && substrate_only) {
+    physical_graph.get_non_routing_supply_pin_net_map()[terminal_name] = net_name;
+    return;
+  }
   if (!pin->is_io_pin()) {
     if (is_power_net) {
       physical_graph.get_power_instance_pin_net_map()[terminal_name] = net_name;
@@ -701,11 +726,13 @@ void LVSInterface::wrapSpecialNetWireData(idb::IdbDesign* design, DefData& def_d
             if (segment == nullptr) {
               continue;
             }
-            if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_line()) {
+            const bool is_routing_layer = segment->get_layer() != nullptr && segment->get_layer()->is_routing();
+            if (is_routing_layer && !segment->is_via() && !segment->is_rect() && segment->get_point_start() != nullptr
+                && segment->get_point_second() != nullptr) {
               appendRoutingShape(*routing_graph, wrapRoutingDataShape(
                                                      segment->get_layer(), idb::IdbRect(segment->get_point_start(), segment->get_point_second(),
                                                                                       segment->get_route_width())));
-            } else if (segment->get_layer() != nullptr && segment->get_layer()->is_routing() && segment->is_rect() && segment->get_delta_rect() != nullptr) {
+            } else if (is_routing_layer && segment->is_rect() && segment->get_delta_rect() != nullptr) {
               appendRoutingShape(*routing_graph, wrapRoutingDataShape(segment->get_layer(), *segment->get_delta_rect()));
             }
           }

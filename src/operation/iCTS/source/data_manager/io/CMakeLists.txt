@@ -6,6 +6,7 @@ add_library(
   ${ICTS_DATA_MANAGER_IO}/WrapperRC.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperClockReader.cc
   ${ICTS_DATA_MANAGER_IO}/WrapperClockWriter.cc
+  ${ICTS_DATA_MANAGER_IO}/WrapperClockDissolve.cc
 )
 
 target_include_directories(

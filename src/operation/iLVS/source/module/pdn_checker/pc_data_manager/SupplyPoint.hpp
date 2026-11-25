@@ -28,13 +28,17 @@ class SupplyPoint
   ~SupplyPoint() = default;
   // getter
   int32_t get_component_id() const { return _component_id; }
+  int32_t get_net_id() const { return _net_id; }
   ConnectType get_connect_type() const { return _connect_type; }
   // setter
   void set_component_id(const int32_t component_id) { _component_id = component_id; }
+  void set_net_id(const int32_t net_id) { _net_id = net_id; }
   void set_connect_type(const ConnectType connect_type) { _connect_type = connect_type; }
 
  private:
+  // Component within the supply net, independent of global shorts.
   int32_t _component_id = -1;
+  int32_t _net_id = -1;
   ConnectType _connect_type = ConnectType::kNone;
 };
 

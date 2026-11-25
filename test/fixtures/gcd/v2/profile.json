@@ -1,0 +1,10 @@
+{
+  "variant": "v2",
+  "site": "SC9T_site",
+  "sample_cell": "ADDFX1_9TSVT",
+  "buffer_low": "BUFX6_9TLVT",
+  "buffer_regular": "BUFX6_9TSVT",
+  "buffer_large": "BUFX8_9TLVT",
+  "buffer_larger": "BUFX12_9TLVT",
+  "mux": "MX2X0P5_9TSVT"
+}

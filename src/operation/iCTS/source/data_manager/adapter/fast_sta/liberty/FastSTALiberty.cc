@@ -441,6 +441,8 @@ auto extractCellArcFromLibCell(Wrapper& wrapper, idb::LibCell* lib_cell, idb::Li
       arc_record.negative_unate = timing_arc->isNegativeArc() != 0U;
       arc_record.conditional = !timing_arc->get_when().empty();
       arc_record.when = timing_arc->get_when();
+      arc_record.rise_only = timing_arc->get_timing_type() == idb::LibArc::TimingType::kCombRise;
+      arc_record.fall_only = timing_arc->get_timing_type() == idb::LibArc::TimingType::kCombFall;
       appendDelayTable(lib_cell, delay_model, idb::LibTable::TableType::kCellRise, FastStaLibertyTableKind::kCellDelay, FastStaTransition::kRise,
                        arc_record.delay_tables);
       appendDelayTable(lib_cell, delay_model, idb::LibTable::TableType::kCellFall, FastStaLibertyTableKind::kCellDelay, FastStaTransition::kFall,

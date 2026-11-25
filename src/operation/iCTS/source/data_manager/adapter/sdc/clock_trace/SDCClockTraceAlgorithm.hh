@@ -111,7 +111,6 @@ auto ClockKindName(const SdcClockDecl& clock) -> std::string;
 auto MasterClockName(const SdcClockDecl& clock) -> std::string;
 auto DominanceForRecord(const ClockTraceRecord& record, const std::string& clock_kind) -> std::string;
 auto ResolveInstPinByLibPort(idb::IdbInstance* inst, idb::LibPort* lib_port) -> idb::IdbPin*;
-auto BuildPreclusteredSinkAnchor(const SdcLibertyCellLookup& liberty_cell_lookup, idb::IdbNet* leaf_net) -> std::optional<ClockTracePreclusteredSinkAnchor>;
 
 auto ObjectKindName(SdcObjectKind kind) -> std::string;
 auto ResolvePortNet(idb::IdbDesign* idb_design, const std::string& port_name) -> idb::IdbNet*;

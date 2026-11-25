@@ -23,7 +23,28 @@
 #include "PhysicalGraph.hpp"
 #include "Utility.hpp"
 
+#include <algorithm>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 namespace ilvs {
+
+namespace {
+
+bool is_io_supply_terminal(const std::string& terminal_name)
+{
+  const std::string::size_type slash = terminal_name.rfind('/');
+  if (slash == std::string::npos) {
+    return false;
+  }
+  const std::string pin_name = terminal_name.substr(slash + 1);
+  return pin_name == "VDDIO" || pin_name == "VSSIO";
+}
+
+}  // namespace
 
 // public
 
@@ -169,10 +190,11 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
       = connect_type == ConnectType::kPower ? physical_graph.get_power_net_name_set() : physical_graph.get_ground_net_name_set();
   bool has_supply_point = false;
   int64_t shortest_distance = 0;
+  std::pair<std::string, int32_t> supply_shape_key;
   for (const std::string& net_name : net_name_set) {
     int32_t net_id = physical_graph.getNetId(net_name);
     NetRoutingGraph* routing_graph = physical_graph.getNetRoutingGraph(net_id);
-    std::vector<int32_t>* component_id_list = physical_graph.getNetRoutingShapeComponentIdList(net_id);
+    const std::vector<int32_t>* component_id_list = physical_graph.getPGNetRoutingShapeComponentIdList(net_id);
     if (routing_graph == nullptr || component_id_list == nullptr) {
       continue;
     }
@@ -187,9 +209,13 @@ SupplyPoint PDNChecker::getCenterSupplyPoint(const ConnectType connect_type, con
         continue;
       }
       int64_t distance = getShapeCenterDistance(routing_shape_list[top_routing_shape_idx].get_shape(), center_x, center_y);
-      if (!has_supply_point || distance < shortest_distance || (distance == shortest_distance && component_id < supply_point.get_component_id())) {
+      // Break ties by geometry identity so a foreign short cannot change the chosen reference.
+      if (!has_supply_point || distance < shortest_distance
+          || (distance == shortest_distance && std::make_pair(net_name, top_routing_shape_idx) < supply_shape_key)) {
         supply_point.set_component_id(component_id);
+        supply_point.set_net_id(net_id);
         supply_point.set_connect_type(connect_type);
+        supply_shape_key = {net_name, top_routing_shape_idx};
         shortest_distance = distance;
         has_supply_point = true;
       }
@@ -247,46 +273,69 @@ void PDNChecker::checkSupplyConnectivity(PCModel& pc_model, const ConnectType co
     return;
   }
 
-  std::set<int32_t> supply_component_id_set;
-  for (SupplyPoint& supply_point : supply_point_list) {
-    if (supply_point.get_connect_type() == connect_type) {
-      supply_component_id_set.insert(supply_point.get_component_id());
+  std::unordered_map<int32_t, std::set<int32_t>> net_supply_component_map;
+  for (const SupplyPoint& supply_point : supply_point_list) {
+    if (supply_point.get_connect_type() == connect_type && supply_point.get_net_id() >= 0 && supply_point.get_component_id() >= 0) {
+      net_supply_component_map[supply_point.get_net_id()].insert(supply_point.get_component_id());
     }
   }
-  if (supply_component_id_set.empty()) {
-    Violation violation;
-    violation.set_violation_type(connect_type == ConnectType::kPower ? ViolationType::kPowerOpenVDD : ViolationType::kPowerOpenVSS);
-    violation.set_terminal_name_list(LVSUTIL.getSortedKeyNameList(instance_pin_net_map));
-    for (auto& [terminal_name, net_name] : instance_pin_net_map) {
-      (void) terminal_name;
-      violation.get_related_net_name_list().push_back(net_name);
+
+  std::unordered_map<std::string, std::vector<std::string>> net_terminal_map;
+  net_terminal_map.reserve(instance_pin_net_map.size());
+  for (const auto& [terminal_name, net_name] : instance_pin_net_map) {
+    net_terminal_map[net_name].push_back(terminal_name);
+  }
+  std::unordered_set<std::string> waived_io_nets;
+  const std::map<std::string, int32_t>& terminal_component_map = physical_graph.get_pg_terminal_component_map();
+  for (const auto& [net_name, terminal_name_list] : net_terminal_map) {
+    if (net_supply_component_map.empty() || std::none_of(terminal_name_list.begin(), terminal_name_list.end(), is_io_supply_terminal)) {
+      continue;
     }
-    violation.set_related_net_name_list(LVSUTIL.getSortedUniqueList(violation.get_related_net_name_list()));
-    violation_list.push_back(std::move(violation));
-    return;
+    std::set<int32_t> component_id_set;
+    bool complete = true;
+    for (const std::string& terminal_name : terminal_name_list) {
+      auto component_iter = terminal_component_map.find(terminal_name);
+      if (component_iter == terminal_component_map.end() || component_iter->second < 0) {
+        complete = false;
+        break;
+      }
+      component_id_set.insert(component_iter->second);
+    }
+    if (complete && component_id_set.size() == 1) {
+      waived_io_nets.insert(net_name);
+    }
   }
 
   std::map<std::pair<std::string, int32_t>, std::vector<std::string>> disconnected_terminal_map;
   for (auto& [terminal_name, net_name] : instance_pin_net_map) {
-    std::map<std::string, int32_t>::iterator component_iter = physical_graph.get_terminal_component_map().find(terminal_name);
-    if (component_iter != physical_graph.get_terminal_component_map().end() && LVSUTIL.exist(supply_component_id_set, component_iter->second)) {
+    if (waived_io_nets.find(net_name) != waived_io_nets.end()) {
       continue;
     }
+    auto component_iter = terminal_component_map.find(terminal_name);
     int32_t component_id = -1;
-    if (component_iter != physical_graph.get_terminal_component_map().end()) {
+    if (component_iter != terminal_component_map.end()) {
       component_id = component_iter->second;
+    }
+    auto supply_iter = net_supply_component_map.find(physical_graph.getNetId(net_name));
+    if (component_id >= 0 && supply_iter != net_supply_component_map.end() && LVSUTIL.exist(supply_iter->second, component_id)) {
+      continue;
     }
     disconnected_terminal_map[{net_name, component_id}].push_back(terminal_name);
   }
+
   for (auto& [key, terminal_name_list] : disconnected_terminal_map) {
     std::sort(terminal_name_list.begin(), terminal_name_list.end());
     Violation violation;
     violation.set_violation_type(connect_type == ConnectType::kPower ? ViolationType::kPowerOpenVDD : ViolationType::kPowerOpenVSS);
     violation.set_net_name(key.first);
     violation.set_terminal_name_list(terminal_name_list);
-    if (key.second != -1) {
-      violation.get_component_id_list().push_back(key.second);
+    for (const std::string& terminal_name : terminal_name_list) {
+      auto global_iter = physical_graph.get_terminal_component_map().find(terminal_name);
+      if (global_iter != physical_graph.get_terminal_component_map().end() && global_iter->second >= 0) {
+        violation.get_component_id_list().push_back(global_iter->second);
+      }
     }
+    violation.set_component_id_list(LVSUTIL.getSortedUniqueList(violation.get_component_id_list()));
     violation_list.push_back(std::move(violation));
   }
 }

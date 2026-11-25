@@ -112,13 +112,34 @@ auto propagateBufferOutput(FastStaContext& context, FastStaNodeId output_node_id
   if (liberty_cell.timing_arcs.empty()) {
     clock_arcs.emplace_back(0U, &liberty_cell.timing_arc);
   } else {
+    bool filtered_by_case = false;
+    bool can_rise = false;
+    bool can_fall = false;
+    const auto lookup = FastStaConstraints::caseLookup(context, output_node.inst_name);
     const auto selection = SelectArcIndexes(liberty_cell, [&](const auto& arc) -> bool {
       const auto& from = output_node.clock_from_port.empty() ? liberty_cell.input_port : output_node.clock_from_port;
       const auto& to = output_node.clock_to_port.empty() ? liberty_cell.output_port : output_node.clock_to_port;
-      return arc.edge_triggered == output_node.clock_edge_triggered && arc.from_port == from && arc.to_port == to
-             && (!arc.edge_triggered || arc.trigger_transition == output_node.clock_trigger_transition)
-             && FastStaCondition::evaluate(arc.when, FastStaConstraints::caseLookup(context, output_node.inst_name)) != FastStaLogicValue::kZero;
+      if (arc.edge_triggered != output_node.clock_edge_triggered || arc.from_port != from || arc.to_port != to
+          || (arc.edge_triggered && arc.trigger_transition != output_node.clock_trigger_transition)) {
+        return false;
+      }
+      if (FastStaCondition::evaluate(arc.when, lookup) == FastStaLogicValue::kZero) {
+        filtered_by_case = true;
+        return false;
+      }
+      can_rise |= !arc.fall_only;
+      can_fall |= !arc.rise_only;
+      return true;
     });
+    // A periodic clock needs both edges. A disabled ICG can still have a
+    // conditional combinational_fall arc for its final transition to low.
+    if (liberty_cell.clock_gate.has_value() && filtered_by_case && (!can_rise || !can_fall)) {
+      output_node.clock_inactive = true;
+      output_node.timing = {};
+      output_node.early_timing = {};
+      output_node.late_timing = {};
+      return;
+    }
     for (const auto arc_index : selection.indexes) {
       clock_arcs.emplace_back(arc_index, &liberty_cell.timing_arcs.at(arc_index));
     }

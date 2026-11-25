@@ -16,8 +16,11 @@
 // ***************************************************************************************
 #include "py_ircx.h"
 
+#include <filesystem>
+
 #include "RCXBackendType.hpp"
 #include "RCXInterface.hpp"
+#include "SPEFSanitizer.hpp"
 #include "ircx_ics55.h"
 #include "idm.h"
 
@@ -26,6 +29,7 @@ namespace python_interface {
 namespace {
 
 RCXBackendType active_backend = RCXBackendType::kNone;
+std::filesystem::path active_config_path;
 
 bool is_native_pdk(const std::optional<std::string>& pdk)
 {
@@ -52,6 +56,7 @@ bool destroy_rcx()
     ircx_ics55_destroy();
   }
   active_backend = RCXBackendType::kNone;
+  active_config_path.clear();
   return true;
 }
 
@@ -59,6 +64,7 @@ bool init_rcx(const std::filesystem::path& config, const std::optional<std::stri
 {
   const std::string config_ = config.string();
   active_backend = RCXBackendType::kNone;
+  active_config_path.clear();
 
   if (!validate_pdk(pdk)) {
     return false;
@@ -67,6 +73,7 @@ bool init_rcx(const std::filesystem::path& config, const std::optional<std::stri
   if (is_ics55_pdk(pdk)) {
     ircx_ics55_init(config_.c_str(), dmInst->get_idb_design());
     active_backend = RCXBackendType::kIcs55;
+    active_config_path = std::filesystem::absolute(config);
     return true;
   }
 
@@ -81,7 +88,8 @@ bool run_rcx()
 {
   if (active_backend == RCXBackendType::kIcs55) {
     ircx_ics55_run();
-    return true;
+    // Sanitize SPEF written by the precompiled ics55 backend so IEEE 1481 rules hold there too.
+    return ircx::sanitizeSPEFOutputsForConfig(active_config_path);
   }
 
   if (active_backend != RCXBackendType::kNative) {
