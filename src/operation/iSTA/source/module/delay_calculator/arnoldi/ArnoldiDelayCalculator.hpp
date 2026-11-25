@@ -32,6 +32,12 @@ struct ArnoldiDelayResult
   std::vector<double> delays;
   std::vector<double> slews;
   double driver_ramp;
+  double driver_crossing = 0.;
+  // Source resistance the pole/residue model was actually built with. It differs
+  // from drive_resistance whenever the response was reused after the fitted
+  // resistance changed, which would make the reported parameters and the waveform
+  // describe two different drivers.
+  double waveform_resistance = 0.;
   ParasiticArnoldiPoleResidue waveform;
   bool resistance_adjusted = false;
 };

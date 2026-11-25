@@ -220,6 +220,21 @@ void RcTreeAnalyzer::analyze(ParasiticNet& net, std::string& root, AnalysisType 
     values.impulses.emplace(tree.nodes[node], std::max(0., 2. * beta[node] - std::pow(delays[node], 2)));
   }
   values.root = root;
+  if (const char* ep = std::getenv("ISTA_DUMP_ELMORE"); ep != nullptr) {
+    static const char* want = std::getenv("ISTA_DUMP_ELMORE_NET");
+    if (want == nullptr || net.get_net_name() == want) {
+      if (FILE* f = std::fopen(ep, "a"); f != nullptr) {
+        const double total_r = totalResistance(net);
+        std::fprintf(f, "E,%s,%d,%d,%zu,%.15g,%.15g\n", net.get_net_name().c_str(), static_cast<int>(analysis),
+                     static_cast<int>(trans), count, total_r, tree.nodes.empty() ? 0. : loads[0]);
+        for (std::size_t i = 0; i < count; ++i)
+          std::fprintf(f, "N,%s,%zu,%s,%.15g,%.15g,%.15g,%.15g,%.15g\n", net.get_net_name().c_str(), i, tree.nodes[i].c_str(),
+                       tree.resistances[i], capacitance[i], loads[i], delays[i],
+                       values.impulses.count(tree.nodes[i]) ? values.impulses.at(tree.nodes[i]) : 0.);
+        std::fclose(f);
+      }
+    }
+  }
 }
 
 double RcTreeAnalyzer::totalLoad(ParasiticNet& parasitic_net, AnalysisType analysis_type, TransType trans_type)

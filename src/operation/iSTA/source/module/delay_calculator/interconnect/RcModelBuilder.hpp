@@ -45,14 +45,16 @@ class RcModelBuilder
   ParasiticDmpModel& dmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type);
   // drive_resistance is the series source resistance (kOhm) that
   // ISTA_DRIVE_RES_SERIES folds into the original RC tree as a real branch.
-  // It participates in the cache key only while that mode is enabled; otherwise
-  // the argument is ignored so the legacy rank-1 fold path keeps one model per
-  // (net, source, analysis, edge).
+  // reduced_drive_resistance is the driver resistance (kOhm) that the reference Krylov
+  // reduction uses as its Norton conductance gd = 1/rd; it is independent of the
+  // series insertion, because reference never inserts a series branch. Both
+  // participate in the cache key so a model can never be shared across distinct
+  // driver conductances.
   ParasiticArnoldiModel& arnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type,
-                                      double drive_resistance = 0.);
+                                      double drive_resistance = 0., double reduced_drive_resistance = 0., double basis_drive_resistance = 0.);
 
  private:
-  using ArnoldiModelKey = std::tuple<std::string, std::string, AnalysisType, TransType, int64_t>;
+  using ArnoldiModelKey = std::tuple<std::string, std::string, AnalysisType, TransType, int64_t, int64_t, int64_t>;
 
   std::string getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type);
   ParasiticDmpModel buildParasiticDmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type);
@@ -62,13 +64,16 @@ class RcModelBuilder
                                       std::vector<double>& resistance_list, std::vector<double>& capacitance_list, std::string& source_node_name);
   ParasiticDmpLoadModel buildParasiticDmpLoadModel(double moment1, double moment2, double moment3);
   ArnoldiModelKey getParasiticArnoldiModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type,
-                                             double drive_resistance);
+                                             double drive_resistance, double reduced_drive_resistance, double basis_drive_resistance);
   ParasiticArnoldiModel buildParasiticArnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                   TransType trans_type, double drive_resistance);
+                                                   TransType trans_type, double drive_resistance, double reduced_drive_resistance,
+                                                   double basis_drive_resistance);
   void initParasiticArnoldiTerm(ParasiticArnoldiModel& arnoldi_model, std::vector<std::string>& node_name_list, std::string& source_node_name);
   void updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_model, ParasiticNet& parasitic_net, std::vector<std::string>& node_name_list,
                                    std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list, std::vector<double>& capacitance_list,
-                                   std::vector<std::size_t>& term_point_idx_list);
+                                   std::vector<double>& basis_capacitance_list, std::vector<std::size_t>& term_point_idx_list,
+                                   double drive_resistance, double reduced_drive_resistance, double basis_drive_resistance,
+                                   AnalysisType analysis_type, TransType trans_type);
   void updateParasiticArnoldiProjection(ParasiticArnoldiModel& arnoldi_model, std::vector<double>& basis_list, std::vector<std::size_t>& term_point_idx_list,
                                         std::size_t order_idx);
   Database& _database;

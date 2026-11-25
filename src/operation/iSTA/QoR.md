@@ -51,14 +51,16 @@ NVP(H) - Hold NVP
 
 ## 设计规则与实例统计表
 
+`CAP`、`FANOUT`、`TRAN` 分别来自实际电容、扇出、transition 检查；`TDRC` 为三项之和。电容和 transition 将分析模式、边沿、时钟域归约为每个物理引脚的最差 slack，各引脚每项最多计一次。约束来源包括适用的 SDC 和 Liberty 限值，取更严格者。详细数值见 `max_capacitance.{rpt,json}` 和 `max_transition.{rpt,json}`。
+
 设计规则与实例统计表内部也可以分为两组: **基本电气信息检查** 以及 **硬件资源汇总**
 
 `CAP`, `FANOUT`, `TRAN`, `TDRC`属于 **基本电气信息检查** :
-- `CAP`: 指示了发生 **最大电容违例(Capacitance Violations)** 的单元数量. 当发生最大电容违例时, 说明这个单元已经无法驱动他需要输出的引脚了.
+- `CAP`: 指示了发生 **最大电容违例(Capacitance Violations)** 的驱动引脚数量. 当发生最大电容违例时, 说明这个单元已经无法驱动他需要输出的引脚了.
   可以使用驱动能力更强的单元或者增加`BUF`单元解决.
 - `FANOUT`: 指示了发生 **最大扇出违例(Fanout Violations)** 的引脚的数量. 通常我们会人为规定一个引脚的最大扇出数.
   比如说64, 那么当一个输出引脚同时驱动了100个输入引脚时, 就会发生最大扇出违例. 同样的, 我们可以通过手动插入缓冲树解决.
-- `TRAN`: 指示了发生 **最大转换时间违例(Transition Violations)** 的时序弧的数量. 一个巨大的转换时间, 不仅仅会拖慢芯片的时序情况,
+- `TRAN`: 指示了发生 **最大转换时间违例(Transition Violations)** 的物理引脚数量. 一个巨大的转换时间, 不仅仅会拖慢芯片的时序情况,
   还会加剧电路的短路功耗. 而导致转换时间过大的原因, 通常是扇出过多, 或负载容抗过大.
 - `TDRC`: 全称 **时序设计规则检查总违例(Timing Design Rule Checks)**, 通常是`CAP`, `FANOUT`, `TRAN`之和.
 
@@ -74,3 +76,5 @@ NVP(H) - Hold NVP
 - `REGS`: 寄存器数量
 
 当芯片没有时序违例以及电气违例时, 我们才需要关注这里的信息.
+
+SDC 规则继承、局部 clock、reference_pin 和单位的支持范围见 [SDC 命令说明](source/module/sdc/UnsupportedCommands.md)。电气违例计数使用真实检查结果。

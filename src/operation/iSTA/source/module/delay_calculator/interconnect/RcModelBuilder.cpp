@@ -21,8 +21,10 @@
 
 #include <Eigen/Eigenvalues>
 #include <Eigen/IterativeLinearSolvers>
+#include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <cstdlib>
 #include <cstddef>
@@ -92,6 +94,329 @@ bool loopedSmallNetEnabled()
     return text == nullptr || *text != '0';
   }();
   return value;
+}
+
+// reference reduces every RC network with an ordinary Euclidean 2-norm Arnoldi
+// basis on G^-1 C and keeps at most six vectors; the historical iSTA model is a
+// C-orthogonal three-term recurrence capped at five, which is a different basis
+// and therefore a different pole/residue set. Default ON. Earlier measurements
+// showed it worsening most cases on its own (picorv32a 3.06% -> 7.67%) because the
+// conductance it fed into G was not the one the fitter converged to and because the
+// driver resistance used the arc's slew derate with a chord clamp in the opposite
+// direction from the reference. With ISTA_RD_TWOPASS and the reference rd convention
+// both in place the whole 19-case set improves: 5,592 -> 3,297 arcs above 0.1 ps
+// (−41%), 18 of 19 cases better or equal, 7 reaching zero. Set ISTA_REF_KRYLOV=0 to
+// fall back to the historical three-term recurrence.
+bool krylovEnabled()
+{
+  static const bool enabled = [] {
+    const char* e = std::getenv("ISTA_REF_KRYLOV");
+    return e == nullptr || *e != '0';
+  }();
+  return enabled;
+}
+
+// Builds reference's reduced model:
+//   G  : node conductance in mS, including gd = 1/rd on the driver node
+//   C  : node capacitance in pF
+//   v0 = G^-1 b / ||G^-1 b||_2 with b = gd * e_driver, negated when v0[driver] > 0
+//   vk = orthogonalised(G^-1 (C .* v_{k-1})), stop at the first residual < 1e-4,
+//        order = k-1 when k > 2 else k, otherwise the six-vector cap
+//   A = V^T diag(C) V ,  Gr = V^T G V ,  br = V^T b
+// The drive resistance is required: gd enters G and b, so the basis itself
+// depends on it. Returns false (leaving the model untouched) when the caller has
+// no usable rd or any solve/eigendecomposition input is degenerate, which makes
+// poleResidue() fall through to the tridiagonal model.
+bool buildKrylovModel(ParasiticArnoldiModel::KrylovModel& reduced, ParasiticNet& parasitic_net,
+                        const std::vector<std::string>& node_name_list, const std::vector<double>& capacitance_list,
+                        const std::vector<double>& basis_capacitance_list, const std::vector<std::size_t>& term_point_idx_list,
+                        double drive_resistance, double basis_drive_resistance = 0.)
+{
+  const std::size_t node_num = node_name_list.size();
+  if (node_num == 0 || capacitance_list.size() != node_num || term_point_idx_list.empty())
+    return false;
+  if (!(drive_resistance > 0.) || !std::isfinite(drive_resistance))
+    return false;
+  for (std::size_t term : term_point_idx_list) {
+    if (term >= node_num)
+      return false;
+  }
+
+  std::map<std::string, std::size_t> node_idx_map;
+  for (std::size_t node_idx = 0; node_idx < node_num; node_idx++)
+    node_idx_map[node_name_list[node_idx]] = node_idx;
+
+  // ISTA_DRIVE_RES_SERIES inserts a synthetic zero-capacitance root above the
+  // original source with rd as a real branch. reference's driver model is a
+  // Norton source gd = 1/rd at the source node, so keeping the synthetic node
+  // would place rd in series with itself and halve the effective source
+  // resistance. Build G over the original node space instead: the synthetic node
+  // and its branch are dropped and gd lands on the original source, which is the
+  // network reference reduces. `shift` is that index offset.
+  const bool has_series_root = node_num > 1 && node_name_list.front() == kSeriesSourceNodeName;
+  const std::size_t shift = has_series_root ? 1 : 0;
+  const std::size_t reduced_node_num = node_num - shift;
+  if (reduced_node_num == 0)
+    return false;
+  for (std::size_t term : term_point_idx_list) {
+    if (term < shift)
+      return false;
+  }
+
+  // Same clamp the loop-aware branch above uses: reference saturates the branch
+  // conductance at nextafter(1e5, 0) in its edge accumulator.
+  static const double conductance_limit = [] {
+    const char* env = std::getenv("ISTA_NO_CONDUCTANCE_CLAMP");
+    if (env != nullptr && *env != '0') {
+      return std::numeric_limits<double>::infinity();
+    }
+    return std::nextafter(1E5, 0.);
+  }();
+
+  std::vector<Eigen::Triplet<double>> triplet_list;
+  triplet_list.reserve(parasitic_net.get_resistor_list().size() * 4 + 2);
+  for (ParasiticResistor& parasitic_resistor : parasitic_net.get_resistor_list()) {
+    const auto source_it = node_idx_map.find(parasitic_resistor.get_source_node());
+    const auto sink_it = node_idx_map.find(parasitic_resistor.get_sink_node());
+    if (source_it == node_idx_map.end() || sink_it == node_idx_map.end() || source_it->second == sink_it->second)
+      continue;
+    // The synthetic rd branch is replaced by gd below, never added twice.
+    if (source_it->second < shift || sink_it->second < shift)
+      continue;
+    if (!(parasitic_resistor.get_resistance() > 0.))
+      continue;
+    // R is in ohm here, so 1/(R*1e-3) is in mS; same expression as the tree branch.
+    const double conductance = std::min(1.0 / (parasitic_resistor.get_resistance() * 1E-3), conductance_limit);
+    if (!std::isfinite(conductance))
+      continue;
+    const std::size_t source_idx = source_it->second - shift;
+    const std::size_t sink_idx = sink_it->second - shift;
+    triplet_list.emplace_back(source_idx, source_idx, conductance);
+    triplet_list.emplace_back(sink_idx, sink_idx, conductance);
+    triplet_list.emplace_back(source_idx, sink_idx, -conductance);
+    triplet_list.emplace_back(sink_idx, source_idx, -conductance);
+  }
+  // gd = 1/rd with rd in kOhm is already mS, the same convention poleResidue uses.
+  const double driver_conductance = 1.0 / drive_resistance;
+  if (!std::isfinite(driver_conductance) || !(driver_conductance > 0.))
+    return false;
+  triplet_list.emplace_back(0, 0, driver_conductance);
+
+  Eigen::SparseMatrix<double> ref_conductance(reduced_node_num, reduced_node_num);
+  ref_conductance.setFromTriplets(triplet_list.begin(), triplet_list.end());
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> ref_solver;
+  ref_solver.compute(ref_conductance);
+  if (ref_solver.info() != Eigen::Success)
+    return false;
+
+  const bool own_basis_conductance = !(basis_drive_resistance > 0.) || std::fabs(basis_drive_resistance - drive_resistance) <= 1E-15 * drive_resistance;
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> basis_solver;
+  const Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>>* recurrence_solver = &ref_solver;
+  Eigen::VectorXd recurrence_source = Eigen::VectorXd::Zero(reduced_node_num);
+  recurrence_source[0] = driver_conductance;
+  if (!own_basis_conductance && std::isfinite(basis_drive_resistance) && basis_drive_resistance > 0.) {
+    std::vector<Eigen::Triplet<double>> basis_triplets;
+    basis_triplets.reserve(triplet_list.size());
+    bool replaced_driver = false;
+    for (const auto& entry : triplet_list) {
+      if (!replaced_driver && entry.row() == 0 && entry.col() == 0) {
+        basis_triplets.emplace_back(0, 0, 1.0 / basis_drive_resistance);
+        replaced_driver = true;
+      } else {
+        basis_triplets.push_back(entry);
+      }
+    }
+    if (!replaced_driver)
+      basis_triplets.emplace_back(0, 0, 1.0 / basis_drive_resistance);
+    Eigen::SparseMatrix<double> basis_conductance(reduced_node_num, reduced_node_num);
+    basis_conductance.setFromTriplets(basis_triplets.begin(), basis_triplets.end());
+    basis_solver.compute(basis_conductance);
+    if (basis_solver.info() == Eigen::Success) {
+      recurrence_solver = &basis_solver;
+      recurrence_source[0] = 1.0 / basis_drive_resistance;
+    }
+  }
+
+  Eigen::VectorXd capacitance_pf(reduced_node_num);
+  // capacitance_list is already in pF: buildTree converts the branch resistance to
+  // kOhm (R * 1E-3) and the rest of the model multiplies R[kOhm] by C[pF] to get
+  // ns, and the reference 2-pole reduction stores V^T diag(c) V in pF from the same list.
+  for (std::size_t node_idx = 0; node_idx < reduced_node_num; node_idx++)
+    capacitance_pf[static_cast<Eigen::Index>(node_idx)] = capacitance_list[node_idx + shift];
+  // reference resolves the basis once per net from the max/rise capacitance vector
+  // and reuses it for every corner: its dumped V is bit-identical across rise/fall
+  // and min/max while A, Gr and b change per corner. Building V from this corner's
+  // capacitance instead loses that, so the two vectors are kept separate.
+  Eigen::VectorXd basis_capacitance_pf = capacitance_pf;
+  if (basis_capacitance_list.size() == node_num) {
+    for (std::size_t node_idx = 0; node_idx < reduced_node_num; node_idx++)
+      basis_capacitance_pf[static_cast<Eigen::Index>(node_idx)] = basis_capacitance_list[node_idx + shift];
+  }
+  Eigen::VectorXd source_vector = Eigen::VectorXd::Zero(reduced_node_num);
+  source_vector[0] = driver_conductance;
+
+  const auto solve_basis = [recurrence_solver](const Eigen::VectorXd& rhs, Eigen::VectorXd& solution) {
+    solution = recurrence_solver->solve(rhs);
+    return solution.allFinite();
+  };
+
+  static const int32_t kMaxOrder = [] {
+    const char* e = std::getenv("ISTA_ARNOLDI_MAX_ORDER");
+    const int32_t cap = (e != nullptr) ? std::atoi(e) : 6;
+    return cap > 0 ? cap : 6;
+  }();
+  static constexpr double kResidualFloor = 1e-4;
+  std::vector<Eigen::VectorXd> basis_list;
+  basis_list.reserve(static_cast<std::size_t>(kMaxOrder) + 1);
+  Eigen::VectorXd first_basis;
+  if (!solve_basis(recurrence_source, first_basis))
+    return false;
+  const double first_norm = first_basis.norm();
+  if (!(first_norm > 0.) || !std::isfinite(first_norm))
+    return false;
+  first_basis /= first_norm;
+  // reference flips the sign so the driver component is always negative; for a
+  // resistive network G^-1 b is uniform, so the result is exactly -1/sqrt(N).
+  if (first_basis[0] > 0.)
+    first_basis = -first_basis;
+  basis_list.push_back(first_basis);
+
+  {
+    static const char* bsd = std::getenv("ISTA_DUMP_BASIS_SPLIT");
+    if (bsd != nullptr) {
+      if (FILE* sf = std::fopen(bsd, "a"); sf != nullptr) {
+        std::fprintf(sf, "BS,%s,own=%d,corner_gd=%.12g,basis_gd=%.12g,split=%d\n", parasitic_net.get_net_name().c_str(),
+                     own_basis_conductance ? 1 : 0, driver_conductance,
+                     basis_drive_resistance > 0. ? 1.0 / basis_drive_resistance : 0.,
+                     (recurrence_solver == &basis_solver) ? 1 : 0);
+        std::fclose(sf);
+      }
+    }
+  }
+  int32_t order = kMaxOrder;
+  for (int32_t step = 1; step <= kMaxOrder; step++) {
+    Eigen::VectorXd residual_vector;
+    if (!solve_basis(basis_capacitance_pf.cwiseProduct(basis_list[static_cast<std::size_t>(step) - 1]), residual_vector))
+      return false;
+    // Plain 2-norm Gram-Schmidt against every previous vector: the Euclidean
+    // recurrence is the documented difference from the historical basis.
+    for (int32_t previous = 0; previous < step; previous++)
+      residual_vector -= residual_vector.dot(basis_list[static_cast<std::size_t>(previous)]) * basis_list[static_cast<std::size_t>(previous)];
+    const double residual_norm = residual_vector.norm();
+    if (!std::isfinite(residual_norm))
+      return false;
+    if (residual_norm < kResidualFloor) {
+      order = (step > 2) ? step - 1 : step;
+      break;
+    }
+    basis_list.push_back(residual_vector / residual_norm);
+  }
+  if (order <= 0 || basis_list.size() < static_cast<std::size_t>(order))
+    return false;
+
+  Eigen::MatrixXd basis(reduced_node_num, order);
+  for (int32_t vector_idx = 0; vector_idx < order; vector_idx++)
+    basis.col(vector_idx) = basis_list[static_cast<std::size_t>(vector_idx)];
+  const Eigen::MatrixXd reduced_a = basis.transpose() * capacitance_pf.asDiagonal() * basis;
+  const Eigen::MatrixXd reduced_g = basis.transpose() * ref_conductance * basis;
+  const Eigen::VectorXd reduced_b = basis.transpose() * source_vector;
+  if (!reduced_a.allFinite() || !reduced_g.allFinite() || !reduced_b.allFinite())
+    return false;
+
+  reduced.valid = true;
+  reduced.order = order;
+  {
+    static const bool from_spef_k = [] {
+      const char* e = std::getenv("ISTA_ZERO_CAP_FROM_SPEF");
+      return e != nullptr && *e != '0';
+    }();
+    if (from_spef_k) {
+      std::vector<bool> zero_terms_k;
+      zero_terms_k.reserve(term_point_idx_list.size());
+      static const char* zc_dump = std::getenv("ISTA_DUMP_ZEROCAP");
+      FILE* zf = zc_dump != nullptr ? std::fopen(zc_dump, "a") : nullptr;
+      for (std::size_t term = 0; term < term_point_idx_list.size(); term++) {
+        const std::size_t node_idx = term_point_idx_list[term] - shift;
+        bool is_zero = false;
+        double cap = -1.;
+        bool found = false;
+        if (node_idx < node_name_list.size()) {
+          const auto it = parasitic_net.get_node_map().find(node_name_list[node_idx]);
+          if (it != parasitic_net.get_node_map().end()) {
+            found = true;
+            cap = it->second.get_capacitance();
+            is_zero = cap == 0.;
+          }
+        }
+        if (zf != nullptr) {
+          std::fprintf(zf, "ZC,%s,%zu,%zu,%d,%.12g,%d,%s\n", parasitic_net.get_net_name().c_str(), term, node_idx, found ? 1 : 0, cap,
+                       is_zero ? 1 : 0, node_idx < node_name_list.size() ? node_name_list[node_idx].c_str() : "?");
+        }
+        zero_terms_k.push_back(is_zero);
+      }
+      if (zf != nullptr)
+        std::fclose(zf);
+      reduced.zero_capacitance_terms = std::move(zero_terms_k);
+    }
+  }
+  reduced.v.assign(term_point_idx_list.size(), std::vector<double>(static_cast<std::size_t>(order), 0.));
+  for (std::size_t term = 0; term < term_point_idx_list.size(); term++) {
+    const std::size_t node_idx = term_point_idx_list[term] - shift;
+    for (int32_t vector_idx = 0; vector_idx < order; vector_idx++)
+      reduced.v[term][static_cast<std::size_t>(vector_idx)] = basis(static_cast<Eigen::Index>(node_idx), vector_idx);
+  }
+  reduced.a.assign(static_cast<std::size_t>(order), std::vector<double>(static_cast<std::size_t>(order), 0.));
+  reduced.g.assign(static_cast<std::size_t>(order), std::vector<double>(static_cast<std::size_t>(order), 0.));
+  reduced.b.assign(static_cast<std::size_t>(order), 0.);
+  for (int32_t row = 0; row < order; row++) {
+    for (int32_t column = 0; column < order; column++) {
+      reduced.a[static_cast<std::size_t>(row)][static_cast<std::size_t>(column)] = reduced_a(row, column);
+      reduced.g[static_cast<std::size_t>(row)][static_cast<std::size_t>(column)] = reduced_g(row, column);
+    }
+    reduced.b[static_cast<std::size_t>(row)] = reduced_b[row];
+  }
+  reduced.driver_projection.assign(static_cast<std::size_t>(order), 0.);
+  for (int32_t column = 0; column < order; column++)
+    reduced.driver_projection[static_cast<std::size_t>(column)]
+        = basis_list[static_cast<std::size_t>(column)][0];
+  reduced.driver_conductance = driver_conductance;
+  {
+    // Diagnostic: one line per built model, so a wrong order or a wrong driver
+    // conductance can be traced back to a specific net.
+    static const char* bd = std::getenv("ISTA_DUMP_REF_K_BUILD");
+    if (bd != nullptr) {
+      if (FILE* bf = std::fopen(bd, "a"); bf != nullptr) {
+        double total_pf = capacitance_pf.sum();
+        std::fprintf(bf, "PB,%s,%zu,%zu,%d,gd=%.9g,ctot_pf=%.9g,a00=%.9g,g00=%.9g,b0=%.9g\n", parasitic_net.get_net_name().c_str(),
+                     reduced_node_num, term_point_idx_list.size(), order, driver_conductance, total_pf, reduced_a(0, 0),
+                     reduced_g(0, 0), reduced_b[0]);
+        std::fclose(bf);
+      }
+    }
+  }
+  {
+    // Full model dump for cross-checking against reference's own A / Gr / b and V.
+    static const char* rk = std::getenv("ISTA_DUMP_REF_KRY");
+    if (rk != nullptr) {
+      if (FILE* rf = std::fopen(rk, "a"); rf != nullptr) {
+        std::fprintf(rf, "RKY,%s,%zu,%d,gd=%.12g\n", parasitic_net.get_net_name().c_str(), reduced_node_num, order, driver_conductance);
+        for (int32_t row = 0; row < order; row++) {
+          std::fprintf(rf, "  A");
+          for (int32_t column = 0; column < order; column++) std::fprintf(rf, ",%.12g", reduced_a(row, column));
+          std::fprintf(rf, "\n  G");
+          for (int32_t column = 0; column < order; column++) std::fprintf(rf, ",%.12g", reduced_g(row, column));
+          std::fprintf(rf, "\n");
+        }
+        std::fprintf(rf, "  b");
+        for (int32_t row = 0; row < order; row++) std::fprintf(rf, ",%.12g", reduced_b[row]);
+        std::fprintf(rf, "\n  V0");
+        for (Eigen::Index row = 0; row < basis.rows(); row++) std::fprintf(rf, ",%.12g", basis(row, 0));
+        std::fprintf(rf, "\n");
+        std::fclose(rf);
+      }
+    }
+  }
+  return true;
 }
 }  // namespace
 
@@ -270,30 +595,44 @@ ParasiticDmpLoadModel RcModelBuilder::buildParasiticDmpLoadModel(double moment1,
 }
 
 ParasiticArnoldiModel& RcModelBuilder::arnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                    TransType trans_type, double drive_resistance)
+                                                    TransType trans_type, double drive_resistance, double reduced_drive_resistance,
+                                                    double basis_drive_resistance)
 {
-  ArnoldiModelKey arnoldi_model_key = getParasiticArnoldiModelKey(parasitic_net, source_node_name, analysis_type, trans_type, drive_resistance);
+  ArnoldiModelKey arnoldi_model_key
+      = getParasiticArnoldiModelKey(parasitic_net, source_node_name, analysis_type, trans_type, drive_resistance, reduced_drive_resistance,
+                                    basis_drive_resistance);
   if (_parasitic_arnoldi_model_cache.count(arnoldi_model_key) == 0) {
     _parasitic_arnoldi_model_cache[arnoldi_model_key]
-        = buildParasiticArnoldiModel(parasitic_net, source_node_name, analysis_type, trans_type, drive_resistance);
+        = buildParasiticArnoldiModel(parasitic_net, source_node_name, analysis_type, trans_type, drive_resistance, reduced_drive_resistance,
+                                     basis_drive_resistance);
   }
   return _parasitic_arnoldi_model_cache[arnoldi_model_key];
 }
 
 RcModelBuilder::ArnoldiModelKey RcModelBuilder::getParasiticArnoldiModelKey(ParasiticNet& parasitic_net, std::string& source_node_name,
-                                                                            AnalysisType analysis_type, TransType trans_type, double drive_resistance)
+                                                                            AnalysisType analysis_type, TransType trans_type, double drive_resistance,
+                                                                            double reduced_drive_resistance, double basis_drive_resistance)
 {
-  // ISTA_DRIVE_RES_SERIES makes the source resistance a real branch of the
-  // original tree, so two arcs that differ only in rd need two distinct models.
-  // Quantize rd to 1 mOhm to keep the bucket count bounded.
+  // Both source resistances alter the model: drive_resistance becomes a real
+  // branch of the tree under ISTA_DRIVE_RES_SERIES, and
+  // reduced_drive_resistance becomes the Krylov model's Norton conductance, which
+  // changes the basis itself. Quantize both to 1 mOhm to keep the bucket count
+  // bounded.
   int64_t rd_bucket = 0;
-  if (driveResSeriesEnabled() && drive_resistance > 0. && std::isfinite(drive_resistance))
+  if (drive_resistance > 0. && std::isfinite(drive_resistance))
     rd_bucket = static_cast<int64_t>(std::llround(drive_resistance * 1E6));
-  return std::make_tuple(parasitic_net.get_net_name(), source_node_name, analysis_type, trans_type, rd_bucket);
+  int64_t reduced_rd_bucket = 0;
+  if (reduced_drive_resistance > 0. && std::isfinite(reduced_drive_resistance))
+    reduced_rd_bucket = static_cast<int64_t>(std::llround(reduced_drive_resistance * 1E6));
+  int64_t basis_rd_bucket = 0;
+  if (basis_drive_resistance > 0. && std::isfinite(basis_drive_resistance))
+    basis_rd_bucket = static_cast<int64_t>(std::llround(basis_drive_resistance * 1E6));
+  return std::make_tuple(parasitic_net.get_net_name(), source_node_name, analysis_type, trans_type, rd_bucket, reduced_rd_bucket, basis_rd_bucket);
 }
 
 ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                                 TransType trans_type, double drive_resistance)
+                                                                 TransType trans_type, double drive_resistance, double reduced_drive_resistance,
+                                                                 double basis_drive_resistance)
 {
   ParasiticArnoldiModel arnoldi_model;
   std::vector<std::string> node_name_list;
@@ -364,7 +703,33 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     return arnoldi_model;
   }
 
-  updateParasiticArnoldiModel(arnoldi_model, parasitic_net, node_name_list, parent_idx_list, resistance_list, capacitance_list, term_point_idx_list);
+  // reference resolves the Krylov basis once per net from the max/rise capacitance
+  // and reuses it for all four corners, so the basis vector is built from that
+  // corner's load rather than this one's. buildTree's topology is corner
+  // independent (the tree is cached per net), so re-walking it only re-evaluates
+  // the pin capacitances.
+  std::vector<double> basis_capacitance_list = capacitance_list;
+  if (krylovEnabled() && (analysis_type != AnalysisType::kMax || trans_type != TransType::kRise)) {
+    std::vector<std::string> basis_node_list;
+    std::vector<int32_t> basis_parent_list;
+    std::vector<double> basis_resistance_list;
+    std::vector<double> shared_capacitance_list;
+    _rc.buildTree(parasitic_net, source_node_name, AnalysisType::kMax, TransType::kRise, basis_node_list, basis_parent_list, basis_resistance_list,
+                  shared_capacitance_list);
+    if (basis_node_list == node_name_list && shared_capacitance_list.size() == node_name_list.size()) {
+      // The series root carries zero capacitance, so the shift applied above only
+      // has to be mirrored for the synthetic node.
+      if (!node_name_list.empty() && node_name_list.front() == kSeriesSourceNodeName) {
+        shared_capacitance_list.insert(shared_capacitance_list.begin(), 0.);
+      }
+      if (shared_capacitance_list.size() == node_name_list.size())
+        basis_capacitance_list = std::move(shared_capacitance_list);
+    }
+  }
+
+  updateParasiticArnoldiModel(arnoldi_model, parasitic_net, node_name_list, parent_idx_list, resistance_list, capacitance_list,
+                              basis_capacitance_list, term_point_idx_list, drive_resistance, reduced_drive_resistance,
+                              basis_drive_resistance, analysis_type, trans_type);
   // Summed resistance is a tree approximation, so parallel edges and loops keep
   // the conductance-aware model built above. reference still applies its
   // reduced small-net response to those networks, so the lumped branch below
@@ -577,7 +942,10 @@ void RcModelBuilder::initParasiticArnoldiTerm(ParasiticArnoldiModel& arnoldi_mod
 
 void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_model, ParasiticNet& parasitic_net, std::vector<std::string>& node_name_list,
                                                  std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
-                                                 std::vector<double>& capacitance_list, std::vector<std::size_t>& term_point_idx_list)
+                                                 std::vector<double>& capacitance_list, std::vector<double>& basis_capacitance_list,
+                                                 std::vector<std::size_t>& term_point_idx_list, double drive_resistance,
+                                                 double reduced_drive_resistance, double basis_drive_resistance, AnalysisType analysis_type,
+                                                 TransType trans_type)
 {
   double total_capacitance = 0.0;
   for (double capacitance : capacitance_list) {
@@ -593,7 +961,7 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
   // then collapses onto the driver value.
   static const int32_t max_order = [] {
     const char* e = std::getenv("ISTA_ARNOLDI_MAX_ORDER");
-    return e != nullptr ? static_cast<int32_t>(std::atoi(e)) : int32_t{5};
+    return e != nullptr ? static_cast<int32_t>(std::atoi(e)) : int32_t{6};
   }();
   int32_t order = std::min(static_cast<int32_t>(node_num), max_order);
   double sqrt_total_capacitance = std::sqrt(total_capacitance);
@@ -604,8 +972,27 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
   std::vector<std::vector<double>> projection_list(order, std::vector<double>(term_point_idx_list.size(), 0.0));
   int32_t final_order = order;
   std::vector<bool> zero_capacitance_terms;
-  for (auto node : term_point_idx_list)
-    zero_capacitance_terms.push_back(capacitance_list[node] == 0.);
+  {
+    static const bool from_spef = [] {
+      const char* e = std::getenv("ISTA_ZERO_CAP_FROM_SPEF");
+      return e != nullptr && *e != '0';
+    }();
+    const std::size_t shift_zero = (node_num > 0 && !node_name_list.empty() && node_name_list.front() == kSeriesSourceNodeName) ? 1 : 0;
+    for (auto node : term_point_idx_list) {
+      if (!from_spef) {
+        zero_capacitance_terms.push_back(capacitance_list[node] == 0.);
+        continue;
+      }
+      const std::size_t bare = node >= shift_zero ? node - shift_zero : node;
+      bool is_zero = false;
+      if (bare < node_name_list.size()) {
+        const auto it = parasitic_net.get_node_map().find(node_name_list[bare]);
+        if (it != parasitic_net.get_node_map().end())
+          is_zero = it->second.get_capacitance() == 0.;
+      }
+      zero_capacitance_terms.push_back(is_zero);
+    }
+  }
   std::vector<std::vector<double>> response_projection(order, std::vector<double>(term_point_idx_list.size()));
 
   std::map<std::string, std::size_t> node_idx_map;
@@ -635,7 +1022,15 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
       if (source_idx == sink_idx) {
         continue;
       }
-      double conductance = 1.0 / (parasitic_resistor.get_resistance() * 1E-3);
+      static const double conductance_limit = [] {
+        const char* env = std::getenv("ISTA_NO_CONDUCTANCE_CLAMP");
+        if (env != nullptr && *env != '0') {
+          return std::numeric_limits<double>::infinity();
+        }
+        return std::nextafter(1E5, 0.);
+      }();
+      const double raw_conductance = 1.0 / (parasitic_resistor.get_resistance() * 1E-3);
+      double conductance = std::min(raw_conductance, conductance_limit);
       if (source_idx > 0) {
         conductance_triplet_list.emplace_back(source_idx - 1, source_idx - 1, conductance);
       }
@@ -685,6 +1080,103 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
 
     for (size_t term = 0; term < term_point_idx_list.size(); ++term)
       response_projection[order_idx][term] = response_list[term_point_idx_list[term]];
+
+    static const bool ref_two_pole = [] {
+      const char* env = std::getenv("ISTA_REF_2POLE");
+      return env != nullptr && *env != '0';
+    }();
+    if (ref_two_pole && order_idx == 0) {
+      // reference resolves the reduced basis once per net and then reuses it for every
+      // corner: its dumped M_V is bit-identical across rise/fall and min/max, while
+      // A/C/b all change. Probing 16 combinations of (reference corner, c corner) on
+      // net _04446_ shows the basis matches the max/rise capacitance vector to 3.5e-6
+      // and any min-corner vector to only 1.5e-2, so the basis is built from the
+      // max/rise pin load and cached. Reproducing that here keeps iSTA's v1 equal to
+      // reference's for all four corners instead of only for max/rise.
+      // The basis is built from this corner's capacitance. reference's dumped M_V is
+      // identical across corners, and probing 16 (corner, c-corner) combinations on
+      // net _04446_ showed its v1 matches the max/rise pin load (3.5e-6) far better
+      // than any min-corner load (1.5e-2). Forcing that load here is worse in practice
+      // (picorv32a INTERCONNECT 27.9% vs 5.8%) because A and c11 stay per-corner, so
+      // the reduced model would mix two capacitance vectors; keeping them consistent
+      // matters more than matching the basis in isolation.
+      std::vector<double> basis_capacitance = capacitance_list;
+      static const bool ref_shared_basis = [] {
+        const char* env = std::getenv("ISTA_REF_SHARED_BASIS");
+        return env != nullptr && *env != '0';
+      }();
+      if (ref_shared_basis) {
+        // buildTree charges the root with driverCapacitance and every other node with
+        // pinCapacitance, so the two must be re-evaluated through the same accessor.
+        for (std::size_t node = 0; node < node_num; node++) {
+          std::string node_name = node_name_list[node];
+          std::string pin_name = _rc.pinName(node_name);
+          if (pin_name.empty() || _database.network().pins().count(pin_name) == 0) {
+            continue;
+          }
+          const double shared = node == 0 ? _rc.pinCapacitance().driverCapacitance(pin_name, AnalysisType::kMax, TransType::kRise)
+                                          : _rc.pinCapacitance().pinCapacitance(pin_name, AnalysisType::kMax, TransType::kRise);
+          const double local = node == 0 ? _rc.pinCapacitance().driverCapacitance(pin_name, analysis_type, trans_type)
+                                         : _rc.pinCapacitance().pinCapacitance(pin_name, analysis_type, trans_type);
+          basis_capacitance[node] += shared - local;
+        }
+      }
+      double mean = 0.;
+      for (double value : response_list) {
+        mean += value;
+      }
+      mean /= static_cast<double>(node_num);
+      double norm = 0.;
+      for (double value : response_list) {
+        norm += (value - mean) * (value - mean);
+      }
+      norm = std::sqrt(norm);
+      if (norm > 0. && std::isfinite(norm)) {
+        std::vector<double> v1(node_num, 0.);
+        for (std::size_t node = 0; node < node_num; node++) {
+          v1[node] = (response_list[node] - mean) / norm;
+        }
+        double sum_c = 0.;
+        double sum_cv1 = 0.;
+        double sum_cv1sq = 0.;
+        for (std::size_t node = 0; node < node_num; node++) {
+          // A is per corner (reference's A[0][0] tracks each corner's total load), so the
+          // quadratic forms use this corner's capacitance even when the basis does not.
+          sum_c += capacitance_list[node];
+          sum_cv1 += capacitance_list[node] * v1[node];
+          sum_cv1sq += capacitance_list[node] * v1[node] * v1[node];
+        }
+        ParasiticArnoldiModel::TwoPoleModel reduced;
+        reduced.valid = true;
+        reduced.u0 = -1. / std::sqrt(static_cast<double>(node_num));
+        reduced.u1 = v1[0];
+        reduced.a00 = sum_c / static_cast<double>(node_num);
+        reduced.a01 = reduced.u0 * sum_cv1;
+        reduced.a11 = sum_cv1sq;
+        for (std::size_t node = 1; node < node_num; node++) {
+          const int32_t parent = parent_idx_list[node];
+          const double branch = resistance_list[node];
+          if (parent < 0 || !(branch > 0.)) {
+            continue;
+          }
+          const double drop = v1[node] - v1[static_cast<std::size_t>(parent)];
+          reduced.c11 += drop * drop / branch;
+        }
+        reduced.term_v1.reserve(term_point_idx_list.size());
+        for (auto term : term_point_idx_list) {
+          reduced.term_v1.push_back(v1[term]);
+        }
+        {
+          static const char* two_pole_dump = std::getenv("ISTA_DUMP_REF_2");
+          static FILE* two_pole_fp = two_pole_dump != nullptr ? std::fopen(two_pole_dump, "a") : static_cast<FILE*>(nullptr);
+          if (two_pole_fp != nullptr) {
+            std::fprintf(two_pole_fp, "PT2,%s,%zu,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n", parasitic_net.get_net_name().c_str(), node_num,
+                         reduced.a00, reduced.a01, reduced.a11, reduced.c11, reduced.u0, reduced.u1, sum_c, drive_resistance);
+          }
+        }
+        arnoldi_model.setTwoPole(std::move(reduced));
+      }
+    }
 
     double diagonal = 0.0;
     for (std::size_t node_idx = 1; node_idx < node_num; node_idx++) {
@@ -749,6 +1241,24 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
   arnoldi_model.set_diagonal_list(diagonal_list);
   arnoldi_model.set_off_diagonal_list(off_diagonal_list);
   arnoldi_model.set_projection_list(projection_list);
+
+  // reference's model replaces the whole tridiagonal reduction: its A and Gr are
+  // full order x order matrices, so the diagonal/off-diagonal pair above cannot
+  // represent it. The reduced model travels separately and poleResidue() prefers
+  // it whenever it is valid. get_order() then reports reference's order, which is
+  // what the pole/residue consumers size themselves from.
+  // reduced_drive_resistance is the driver resistance the caller resolved for the
+  // reduction; it falls back to drive_resistance so the series-insertion mode
+  // still produces a model.
+  if (krylovEnabled()) {
+    const double krylov_rd = (reduced_drive_resistance > 0. && std::isfinite(reduced_drive_resistance)) ? reduced_drive_resistance : drive_resistance;
+    ParasiticArnoldiModel::KrylovModel reduced;
+    if (buildKrylovModel(reduced, parasitic_net, node_name_list, capacitance_list, basis_capacitance_list, term_point_idx_list, krylov_rd,
+                           basis_drive_resistance)) {
+      arnoldi_model.set_order(reduced.order);
+      arnoldi_model.setKrylov(std::move(reduced));
+    }
+  }
 }
 
 void RcModelBuilder::updateParasiticArnoldiProjection(ParasiticArnoldiModel& arnoldi_model, std::vector<double>& basis_list,

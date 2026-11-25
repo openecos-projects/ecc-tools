@@ -228,6 +228,27 @@ SdfDelay SdfValueExtractor::arcDelay(Arc& arc, TransType input_trans_type)
   if (!arc.get_graph_delay_map().empty()) {
     updateDelay(sdf_delay, arc.get_graph_delay_map(), input_trans_type);
   }
+  if (const char* sp = std::getenv("ISTA_DUMP_SDFARC"); sp != nullptr && arc.get_type() == ArcType::kNet) {
+    static const char* want = std::getenv("ISTA_DUMP_SDFARC_NET");
+    if (want == nullptr || arc.get_owner_name() == want) {
+      if (FILE* f = std::fopen(sp, "a"); f != nullptr) {
+        std::fprintf(f, "SA,%s,%s,%s,gm=%zu,iom=%zu", arc.get_owner_name().c_str(), arc.get_source_pin().c_str(),
+                     arc.get_sink_pin().c_str(), arc.get_graph_delay_map().size(), arc.get_input_output_delay_map().size());
+        for (auto& lv1 : arc.get_graph_delay_map())
+          for (auto& lv2 : lv1.second)
+            for (auto& lv3 : lv2.second)
+              std::fprintf(f, ",g%d_%d_%d=%.15g", static_cast<int>(lv1.first), static_cast<int>(lv2.first),
+                           static_cast<int>(lv3.first), lv3.second);
+        for (auto& lv1 : arc.get_input_output_delay_map())
+          for (auto& lv2 : lv1.second)
+            for (auto& lv3 : lv2.second)
+              std::fprintf(f, ",io%d_%d_%d=%.15g", static_cast<int>(lv1.first), static_cast<int>(lv2.first),
+                           static_cast<int>(lv3.first), lv3.second);
+        std::fprintf(f, "\n");
+        std::fclose(f);
+      }
+    }
+  }
   if (!hasDelay(sdf_delay)) {
     updateDelay(sdf_delay, arc.get_input_output_delay_map(), input_trans_type);
   }

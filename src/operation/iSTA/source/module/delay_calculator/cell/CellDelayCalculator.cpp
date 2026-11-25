@@ -23,12 +23,15 @@
 #include <cstdlib>
 #include <functional>
 #include <ranges>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
 #include "TimingTolerance.hpp"
 
 namespace ista {
+extern thread_local const char* g_dump_source_pin_cstr;
+
 namespace
 {
 // Diagnostic only: the CEFF dump needs the driving (source) pin so multi-input
@@ -37,7 +40,7 @@ namespace
 thread_local const std::string* g_dump_source_pin = nullptr;
 
 // Diagnostic: converged slew per (pin, edge). Loaded once.
-const std::unordered_map<std::string, double>& forcedPtSlew()
+const std::unordered_map<std::string, double>& forcedRefSlew()
 {
   static const auto values = [] {
     std::unordered_map<std::string, double> map;
@@ -57,15 +60,54 @@ const std::unordered_map<std::string, double>& forcedPtSlew()
   return values;
 }
 
-std::optional<double> forcedPtSlewFor(const std::string& pin, TransType edge)
+const std::unordered_map<std::string, double>& forcedRefSlew4()
 {
-  const auto& map = forcedPtSlew();
+  static const auto values = [] {
+    std::unordered_map<std::string, double> map;
+    const char* path = std::getenv("ISTA_FORCE_REF_SLEW4");
+    if (path != nullptr) {
+      if (FILE* f = std::fopen(path, "r"); f != nullptr) {
+        char pin[512];
+        int trans = 0;
+        int analysis = 0;
+        double slew = 0.;
+        while (std::fscanf(f, "%511[^,],%d,%d,%lf\n", pin, &trans, &analysis, &slew) == 4)
+          map[std::string(pin) + "," + std::to_string(trans) + "," + std::to_string(analysis)] = slew;
+        std::fclose(f);
+      }
+    }
+    return map;
+  }();
+  return values;
+}
+
+std::optional<double> forcedRefSlewFor(const std::string& pin, TransType edge)
+{
+  const auto& map = forcedRefSlew();
   if (map.empty())
     return std::nullopt;
   const auto it = map.find(pin + "," + std::to_string(static_cast<int>(edge)));
   if (it == map.end() || !(it->second > 0.))
     return std::nullopt;
   return it->second;
+}
+
+std::optional<double> forcedRefSlew4For(const std::string& pin, TransType edge, AnalysisType analysis_type)
+{
+  const auto& map = forcedRefSlew4();
+  if (map.empty())
+    return std::nullopt;
+  const auto it = map.find(pin + "," + std::to_string(static_cast<int>(edge)) + "," + std::to_string(static_cast<int>(analysis_type)));
+  if (it == map.end() || !(it->second > 0.))
+    return std::nullopt;
+  return it->second;
+}
+
+std::optional<double> forcedSlewAny(const std::string& pin, TransType edge, AnalysisType analysis_type)
+{
+  if (const auto v = forcedRefSlew4For(pin, edge, analysis_type))
+    return v;
+  return forcedRefSlewFor(pin, edge);
 }
 }  // namespace
 
@@ -114,7 +156,7 @@ bool CellDelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCe
                                  ? calcTimingArcSlew(output_pin, *selected_arc, analysis_type, output_trans_type, selected_input_slew, output_load)
                                  : selected_input_slew;
   timing_result.set_slew(output_slew);
-  if (const auto forced = forcedPtSlewFor(output_pin, output_trans_type))
+  if (const auto forced = forcedSlewAny(output_pin, output_trans_type, analysis_type))
     timing_result.set_slew(*forced);
   return true;
 }
@@ -166,7 +208,7 @@ double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timi
         return e != nullptr && std::atoi(e) != 0;
       }();
       if (slew_fallback && !(effective_slew > 0.)) {
-        if (const auto forced = forcedPtSlewFor(arc.get_source_pin(), input_trans_type))
+        if (const auto forced = forcedSlewAny(arc.get_source_pin(), input_trans_type, analysis_type))
           effective_slew = *forced;
       }
     }
@@ -195,6 +237,7 @@ double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timi
 {
   const std::string& arc_source_pin = arc.get_source_pin();
   g_dump_source_pin = &arc_source_pin;
+  g_dump_source_pin_cstr = arc_source_pin.c_str();
   static const char* dump_path = std::getenv("ISTA_DUMP_CELL_ARC");
   if (dump_path != nullptr) {
     const double dump_load = _load.arcLoad(arc, analysis_type, output_trans_type);
@@ -214,6 +257,46 @@ double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timi
     return timing_cell_arc.get_delay();
   }
   double raw_output_load = _load.arcLoad(arc, analysis_type, output_trans_type);
+  {
+    static const char* cl_env = std::getenv("ISTA_FORCE_CELL_LOAD");
+    static const std::unordered_map<std::string, double> cl_map = [] {
+      std::unordered_map<std::string, double> m;
+      if (cl_env == nullptr) return m;
+      FILE* f = std::fopen(cl_env, "r");
+      if (f == nullptr) return m;
+      char line[512];
+      while (std::fgets(line, sizeof(line), f) != nullptr) {
+        std::string text(line);
+        std::vector<std::string> part;
+        std::size_t start = 0;
+        while (true) {
+          std::size_t comma = text.find(',', start);
+          part.push_back(text.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
+          if (comma == std::string::npos) break;
+          start = comma + 1;
+        }
+        if (part.size() < 4) continue;
+        m[part[0] + "," + part[1] + "," + part[2]] = std::atof(part[3].c_str());
+      }
+      std::fclose(f);
+      return m;
+    }();
+    if (!cl_map.empty()) {
+      const std::string key = arc.get_sink_pin() + "," + std::to_string(static_cast<int>(analysis_type)) + "," +
+                              std::to_string(static_cast<int>(output_trans_type));
+      const auto it = cl_map.find(key);
+      if (it != cl_map.end() && it->second > 0.) {
+        raw_output_load = it->second;
+        if (const char* fd = std::getenv("ISTA_DUMP_CELL_LOAD")) {
+          if (FILE* fp = std::fopen(fd, "a"); fp != nullptr) {
+            std::fprintf(fp, "CLO,%s,%d,%d,%.15g\n", arc.get_sink_pin().c_str(), static_cast<int>(analysis_type),
+                         static_cast<int>(output_trans_type), raw_output_load);
+            std::fclose(fp);
+          }
+        }
+      }
+    }
+  }
   std::vector<double> delay_list;
   for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin())) {
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
@@ -297,7 +380,7 @@ double CellDelayCalculator::calcTimingCellArcSlew(Arc& arc, TimingCellArc& timin
     // Diagnostic: quantify how much of the cell-arc residual comes from the
     // slew the network solve produced. Overrides with the converged
     // slew for the same sink pin and edge.
-    if (const auto forced = forcedPtSlewFor(arc.get_sink_pin(), output_trans_type))
+    if (const auto forced = forcedSlewAny(arc.get_sink_pin(), output_trans_type, analysis_type))
       result = *forced;
   }
   return result;
@@ -373,6 +456,54 @@ double CellDelayCalculator::calcTimingArcDelay(std::string& output_pin, TimingAr
                                                double input_slew, double output_load)
 {
   DriverResponse& timing_result = _arnoldi.response(output_pin, timing_arc, analysis_type, output_trans_type, input_slew);
+  static const bool cell_delay_from_table = [] {
+    const char* e = std::getenv("ISTA_CELL_DELAY_FROM_TABLE");
+    return e != nullptr && *e != '0';
+  }();
+  if (cell_delay_from_table && timing_result.get_is_valid()) {
+    const double table_load = timing_result.get_effective_capacitance() > 0. ? timing_result.get_effective_capacitance() : output_load;
+    const double table_delay = calcTimingArcDelayByLoad(timing_arc, output_trans_type, input_slew, table_load);
+    if (const char* td = std::getenv("ISTA_DUMP_CELL_TABLE")) {
+      if (FILE* tf = std::fopen(td, "a"); tf != nullptr) {
+        std::fprintf(tf, "CT,%s,%d,%d,%.15g,%.15g,%.15g,%.15g\n", output_pin.c_str(), static_cast<int>(analysis_type),
+                     static_cast<int>(output_trans_type), input_slew, table_load, table_delay, timing_result.get_gate_delay());
+        std::fclose(tf);
+      }
+    }
+    return table_delay;
+  }
+  static const double degenerate_cap = [] {
+    const char* e = std::getenv("ISTA_DEGENERATE_NET_CAP");
+    return e != nullptr ? std::atof(e) : 1e-6;
+  }();
+  {
+    static const char* gd = std::getenv("ISTA_DUMP_DEGEN_CAND");
+    if (gd != nullptr && output_pin.find("fixio") == 0 && timing_result.get_is_valid()) {
+      if (FILE* gf = std::fopen(gd, "a"); gf != nullptr) {
+        std::fprintf(gf, "GC,%s,%d,%d,inslew=%.15g,output_load=%.15g,effcap=%.15g,delay=%.15g\n", output_pin.c_str(),
+                     static_cast<int>(analysis_type), static_cast<int>(output_trans_type), input_slew, output_load,
+                     timing_result.get_effective_capacitance(), timing_result.get_gate_delay());
+        std::fclose(gf);
+      }
+    }
+  }
+  if (degenerate_cap > 0. && timing_result.get_is_valid()) {
+    const double solved_cap = timing_result.get_effective_capacitance();
+    // The load the caller resolved for this arc is the net's own total capacitance;
+    // DriverResponse does not carry it, so compare that instead of the solved Ceff.
+    const double total_cap = output_load;
+    if (solved_cap >= 0. && total_cap >= 0. && total_cap <= degenerate_cap) {
+      static const char* dd = std::getenv("ISTA_DUMP_DEGENERATE");
+      if (dd != nullptr) {
+        if (FILE* df = std::fopen(dd, "a"); df != nullptr) {
+          std::fprintf(df, "DG,%s,%d,%d,%.15g,%.15g,%.15g,%.15g\n", output_pin.c_str(), static_cast<int>(analysis_type),
+                       static_cast<int>(output_trans_type), input_slew, solved_cap, total_cap, timing_result.get_gate_delay());
+          std::fclose(df);
+        }
+      }
+      return calcTimingArcDelayByLoad(timing_arc, output_trans_type, input_slew, solved_cap);
+    }
+  }
   if (timing_result.get_is_valid()) {
     static const char* dp1 = std::getenv("ISTA_DUMP_DISPATCH");
     if (dp1 != nullptr) {
@@ -430,7 +561,22 @@ double CellDelayCalculator::calcTimingArcSlew(std::string& output_pin, TimingArc
   int slew_source = 0;
   double slew_value = 0.0;
   DriverResponse& timing_result = _arnoldi.response(output_pin, timing_arc, analysis_type, output_trans_type, input_slew);
-  if (timing_result.get_is_valid()) {
+  static const bool cell_delay_from_table_slew = std::getenv("ISTA_CELL_DELAY_FROM_TABLE") != nullptr
+                                                 && *std::getenv("ISTA_CELL_DELAY_FROM_TABLE") != '0';
+  if (cell_delay_from_table_slew && timing_result.get_is_valid()) {
+    static const bool slew_from_table = [] {
+      const char* e = std::getenv("ISTA_CELL_SLEW_FROM_TABLE");
+      return e != nullptr && *e != '0';
+    }();
+    if (slew_from_table) {
+      const double table_load = timing_result.get_effective_capacitance() > 0. ? timing_result.get_effective_capacitance() : output_load;
+      slew_value = calcTimingArcSlewByLoad(timing_arc, output_trans_type, input_slew, table_load);
+      slew_source = 4;
+    } else {
+      slew_value = timing_result.get_driver_slew();
+      slew_source = 1;
+    }
+  } else if (timing_result.get_is_valid()) {
     slew_value = timing_result.get_driver_slew();
     slew_source = 1;
   } else {
@@ -462,6 +608,19 @@ double CellDelayCalculator::calcTimingArcDelayByLoad(TimingArc& timing_arc, Tran
   }
   double converted_output_load = convertOutputLoad(timing_arc, output_load);
   double delay = timing_arc.get_delay_table_map()[output_trans_type].findValue(input_slew * timing_arc.get_time_unit_scale(), converted_output_load);
+  {
+    // Diagnostic only: the two inputs of the NLDM cell-delay lookup. Reference
+    // reports both numbers, so this dump makes the cell-arc comparison direct.
+    static const char* cp = std::getenv("ISTA_DUMP_CELLLOOKUP");
+    if (cp != nullptr) {
+      if (FILE* fp = std::fopen(cp, "a"); fp != nullptr) {
+        std::fprintf(fp, "CL,%s,%d,%d,%.12g,%.12g,%.12g,%.12g\n", g_dump_source_pin != nullptr ? g_dump_source_pin->c_str() : "",
+                     static_cast<int>(output_trans_type), static_cast<int>(timing_arc.get_trigger_trans_type()), input_slew,
+                     converted_output_load, output_load, delay / timing_arc.get_time_unit_scale());
+        std::fclose(fp);
+      }
+    }
+  }
   return delay / timing_arc.get_time_unit_scale();
 }
 

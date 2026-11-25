@@ -125,6 +125,19 @@ void DelayCalculator::completeCellArcDelays(Graph& graph)
             const double load = _load.arcLoad(arc, mode, output);
             for (double slew : slews) {
               const double delay = _cell.calcTimingArcDelay(arc.get_sink_pin(), *variant, mode, output, slew, load);
+              {
+                // Diagnostic only: the per-condition SDF value together with the
+                // NLDM axes it was evaluated at.
+                static const char* vp = std::getenv("ISTA_DUMP_VARIANT");
+                if (vp != nullptr) {
+                  if (FILE* fp = std::fopen(vp, "a"); fp != nullptr) {
+                    std::fprintf(fp, "V,%s,%s,%d,%d,%d,%.12g,%.12g,%.12g,%zu\n", arc.get_sink_pin().c_str(),
+                                 variant->get_sdf_cond().c_str(), static_cast<int>(mode), static_cast<int>(input),
+                                 static_cast<int>(output), slew, load, delay, slews.size());
+                    std::fclose(fp);
+                  }
+                }
+              }
               arc.update_timing_arc_delay(variant->get_arc_idx(), mode, input, output, delay, false);
             }
           }
@@ -224,7 +237,18 @@ double DelayCalculator::calcCellArcDelay(Arc& arc, AnalysisType analysis_type, T
   }
   TimingCellArc* timing_cell_arc = _selection.cellArc(arc);
   if (timing_cell_arc != nullptr) {
-    return _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type);
+    const double d4 = _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type);
+    if (const char* dp = std::getenv("ISTA_DUMP_C4")) {
+      static const char* want = std::getenv("ISTA_DUMP_C4_OWNER");
+      if (want == nullptr || arc.get_owner_name() == want) {
+        if (FILE* f = std::fopen(dp, "a"); f != nullptr) {
+          std::fprintf(f, "C4,%s,%s,%s,%d,%d,%.15g\n", arc.get_owner_name().c_str(), arc.get_source_pin().c_str(),
+                       arc.get_sink_pin().c_str(), static_cast<int>(analysis_type), static_cast<int>(input_trans_type), d4);
+          std::fclose(f);
+        }
+      }
+    }
+    return d4;
   }
   arc.get_trans_type_map()[input_trans_type] = input_trans_type;
   return 1.0;
@@ -233,17 +257,66 @@ double DelayCalculator::calcCellArcDelay(Arc& arc, AnalysisType analysis_type, T
 double DelayCalculator::calcArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double input_slew)
 {
   if (arc.get_type() == ArcType::kNet) {
-    return _wire.calcNetArcDelay(arc, analysis_type, output_trans_type, input_slew);
+    const double v = _wire.calcNetArcDelay(arc, analysis_type, output_trans_type, input_slew);
+    if (const char* dp = std::getenv("ISTA_DUMP_CAD"); dp != nullptr) {
+      static const char* want = std::getenv("ISTA_DUMP_CAD_NET");
+      if (want == nullptr || arc.get_owner_name() == want) {
+        if (FILE* f = std::fopen(dp, "a"); f != nullptr) {
+          std::fprintf(f, "CA,%s,%s,%s,%d,%d,%d,%.15g,%.15g\n", arc.get_owner_name().c_str(), arc.get_source_pin().c_str(),
+                       arc.get_sink_pin().c_str(), static_cast<int>(analysis_type), static_cast<int>(input_trans_type),
+                       static_cast<int>(output_trans_type), input_slew, v);
+          std::fclose(f);
+        }
+      }
+    }
+    return v;
   }
   TimingCellArc* timing_cell_arc = _selection.cellArc(arc);
   if (timing_cell_arc != nullptr) {
-    return _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type, output_trans_type, input_slew);
+    const double cell_delay_result =
+        _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type, output_trans_type, input_slew);
+    if (const char* dp = std::getenv("ISTA_DUMP_CB")) {
+      static const char* want = std::getenv("ISTA_DUMP_CB_OWNER");
+      if (want == nullptr || arc.get_owner_name() == want) {
+        if (FILE* f = std::fopen(dp, "a"); f != nullptr) {
+          // Also record the OUTPUT transition: the reference's fall transition is
+          // 3.1-3.3% larger than iSTA's on the same arc, and that is what feeds the
+          // next cell's lookup, so it has to be traceable here too.
+          const double out_slew = _cell.calcTimingCellArcSlew(arc, *timing_cell_arc, analysis_type,
+                                                              input_trans_type, output_trans_type, input_slew);
+          // The load is the other NLDM axis, so it has to be recorded next to the slew:
+          // with both axes and the SDF value, the liberty lookup can be replayed exactly.
+          const double load = _load.arcLoad(arc, analysis_type, output_trans_type);
+          std::fprintf(f, "CB,%s,%s,%s,%d,%d,%d,%.15g,%.15g,%.15g,%.15g\n", arc.get_owner_name().c_str(),
+                       arc.get_source_pin().c_str(), arc.get_sink_pin().c_str(), static_cast<int>(analysis_type),
+                       static_cast<int>(input_trans_type), static_cast<int>(output_trans_type), input_slew,
+                       cell_delay_result, out_slew, load);
+          std::fclose(f);
+        }
+      }
+    }
+    return cell_delay_result;
   }
-  if (arc.get_input_output_delay_map().count(analysis_type) > 0 && arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) > 0
-      && arc.get_input_output_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0) {
+  const int branch = arc.get_input_output_delay_map().count(analysis_type) > 0
+                             && arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) > 0
+                             && arc.get_input_output_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0
+                         ? 0
+                         : (arc.get_trans_delay_map().count(analysis_type) > 0 && arc.get_trans_delay_map()[analysis_type].count(input_trans_type) > 0 ? 1 : 2);
+  if (const char* dp = std::getenv("ISTA_DUMP_CB_NULL")) {
+    static const char* want = std::getenv("ISTA_DUMP_CB_NULL_OWNER");
+    if (want == nullptr || arc.get_owner_name() == want) {
+      if (FILE* f = std::fopen(dp, "a"); f != nullptr) {
+        std::fprintf(f, "CN,%s,%s,%s,%d,%d,%d,%.15g,%d\n", arc.get_owner_name().c_str(), arc.get_source_pin().c_str(),
+                     arc.get_sink_pin().c_str(), static_cast<int>(analysis_type), static_cast<int>(input_trans_type),
+                     static_cast<int>(output_trans_type), input_slew, branch);
+        std::fclose(f);
+      }
+    }
+  }
+  if (branch == 0) {
     return arc.get_input_output_delay_map()[analysis_type][input_trans_type][output_trans_type];
   }
-  if (arc.get_trans_delay_map().count(analysis_type) > 0 && arc.get_trans_delay_map()[analysis_type].count(input_trans_type) > 0) {
+  if (branch == 1) {
     return arc.get_trans_delay_map()[analysis_type][input_trans_type];
   }
   if (analysis_type == AnalysisType::kMin) {

@@ -107,12 +107,15 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   for (spef::ResCap& spef_cap : spef_net.caps) {
     readCapacitance(parasitic_net, spef_cap, driver_instance, driver_pin);
   }
-  // The U-2022.12 model normalizes extracted nodes to at least 1 zF.
-  // Apply this in pF after duplicate CAP entries have been summed, including
-  // nodes present only in CONN/RES. Liberty pin capacitance is added later.
-  constexpr double minimum_node_capacitance = 1e-9;
-  for (auto& [name, node] : parasitic_net.get_node_map()) {
-    node.set_capacitance(std::max(node.get_capacitance(), minimum_node_capacitance));
+  static const bool apply_min_node_cap = [] {
+    const char* e = std::getenv("ISTA_NO_MIN_NODE_CAP");
+    return e == nullptr || *e == '0';
+  }();
+  if (apply_min_node_cap) {
+    constexpr double minimum_node_capacitance = 1e-9;
+    for (auto& [name, node] : parasitic_net.get_node_map()) {
+      node.set_capacitance(std::max(node.get_capacitance(), minimum_node_capacitance));
+    }
   }
   _parasitics.nets()[parasitic_net.get_net_name()] = parasitic_net;
 }
