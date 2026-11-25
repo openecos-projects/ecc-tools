@@ -64,6 +64,20 @@ class TclCheckAntenna : public TclCmd
   std::vector<std::pair<std::string, ValueType>> _config_list;
 };
 
+class TclRepairAntenna : public TclCmd
+{
+ public:
+  explicit TclRepairAntenna(const char* cmd_name);
+  ~TclRepairAntenna() override = default;
+
+  unsigned check() override { return 1; };
+
+  unsigned exec() override;
+
+ private:
+  std::vector<std::pair<std::string, ValueType>> _config_list;
+};
+
 class TclInsertMetal : public TclCmd
 {
  public:

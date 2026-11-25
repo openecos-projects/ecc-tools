@@ -26,6 +26,7 @@ class AntennaReportingTest
     testZeroDiffusionOutputIsNotProtected();
     testLayerQualifiedPinAreas();
     testMultilayerPinAreasDoNotSum();
+    testSamePortCrossLayerConnectivityWithoutExternalVia();
     testPartialAreaOnLayerQualifiedPinReachedViaUpperLayer();
     testCumulativeAreaSurvivesGatelessLayer();
     testDriverOnlyLowerIslandAccumulates();
@@ -345,9 +346,11 @@ END M3
     require(imj::Utility::equalDoubleByError(getNumber(m2_car, "Ratio: "), 8.0, 1e-9),
             "unexpected M2 CAR when pin had M1 and M3 PORT shapes");
 
-    // 4) Same GATE_Q_M1_M3 macro, but external route connects ONLY to the M3 PORT shape.
-    //    The M2-qualified gate (4) and diffusion (3) must apply on M3 (not 0), yielding
-    //    M3 CAR = 32 / 4 = 8.0 > 7.
+    // 4) Same GATE_Q_M1_M3 macro (single PORT containing both M1 and M3 rectangles),
+    //    external route connects ONLY to the M3 PORT shape.
+    //    At M1, the M1 PORT rect (area 1) is connected to the M1 gate (area 1), accumulating
+    //    M1 = 1. At M3, the same-PORT M1 and M3 shapes connect, upgrading gate to M2 (4) and
+    //    diffusion to M2 (3): M3 PAR = 32 / 4 = 8.0 and M3 CAR = (1 + 32) / 4 = 8.25 > 7.
     const std::string def_m3_only = R"(VERSION 5.8 ;
 DIVIDERCHAR "/" ;
 BUSBITCHARS "[]" ;
@@ -368,13 +371,16 @@ END DESIGN
     writeCaseFiles(_output / "layer_q_m3_only_port", m1_m3_cell_lef, def_m3_only, extra_tech_m3);
     MJI.checkAntenna({});
     report = readText(_output / "antenna_checker/antenna_check.rpt");
+    std::string m3_par = getViolationOf(report, "layered", "M3", "PAR");
+    require(imj::Utility::equalDoubleByError(getNumber(m3_par, "Ratio: "), 8.0, 1e-9),
+            "unexpected M3 PAR when net connected only to M3 PORT");
     std::string m3_car = getViolationOf(report, "layered", "M3", "CAR");
     require(imj::Utility::equalDoubleByError(getNumber(m3_car, "Gate area: "), 4.0, 1e-9),
             "M2 LAYER-qualified gate area missing when net connected only to M3 PORT");
     require(imj::Utility::equalDoubleByError(getNumber(m3_car, "Diffusion area: "), 3.0, 1e-9),
             "M2 LAYER-qualified diff area missing when net connected only to M3 PORT");
-    require(imj::Utility::equalDoubleByError(getNumber(m3_car, "Ratio: "), 8.0, 1e-9),
-            "unexpected M3 CAR when net connected only to M3 PORT");
+    require(imj::Utility::equalDoubleByError(getNumber(m3_car, "Ratio: "), 8.25, 1e-9),
+            "unexpected M3 CAR when same-PORT M1 shape carried M1 area to M3");
   }
 
   void testCumulativeAreaSurvivesGatelessLayer()
@@ -490,6 +496,118 @@ END DESIGN
     require(imj::Utility::equalDoubleByError(getNumber(car, "Diffusion area: "), 2.0, 1e-9),
             "multi-layer pin summed diff area across M1 and M2 instead of taking M2 total");
     require(imj::Utility::equalDoubleByError(getNumber(car, "Ratio: "), 8.0, 1e-9), "unexpected M2 CAR ratio");
+  }
+
+  void testSamePortCrossLayerConnectivityWithoutExternalVia()
+  {
+    // Shapes belonging to the same LEF PORT are internally connected even without an external
+    // DEF via bridging M1 and M2.
+    // 1) Gate declared only on M1 (`ANTENNAGATEAREA 1 LAYER M1`): M1=9 + M2=23 -> M2 CAR = 32.0.
+    const std::string lef_m1_gate = R"(VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+MACRO MULTI_Q_M1
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 1 BY 1 ;
+  SITE CORE ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 1 LAYER M1 ;
+    PORT
+      LAYER M1 ;
+        RECT 0 0 1 1 ;
+      LAYER M2 ;
+        RECT 0 0 1 1 ;
+    END
+  END A
+END MULTI_Q_M1
+END LIBRARY
+)";
+    const std::string def_no_via_m1 = R"(VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN multi_layer_q_no_via ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 40000 40000 ) ;
+ROW ROW_0 CORE 0 0 N DO 40 BY 1 STEP 1000 0 ;
+COMPONENTS 1 ;
+- u0 MULTI_Q_M1 + FIXED ( 1500 1500 ) N ;
+END COMPONENTS
+NETS 1 ;
+- mq ( u0 A )
+  + USE SIGNAL
+  + ROUTED M1 ( 10000 2000 ) ( 2000 2000 )
+    NEW M2 ( 2000 2000 ) ( 2000 24000 ) ;
+END NETS
+END DESIGN
+)";
+    writeCaseFiles(_output / "multi_q_no_via_m1", lef_m1_gate, def_no_via_m1);
+    auto* m2 = dynamic_cast<idb::IdbLayerRouting*>(dmInst->get_idb_layout()->get_layers()->find_layer("M2"));
+    require(m2 != nullptr, "missing M2");
+    m2->set_antenna_cum_area_ratio(28.0);
+    MJI.checkAntenna({});
+    std::string report = readText(_output / "antenna_checker/antenna_check.rpt");
+    std::string car = getViolationOf(report, "mq", "M2", "CAR");
+    require(imj::Utility::equalDoubleByError(getNumber(car, "Gate area: "), 1.0, 1e-9),
+            "unexpected M2 gate area on same-PORT pin without external via");
+    require(imj::Utility::equalDoubleByError(getNumber(car, "Ratio: "), 32.0, 1e-9),
+            "same-PORT M1 area lost when external route omitted V12");
+
+    // 2) Both M1 and M2 LAYER-qualified gates (`1` on M1, `4` on M2), no external via:
+    //    M1=9 + M2=23, gate deduplicated to M2=4 -> M2 CAR = 8.0 > 7.
+    const std::string lef_m1_m2_gate = R"(VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+MACRO MULTI_Q
+  CLASS CORE ;
+  ORIGIN 0 0 ;
+  SIZE 1 BY 1 ;
+  SITE CORE ;
+  PIN A
+    DIRECTION INPUT ;
+    USE SIGNAL ;
+    ANTENNAGATEAREA 1 LAYER M1 ;
+    ANTENNAGATEAREA 4 LAYER M2 ;
+    ANTENNADIFFAREA 2 LAYER M1 ;
+    ANTENNADIFFAREA 2 LAYER M2 ;
+    PORT
+      LAYER M1 ;
+        RECT 0 0 1 1 ;
+      LAYER M2 ;
+        RECT 0 0 1 1 ;
+    END
+  END A
+END MULTI_Q
+END LIBRARY
+)";
+    const std::string def_no_via_both = R"(VERSION 5.8 ;
+DIVIDERCHAR "/" ;
+BUSBITCHARS "[]" ;
+DESIGN multi_layer_q_no_via_both ;
+UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 40000 40000 ) ;
+ROW ROW_0 CORE 0 0 N DO 40 BY 1 STEP 1000 0 ;
+COMPONENTS 1 ;
+- u0 MULTI_Q + FIXED ( 1500 1500 ) N ;
+END COMPONENTS
+NETS 1 ;
+- mq ( u0 A )
+  + USE SIGNAL
+  + ROUTED M1 ( 10000 2000 ) ( 2000 2000 )
+    NEW M2 ( 2000 2000 ) ( 2000 24000 ) ;
+END NETS
+END DESIGN
+)";
+    writeCaseFiles(_output / "multi_q_no_via_both", lef_m1_m2_gate, def_no_via_both);
+    MJI.checkAntenna({});
+    report = readText(_output / "antenna_checker/antenna_check.rpt");
+    car = getViolationOf(report, "mq", "M2", "CAR");
+    require(imj::Utility::equalDoubleByError(getNumber(car, "Gate area: "), 4.0, 1e-9),
+            "multi-layer same-PORT pin gate area wrong without external via");
+    require(imj::Utility::equalDoubleByError(getNumber(car, "Ratio: "), 8.0, 1e-9),
+            "multi-layer same-PORT M2 CAR wrong without external via");
   }
 
   void testPartialAreaOnLayerQualifiedPinReachedViaUpperLayer()

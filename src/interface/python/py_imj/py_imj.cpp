@@ -29,6 +29,8 @@ bool initFillerConfigMapByJSON(const std::string& config, std::map<std::string, 
 void initFillerConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 bool initAntennaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initAntennaConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
+bool initRepairAntennaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
+void initRepairAntennaConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 bool initMetalConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initMetalConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 bool initDefFlattenConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
@@ -73,6 +75,18 @@ bool checkAntenna(const std::optional<std::filesystem::path>& config, std::map<s
   initAntennaConfigMapByDict(config_dict, config_map);
   MJI.checkAntenna(config_map);
   return true;
+}
+
+bool repairAntenna(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
+{
+  const std::string config_ = path_or_empty(config);
+  std::map<std::string, std::any> config_map;
+  bool pass = config_.empty() ? true : initRepairAntennaConfigMapByJSON(config_, config_map);
+  if (!pass) {
+    return false;
+  }
+  initRepairAntennaConfigMapByDict(config_dict, config_map);
+  return MJI.repairAntenna(config_map);
 }
 
 bool insertMetal(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
