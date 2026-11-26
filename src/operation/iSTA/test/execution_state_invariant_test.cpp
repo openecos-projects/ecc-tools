@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 //
-// P0 of the run_sta execution-side refactor: lock the semantics of the
-// per-vertex timing-state structures before their containers change shape:
-//   T2  ClockWaveform/ClockState sparse presence + summarize/physicalEdge
-//       (locks the enum-grid conversion)
-//   T3  getWorstPathState tolerance + ascending-tag tie-break (locks the
-//       path-state map repack)
-//   T4  Arc::update_timing_arc_delay fallback/zero-slew state machine (locks
-//       the arc delay-grid conversion)
-//   T5  arc endpoint vertex-index == name-resolution equivalence (locks
-//       Graph::sourcePoint/sinkPoint switching to vertex indices)
+// Locks the semantics of the per-vertex timing-state structures: waveform
+// presence and envelope merging, worst-path tie-breaking, the arc delay
+// fallback state machine, and arc endpoint resolution.
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -31,7 +24,7 @@ void require(bool condition, const char* message)
     throw std::runtime_error(message);
 }
 
-// T2a: absent and stored-zero are distinct, and a write never leaks across
+// Absent and stored-zero are distinct, and a write never leaks across
 // modes or edges.
 void waveformPresence()
 {
@@ -44,7 +37,7 @@ void waveformPresence()
   require(!state.slew(AnalysisType::kMax, TransType::kRise), "write leaked to another waveform field");
 }
 
-// T2b: summarize() merges source waveforms into the envelope picking the per
+// summarize() merges source waveforms into the envelope picking the per
 // mode/edge winner, and the predecessor bookkeeping follows the winning source.
 void summarizeEnvelope()
 {
@@ -78,7 +71,7 @@ void summarizeEnvelope()
   require(!state.arrival(AnalysisType::kMax, TransType::kFall), "envelope fabricated a fall value");
 }
 
-// T2c: physicalEdge extracts exactly one edge of the physical bookkeeping.
+// physicalEdge extracts exactly one edge of the physical bookkeeping.
 void physicalEdgeExtraction()
 {
   Database db;
@@ -99,7 +92,7 @@ void physicalEdgeExtraction()
   require(rise.arrival_map.empty(), "physicalEdge copied effective values");
 }
 
-// T2d: clearing the effective envelope and republishing from the physical
+// Clearing the effective envelope and republishing from the physical
 // values leaves no stale effective entries (the publishClock pattern).
 void clearAndRepublish()
 {
@@ -113,7 +106,7 @@ void clearAndRepublish()
   require(!state.arrival(AnalysisType::kMin, TransType::kRise), "republish kept a stale effective entry");
 }
 
-// T3: worst-path selection iterates the tag map in ascending tag id and a
+// Worst-path selection iterates the tag map in ascending tag id and a
 // candidate only replaces the incumbent when it beats it by more than
 // kTimingTolerance (1e-6) — so within-tolerance ties keep the lowest tag id,
 // and the comparison is always against the current incumbent, not the best
@@ -156,7 +149,7 @@ void pathStateTieBreak()
           "non-finite arrival won worst-path selection");
 }
 
-// T4: Arc::update_timing_arc_delay — the fallback/zero-slew state machine.
+// Arc::update_timing_arc_delay — the fallback/zero-slew state machine.
 double arcDelayAt(Arc& arc, int32_t variant, AnalysisType mode, TransType in, TransType out)
 {
   return arc.findTimingArcDelay(variant)->get(mode, in, out).value();
@@ -201,7 +194,7 @@ void arcDelayStateMachine()
   }
 }
 
-// T5: for arcs with resolved vertex indices, vertex lookup and name lookup
+// For arcs with resolved vertex indices, vertex lookup and name lookup
 // must reach the same TimingPoint; names-only arcs keep the name path.
 void vertexIndexEquivalence()
 {
