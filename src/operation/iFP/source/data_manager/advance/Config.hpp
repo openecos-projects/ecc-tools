@@ -30,9 +30,8 @@ namespace ifp {
 
 struct PGIOCoreConnectConfig
 {
-  // IO-core routes stay on the target stripe layer. Normal IO cells use
-  // direct extensions and straight bridges; Manhattan forms are restricted
-  // to cells whose outermost rail has no legal core-range access point.
+  // Prefer same-layer direct/straight connections. Out-of-core rails and
+  // blocked straight paths may use Manhattan or checked layer-change detours.
   bool enabled = false;
   // Empty means the resolved core POWER/GROUND nets.
   std::vector<std::string> nets;
