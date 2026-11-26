@@ -416,7 +416,13 @@ std::optional<double> ArnoldiWaveformSolver::crossingCapacitance(double driver_r
   const double tolerance = 64. * std::numeric_limits<double>::epsilon() * std::max(crossing_time, driver_ramp);
   if (crossing_time < ideal_time - tolerance)
     return std::nullopt;
-  if (crossing_time >= rampTime(1. / (drive_resistance * total_capacitance), driver_ramp, voltage))
+  const double maximum_crossing = rampTime(1. / (drive_resistance * total_capacitance), driver_ramp, voltage);
+  // A distributed RC tail can cross late thresholds after the lumped total
+  // load does. Its inverse then lies outside the permitted capacitance range;
+  // clipping it would turn an infeasible equation into a false residual zero.
+  if (!std::isfinite(maximum_crossing) || crossing_time > maximum_crossing + tolerance)
+    return std::nullopt;
+  if (std::abs(crossing_time - maximum_crossing) <= tolerance)
     return total_capacitance;
   double lower = 0., upper = total_capacitance;
   double capacitance = .5 * total_capacitance;

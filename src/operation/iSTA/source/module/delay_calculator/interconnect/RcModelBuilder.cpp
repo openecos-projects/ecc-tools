@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -391,6 +392,8 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
   double sqrt_total_capacitance = std::sqrt(total_capacitance);
   std::vector<double> current_basis_list(node_num, 1.0 / sqrt_total_capacitance);
   std::vector<double> previous_basis_list(node_num, 0.0);
+  std::vector<std::vector<double>> basis_list;
+  basis_list.reserve(order);
   std::vector<double> diagonal_list(order, 0.0);
   std::vector<double> off_diagonal_list(order, 0.0);
   std::vector<std::vector<double>> projection_list(order, std::vector<double>(term_point_idx_list.size(), 0.0));
@@ -446,6 +449,7 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
   }
 
   for (int32_t order_idx = 0; order_idx < order; order_idx++) {
+    basis_list.push_back(current_basis_list);
     updateParasiticArnoldiProjection(arnoldi_model, current_basis_list, term_point_idx_list, order_idx);
     if (arnoldi_model.get_projection_list().empty()) {
       arnoldi_model.set_projection_list(projection_list);
@@ -479,18 +483,15 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
       response_projection[order_idx][term] = response_list[term_point_idx_list[term]];
 
     double diagonal = 0.0;
+    double response_norm_squared = 0.0;
     for (std::size_t node_idx = 1; node_idx < node_num; node_idx++) {
       diagonal += current_basis_list[node_idx] * capacitance_list[node_idx] * response_list[node_idx];
+      response_norm_squared += capacitance_list[node_idx] * response_list[node_idx] * response_list[node_idx];
     }
     diagonal_list[order_idx] = diagonal;
     if (order_idx == order - 1) {
       break;
     }
-    if (diagonal < ista::kTimingTolerance) {
-      final_order = order_idx + 1;
-      break;
-    }
-
     for (std::size_t node_idx = 0; node_idx < node_num; node_idx++) {
       response_list[node_idx] -= diagonal * current_basis_list[node_idx];
       if (order_idx > 0) {
@@ -498,15 +499,32 @@ void RcModelBuilder::updateParasiticArnoldiModel(ParasiticArnoldiModel& arnoldi_
       }
     }
 
+    // The RC operator is self-adjoint in the capacitance inner product.
+    // Reorthogonalize the Lanczos residual to suppress duplicate modes when
+    // roundoff spoils the three-term recurrence. Zero-C nodes contribute no
+    // weight; their algebraic response is retained in response_projection.
+    for (int pass = 0; pass < 2; ++pass) {
+      for (const auto& basis : basis_list) {
+        double projection = 0.;
+        for (std::size_t node_idx = 0; node_idx < node_num; ++node_idx)
+          projection += basis[node_idx] * capacitance_list[node_idx] * response_list[node_idx];
+        for (std::size_t node_idx = 0; node_idx < node_num; ++node_idx)
+          response_list[node_idx] -= projection * basis[node_idx];
+      }
+    }
+
     double off_diagonal = 0.0;
     for (std::size_t node_idx = 0; node_idx < node_num; node_idx++) {
       off_diagonal += capacitance_list[node_idx] * response_list[node_idx] * response_list[node_idx];
     }
-    if (off_diagonal < ista::kTimingTolerance * ista::kTimingTolerance) {
+    off_diagonal = std::sqrt(off_diagonal);
+    // Dot-product roundoff grows with the number of summed terms. A relative
+    // breakdown bound preserves the same basis when all RC times are scaled.
+    const double breakdown = std::numeric_limits<double>::epsilon() * node_num * std::sqrt(response_norm_squared);
+    if (!(off_diagonal > breakdown)) {
       final_order = order_idx + 1;
       break;
     }
-    off_diagonal = std::sqrt(off_diagonal);
     off_diagonal_list[order_idx] = off_diagonal;
 
     previous_basis_list = current_basis_list;

@@ -421,7 +421,8 @@ add_test(NAME ista_waveform_solver COMMAND test_ista_waveform_solver)
 set_tests_properties(ista_waveform_solver PROPERTIES TIMEOUT 30)
 
 add_executable(test_ista_rc_physics EXCLUDE_FROM_ALL rc_physics_test.cpp)
-target_link_libraries(test_ista_rc_physics PRIVATE ista_parasitic_delay)
+find_package(Eigen3 REQUIRED NO_MODULE)
+target_link_libraries(test_ista_rc_physics PRIVATE ista_parasitic_delay Eigen3::Eigen)
 add_test(NAME ista_rc_physics COMMAND test_ista_rc_physics)
 set_tests_properties(ista_rc_physics PROPERTIES TIMEOUT 30)
 

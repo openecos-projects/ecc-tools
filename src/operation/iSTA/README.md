@@ -72,26 +72,40 @@ agrees with the library delay at that load. Every changed resistance rebuilds
 the modal response.
 
 Discontinuous table sensitivities or inconsistent delay/slew observations can
-prevent that model from converging. In that case a separate charge-equivalence
-solve restarts at total load with one fixed source resistance. The local delay
+prevent that model from converging. In that case threshold matching restarts at
+total load with one fixed source resistance and its corresponding modal response.
+The local delay
 slope estimates resistance through the slow-ramp first-moment limit, delay = R*C;
 the measured RC slew bounds it. Nonpositive slope uses the slew boundary as an
 explicit approximation. This does not identify a unique driver from flat delay
 data. The ramp then follows the library transition; an infeasible transition
 uses the minimum RC span. Its finite ramp is the longest one whose upper
-remaining-voltage crossing is at the ramp end. Effective capacitance is delivered
-charge divided by source voltage change over this ramp.
+remaining-voltage crossing is at the ramp end. This restart preserves the library
+delay at its converged effective load even when the local delay derivative cannot
+identify a source. If threshold matching has no feasible root, a separate
+charge-equivalence solve restarts: effective capacitance is delivered charge
+divided by source voltage change over the ramp. In particular, a slow remote
+pole can make a late threshold crossing infeasible within the total-load bound;
+that bound is not accepted as a threshold-matching solution.
 
-Both residual solves keep capacitance in (0, Ctotal] and require relative error
+All residual solves keep capacitance in (0, Ctotal] and require relative error
 below sqrt(double epsilon). No partially converged joint model or jump at a
 table knot is accepted. Analytic inverse bounds are checked after rounding.
-The methods use no reference-output coefficients or absolute delay-error floor.
+The stopping criteria use floating-point precision and relative load residuals.
 
 Rise and fall calculations use the library's actual voltage thresholds. Each
 receiver retains its own physical waveform in both minimum and maximum
 analysis. Charge integration avoids cancellation for small time constants and
-strong shielding. Synthetic tests cover analytical RC crossings, charge balance,
-first moments, arrival translation, asymmetric thresholds, and unit scaling.
+strong shielding. Synthetic tests cover analytical RC crossings, library-delay
+consistency, first moments, arrival translation, asymmetric thresholds, and unit
+scaling.
+
+The RC reduction uses a capacitance-weighted Lanczos basis with at most five
+vectors. Two reorthogonalization passes suppress repeated modes caused by
+roundoff. Breakdown is relative to the operator response norm and dot-product
+roundoff, so scaling every RC time does not change the reduced dimension. Tests
+compare a complete four-node nodal solution with the reduced response over twelve
+orders of magnitude in resistance.
 
 `adjust_driver_resistance` and `min_slew_degradation` remain accepted as legacy
 0/1 configuration fields in Tcl, C++ and Python. They have no effect on the

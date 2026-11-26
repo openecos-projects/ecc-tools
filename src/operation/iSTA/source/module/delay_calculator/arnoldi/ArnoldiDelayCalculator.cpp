@@ -196,12 +196,12 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
   // In the slow-ramp limit the load delay is R*C, so the local delay slope
   // estimates R. Bound it by the observed RC slew. With nonpositive delay
   // sensitivity, explicitly use that boundary as an approximate source.
-  // Keep this approximate source fixed throughout a charge-only restart.
-  const double charge_resistance = nominal_sensitivity > 0. ? std::min(nominal_sensitivity, slew_bound) : slew_bound;
-  const auto charge_driver = [&](double capacitance, double delay, double slew) -> std::optional<DriverFit> {
+  // Keep this approximate source fixed throughout each restarted solve.
+  const double fixed_resistance = nominal_sensitivity > 0. ? std::min(nominal_sensitivity, slew_bound) : slew_bound;
+  const auto fixed_driver = [&](double capacitance, double delay, double slew) -> std::optional<DriverFit> {
     if (!(slew > 0.) || !std::isfinite(delay) || !std::isfinite(slew))
       return std::nullopt;
-    const double tau = charge_resistance * capacitance;
+    const double tau = fixed_resistance * capacitance;
     double ramp = 0.;
     if (slew > tau * std::log(upper / lower))
       ArnoldiWaveformSolver::solveRamp(1. / tau, slew, lower, upper, ramp);
@@ -212,23 +212,26 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     const double crossing = ArnoldiWaveformSolver::rampTime(1. / tau, ramp, threshold);
     if (!(ramp > 0.) || !std::isfinite(ramp) || !std::isfinite(crossing))
       return std::nullopt;
-    return DriverFit{charge_resistance, ramp, delay - crossing, false};
+    return DriverFit{fixed_resistance, ramp, delay - crossing, false};
   };
-  const auto solve_load = [&](bool charge_only) -> std::optional<Evaluation> {
-    const auto fixed_waveform = charge_only ? ArnoldiWaveformSolver::poleResidue(model, charge_resistance) : ParasiticArnoldiPoleResidue{};
-    if (charge_only && !fixed_waveform.get_is_valid())
+  enum class LoadEquation { kCharacterizedCrossing, kFixedCrossing, kFixedCharge };
+  const auto solve_load = [&](LoadEquation equation) -> std::optional<Evaluation> {
+    const bool fixed_source = equation != LoadEquation::kCharacterizedCrossing;
+    const bool charge_only = equation == LoadEquation::kFixedCharge;
+    const auto fixed_waveform = fixed_source ? ArnoldiWaveformSolver::poleResidue(model, fixed_resistance) : ParasiticArnoldiPoleResidue{};
+    if (fixed_source && !fixed_waveform.get_is_valid())
       return std::nullopt;
     const auto evaluate = [&](double capacitance) -> std::optional<Evaluation> {
       const double delay = tableDelay(timing_arc, edge, input_slew, capacitance);
       const double slew = derate * tableSlew(timing_arc, edge, input_slew, capacitance);
-      const auto driver = charge_only ? charge_driver(capacitance, delay, slew)
+      const auto driver = fixed_source ? fixed_driver(capacitance, delay, slew)
                                      : fitDriver(capacitance, delay, tableSensitivity(timing_arc, edge, input_slew, capacitance),
                                                  slew, lower, upper, threshold, plateau_factor);
-      if (!driver || (!charge_only && !driver->delay_identified))
+      if (!driver || (!fixed_source && !driver->delay_identified))
         return std::nullopt;
-      // A joint evaluation owns its resistance and modal response. The charge
-      // fallback uses one fixed conductance matrix throughout its iteration.
-      auto waveform = charge_only ? fixed_waveform : ArnoldiWaveformSolver::poleResidue(model, driver->resistance);
+      // A joint evaluation owns its resistance and modal response. Each fixed
+      // source uses one conductance matrix throughout its iteration.
+      auto waveform = fixed_source ? fixed_waveform : ArnoldiWaveformSolver::poleResidue(model, driver->resistance);
       if (!waveform.get_is_valid())
         return std::nullopt;
       double matched = 0.;
@@ -255,14 +258,14 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     double low = 0., high = total;
     if (state->residual > 0.)
       return std::nullopt;
-    // A charge root may lie above a nonpositive-slew extrapolation. Locate
+    // A fixed-source root may lie above a nonpositive-slew extrapolation. Locate
     // its feasible lower side without accepting a jump as a residual zero.
     bool bracketed = false;
     for (int iteration = 0; iteration < kIterationLimit; ++iteration) {
       const double capacitance = std::midpoint(low, high);
       auto trial = evaluate(capacitance);
       if (!trial) {
-        if (!charge_only || bracketed)
+        if (!fixed_source || bracketed)
           return std::nullopt;
         low = capacitance;
         continue;
@@ -280,12 +283,16 @@ std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& t
     }
     return std::nullopt;
   };
-  auto state = solve_load(false);
+  auto state = solve_load(LoadEquation::kCharacterizedCrossing);
   // A piecewise-linear LUT has discontinuous local sensitivities. If its
-  // joint model has no root, restart a single continuous charge equation;
+  // joint model has no root, restart with a fixed resistance and match the
+  // source crossing. Charge equivalence is the last fallback when crossing
+  // equivalence has no feasible root. Each restart uses one residual;
   // never mix definitions or publish a partially converged joint waveform.
   if (!state)
-    state = solve_load(true);
+    state = solve_load(LoadEquation::kFixedCrossing);
+  if (!state)
+    state = solve_load(LoadEquation::kFixedCharge);
   if (!state)
     return std::nullopt;
 

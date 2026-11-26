@@ -182,6 +182,14 @@ void testCapacitanceInversion()
   require(!ArnoldiWaveformSolver::crossingCapacitance(2., 1., 4., .5, .5),
           "crossing before the ideal source accepted");
   require(!ArnoldiWaveformSolver::crossingCapacitance(2., -1., 4., 2., .5), "negative drive resistance accepted");
+  for (const double scale : {1e-9, 1., 1e9}) {
+    const auto boundary = ArnoldiWaveformSolver::crossingCapacitance(2. * scale, scale, 1.,
+                                                                   1.84140566043696063785 * scale, .5);
+    require(boundary.has_value(), "total-load boundary crossing was rejected");
+    expectNear(*boundary, 1., "boundary crossing lost total capacitance");
+    require(!ArnoldiWaveformSolver::crossingCapacitance(2. * scale, scale, 1., 3. * scale, .5),
+            "unattainable crossing was clipped into a capacitance root");
+  }
 }
 }  // namespace
 

@@ -58,6 +58,7 @@ class ArnoldiWaveformSolver
   // Partial derivative of threshold time with respect to R*C, with ramp fixed.
   static double rampTimeSensitivity(double pole, double ramp, double voltage);
   // Lumped capacitance reproducing a distributed source threshold crossing.
+  // Crossings requiring a load outside [0, total_capacitance] are infeasible.
   static std::optional<double> crossingCapacitance(double driver_ramp, double drive_resistance, double total_capacitance,
                                                    double crossing_time, double voltage);
   static double effectiveCapacitance(double driver_ramp, double drive_resistance, const ParasiticArnoldiPoleResidue& pole_residue,

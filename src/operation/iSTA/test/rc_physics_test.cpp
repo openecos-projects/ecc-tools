@@ -2,6 +2,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <Eigen/Eigenvalues>
 #include "ArnoldiResponseCalculator.hpp"
 #include "ArnoldiWaveformSolver.hpp"
 #include "PinCapacitanceCalculator.hpp"
@@ -132,10 +133,86 @@ void testIdealShortInLoop()
   require(std::abs(moment(sink) - .7 - (.1 * .2 / (.1 + .2)) * .4) < 1e-10,
           "short contraction discarded a parallel conductive branch");
 }
+
+void testScaledLadderAgainstNodalSolution()
+{
+  using namespace ista;
+  // Four dynamic nodes fit within the reduced dimension. Solve their complete
+  // nodal system independently; uniformly scaling resistance must only scale
+  // time, including when all time constants are small.
+  const Eigen::Vector4d capacitances(.1, .2, .3, .4);
+  const double driver_resistance = .35, ramp = .3;
+  const double branches[] = {.12, .4, .9};
+  Eigen::Matrix4d conductance = Eigen::Matrix4d::Zero();
+  conductance(0, 0) = 1. / driver_resistance;
+  for (int node = 1; node < 4; ++node) {
+    const double g = 1. / branches[node - 1];
+    conductance(node - 1, node - 1) += g;
+    conductance(node, node) += g;
+    conductance(node - 1, node) -= g;
+    conductance(node, node - 1) -= g;
+  }
+  const Eigen::Vector4d roots = capacitances.cwiseSqrt();
+  const Eigen::Matrix4d inverse_roots = roots.cwiseInverse().asDiagonal();
+  Eigen::SelfAdjointEigenSolver<Eigen::Matrix4d> full(inverse_roots * conductance * inverse_roots);
+  require(full.info() == Eigen::Success, "full nodal reference did not solve");
+  const Eigen::Vector4d weights = full.eigenvectors().transpose() * roots;
+  const auto exact_crossing = [&](int node, double threshold) {
+    long double low = 0., high = ramp + 100. / full.eigenvalues()[0];
+    for (int iteration = 0; iteration < 160; ++iteration) {
+      const long double t = (low + high) / 2.;
+      long double remaining = 0.;
+      for (int mode = 0; mode < 4; ++mode) {
+        const long double pole = full.eigenvalues()[mode];
+        const long double decay = t < ramp ? 1.L - t / ramp - std::expm1(-pole * t) / (pole * ramp)
+            : -std::expm1(-pole * ramp) / (pole * ramp) * std::exp(-pole * (t - ramp));
+        remaining += full.eigenvectors()(node, mode) * weights[mode] / roots[node] * decay;
+      }
+      if (remaining > threshold) low = t;
+      else high = t;
+    }
+    return static_cast<double>((low + high) / 2.);
+  };
+  for (double scale : {1e-6, 1., 1e6}) {
+    Database db;
+    Config config;
+    PinCapacitanceCalculator caps(db);
+    RcTreeAnalyzer rc(db, caps);
+    RcModelBuilder models(db, config, rc);
+    ParasiticNet net;
+    net.set_net_name("scaled_ladder");
+    std::string source = "n0";
+    for (int node = 0; node < 4; ++node) {
+      const auto name = "n" + std::to_string(node);
+      db.network().pins()[name].set_is_port(true);
+      net.get_node_map()[name].set_capacitance(capacitances[node]);
+      if (node > 0) {
+        ParasiticResistor resistor;
+        resistor.set_source_node("n" + std::to_string(node - 1));
+        resistor.set_sink_node(name);
+        resistor.set_resistance(branches[node - 1] * 1000. * scale);
+        net.get_resistor_list().push_back(resistor);
+      }
+    }
+    const auto& model = models.arnoldiModel(net, source, AnalysisType::kMax, TransType::kRise);
+    const auto waveform = ArnoldiWaveformSolver::poleResidue(model, driver_resistance * scale);
+    require(waveform.get_is_valid(), "scaling a passive ladder invalidated its response");
+    for (int node = 0; node < 4; ++node) {
+      const auto terminal = model.get_term_index_map().at("n" + std::to_string(node));
+      for (double threshold : {.1, .5, .9}) {
+        double crossing = 0.;
+        ArnoldiWaveformSolver::crossingTime(ramp * scale, waveform, terminal, threshold, crossing);
+        require(std::abs(crossing / scale - exact_crossing(node, threshold)) < 1e-8,
+                "scaled RC ladder disagrees with its full nodal crossing");
+      }
+    }
+  }
+}
 }  // namespace
 
 int main()
 {
   testDistinctRcBranches();
   testIdealShortInLoop();
+  testScaledLadderAgainstNodalSolution();
 }

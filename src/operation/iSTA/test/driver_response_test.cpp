@@ -28,8 +28,8 @@ double waveformMoment(const ista::ArnoldiDelayResult& result, std::size_t termin
     moment += result.waveform.get_residue_list()[terminal][i] / result.waveform.get_pole_list()[i];
   return moment;
 }
-// Integrate the delivered current over the source ramp in long double.
-// Q = integral((u-v)/R) must equal Ceff times the source voltage change.
+// Independently integrate delivered current over the source ramp. Charge
+// equivalence requires Q = Ceff times the source voltage change.
 void checkChargeBalance(const ista::ArnoldiDelayResult& result)
 {
   const auto integral = [](long double x) {
@@ -47,9 +47,8 @@ void checkChargeBalance(const ista::ArnoldiDelayResult& result)
     charge += result.waveform.get_residue_list()[0][i] * integral(pole * ramp) / (pole * pole * ramp * resistance);
   }
   const long double lumped_charge = result.effective_capacitance * voltage;
-  require(std::abs(charge - lumped_charge) < 1e-7L * lumped_charge, "driver fit violated charge equivalence");
+  require(std::abs(charge - lumped_charge) < 1e-7L * lumped_charge, "driver violated charge equivalence");
 }
-
 void testDistinctRcBranches()
 {
   using namespace ista;
@@ -558,8 +557,62 @@ void testLoadSensitivityKnot()
       const auto result = ArnoldiDelayCalculator{}.calculate(arc, edge, .1, model);
       require(result.has_value(), "continuous table lost its RC response at a load-sensitivity knot");
       require(result->effective_capacitance > .2 && result->effective_capacitance < 1., "knot fallback violated passive load bounds");
-      checkChargeBalance(*result);
+      require(std::abs(result->delays[0] - delay.findValue(.1, result->effective_capacitance)) < 1e-7,
+              "sensitivity-knot restart lost the source delay observation");
     }
+  }
+}
+
+void testFixedResistanceDelayEquivalence()
+{
+  using namespace ista;
+  Database db;
+  Config config;
+  PinCapacitanceCalculator caps(db);
+  RcTreeAnalyzer rc(db, caps);
+  RcModelBuilder models(db, config, rc);
+  std::string source = "source", sink = "sink";
+  db.network().pins()[source].set_is_port(true);
+  db.network().pins()[sink].set_is_port(true);
+  ParasiticNet net;
+  net.set_net_name("fixed_source");
+  net.get_node_map()[source].set_capacitance(.2);
+  net.get_node_map()[sink].set_capacitance(.8);
+  ParasiticResistor wire;
+  wire.set_source_node(source);
+  wire.set_sink_node(sink);
+  wire.set_resistance(2000.);
+  net.get_resistor_list().push_back(wire);
+  for (auto edge : {TransType::kRise, TransType::kFall}) {
+    TimingArc arc;
+    auto& delay = arc.get_delay_table_map()[edge];
+    delay.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
+    delay.set_axis_list({{0., 1.}});
+    // This slope is larger than the observed slew can identify with a
+    // ramp-plus-resistor source. The fixed-R approximation must nevertheless
+    // retain the delay observation at its delay-equivalent load.
+    delay.set_value_list({.2, 4.2});
+    arc.get_slew_table_map()[edge].set_value_list({1.});
+    const auto& model = models.arnoldiModel(net, source, AnalysisType::kMax, edge);
+    const auto result = ArnoldiDelayCalculator{}.calculate(arc, edge, .1, model);
+    require(result.has_value(), "fixed-resistance delay matching failed");
+    require(result->effective_capacitance > .2 && result->effective_capacitance < 1.,
+            "fixed-resistance load left the passive interval");
+    require(std::abs(result->delays[0] - (.2 + 4. * result->effective_capacitance)) < 1e-7,
+            "fixed-resistance source delay disagrees with the library at the returned load");
+    require(std::abs(waveformMoment(*result) - result->drive_resistance) < 1e-10,
+            "fixed-resistance solve changed the source first moment");
+    require(result->delays[1] > result->delays[0], "positive wire resistance lost its receiver delay");
+
+    // A slow remote pole can make a late source crossing exceed the lumped
+    // total-load crossing. That is not a root within the physical load bounds;
+    // the final charge equation must restart instead of accepting a clipped C.
+    arc.set_output_threshold_pct_rise(.95);
+    arc.set_output_threshold_pct_fall(.05);
+    const auto late = ArnoldiDelayCalculator{}.calculate(arc, edge, .1, model);
+    require(late && late->effective_capacitance > .2 && late->effective_capacitance < 1.,
+            "unattainable late source crossing was accepted as total-load convergence");
+    checkChargeBalance(*late);
   }
 }
 
@@ -599,8 +652,9 @@ void testShieldedLoadWithSlewLimitedDriver()
     require(result.has_value(), "valid slew-limited driver failed");
     require(result->effective_capacitance > .1 && result->effective_capacitance < 1., "shielded capacitance left the physical interval");
     require(std::abs(result->drive_resistance * model.get_total_capacitance() * std::log(7. / 3.) - .2) < 1e-8,
-            "charge fallback changed the resistance characterized at total load");
-    checkChargeBalance(*result);
+            "fixed-source fallback changed the resistance characterized at total load");
+    require(std::abs(result->delays[0] - (.1 + 4. * result->effective_capacitance)) < 1e-7,
+            "slew-limited source disagrees with its delay-equivalent load");
     // The two-node nodal-admittance matrix gives these two positive poles.
     // Integrate their exponentials under a linear ramp independently of the
     // reduced model, then compare receiver crossings and physical slews.
@@ -775,10 +829,9 @@ void testNonlinearEffectiveLoadConvergence()
   const auto& bounded_model = models.arnoldiModel(net, source, AnalysisType::kMax, TransType::kRise);
   const auto bounded = ArnoldiDelayCalculator{}.calculate(arc, TransType::kRise, .1, bounded_model);
   require(bounded && bounded->effective_capacitance > .15 && bounded->effective_capacitance < .3,
-          "invalid zero-load extrapolation hid a valid interior charge solution");
-  checkChargeBalance(*bounded);
-
-
+          "invalid zero-load extrapolation hid a valid interior load solution");
+  require(std::abs(bounded->delays[0] - .2 - bounded->effective_capacitance) < 1e-7,
+          "bounded load solve lost its source delay constraint");
 }
 
 void testOrdinaryDriverPolicy()
@@ -1027,8 +1080,8 @@ void testStrongShieldingCharge()
   require(std::abs((result->delays[1] - result->delays[0]) - slow_time_constant * std::log(2.)) < 1e-6,
           "charge convergence failure replaced the physical crossing with an Elmore delay");
 
-  // A monotone nonlinear slew table can make fixed-point charge iteration
-  // oscillate even though the waveform/charge equation has a valid root.
+  // A monotone nonlinear slew table can make fixed-point load iteration
+  // oscillate even though the waveform equation has a valid root.
   net.get_node_map()[source].set_capacitance(.01);
   net.get_node_map()[sink].set_capacitance(.99);
   net.get_resistor_list().front().set_resistance(10.);
@@ -1038,8 +1091,9 @@ void testStrongShieldingCharge()
   rc.clear();
   const auto& nonlinear_model = models.arnoldiModel(net, source, AnalysisType::kMax, TransType::kRise);
   const auto nonlinear = ArnoldiDelayCalculator{}.calculate(arc, TransType::kRise, .1, nonlinear_model);
-  require(nonlinear.has_value(), "oscillating Ceff iteration discarded a valid charge root");
-  checkChargeBalance(*nonlinear);
+  require(nonlinear.has_value(), "oscillating Ceff iteration discarded a valid load root");
+  require(std::abs(nonlinear->delays[0] - (.1 + 4. * nonlinear->effective_capacitance)) < 1e-7,
+          "nonlinear load solve lost its source delay constraint");
 }
 
 void testZeroCapacitancePortTap()
@@ -1253,6 +1307,7 @@ void testIncompleteNetwork()
 int main()
 {
   testLoadSensitivityKnot();
+  testFixedResistanceDelayEquivalence();
   using namespace ista;
   testDistributedDriverLibraryConsistency();
   testDistinctRcBranches();
