@@ -26,7 +26,7 @@ target_include_directories(ircx_process_model INTERFACE "${CMAKE_CURRENT_SOURCE_
 
 add_library(ircx_process_parser
   parser/ProcessReader.cpp parser/ProcessDetector.cpp parser/ProcessUnits.cpp
-  parser/ProcessBuilder.cpp parser/ConductorBuilder.cpp parser/ViaBuilder.cpp parser/DeferredModelValidation.cpp
+  parser/ProcessBuilder.cpp parser/ConductorBuilder.cpp parser/ViaBuilder.cpp parser/DeferredModelValidation.cpp parser/ThicknessModelBuilder.cpp
   parser/itf/ItfParser.cpp parser/tech/TechParser.cpp
   parser/itf/syntax/ItfSyntax.cpp
   parser/tech/syntax/TechSyntax.cpp parser/tech/syntax/TechValidation.cpp
@@ -37,7 +37,7 @@ target_include_directories(ircx_process_parser PUBLIC "${CMAKE_CURRENT_SOURCE_DI
 target_include_directories(ircx_process_parser PRIVATE parser/itf/syntax parser/tech/syntax "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(ircx_process_parser PRIVATE -Wall -Wextra -Wpedantic)
 
-add_library(ircx_process_evaluator evaluator/ProcessEvaluator.cpp)
+add_library(ircx_process_evaluator evaluator/ProcessEvaluator.cpp evaluator/ProcessThicknessEvaluator.cpp evaluator/ProcessSpatialEvaluator.cpp evaluator/ProcessGeometryValidation.cpp)
 target_link_libraries(ircx_process_evaluator PUBLIC ircx_process_model)
 target_include_directories(ircx_process_evaluator PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/evaluator")
 
@@ -49,4 +49,7 @@ if(BUILD_TESTING)
   add_executable(ircx_process_evaluator_test ../../test/RCXProcessEvaluatorTest.cpp)
   target_link_libraries(ircx_process_evaluator_test PRIVATE ircx_process_parser ircx_process_evaluator)
   add_test(NAME ircx_process_evaluator_test COMMAND ircx_process_evaluator_test)
+  add_executable(ircx_spatial_process_test ../../test/RCXSpatialProcessTest.cpp)
+  target_link_libraries(ircx_spatial_process_test PRIVATE ircx_process_evaluator)
+  add_test(NAME ircx_spatial_process_test COMMAND ircx_spatial_process_test)
 endif()

@@ -8,6 +8,7 @@ endif()
 
 add_library(ircx_interface
     ${IRCX_INTERFACE}/RCXInterface.cpp
+    ${IRCX_INTERFACE}/RCXMetalShapes.cpp
 )
 
 add_subdirectory(${IRCX_INTERFACE}/spef_tools)

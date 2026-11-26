@@ -68,13 +68,15 @@ class PatternGrid
     groups_.clear();
     Grid* current = nullptr;
     for (std::string line; std::getline(in, line);) {
-      if (line.empty() || line[0] == '#')
+      const auto first = line.find_first_not_of(" \t\r\n");
+      if (first == std::string::npos || line[first] == '#')
         continue;
+      line = line.substr(first, line.find_last_not_of(" \t\r\n") - first + 1);
       std::istringstream row(line);
       if (line[0] == 'P') {
         std::string p, m, b, u;
         double w = 0;
-        if (!(row >> p >> m >> b >> u >> w) || w <= 0 || !std::isfinite(w))
+        if (!(row >> p >> m >> b >> u >> w) || p != "P" || w <= 0 || !std::isfinite(w))
           RCXLOG.error(ircx::Loc::current(), "invalid grid header");
         row >> std::ws;
         if (!row.eof())

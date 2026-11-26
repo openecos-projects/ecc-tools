@@ -55,7 +55,16 @@ void CapExtractor::extract()
   Monitor monitor;
   RCXLOG.info(Loc::current(), "Starting...");
 
+  // Current table versions encode nominal rectangular cross sections. Reject
+  // shape-dependent processes until a library declares matching geometry axes.
   auto& database = RCXDM.getDatabase();
+  for (auto& corner : database.get_corner_data_list()) {
+    for (const auto& [layer, name] : database.get_layer_table().get_design_idx_to_name_map()) {
+      const auto* conductor = getProcessConductor(corner, layer);
+      if (conductor && (conductor->get_side_tangent() != 0 || conductor->get_thickness_polynomial()))
+        RCXLOG.error(Loc::current(), "Capacitance tables do not represent variable thickness or trapezoidal geometry on ", name);
+    }
+  }
 
   // These former switches cannot select an alternate calculation anymore.
   const char* mode = std::getenv("IRCX_MULTI_MODE");
@@ -67,6 +76,9 @@ void CapExtractor::extract()
   const char* table = std::getenv("IRCX_PATTERN_TABLE");
   if (table && *table)
     RCXLOG.error(Loc::current(), "only PatternGrid capacitance calculation is supported; remove IRCX_PATTERN_TABLE");
+  const char* interlayer_table = std::getenv("IRCX_XLAYER_TABLE");
+  if (interlayer_table && *interlayer_table)
+    RCXLOG.error(Loc::current(), "only PatternGrid capacitance calculation is supported; remove IRCX_XLAYER_TABLE");
 
   _grid.reset();
   _grid_override.reset();

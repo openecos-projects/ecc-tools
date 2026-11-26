@@ -14,12 +14,17 @@ struct WireGeometryQuery
   double width;
   double lower_spacing = -1;
   double upper_spacing = -1;
+  std::optional<double> drawn_density;
+  std::optional<double> fabricated_density;
 };
 struct EffectiveWireGeometry
 {
   double width;
   double thickness;
   double center_shift = 0;
+  double side_tangent = 0;
+  double top_width() const { return width + side_tangent * thickness; }
+  double bottom_width() const { return width - side_tangent * thickness; }
 };
 inline constexpr std::size_t kNoWireNeighbor = std::numeric_limits<std::size_t>::max();
 struct WireGeometrySpan
@@ -44,6 +49,10 @@ struct EffectiveWireSegment
   EffectiveWireGeometry geometry;
   double lower_spacing = -1;
   double upper_spacing = -1;
+  // Endpoint densities vary linearly over [start,end]. The two snapshots are
+  // independent; absence never implies a zero density or a fallback basis.
+  std::optional<std::pair<double, double>> drawn_density;
+  std::optional<std::pair<double, double>> fabricated_density;
 };
 using WireGeometryProfiles = std::vector<std::vector<EffectiveWireSegment>>;
 

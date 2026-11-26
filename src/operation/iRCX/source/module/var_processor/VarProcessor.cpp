@@ -17,11 +17,15 @@
 #include "VarProcessor.hpp"
 
 #include <cmath>
+#include <map>
+#include <set>
 #include <unordered_map>
 
 #include "Utility.hpp"
 #include "ProcessBinding.hpp"
 #include "ProcessEvaluator.hpp"
+#include "DensityGeometry.hpp"
+#include "LayoutMetal.hpp"
 
 namespace ircx {
 namespace {
@@ -190,9 +194,35 @@ ProcessResult<void, std::string> VarProcessor::applyCornerEffectiveGeometry(std:
       wires[i].spans.push_back(span);
     }
   }
+  std::set<int32_t> density_layers;
+  for (std::size_t i = 0; i < wires.size(); ++i)
+    if (wires[i].conductor->get_thickness_polynomial()) density_layers.insert(edges[i]->get_layer_idx());
+  std::map<int32_t, MetalDensity> drawn_density;
+  if (!density_layers.empty()) {
+    auto metal = collectLayoutMetal(database.get_layout_data(), scale);
+    if (!metal) return metal.error;
+    for (int32_t layer : density_layers) {
+      const auto shapes = metal->find(layer);
+      if (shapes == metal->end()) continue;
+      auto index = MetalDensity::build(shapes->second);
+      if (!index) return index.error;
+      drawn_density.emplace(layer, std::move(*index));
+    }
+  }
   for (auto domain : {ProcessEffectType::kResistance, ProcessEffectType::kCapacitance}) {
-    auto result = evaluateWireGeometryProfiles(wires, domain);
+    auto result = density_layers.empty() ? evaluateWireGeometryProfiles(wires, domain) : evaluateWireEtchProfiles(wires, domain);
     if (!result) return result.error;
+    if (!density_layers.empty()) {
+      for (std::size_t i = 0; i < wires.size(); ++i) {
+        const auto drawn = drawn_density.find(edges[i]->get_layer_idx());
+        auto finalized = finalizeDensityGeometry(wires[i], (*result)[i], edges[i]->get_line_segment().get_is_horizontal(),
+            drawn == drawn_density.end() ? nullptr : &drawn->second, nullptr, domain);
+        if (!finalized) return finalized.error;
+        (*result)[i] = std::move(*finalized);
+      }
+      const auto valid = validateWireGeometryProfiles(wires, *result, domain);
+      if (!valid) return valid.error;
+    }
     for (std::size_t i = 0; i < wires.size(); ++i) {
       const auto& edge = *edges[i];
       if (edge.get_is_special_net()) continue;

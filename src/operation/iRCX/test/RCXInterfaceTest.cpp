@@ -117,6 +117,52 @@ class InterfaceFixture
     dmInst->set_idb_def_service(has_def ? &_def_service : nullptr);
   }
 
+  void addDensityMetal()
+  {
+    auto* design = _def_service.get_design();
+    auto* pin = design->get_io_pin_list()->add_pin_list("floating");
+    auto* shape = new idb::IdbLayerShape();
+    shape->set_layer(_layer);
+    shape->add_rect(0, 0, 100, 100);
+    shape->add_rect(200, 0, 300, 100);
+    pin->get_port_box_list().push_back(shape);
+    design->get_fill_list()->add_fill_layer(_layer)->add_rect(400, 0, 500, 100);
+    auto make_via = [&](int32_t x) {
+      auto* master = new idb::IdbViaMaster();
+      master->get_bottom_layer_shape()->set_layer(_layer);
+      master->get_bottom_layer_shape()->add_rect(0, 0, 100, 100);
+      master->get_bottom_layer_shape()->add_rect(200, 0, 300, 100);
+      master->get_top_layer_shape()->set_layer(_layer);
+      master->get_top_layer_shape()->add_rect(400, 0, 500, 100);
+      auto* via = new idb::IdbVia();
+      via->set_instance(master);
+      via->set_coordinate(x, 0);
+      return via;
+    };
+    auto* wire = design->get_net_list()->get_net_list().front()->get_wire_list()->add_wire()->add_segment();
+    wire->set_is_via(true);
+    wire->set_via(make_via(600));
+    auto* special = design->get_special_net_list()->add_net("power")->get_wire_list()->add_wire()->add_segment();
+    special->set_is_via(true);
+    special->set_via(make_via(1200));
+    special->set_layer(_layer);
+    special->set_route_width(100);
+    special->add_flush_point(3000,1000,0);
+    special->add_point(4000,1000);
+    special->add_flush_point(4000,2000,25);
+    auto* patched = design->get_special_net_list()->get_net_list().front()->get_wire_list()->add_wire()->add_segment();
+    patched->set_layer(_layer);
+    patched->set_route_width(100);
+    patched->add_point(3000,3000);
+    patched->add_point(4000,3000);
+    patched->set_is_rect(true);
+    patched->set_delta_rect(5000,3000,5100,3100);
+    patched->set_bounding_box();
+    auto* fill = design->get_fill_list()->add_fill_via(make_via(50));
+    fill->add_coordinate(1800, 0);
+    fill->add_coordinate(2400, 0);
+  }
+
   void init()
   {
     RCXI.initRCX({{"-config", (_directory / "ircx.config").string()}});
@@ -176,15 +222,19 @@ void checkPatternGridInput(const std::string& scenario)
   fixture.prepare();
   const std::string grid = "P M1 SUBSTRATE - .2\n"
                            "-1 -1 8 0 0\n-1 .2 5 0 3\n.2 -1 5 3 0\n.2 .2 2 3 3\n";
+  const std::string v2_grid = "IRCX_PATTERN_GRID_V2\nP M1 SUBSTRATE - .2\n"
+                              "-1 -1 8 0 0 0 0\n-1 .2 5 0 3 0 0\n.2 -1 5 3 0 0 0\n.2 .2 2 3 3 0 0\n";
   const std::string a_table = "A metal1 OVER SUBSTRATE\n.1 0 2\n2 0 3\n";
   const std::string b_table = "B metal1 OVER SUBSTRATE UNDER metal2\n.1 0 2\n2 0 3\n";
   const bool invalid = scenario.starts_with("reject_");
   std::ofstream(fixture.directory() / "typical.captab")
       << (scenario == "reject_a" ? a_table : scenario == "reject_b" ? b_table
-          : scenario == "reject_empty" ? "" : scenario == "reject_mixed" ? grid + a_table : grid);
-  if (scenario == "override" || scenario == "override_corners") {
+          : scenario == "reject_empty" ? "" : scenario == "reject_mixed" ? grid + a_table
+          : scenario == "reject_v2" ? v2_grid : grid);
+  if (scenario == "override" || scenario == "override_corners" || scenario == "override_v2") {
     const auto path = fixture.directory() / "explicit-grid.captab";
-    std::ofstream(path) << "P M1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
+    std::ofstream(path) << (scenario == "override_v2" ? v2_grid
+        : "P M1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n");
     setenv("IRCX_PATTERN_GRID", path.c_str(), 1);
   }
   if (scenario == "corners" || scenario == "override_corners") {
@@ -229,13 +279,16 @@ void checkPatternGridInput(const std::string& scenario)
   if (scenario == "removed_prebuilt") setenv("IRCX_MULTI_MODE", "prebuilt", 1);
   if (scenario == "removed_rank") setenv("IRCX_MULTI_RANK", "3", 1);
   if (scenario == "removed_table") setenv("IRCX_PATTERN_TABLE", "unused.captab", 1);
-  if (scenario == "override_corners" || scenario.starts_with("removed_")) {
+  if (scenario == "removed_interlayer") setenv("IRCX_XLAYER_TABLE", "unused.captab", 1);
+  if (scenario == "override_corners" || scenario == "override_v2" || scenario.starts_with("removed_")) {
     bool rejected = false;
     try {
       RCXI.runRCX();
     } catch (const std::runtime_error& error) {
       const std::string diagnostic(error.what());
-      rejected = diagnostic.find(scenario == "override_corners" ? "exactly one process corner" : "PatternGrid") != std::string::npos;
+      rejected = diagnostic.find(scenario == "override_corners" ? "exactly one process corner"
+                                 : scenario == "override_v2" ? "grid"
+                                 : scenario == "removed_interlayer" ? "remove IRCX_XLAYER_TABLE" : "PatternGrid") != std::string::npos;
     }
     require(rejected, "unsupported extraction setting did not fail explicitly: " + scenario);
     return;
@@ -260,6 +313,36 @@ void checkPatternGridInput(const std::string& scenario)
       require(std::abs(coupling.begin()->second.at(corner) - (corner == 2 ? 0.0 : 3.6)) < 1e-10,
               "coupling used the wrong corner grid");
   }
+  RCXI.destroyRCX();
+}
+
+void checkDensityMetal()
+{
+  InterfaceFixture fixture;
+  fixture.prepare();
+  fixture.addDensityMetal();
+  fixture.init();
+  const auto& shapes = RCXDM.getDatabase().get_layout_data().get_density_metal_shapes();
+  require(shapes.size() == 19, "pins, via landings, special path legs, and fills must reach density geometry");
+  std::set<int32_t> starts;
+  bool horizontal=false,vertical=false,patch=false,patched_wire=false;
+  for (const auto& shape : shapes) {
+    if (gtl::yl(shape.get_shape())>0) {
+      horizontal |= shape.get_shape()==GTLRectInt(3000,950,4050,1050);
+      vertical |= shape.get_shape()==GTLRectInt(3950,950,4050,2025);
+      patch |= shape.get_shape()==GTLRectInt(5000,3000,5100,3100);
+      patched_wire |= shape.get_shape()==GTLRectInt(3000,2950,4000,3050);
+      continue;
+    }
+    require(gtl::xh(shape.get_shape()) - gtl::xl(shape.get_shape()) == 100, "pin rectangles were replaced by a bounding box");
+    starts.insert(gtl::xl(shape.get_shape()));
+  }
+  require(starts == std::set<int32_t>{0, 200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400, 2600, 2800},
+          "density geometry has incorrect database coordinates");
+  require(horizontal && vertical,"every special route leg and endpoint extension must survive a via-marked path");
+  require(patch && patched_wire,"a patch and route body in one special path must both survive");
+  RCXI.wrapDensityMetal();
+  require(shapes.size() == 19, "rebuilding the physical shape snapshot must not accumulate stale rectangles");
   RCXI.destroyRCX();
 }
 
@@ -567,12 +650,14 @@ int main(int argc, char** argv)
   try {
     require(setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1) == 0, "cannot enable exception error reporting");
     for (const char* name : {"IRCX_MULTI_MODE", "IRCX_MULTI_RANK", "IRCX_PATTERN_GRID", "IRCX_PATTERN_TABLE", "IRCX_MULTI_OUTPUT",
-                             "IRCX_XLAYER_TABLE", "IRCX_CROSSING_TRANSMISSION"}) unsetenv(name);
+                             "IRCX_XLAYER_TABLE"}) unsetenv(name);
     const std::string scenario = argc > 1 ? argv[1] : "extract";
     if (scenario == "extract") {
       checkExtraction();
     } else if (scenario.starts_with("captab_")) {
       checkPatternGridInput(scenario.substr(7));
+    } else if (scenario == "density_metal") {
+      checkDensityMetal();
     } else if (scenario == "missing_database") {
       checkMissingDatabase(false, false);
     } else if (scenario == "missing_lef") {

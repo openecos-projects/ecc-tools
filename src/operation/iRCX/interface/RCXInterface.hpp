@@ -83,6 +83,7 @@ class RCXInterface
   void wrapViaList(Net& net, idb::IdbRegularWireSegment* idb_segment);
   void wrapVia(Net& net, idb::IdbVia* idb_via);
   void wrapSpecialNet();
+  void wrapDensityMetal();
 #endif
 #endif
 

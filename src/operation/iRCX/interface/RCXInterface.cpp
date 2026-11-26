@@ -454,6 +454,7 @@ void RCXInterface::wrapDatabase()
   wrapSPEFNameData();
   wrapNetList();
   wrapSpecialNet();
+  wrapDensityMetal();
 }
 
 void RCXInterface::wrapDBInfo()

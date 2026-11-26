@@ -14,6 +14,9 @@ Status uniqueFields(const Field& field, std::initializer_list<std::string_view> 
 Result<double> scalar(const Field& field, const ProcessUnits& units, Dimension dimension = Dimension::kScalar);
 Status positive(double value, const Field& field);
 Status validateDeferredModel(const Field& field, const ProcessUnits& units);
+Result<ProcessThicknessPolynomial> buildThicknessPolynomial(const Field& field, SyntaxKind kind, const ProcessUnits& units);
+Status resolveThicknessPolynomial(ProcessConductor& model, const Field& layer, bool use_si_density, const ProcessUnits& units);
+Status normalizeConductorEtch(ProcessConductor& model, const Field& layer, const ProcessUnits& units);
 Result<ProcessEffectType> effect(const Field& field);
 Result<ProcessTable2D> table2D(const Field& field, const ProcessUnits& units, std::string_view row, std::string_view column, Dimension values,
                                bool positive_values = false);

@@ -23,6 +23,7 @@
 #include "ProcessConductor.hpp"
 #include "ProcessEffectType.hpp"
 #include "ProcessEvaluator.hpp"
+#include "ProcessSpatialEvaluator.hpp"
 #include "ProcessVia.hpp"
 #include "TopoEdge.hpp"
 #include "Utility.hpp"
@@ -164,8 +165,8 @@ ProcessResult<double> ResExtractor::extractWireResistance(CornerData& corner_dat
       const double start = std::max(segment.start, segment_start);
       const double end = std::min(segment.end, segment_end);
       if (end <= start) continue;
-      const auto value = evaluateWireResistanceFromGeometry(conductor, {width, lower_spacing, upper_spacing}, segment.geometry,
-          end - start, corner_data.get_tmpr(), corner_data.get_global_tmpr());
+      const auto value = integrateWireResistance(conductor, {width, lower_spacing, upper_spacing}, segment,
+          start, end, corner_data.get_tmpr(), corner_data.get_global_tmpr());
       if (!value) return value.error;
       resistance += *value;
     }

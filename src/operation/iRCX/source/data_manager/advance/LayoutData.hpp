@@ -34,6 +34,7 @@ class LayoutData
   std::map<int32_t, RoutingLayer>& get_routing_layer_map() { return _routing_layer_map; }
   std::vector<Net>& get_net_list() { return _net_list; }
   Net& get_special_net() { return _special_net; }
+  std::vector<LayerShape>& get_density_metal_shapes() { return _density_metal_shapes; }
   // setter
   void set_design_name(const std::string& design_name) { _design_name = design_name; }
   void set_die_shape(const GTLRectInt& die_shape) { _die_shape = die_shape; }
@@ -56,6 +57,9 @@ class LayoutData
   std::map<int32_t, RoutingLayer> _routing_layer_map;
   std::vector<Net> _net_list;
   Net _special_net;
+  // Physical routing metal that is not necessarily represented by a net edge:
+  // disconnected pins, array-via landings, and fill rectangles.
+  std::vector<LayerShape> _density_metal_shapes;
 };
 
 }  // namespace ircx

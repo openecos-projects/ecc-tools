@@ -700,6 +700,30 @@ int main(int argc, char** argv)
         throw std::runtime_error("CLI failure did not log and exit through the common logger");
       return EXIT_SUCCESS;
     }
+    if (group == "spatial_density") {
+      for (double scale : {1.0, 0.9}) {
+        for (bool vertical : {false, true}) {
+          ResistanceFixture fixture;
+          fixture.defer_geometry = true;
+          fixture.loadProcess(R"(CONDUCTOR metal1 { THICKNESS=2 RHO=0.4
+            POLYNOMIAL_BASED_THICKNESS_VARIATION {
+              DENSITY_POLYNOMIAL_ORDERS={2} WIDTH_POLYNOMIAL_ORDERS={0}
+              POLYNOMIAL_COEFFICIENTS={1} DENSITY_BOUNDS_VS_WIDTH={(0.2 0 1)}
+            } })", scale);
+          auto& layout = RCXDM.getDatabase().get_layout_data();
+          layout.get_routing_layer_map()[0] = RoutingLayer{};
+          Patch metal;
+          metal.set_layer_idx(0);
+          metal.set_shape(GTLRectInt(-25000,-25000,25000,25000));
+          layout.get_net_list()[0].get_patch_list().push_back(metal);
+          fixture.addGeometry(false,100,200,vertical,true);
+          RCXVP.process();
+          const double expected = scale == 1 ? (std::atan(1.0)-std::atan(0.98))/0.02 : 1/(1+0.81*0.81);
+          fixture.extractAndExpect(expected);
+        }
+      }
+      return EXIT_SUCCESS;
+    }
     if (group == "process_input") {
       tests = processInputTests();
     } else if (group == "wire_etch") {

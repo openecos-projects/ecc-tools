@@ -14,7 +14,7 @@ using namespace ircx;
 
 namespace {
 
-void checkLayerNames()
+void checkLayerNames(const std::string& geometry)
 {
   DataManager::destroyInst();
   DataManager::initInst();
@@ -30,6 +30,8 @@ void checkLayerNames()
     layers.register_mapping(design, name);
     ProcessConductor conductor;
     conductor.set_layer_name(name);
+    if (geometry == "side_tangent") conductor.set_side_tangent(.1);
+    if (geometry == "polynomial") conductor.get_thickness_polynomial().emplace();
     process->conductors.push_back(conductor);
   }
 
@@ -50,10 +52,8 @@ void checkLayerNames()
     const auto& context = contexts[net];
     input << context.header << '\n';
     for (int left : {-1, 1})
-      for (int right : {-1, 1}) {
-        input << left << ' ' << right << ' ' << net + 1 << " 0 0";
-        input << '\n';
-      }
+      for (int right : {-1, 1})
+        input << left << ' ' << right << ' ' << net + 1 << " 0 0\n";
     TopoEdge edge(net);
     edge.set_layer_idx(context.master);
     // 10 um wires, spaced 20 um apart to isolate the layer-name lookup.
@@ -89,20 +89,28 @@ void checkLayerNames()
 
 }  // namespace
 
-int main()
+int main(int argc, char** argv)
 {
   setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1);
   for (const char* name : {"IRCX_MULTI_MODE", "IRCX_MULTI_RANK", "IRCX_PATTERN_GRID", "IRCX_PATTERN_TABLE", "IRCX_MULTI_OUTPUT",
-                           "IRCX_XLAYER_TABLE", "IRCX_CROSSING_TRANSMISSION"}) unsetenv(name);
+                           "IRCX_XLAYER_TABLE"}) unsetenv(name);
   Logger::initInst();
   Utility::initInst();
   CapExtractor::initInst();
+  const std::string geometry = argc > 1 ? argv[1] : "";
   int result = EXIT_SUCCESS;
   try {
-    checkLayerNames();
+    checkLayerNames(geometry);
+    if (!geometry.empty()) {
+      std::cerr << "nominal grid accepted variable process geometry: " << geometry << '\n';
+      result = EXIT_FAILURE;
+    }
   } catch (const std::exception& error) {
-    std::cerr << error.what() << '\n';
-    result = EXIT_FAILURE;
+    if (geometry.empty() || std::string(error.what()).find("Capacitance tables do not represent variable thickness or trapezoidal geometry")
+                                == std::string::npos) {
+      std::cerr << error.what() << '\n';
+      result = EXIT_FAILURE;
+    }
   }
   CapExtractor::destroyInst();
   DataManager::destroyInst();

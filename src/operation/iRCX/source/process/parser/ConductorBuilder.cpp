@@ -26,8 +26,9 @@ Status selectResistance(ProcessConductor& model, const Field& layer, SyntaxKind 
   }
   return {};
 }
+}  // namespace
 
-Status normalizeEtch(ProcessConductor& model, const Field& layer, const ProcessUnits& units)
+Status normalizeConductorEtch(ProcessConductor& model, const Field& layer, const ProcessUnits& units)
 {
   const auto original = model.get_etch_table_list();
   model.get_etch_table_list().clear();
@@ -61,7 +62,6 @@ Status normalizeEtch(ProcessConductor& model, const Field& layer, const ProcessU
     else model.set_capacitive_only_etch(etch);
   }
   return {};
-}
 }
 
 Result<ProcessConductor> buildConductor(const Field& layer, SyntaxKind kind, const ProcessUnits& units, std::vector<ProcessDiagnostic>& diagnostics)
@@ -153,6 +153,7 @@ Result<ProcessConductor> buildConductor(const Field& layer, SyntaxKind kind, con
       if (!values)
         return values.error;
       if (!field.modifiers.empty() && field.modifiers.front() == "ETCH_FROM_TOP") {
+        model.set_has_top_etch(true);
         deferEvaluation(field, ProcessEffectType::kCapacitance, "trapezoidal geometry evaluation is not implemented", model.get_evaluation_issues(),
                         diagnostics);
         continue;
@@ -165,13 +166,21 @@ Result<ProcessConductor> buildConductor(const Field& layer, SyntaxKind kind, con
             return fail(field, "invalid_value", "fractional thickness change must be greater than -1");
         model.get_thickness_change_table_list().push_back(std::move(table));
       }
-    } else if (isOneOf(key, {"SIDE_TANGENT", "CLAD_RPSQ", "CLAD_THICKNESS", "FILL_RATIO"})) {
+    } else if (key == "SIDE_TANGENT") {
+      const auto value = scalar(field, units);
+      if (!value) return value.error;
+      model.set_side_tangent(*value);
+    } else if (key == "POLYNOMIAL_BASED_THICKNESS_VARIATION") {
+      auto polynomial = buildThicknessPolynomial(field, kind, units);
+      if (!polynomial) return polynomial.error;
+      model.get_thickness_polynomial() = std::move(*polynomial);
+    } else if (isOneOf(key, {"CLAD_RPSQ", "CLAD_THICKNESS", "FILL_RATIO"})) {
       auto value = scalar(field, units);
       if (!value)
         return value.error;
       if (*value != 0)
         deferEvaluation(field, ProcessEffectType::kBoth, "evaluation of this geometry model is not implemented", model.get_evaluation_issues(), diagnostics);
-    } else if (isOneOf(key, {"THICKNESS_VS_DENSITY", "DENSITY_BOX_WEIGHTING_FACTOR", "BOTTOM_THICKNESS_VS_SI_WIDTH", "POLYNOMIAL_BASED_THICKNESS_VARIATION",
+    } else if (isOneOf(key, {"THICKNESS_VS_DENSITY", "DENSITY_BOX_WEIGHTING_FACTOR", "BOTTOM_THICKNESS_VS_SI_WIDTH",
                              "WIDTH_SI_VS_WIDTH_AND_SPACING", "WIDTH-SPACE"})) {
       auto domain = effect(field);
       if (!domain)
@@ -179,6 +188,8 @@ Result<ProcessConductor> buildConductor(const Field& layer, SyntaxKind kind, con
       auto valid = validateDeferredModel(field, units);
       if (!valid)
         return valid.error;
+      if (key == "DENSITY_BOX_WEIGHTING_FACTOR" && find(layer, "POLYNOMIAL_BASED_THICKNESS_VARIATION"))
+        continue;
       deferEvaluation(field, *domain, "evaluation of this geometry model is not implemented", model.get_evaluation_issues(), diagnostics);
     } else if (isOneOf(key, {"MINWIDTH",
                              "MINSPACE",
@@ -219,11 +230,6 @@ Result<ProcessConductor> buildConductor(const Field& layer, SyntaxKind kind, con
   auto selected = selectResistance(model, layer, kind, resistance);
   if (!selected)
     return selected.error;
-  if (kind == SyntaxKind::kTech) {
-    auto normalized = normalizeEtch(model, layer, units);
-    if (!normalized)
-      return normalized.error;
-  }
   return model;
 }
 }  // namespace ircx::process_detail

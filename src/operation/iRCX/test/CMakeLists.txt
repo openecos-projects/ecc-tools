@@ -1,4 +1,11 @@
 if(BUILD_TESTING)
+  add_executable(ircx_metal_density_test RCXMetalDensityTest.cpp)
+  target_link_libraries(ircx_metal_density_test PRIVATE ircx_metal_density)
+  add_test(NAME ircx_metal_density_test COMMAND ircx_metal_density_test)
+  add_executable(ircx_layout_density_test RCXLayoutDensityTest.cpp)
+  target_link_libraries(ircx_layout_density_test PRIVATE ircx_var_processor ircx_process_parser)
+  add_test(NAME ircx_layout_density_test COMMAND ircx_layout_density_test)
+
   add_executable(ircx_data_manager_test
       RCXDataManagerTest.cpp
   )
@@ -37,11 +44,11 @@ if(BUILD_TESTING)
   )
 
   add_test(NAME ircx_interface_test COMMAND ircx_interface_test)
-  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping spef_writer_sections spef_writer_names)
+  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping spef_writer_sections spef_writer_names density_metal)
     add_test(NAME ircx_interface_${scenario} COMMAND ircx_interface_test ${scenario})
   endforeach()
-  foreach(scenario grid override corners coupling overlap process_names reject_a reject_b reject_empty reject_mixed
-                   override_corners removed_mode removed_prebuilt removed_rank removed_table)
+  foreach(scenario grid override corners coupling overlap process_names reject_a reject_b reject_empty reject_mixed reject_v2
+                   override_corners override_v2 removed_mode removed_prebuilt removed_rank removed_table removed_interlayer)
     add_test(NAME ircx_interface_captab_${scenario} COMMAND ircx_interface_test captab_${scenario})
   endforeach()
 
@@ -60,6 +67,9 @@ if(BUILD_TESTING)
   target_link_libraries(ircx_pattern_test PRIVATE ircx_cap_extractor)
   target_compile_options(ircx_pattern_test PRIVATE -UNDEBUG)
   add_test(NAME ircx_pattern_test COMMAND ircx_pattern_test)
+  foreach(model side_tangent polynomial)
+    add_test(NAME ircx_nominal_table_rejects_${model} COMMAND ircx_grid_layer_names_test ${model})
+  endforeach()
 endif()
 
 if(BUILD_TESTING)
@@ -68,7 +78,7 @@ if(BUILD_TESTING)
   foreach(scale 0.9 0.73 1 0 -1 nan)
     add_test(NAME ircx_resistance_geometry_${scale} COMMAND ircx_resistance_geometry_test ${scale})
   endforeach()
-  foreach(scenario wire_etch via_area invalid_geometry process_input logger_exit)
+  foreach(scenario wire_etch via_area invalid_geometry process_input logger_exit spatial_density)
     add_test(NAME ircx_resistance_${scenario} COMMAND ircx_resistance_geometry_test ${scenario})
   endforeach()
 endif()

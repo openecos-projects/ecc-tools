@@ -35,11 +35,13 @@ class TopoEdge
   int32_t get_end_node_idx() const { return _end_node_idx; }
   int32_t get_layer_idx() const { return _layer_idx; }
   GTLRectInt& get_shape() { return _shape; }
+  const GTLRectInt& get_shape() const { return _shape; }
   int32_t get_width() const { return _width; }
   int32_t get_half_width() const { return _half_width; }
   int32_t get_length() const { return _length; }
   GTLPointInt& get_center() { return _center; }
   LineSegment& get_line_segment() { return _line_segment; }
+  const LineSegment& get_line_segment() const { return _line_segment; }
   // setter
   void set_via_name(const std::string& via_name) { _via_name = via_name; }
   void set_start_node_idx(int32_t start_node_idx) { _start_node_idx = start_node_idx; }
