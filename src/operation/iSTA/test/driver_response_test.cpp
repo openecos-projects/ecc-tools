@@ -420,8 +420,8 @@ void testDistributedVoltageDomains()
   require(arc.rcFailed(AnalysisType::kMax, TransType::kRise) && !arc.rcFailed(AnalysisType::kMin, TransType::kRise),
           "RC failure became a valid fallback or leaked across min/max");
 
-  // An unreachable threshold invalidates the shared receiver response for
-  // this driver/edge. A control with all receivers reachable must recover.
+  // A receiver's voltage threshold is an observation of the circuit solution;
+  // changing it cannot change the reachable waveforms at sibling terminals.
   std::string peer = "v:A";
   db.network().pins()[peer].set_instance_name("v");
   db.network().pins()[peer].set_pin_name("A");
@@ -437,17 +437,18 @@ void testDistributedVoltageDomains()
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
     for (auto edge : {TransType::kRise, TransType::kFall}) {
       const auto mixed = arnoldi.response(source, timing, mode, edge, .1);
-      require(mixed.get_is_valid() && mixed.loadFailed(sink) && mixed.loadFailed(peer) && !mixed.get_wire_delay_map().contains(peer)
+      require(mixed.get_is_valid() && mixed.loadFailed(sink) && !mixed.loadFailed(peer) && mixed.get_wire_delay_map().at(peer) > 0.
                   && !mixed.loadFailed(source) && mixed.get_wire_delay_map().contains(source),
-              "failed shared receiver solve published a sibling's RC delay");
+              "unreachable receiver invalidated a reachable sibling's waveform");
       Arc peer_arc;
       peer_arc.set_type(ArcType::kNet);
       peer_arc.set_owner_name(name);
       peer_arc.set_source_pin(source);
       peer_arc.set_sink_pin(peer);
-      require(wire.calcNetArcDelay(peer_arc, mode, edge, mixed.get_driver_slew()) == 0.
-                  && wire.calcNetArcSlew(peer_arc, mode, edge, mixed.get_driver_slew()) == mixed.get_driver_slew() && peer_arc.rcFailed(mode, edge),
-              "shared RC failure lost zero-delay/source-slew propagation or its diagnostic");
+      require(wire.calcNetArcDelay(peer_arc, mode, edge, mixed.get_driver_slew()) == mixed.get_wire_delay_map().at(peer)
+                  && wire.calcNetArcSlew(peer_arc, mode, edge, mixed.get_driver_slew()) == mixed.get_load_slew_map().at(peer)
+                  && !peer_arc.rcFailed(mode, edge),
+              "reachable sibling lost its independent RC result");
     }
   // Only the fall window is unreachable; the rise solve and source response
   // must stay valid even after the fall result has entered the cache.
@@ -458,7 +459,8 @@ void testDistributedVoltageDomains()
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
     const auto fall = arnoldi.response(source, timing, mode, TransType::kFall, .1);
     const auto rise = arnoldi.response(source, timing, mode, TransType::kRise, .1);
-    require(fall.loadFailed(peer) && !rise.loadFailed(peer) && !rise.loadFailed(sink) && rise.get_wire_delay_map().at(peer) > 0.,
+    require(fall.loadFailed(sink) && !fall.loadFailed(peer) && !rise.loadFailed(peer) && !rise.loadFailed(sink)
+                && rise.get_wire_delay_map().at(peer) > 0.,
             "unreachable fall receiver contaminated the rise response");
   }
   // Invalid library metadata is a separate failure from unreachable voltage.

@@ -23,8 +23,6 @@
 #include <string>
 #include <vector>
 
-#include "TimingTolerance.hpp"
-
 namespace ista {
 
 bool CellDelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCellArc& timing_cell_arc, AnalysisType analysis_type, TransType output_trans_type,
@@ -248,10 +246,7 @@ double CellDelayCalculator::calcTimingCellArcSlew(TimingCellArc& timing_cell_arc
 
 double CellDelayCalculator::convertOutputLoad(TimingArc& timing_arc, double output_load)
 {
-  if (std::abs(timing_arc.get_cap_unit_scale() - 1.0) < ista::kTimingTolerance) {
-    return output_load;
-  }
-  return static_cast<int>(std::ceil(output_load * timing_arc.get_cap_unit_scale()));
+  return output_load * timing_arc.get_cap_unit_scale();
 }
 
 double CellDelayCalculator::calcTimingArcDelay(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type,

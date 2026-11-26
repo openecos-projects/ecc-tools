@@ -64,6 +64,13 @@ void testNegligibleSlowMode()
 {
   const auto poles = model({1., 1e-30}, {1., 1e-30});
   expectNear(crossing(poles, 2., .5), 1.84140566043696063785, "negligible slow mode widened the crossing interval");
+  for (double scale : {1e-9, 1., 1e9})
+    for (double slow_weight : {0., 1e-30}) {
+      expectNear(ArnoldiWaveformSolver::inputPortCrossing({scale, 1e30 * scale}, {1., slow_weight}, 0., .5),
+                 std::log(2.) * scale, "input step crossing depends on an unobservable slow mode");
+      expectNear(ArnoldiWaveformSolver::inputPortCrossing({scale, 1e30 * scale}, {1., slow_weight}, 2. * scale, .5),
+                 1.84140566043696063785 * scale, "input ramp crossing depends on an unobservable slow mode");
+    }
 }
 
 void testRoundedRampBound()

@@ -179,7 +179,6 @@ DriverResponse ArnoldiResponseCalculator::calculate(std::string& output_pin, Tim
   timing_result.set_effective_capacitance(effective_capacitance);
   timing_result.set_gate_delay(delay_list.front());
   timing_result.set_driver_slew(slew_list.front());
-  bool unreachable_receiver = false;
   for (std::size_t term_idx = 0; term_idx < arnoldi_model.get_term_node_list().size(); term_idx++) {
     std::string& term_node_name = arnoldi_model.get_term_node_list()[term_idx];
     double wire_delay = delay_list[term_idx] - delay_list.front();
@@ -202,11 +201,10 @@ DriverResponse ArnoldiResponseCalculator::calculate(std::string& output_pin, Tim
         const double lower = ratio * slew_lower;
         const double upper = ratio * slew_upper;
         if (!(middle > 0. && middle < 1. && lower > 0. && upper < 1. && upper > lower)) {
-          // Valid receiver thresholds outside the source voltage swing make
-          // the shared network response unreachable, not merely uncached.
+          // This receiver's observation is unreachable. Its threshold does
+          // not change the circuit solution at other terminals.
           timing_result.setLoadFailed(term_node_name);
           timing_result.setLoadFailed(pin_name);
-          unreachable_receiver = true;
           continue;
         }
         const bool fall = output_trans_type == TransType::kFall;
@@ -229,20 +227,6 @@ DriverResponse ArnoldiResponseCalculator::calculate(std::string& output_pin, Tim
     timing_result.get_load_slew_map()[term_node_name] = load_slew;
     timing_result.get_wire_delay_map()[pin_name] = wire_delay;
     timing_result.get_load_slew_map()[pin_name] = load_slew;
-  }
-  if (unreachable_receiver) {
-    // Receivers share one distributed-network solve. An unreachable crossing
-    // invalidates that solve for this driver/analysis/edge, including siblings
-    // whose individual thresholds were reachable. Keep the fitted gate values;
-    // WireDelayCalculator publishes explicit nonbounding 0/source-slew values.
-    for (std::size_t term_idx = 1; term_idx < arnoldi_model.get_term_node_list().size(); ++term_idx) {
-      std::string& term = arnoldi_model.get_term_node_list()[term_idx];
-      for (const auto& name : {term, _rc.pinName(term)}) {
-        timing_result.setLoadFailed(name);
-        timing_result.get_wire_delay_map().erase(name);
-        timing_result.get_load_slew_map().erase(name);
-      }
-    }
   }
   cacheDriverResponse(output_pin, analysis_type, output_trans_type, timing_result.get_driver_slew(), timing_result);
   return timing_result;

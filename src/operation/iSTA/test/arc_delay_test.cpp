@@ -115,43 +115,46 @@ static void checkClockToQ()
 
 static void checkExternalDrivingLoad()
 {
-  for (auto direction : {PinDirection::kInput, PinDirection::kInout}) {
-    Database database;
-    Config config;
-    design(database, 100.0);
-    database.parasitics().nets().clear();
-    database.network().pins().at("external").set_direction(direction);
-    if (direction == PinDirection::kInput)
-      database.network().nets().at("pad_net").get_load_pin_list() = {"buffer:contact"};
-    TimingCellArc driver;
-    TimingArc timing;
-    timing.set_sense(TimingArcSense::kPositive);
-    for (auto edge : {TransType::kRise, TransType::kFall}) {
-      TimingTable delay, slew;
-      delay.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
-      slew.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
-      delay.set_axis_list({{0.0, 1.0}});
-      slew.set_axis_list({{0.0, 1.0}});
-      const double slope = edge == TransType::kRise ? 2.0 : 3.0;
-      delay.set_value_list({0.1, 0.1 + slope});
-      slew.set_value_list({0.2, 0.2 + 2.0 * slope});
-      timing.get_delay_table_map()[edge] = delay;
-      timing.get_slew_table_map()[edge] = slew;
-    }
-    driver.get_timing_arc_list().push_back(timing);
-    DelayCalculator calculator(database, config);
-    std::string port = "external";
-    for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
+  for (double cap_unit_scale : {1., .001, 1000.}) {
+    for (auto direction : {PinDirection::kInput, PinDirection::kInout}) {
+      Database database;
+      Config config;
+      design(database, 100.0);
+      database.parasitics().nets().clear();
+      database.network().pins().at("external").set_direction(direction);
+      if (direction == PinDirection::kInput)
+        database.network().nets().at("pad_net").get_load_pin_list() = {"buffer:contact"};
+      TimingCellArc driver;
+      TimingArc timing;
+      timing.set_sense(TimingArcSense::kPositive);
+      timing.set_cap_unit_scale(cap_unit_scale);
       for (auto edge : {TransType::kRise, TransType::kFall}) {
-        const double port_load = (mode == AnalysisType::kMin ? 0.04 : 0.08) + (edge == TransType::kRise ? 0.0 : 0.01);
-        database.sdc().get_port_constraint_map().at(port).set_load(mode, edge, port_load, false);
-        calculator.clear();
-        DelayResult result;
-        require(calculator.calculateDrivingCell(port, driver, mode, edge, 0.1, 0.1, result), "external driver produced no result");
-        const double load = port_load + 0.03;
+        TimingTable delay, slew;
+        delay.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
+        slew.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
+        delay.set_axis_list({{0.0, cap_unit_scale}});
+        slew.set_axis_list({{0.0, cap_unit_scale}});
         const double slope = edge == TransType::kRise ? 2.0 : 3.0;
-        require(std::abs(result.get_delay() - slope * load) < 1e-12, "driving-cell delay omitted the input port's set_load");
-        require(std::abs(result.get_slew() - (0.2 + 2.0 * slope * load)) < 1e-12, "driving-cell slew omitted the input port's set_load");
+        delay.set_value_list({0.1, 0.1 + slope});
+        slew.set_value_list({0.2, 0.2 + 2.0 * slope});
+        timing.get_delay_table_map()[edge] = delay;
+        timing.get_slew_table_map()[edge] = slew;
+      }
+      driver.get_timing_arc_list().push_back(timing);
+      DelayCalculator calculator(database, config);
+      std::string port = "external";
+      for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
+        for (auto edge : {TransType::kRise, TransType::kFall}) {
+          const double port_load = (mode == AnalysisType::kMin ? 0.04 : 0.08) + (edge == TransType::kRise ? 0.0 : 0.01);
+          database.sdc().get_port_constraint_map().at(port).set_load(mode, edge, port_load, false);
+          calculator.clear();
+          DelayResult result;
+          require(calculator.calculateDrivingCell(port, driver, mode, edge, 0.1, 0.1, result), "external driver produced no result");
+          const double load = port_load + 0.03;
+          const double slope = edge == TransType::kRise ? 2.0 : 3.0;
+          require(std::abs(result.get_delay() - slope * load) < 1e-12, "driving-cell delay omitted the input port's set_load");
+          require(std::abs(result.get_slew() - (0.2 + 2.0 * slope * load)) < 1e-12, "driving-cell slew omitted the input port's set_load");
+        }
       }
     }
   }
@@ -167,13 +170,13 @@ static void checkDrivingCellSelection()
   database.network().pins().at("external").set_direction(PinDirection::kInput);
   database.liberty().get_cell_map().at("boundary").get_port_map().at("contact").set_capacitance(0.);
   auto& net = database.parasitics().nets().at("pad_net");
-  net.get_node_map().at("external").set_capacitance(.01);
-  net.get_node_map().at("buffer:contact").set_capacitance(.003547);
+  net.get_node_map().at("external").set_capacitance(1. / 64.);
+  net.get_node_map().at("buffer:contact").set_capacitance(1. / 256.);
   database.sdc().get_port_constraint_map().clear();
   TimingCellArc driver;
-  // Two conditional PAD strengths. Numerical fit residuals must not select
-  // the slow, weak driver for min analysis merely because its fitted delay
-  // correction is negative. The extracted PAD probe fits the strong min table.
+  // Synthetic affine tables: the weak driver has eight times the load-delay
+  // slope and a wider transition. The min/max choice follows these library
+  // load sensitivities even when the RC calculation has a rounding residual.
   for (bool weak : {true, false}) {
     TimingArc timing;
     timing.set_sense(TimingArcSense::kPositive);
@@ -185,11 +188,11 @@ static void checkDrivingCellSelection()
       auto& delay = timing.get_delay_table_map()[edge];
       delay.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
       delay.set_axis_list({{0., 1.}});
-      delay.set_value_list(weak ? std::vector<double>{1.629336881, 1.902036481} : std::vector<double>{.998172595, 1.030598978});
+      delay.set_value_list(weak ? std::vector<double>{2., 2.25} : std::vector<double>{1., 1.03125});
       auto& slew = timing.get_slew_table_map()[edge];
       slew.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
       slew.set_axis_list({{0., 1.}});
-      slew.set_value_list(weak ? std::vector<double>{1.76141945, 2.35381945} : std::vector<double>{.303250057, .372144657});
+      slew.set_value_list(weak ? std::vector<double>{2., 2.5} : std::vector<double>{.25, .3125});
     }
     driver.get_timing_arc_list().push_back(timing);
   }

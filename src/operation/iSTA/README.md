@@ -107,10 +107,19 @@ roundoff, so scaling every RC time does not change the reduced dimension. Tests
 compare a complete four-node nodal solution with the reduced response over twelve
 orders of magnitude in resistance.
 
+Receiver thresholds observe the calculated voltage without changing the
+passive circuit. A receiver whose threshold cannot be reached is marked failed;
+reachable siblings retain their delays and transitions. Input-port crossings
+grow their root bracket from the ramp or fastest observable time constant, so
+an almost unobservable slow mode does not set the root's time resolution.
+
 `adjust_driver_resistance` and `min_slew_degradation` remain accepted as legacy
 0/1 configuration fields in Tcl, C++ and Python. They have no effect on the
-physical model. The separate configurable capacitive approximation for small
-networks is described in [the small-network model](../../../docs/ista-small-network.md).
+physical model. The configurable `small_net_limit_ps` approximation defaults to
+2.0 ps; zero disables it. This is a budget on total R times total C, not a delay
+error bound. Eligible networks use the cell tables at total capacitance and a
+first-moment one-pole response at each receiver. See the
+[small-network model](../../../docs/ista-small-network.md) for details.
 
 SPEF import preserves finite nonnegative resistances and small positive
 capacitances. Negative or nonfinite resistance is rejected. Zero-resistance

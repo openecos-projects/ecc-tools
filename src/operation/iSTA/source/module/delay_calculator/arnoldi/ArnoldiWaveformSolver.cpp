@@ -572,32 +572,64 @@ double ArnoldiWaveformSolver::inputPortCrossing(const std::vector<double>& time_
 {
   // Integrate each exponential step response over the source ramp. Remaining
   // voltage is the falling waveform, or one minus the rising waveform.
-  double low = 0.0;
-  double high = ramp + 64.0 * *std::max_element(time_constants.begin(), time_constants.end());
-  for (int32_t iteration = 0; iteration < 64; ++iteration) {
-    double time = 0.5 * (low + high);
-    double remaining = 0.0;
+  const double failure = std::numeric_limits<double>::quiet_NaN();
+  if (time_constants.empty() || time_constants.size() != weights.size() || !(ramp >= 0.) || !std::isfinite(ramp)
+      || !(voltage > 0. && voltage < 1.))
+    return failure;
+  double fastest = std::numeric_limits<double>::infinity();
+  for (std::size_t index = 0; index < time_constants.size(); ++index) {
+    const double tau = time_constants[index];
+    if (!(tau >= 0.) || !std::isfinite(tau) || !std::isfinite(weights[index]))
+      return failure;
+    if (tau > 0. && weights[index] != 0.)
+      fastest = std::min(fastest, tau);
+  }
+  const auto evaluate = [&](double time) {
+    double remaining = 0., derivative = 0.;
     for (std::size_t index = 0; index < time_constants.size(); ++index) {
-      double tau = time_constants[index];
-      double response = 0.0;
-      if (tau == 0.0) {
-        response = ramp > 0.0 ? std::max(0.0, 1.0 - time / ramp) : 0.0;
-      } else if (ramp == 0.0) {
+      if (weights[index] == 0.)
+        continue;
+      const double tau = time_constants[index];
+      double response = 0., slope = 0.;
+      if (tau == 0.) {
+        if (ramp > 0. && time < ramp) {
+          response = 1. - time / ramp;
+          slope = -1. / ramp;
+        }
+      } else if (ramp == 0.) {
         response = std::exp(-time / tau);
+        slope = -response / tau;
       } else if (time < ramp) {
-        response = 1.0 - time / ramp - tau / ramp * std::expm1(-time / tau);
+        const double fraction = time / ramp;
+        response = 1. - fraction + fraction * meanDecay(time / tau);
+        slope = std::expm1(-time / tau) / ramp;
       } else {
-        response = -tau / ramp * std::expm1(-ramp / tau) * std::exp(-(time - ramp) / tau);
+        response = meanDecay(ramp / tau) * std::exp(-(time - ramp) / tau);
+        slope = -response / tau;
       }
       remaining += weights[index] * response;
+      derivative += weights[index] * slope;
     }
-    if (remaining > voltage) {
-      low = time;
-    } else {
-      high = time;
-    }
+    return std::pair{remaining - voltage, derivative};
+  };
+  const double initial = evaluate(0.).first;
+  if (!std::isfinite(initial))
+    return failure;
+  if (initial <= 0.)
+    return 0.;  // A step can cross immediately through algebraic feedthrough.
+  double low = 0., high = ramp > 0. ? ramp : fastest;
+  if (!std::isfinite(high))
+    return failure;
+  // An unobservable slow mode must not determine the crossing resolution.
+  double value = evaluate(high).first;
+  while (std::isfinite(value) && value > 0.) {
+    low = high;
+    high = high <= .5 * std::numeric_limits<double>::max() ? 2. * high : std::numeric_limits<double>::max();
+    if (high == low)
+      return failure;
+    value = evaluate(high).first;
   }
-  return 0.5 * (low + high);
+  return std::isfinite(value) ? bracketedRoot(evaluate, low, high) : failure;
 }
 
 }  // namespace ista
