@@ -31,9 +31,10 @@ their constraints to core-facing pins, or silently ignore missing SDC targets.
 The graph separates receiving and driving vertices for genuine INOUT pins,
 while reports, constraints and activity annotations retain physical names.
 Liberty functions, three-state conditions and conditional arcs determine
-enabled paths. See the [bidirectional IO implementation](../../../docs/sta-pw-bidirectional-io.md)
-for graph roles, driver-specific loads, regression coverage and power-estimation
-limitations.
+enabled paths. Loads and RC responses belong to the active driver; changing
+the driver invalidates results rooted at another pin. The separation of physical
+pins and graph roles follows the representation referenced in OpenSTA's
+`graph/Graph.cc` (`makePinVertices()` and `makeWireEdge()`).
 
 ## Power/ground connectivity
 
@@ -118,8 +119,10 @@ an almost unobservable slow mode does not set the root's time resolution.
 physical model. The configurable `small_net_limit_ps` approximation defaults to
 2.0 ps; zero disables it. This is a budget on total R times total C, not a delay
 error bound. Eligible networks use the cell tables at total capacitance and a
-first-moment one-pole response at each receiver. See the
-[small-network model](../../../docs/ista-small-network.md) for details.
+first-moment one-pole response at each receiver. Eligibility requires a complete
+passive single-driver network, a 50% delay threshold, symmetric slew thresholds,
+and compatible source/receiver voltage and threshold conventions. Other networks
+use the distributed solver.
 
 SPEF import preserves finite nonnegative resistances and small positive
 capacitances. Negative or nonfinite resistance is rejected. Zero-resistance

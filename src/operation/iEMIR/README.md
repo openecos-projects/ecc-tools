@@ -248,7 +248,6 @@ The benchmark compares a fresh SparseLU factorization for every RHS with each
 prepared backend, including a reusable SparseLU control. It checks voltages and
 residuals, and reports setup separately from solve time. These are solver-only
 measurements; they do not predict full-flow or dynamic-analysis speedup.
-Recorded local results and limitations: [validation report](../../../docs/ir-acceleration-validation.md).
 
 ## Static EM evaluation and diagnostics
 
