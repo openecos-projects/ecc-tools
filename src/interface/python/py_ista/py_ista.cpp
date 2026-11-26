@@ -26,7 +26,8 @@ namespace python_interface {
 bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map);
 void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map);
 
-bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict)
+bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict,
+             const std::vector<std::string>& min_lib_paths)
 {
   const std::string config_ = path_or_empty(config);
   std::map<std::string, std::any> config_map;
@@ -37,6 +38,7 @@ bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::s
     return false;
   }
   initStaConfigMapByDict(config_dict, config_map);
+  config_map["-min_lib_paths"] = min_lib_paths;
   STAI.initSTA(config_map);
   return true;
 }

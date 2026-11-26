@@ -33,7 +33,7 @@ class LibertyArcSelector
   TransType getOutputTransType(TimingCellArc& timing_cell_arc, TransType input_trans_type);
   std::vector<TransType> getOutputTransTypeList(TimingCellArc& timing_cell_arc, TransType input_trans_type);
   std::vector<TimingArc*> cellCandidates(TimingCellArc& timing_cell_arc, TransType input_trans_type, TransType output_trans_type,
-                                         const std::string& output_pin = "");
+                                         const std::string& output_pin = "", AnalysisType analysis = AnalysisType::kNone);
   std::vector<TimingArc*> checkCandidates(TimingCheckArc& timing_check_arc, TransType clock_trans_type, TransType data_trans_type);
 
 

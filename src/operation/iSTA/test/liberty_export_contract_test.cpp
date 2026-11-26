@@ -114,6 +114,23 @@ void checkTransitionCapacitanceExport()
       "min pin capacitance was substituted with the max transition range");
 }
 
+void checkScopedModelExport()
+{
+  LibertyLibrary library;
+  auto& cell = library.get_cell_map()["macro"];
+  cell.set_cell_name("macro");
+  TimingCellArc arc;
+  arc.setAnalysisType(AnalysisType::kMin);
+  cell.get_cell_arc_list().push_back(arc);
+  bool rejected = false;
+  try {
+    static_cast<void>(LibertyDataExporter::exportCells(library, TimingTimeUnit::kNS, TimingCapacitiveUnit::kPF));
+  } catch (const std::runtime_error&) {
+    rejected = true;
+  }
+  require(rejected, "optimization snapshot silently discarded the paired model's analysis identity");
+}
+
 void addCell(LibertyLibrary& library, const std::string& name, const std::string& library_name, double area, double leakage, double resistance, bool inverting)
 {
   auto& cell = library.get_cell_map()[name];
@@ -293,6 +310,7 @@ int main()
   checkUnreadyExport();
   checkRectangularTableExport();
   checkTransitionCapacitanceExport();
+  checkScopedModelExport();
   checkLibertyCellFamilies();
   checkTriStateEnableSplitsFamilies();
   checkDiagnosticOrder();

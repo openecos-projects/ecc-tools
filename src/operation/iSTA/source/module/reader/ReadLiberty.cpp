@@ -62,7 +62,7 @@ double nominalVoltage(idb::LibLibrary& library)
 }
 }  // namespace
 
-void ReadLiberty::read()
+void ReadLiberty::read(const std::vector<std::string>& min_lib_paths)
 {
   Monitor monitor;
   const auto conversion_start = std::chrono::steady_clock::now();
@@ -82,7 +82,7 @@ void ReadLiberty::read()
   }
   STALOG.info(Loc::current(), "Liberty conversion starting: libraries=", lib_list.size(), ", configured_workers=", configured_workers,
               ", active_workers=", active_workers, ".");
-  readCells(lib_list);
+  readCells(lib_list, min_lib_paths);
   checkCellReferences();
   readLibraryInfo(lib_list);
   const double conversion_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - conversion_start).count();
@@ -121,16 +121,6 @@ void ReadLiberty::checkCellReferences() const
   }
   message << " load the matching libraries for the selected timing corner, including macro libraries, before initializing STA.";
   throw std::runtime_error(message.str());
-}
-
-void ReadLiberty::readCells(const std::vector<idb::LibLibrary*>& lib_list)
-{
-  _liberty.get_cell_map().clear();
-  for (idb::LibLibrary* lib : lib_list) {
-    for (std::unique_ptr<idb::LibCell>& lib_cell : lib->get_cells()) {
-      readCell(lib_cell.get());
-    }
-  }
 }
 
 void ReadLiberty::readLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list)
@@ -244,7 +234,7 @@ TimingTimeUnit ReadLiberty::timeUnit(idb::LibLibrary* lib_library)
   return TimingTimeUnit::kNS;
 }
 
-void ReadLiberty::readCell(idb::LibCell* lib_cell)
+LibertyCell ReadLiberty::readCell(idb::LibCell* lib_cell)
 {
   idb::LibLibrary* lib_library = lib_cell->get_owner_lib();
   LibertyCell timing_cell;
@@ -310,7 +300,7 @@ void ReadLiberty::readCell(idb::LibCell* lib_cell)
   }
 
   readCellInfo(timing_cell);
-  _liberty.get_cell_map()[timing_cell.get_cell_name()] = timing_cell;
+  return timing_cell;
 }
 
 void ReadLiberty::readPort(LibertyCell& timing_cell, idb::LibPort* lib_port)

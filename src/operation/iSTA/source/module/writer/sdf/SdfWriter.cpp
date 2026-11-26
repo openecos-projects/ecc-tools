@@ -261,28 +261,36 @@ bool SdfWriter::hasSdfTimingCheck(Instance& instance)
 
 void SdfWriter::outputSdfCellDelay(std::ostream& sdf_file, Instance& instance)
 {
-  sdf_file << "  (DELAY\n";
-  sdf_file << "   (ABSOLUTE\n";
+  // Separate analysis families share one SDF IOPATH. Merge only equal
+  // ports/conditions/trigger edges, retaining independent min/max values.
+  std::map<std::pair<std::string, std::string>, SdfCellArcDelayMap> paths;
+  const auto merge = [&](std::string source, std::string sink, SdfCellArcDelayMap values) {
+    auto& destination = paths[{source, sink}];
+    for (auto& [key, delay] : values)
+      _values.mergeDelay(destination[key], delay);
+  };
   if (_instance_cell_arcs.count(instance.get_instance_name()) > 0) {
     for (Arc* arc : _instance_cell_arcs[instance.get_instance_name()]) {
-      outputSdfGraphCellArc(sdf_file, *arc);
+      auto& pins = _database.network().pins();
+      if (pins.contains(arc->get_source_pin()) && pins.contains(arc->get_sink_pin()))
+        merge(_format.portName(pins.at(arc->get_source_pin())), _format.portName(pins.at(arc->get_sink_pin())), _values.graphCellArcDelays(*arc));
     }
   }
-  outputSdfOnlyCellArcList(sdf_file, instance);
+  if (auto* cell = _values.timingCell(instance)) {
+    for (auto& arc : cell->get_cell_arc_list()) {
+      if (arc.get_is_timing_graph_arc() || arc.get_is_clear_preset_arc() || arc.get_is_disable_arc() || !_values.hasCellArcPins(instance, arc))
+        continue;
+      merge(_format.escapeName(arc.get_source_port()), _format.escapeName(arc.get_sink_port()), _values.cellArcDelays(arc));
+    }
+  }
+  sdf_file << "  (DELAY\n";
+  sdf_file << "   (ABSOLUTE\n";
+  for (auto& [ports, values] : paths) {
+    auto [source, sink] = ports;
+    outputSdfCellArcDelayMap(sdf_file, source, sink, values);
+  }
   sdf_file << "   )\n";
   sdf_file << "  )\n";
-}
-
-void SdfWriter::outputSdfGraphCellArc(std::ostream& sdf_file, Arc& arc)
-{
-  Database& database = _database;
-  if (database.network().pins().count(arc.get_source_pin()) == 0 || database.network().pins().count(arc.get_sink_pin()) == 0) {
-    return;
-  }
-  std::string source_port_name = _format.portName(database.network().pins()[arc.get_source_pin()]);
-  std::string sink_port_name = _format.portName(database.network().pins()[arc.get_sink_pin()]);
-  auto cell_arc_delay_map = _values.graphCellArcDelays(arc);
-  outputSdfCellArcDelayMap(sdf_file, source_port_name, sink_port_name, cell_arc_delay_map);
 }
 
 void SdfWriter::outputSdfCellArcDelayMap(std::ostream& sdf_file, std::string& source_port_name, std::string& sink_port_name,
@@ -302,29 +310,6 @@ void SdfWriter::outputSdfCellArcDelayMap(std::ostream& sdf_file, std::string& so
     outputSdfCellArc(sdf_file, source_port_name, sink_port_name, condition, input_trans_type, cell_arc_delay_pair.second,
                      retain == cell_arc_delay_map.end() ? nullptr : &retain->second);
   }
-}
-
-void SdfWriter::outputSdfOnlyCellArcList(std::ostream& sdf_file, Instance& instance)
-{
-  LibertyCell* timing_cell = _values.timingCell(instance);
-  if (timing_cell == nullptr) {
-    return;
-  }
-  for (TimingCellArc& timing_cell_arc : timing_cell->get_cell_arc_list()) {
-    if (timing_cell_arc.get_is_timing_graph_arc() || timing_cell_arc.get_is_clear_preset_arc() || timing_cell_arc.get_is_disable_arc()
-        || !_values.hasCellArcPins(instance, timing_cell_arc)) {
-      continue;
-    }
-    outputSdfOnlyCellArc(sdf_file, timing_cell_arc);
-  }
-}
-
-void SdfWriter::outputSdfOnlyCellArc(std::ostream& sdf_file, TimingCellArc& timing_cell_arc)
-{
-  std::string source_port_name = _format.escapeName(timing_cell_arc.get_source_port());
-  std::string sink_port_name = _format.escapeName(timing_cell_arc.get_sink_port());
-  auto cell_arc_delay_map = _values.cellArcDelays(timing_cell_arc);
-  outputSdfCellArcDelayMap(sdf_file, source_port_name, sink_port_name, cell_arc_delay_map);
 }
 
 void SdfWriter::outputSdfCellArc(std::ostream& sdf_file, std::string& source_port_name, std::string& sink_port_name, std::string& condition,

@@ -49,6 +49,13 @@ jobs:
             test_lvs_data_manager test_lvs_flow test_lvs_interface test_lvs_physical_graph --parallel 2
           ctest --test-dir build -R '^(test_ifp_(pdn_generator|phy_placer|config)|test_lvs_(data_manager|flow|interface|physical_graph))$' --output-on-failure --no-tests=error
 
+      - name: Run paired macro timing model regressions
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          cmake --build build --target test_ista_min_library test_ista_missing_liberty test_ista_three_state test_ista_liberty_export_contract --parallel 2
+          ctest --test-dir build -R '^ista_(min_library|missing_liberty|three_state|liberty_export_contract)$' --output-on-failure --no-tests=error
+
       - name: Upload repaired wheel
         uses: actions/upload-artifact@v4
         with:

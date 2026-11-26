@@ -22,10 +22,12 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <vector>
 
 namespace python_interface {
 
-bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool initSTA(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict,
+             const std::vector<std::string>& min_lib_paths = {});
 bool prepareTimingModel();
 bool exportTimingModel();
 bool runSTA();

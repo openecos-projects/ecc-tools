@@ -119,7 +119,7 @@ void DelayCalculator::completeCellArcDelays(Graph& graph)
         for (auto output : _selection.getOutputTransTypeList(*family, input)) {
           // No instance name: evaluate the variant itself without case pruning.
           // This pass runs after analysis; only the per-variant export cache is filled.
-          for (auto* variant : _selection.cellCandidates(*family, input, output)) {
+          for (auto* variant : _selection.cellCandidates(*family, input, output, "", mode)) {
             if (!missing.contains(variant->get_arc_idx()) || !variant->get_delay_table_map().contains(output))
               continue;
             const double load = _load.arcLoad(arc, mode, output);
@@ -161,6 +161,8 @@ void DelayCalculator::initializeTransArcTiming(Arc& arc, AnalysisType analysis_t
   }
 
   TimingCellArc* timing_cell_arc = _selection.cellArc(arc);
+  if (timing_cell_arc && !timing_cell_arc->supportsAnalysis(analysis_type))
+    return;
   if (timing_cell_arc == nullptr || timing_cell_arc->get_timing_arc_list().empty()) {
     double delay = calcCellArcDelay(arc, analysis_type, input_trans_type);
     arc.get_input_output_delay_map()[analysis_type][input_trans_type][input_trans_type] = delay;
@@ -174,7 +176,7 @@ void DelayCalculator::initializeTransArcTiming(Arc& arc, AnalysisType analysis_t
 
   for (TransType output_trans_type : _selection.getOutputTransTypeList(*timing_cell_arc, input_trans_type)) {
     if (!timing_cell_arc->get_timing_arc_list().empty()
-        && _selection.cellCandidates(*timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin()).empty()) {
+        && _selection.cellCandidates(*timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin(), analysis_type).empty()) {
       continue;
     }
     double delay = _cell.calcTimingCellArcDelay(arc, *timing_cell_arc, analysis_type, input_trans_type, output_trans_type, 0.0, true);
@@ -276,9 +278,11 @@ std::optional<DelayResult> DelayCalculator::arcDelay(Arc& arc, AnalysisType anal
                                                      std::optional<double> output_slew_input)
 {
   TimingCellArc* cell_arc = _selection.cellArc(arc);
+  if (cell_arc && !cell_arc->supportsAnalysis(analysis))
+    return std::nullopt;
   if (cell_arc && !_selection.isClockArcTriggerTrans(*cell_arc, input))
     return std::nullopt;
-  if (cell_arc && !cell_arc->get_timing_arc_list().empty() && _selection.cellCandidates(*cell_arc, input, output, arc.get_sink_pin()).empty())
+  if (cell_arc && !cell_arc->get_timing_arc_list().empty() && _selection.cellCandidates(*cell_arc, input, output, arc.get_sink_pin(), analysis).empty())
     return std::nullopt;
   DelayResult result;
   result.set_output_trans_type(output);
@@ -296,9 +300,11 @@ std::optional<DelayResult> DelayCalculator::arcDelay(Arc& arc, AnalysisType anal
 std::optional<DelayResult> DelayCalculator::cellDelay(std::string& pin, TimingCellArc& arc, AnalysisType analysis, TransType input, TransType output,
                                                       double slew)
 {
+  if (!arc.supportsAnalysis(analysis))
+    return std::nullopt;
   if (!_selection.isClockArcTriggerTrans(arc, input))
     return std::nullopt;
-  if (!arc.get_timing_arc_list().empty() && _selection.cellCandidates(arc, input, output, pin).empty())
+  if (!arc.get_timing_arc_list().empty() && _selection.cellCandidates(arc, input, output, pin, analysis).empty())
     return std::nullopt;
   DelayResult result;
   result.set_output_trans_type(output);

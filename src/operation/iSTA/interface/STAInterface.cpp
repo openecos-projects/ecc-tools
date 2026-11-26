@@ -403,7 +403,7 @@ void STAInterface::readDesign(std::map<std::string, std::any>& config_map)
   STADM.readConfig(config_map);
   STADM.getDatabase().sdc().set_sdc_file_path(dmInst->get_config().get_sdc_path());
   readNetwork(STADM.getDatabase().network());
-  ReadLiberty(STADM.getDatabase().liberty(), STADM.getDatabase().network()).read();
+  ReadLiberty(STADM.getDatabase().liberty(), STADM.getDatabase().network()).read(STADM.getConfig().min_lib_paths);
   STADM.buildDesign();
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

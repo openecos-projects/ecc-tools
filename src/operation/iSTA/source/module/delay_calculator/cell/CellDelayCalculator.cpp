@@ -85,7 +85,7 @@ bool CellDelayCalculator::calculateDrivingCell(std::string& output_pin, TimingCe
   double selected_table_delay = 0.;
   for (TransType input_trans_type : {TransType::kRise, TransType::kFall}) {
     const double input_slew = input_trans_type == TransType::kRise ? input_transition_rise : input_transition_fall;
-    for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, output_pin)) {
+    for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, output_pin, analysis_type)) {
       if (!timing_arc->get_delay_table_map().contains(output_trans_type) && !timing_arc->get_slew_table_map().contains(output_trans_type))
         continue;
       // Choose the external drive condition from its library load delay.
@@ -141,7 +141,7 @@ double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timi
   double input_slew = 0.0;
   double raw_output_load = _load.arcLoad(arc, analysis_type, output_trans_type);
   std::vector<double> delay_list;
-  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin())) {
+  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin(), analysis_type)) {
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
       continue;
     }
@@ -215,7 +215,7 @@ double CellDelayCalculator::calcTimingCellArcDelay(Arc& arc, TimingCellArc& timi
   }
   double raw_output_load = _load.arcLoad(arc, analysis_type, output_trans_type);
   std::vector<double> delay_list;
-  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin())) {
+  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin(), analysis_type)) {
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
       continue;
     }
@@ -279,7 +279,8 @@ double CellDelayCalculator::calcTimingCellArcSlew(Arc& arc, TimingCellArc& timin
       }
     }
   }
-  std::vector<TimingArc*> candidate_arc_list = _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin());
+  std::vector<TimingArc*> candidate_arc_list
+      = _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, arc.get_sink_pin(), analysis_type);
   std::vector<double> slew_list;
   for (TimingArc* timing_arc : candidate_arc_list) {
     if (timing_arc->get_slew_table_map().count(output_trans_type) == 0) {
@@ -316,7 +317,7 @@ double CellDelayCalculator::calcTimingCellArcDelay(TimingCellArc& timing_cell_ar
     return timing_cell_arc.get_delay();
   }
   std::vector<double> delay_list;
-  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type)) {
+  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, "", analysis_type)) {
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
       continue;
     }
@@ -342,7 +343,7 @@ double CellDelayCalculator::calcTimingCellArcSlew(TimingCellArc& timing_cell_arc
   if (!_selection.isMatchTimingType(timing_cell_arc, output_trans_type)) {
     return input_slew;
   }
-  std::vector<TimingArc*> candidate_arc_list = _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type);
+  std::vector<TimingArc*> candidate_arc_list = _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, "", analysis_type);
   std::vector<double> slew_list;
   for (TimingArc* timing_arc : candidate_arc_list) {
     if (timing_arc->get_slew_table_map().count(output_trans_type) == 0) {
@@ -489,7 +490,7 @@ double CellDelayCalculator::calcTimingCellArcDelay(std::string& output_pin, Timi
   }
   double output_load = _load.pinLoad(output_pin, analysis_type, output_trans_type);
   std::vector<double> delay_list;
-  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, output_pin)) {
+  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, output_pin, analysis_type)) {
     if (timing_arc->get_delay_table_map().count(output_trans_type) == 0) {
       continue;
     }
@@ -528,7 +529,7 @@ double CellDelayCalculator::calcTimingCellArcSlew(std::string& output_pin, Timin
   }
   double output_load = _load.pinLoad(output_pin, analysis_type, output_trans_type);
   std::vector<double> slew_list;
-  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, output_pin)) {
+  for (TimingArc* timing_arc : _selection.cellCandidates(timing_cell_arc, input_trans_type, output_trans_type, output_pin, analysis_type)) {
     if (timing_arc->get_slew_table_map().count(output_trans_type) == 0) {
       continue;
     }

@@ -41,6 +41,7 @@ class SdfValueExtractor
 
   SdfCellArcDelayMap graphCellArcDelays(Arc& arc);
   SdfCellArcDelayMap cellArcDelays(TimingCellArc& cell_arc);
+  void mergeDelay(SdfDelay& target, SdfDelay& source);
   SdfCheckValues checkValues(Instance& instance, TimingCheckArc& check_arc, TimingArc& timing_arc, TransType transition);
   // Diagnostic: write every pin's four transition times
   // (`actual_{rise,fall}_transition_{min,max}`) so a run can be compared pin by
@@ -54,7 +55,6 @@ class SdfValueExtractor
   double checkDelay(Instance& instance, TimingCheckArc& check_arc, TimingArc& timing_arc, AnalysisType analysis_type, TransType transition);
   void adjustHoldDelay(Instance& instance, TimingCheckArc& check_arc, TimingArc& timing_arc, TransType transition, double& minimum, double& maximum);
   void mergeCellArcDelay(SdfCellArcDelayMap& delays, TimingArc& timing_arc, TransType input_transition, SdfDelay& delay);
-  void mergeDelay(SdfDelay& target, SdfDelay& source);
   TimingCheckArc* findSetupCheck(LibertyCell& timing_cell, TimingCheckArc& hold_timing_check_arc);
   TimingArc* findSetupArc(TimingCheckArc& setup_timing_check_arc, TimingArc& hold_timing_arc, TransType data_trans_type);
   void updateDelay(SdfDelay& sdf_delay, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& delay_map, TransType input_trans_type);

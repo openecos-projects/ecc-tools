@@ -104,8 +104,10 @@ std::vector<TransType> LibertyArcSelector::getOutputTransTypeList(TimingCellArc&
 }
 
 std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing_cell_arc, TransType input_trans_type, TransType output_trans_type,
-                                                           const std::string& output_pin)
+                                                           const std::string& output_pin, AnalysisType analysis)
 {
+  if (analysis != AnalysisType::kNone && !timing_cell_arc.supportsAnalysis(analysis))
+    return {};
   bool is_flip = input_trans_type != output_trans_type;
   std::vector<TimingArc*> candidate_arc_list;
   bool is_virtual_driver = false;
