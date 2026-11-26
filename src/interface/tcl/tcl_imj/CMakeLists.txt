@@ -2,6 +2,7 @@ add_library(tcl_imj
     ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_analyze_driver.cpp
     ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_cut_def.cpp
     ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_check_antenna.cpp
+    ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_repair_antenna.cpp
     ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_flatten_def.cpp
     ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_destroy_mj.cpp
     ${HOME_INTERFACE}/tcl/tcl_imj/src/tcl_init_mj.cpp

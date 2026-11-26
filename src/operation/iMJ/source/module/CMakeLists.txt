@@ -1,4 +1,5 @@
 add_subdirectory(${IMJ_MODULE}/antenna_checker)
+add_subdirectory(${IMJ_MODULE}/antenna_repairer)
 add_subdirectory(${IMJ_MODULE}/def_flattener)
 add_subdirectory(${IMJ_MODULE}/driver_analyzer)
 add_subdirectory(${IMJ_MODULE}/def_cutter)
@@ -10,6 +11,7 @@ add_library(imj_module INTERFACE)
 target_link_libraries(imj_module
     INTERFACE
     imj_antenna_checker
+    imj_antenna_repairer
     imj_def_flattener
     imj_driver_analyzer
     imj_def_cutter

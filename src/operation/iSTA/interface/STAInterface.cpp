@@ -46,6 +46,7 @@
 #include "Logger.hpp"
 #include "ModelExtractor.hpp"
 #include "Monitor.hpp"
+#include "PathChecker.hpp"
 #include "SdcCommand.hpp"
 #include "SdcReader.hpp"
 #include "SdfWriter.hpp"
@@ -288,7 +289,8 @@ void STAInterface::extractLib()
   try {
     TimingAnalyzer(STADM.getDatabase(), STADC, STADM.getConfig().check_constant_capacitance != 0).analyze();
 
-    auto timing_model = ModelExtractor(STADM.getDatabase()).extract();
+    PathChecker check(STADM.getDatabase(), STADC);
+    auto timing_model = ModelExtractor(STADM.getDatabase(), check).extract();
     std::string output_path = STADM.getConfig().tc_temp_directory_path;
     liberty_writer::writeLib(timing_model, STADM.getDatabase().liberty(), output_path);
 

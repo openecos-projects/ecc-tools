@@ -94,6 +94,39 @@ void initAntennaConfigMapByDict(std::map<std::string, std::string>& config_dict,
   }
 }
 
+bool initRepairAntennaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
+{
+  auto config_file = std::ifstream(config);
+  if (!config_file.is_open()) {
+    return false;
+  }
+  nlohmann::json json;
+  config_file >> json;
+  for (const std::string& key : {"-diode", "-max_iter", "-search_radius_um", "-report_dir", "-report_path", "-step_json"}) {
+    nlohmann::json raw = ecc::getJsonData(json, {"MJ", key});
+    if (raw.is_string()) {
+      std::string value = raw.get<std::string>();
+      if (!value.empty()) {
+        config_map[key] = value;
+      }
+    } else if (raw.is_number_integer()) {
+      config_map[key] = raw.get<int>();
+    } else if (raw.is_number_float()) {
+      config_map[key] = raw.get<double>();
+    }
+  }
+  return true;
+}
+
+void initRepairAntennaConfigMapByDict(std::map<std::string, std::string>& config_dict, std::map<std::string, std::any>& config_map)
+{
+  for (const std::string& key : {"-diode", "-max_iter", "-search_radius_um", "-report_dir", "-report_path", "-step_json"}) {
+    if (config_dict.count(key) > 0 && !config_dict[key].empty()) {
+      config_map[key] = config_dict[key];
+    }
+  }
+}
+
 bool initMetalConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
 {
   auto config_file = std::ifstream(config);

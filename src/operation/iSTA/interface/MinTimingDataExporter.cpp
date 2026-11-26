@@ -207,8 +207,6 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
           // consumers must retain the context before endpoint reduction.
           for (const auto& candidate : checked) {
             const auto& check = candidate.check();
-            if (check.type == TimingCheckType::kClockGatingHold)
-              continue;  // schema 2 consumers require a Liberty hold LUT.
             TimingMinContextData context;
             context.start_point = path.get_start_point();
             context.end_point = name;
@@ -247,7 +245,7 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             // identity without counting the edge twice in the consumer.
             context.capture_edge_ps = 0.0;
             context.capture_arrival_ps = (check.capture_time + check.reconvergence) * snapshot.time_unit_ps;
-            if (structural_model && context.check_type != 0) {
+            if (structural_model && (check.type == TimingCheckType::kHold || check.type == TimingCheckType::kRemoval)) {
               // Only the required-time rule is model data. Its live check is
               // evaluated later from runtime data/clock slew, so no LUT value
               // queried at the placeholder slew is a numeric min reference.
@@ -293,11 +291,6 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
   for (auto& arc : snapshot.constraint_arcs)
     arc.min_qualification = qualifyMinCheck(database, arc, snapshot, active_checks);
   for (auto& pin : snapshot.pins) {
-    if (database.graph().clockGatingChecks().contains(pin.name)) {
-      pin.min_qualification.valid = {false, false};
-      pin.min_qualification.reason = {TimingMinQualificationReason::kUnsupportedConstraint, TimingMinQualificationReason::kUnsupportedConstraint};
-      continue;
-    }
     if (pin.is_port) {
       auto output = qualifyMinOutput(database, pin.name);
       const bool has_output_context = pin.min_qualification.valid[0] || pin.min_qualification.valid[1];
