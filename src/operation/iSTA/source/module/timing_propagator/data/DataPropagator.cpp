@@ -22,8 +22,6 @@
 #include "network/Network.hpp"
 #include "sdc/ExceptionMatcher.hpp"
 
-#include <cstdlib>
-
 namespace ista {
 void DataPropagator::propagate()
 {
@@ -35,7 +33,6 @@ void DataPropagator::propagate()
   _startpoint_timing.seed(startpoints);
   _data_slew_propagator.propagate();
   _data_arrival_propagator.propagate();
-
 
   STALOG.info(Loc::current(), "Completed", monitor.getStatsInfo());
 }

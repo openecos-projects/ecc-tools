@@ -52,6 +52,11 @@ static void storedWireDelay()
   writer.write(second);
   if (second.str().find("(INTERCONNECT in out (9.0000000000::9.0000000000))") == std::string::npos)
     throw std::runtime_error("repeated write retained an old value");
+  arc.set_is_loop_disable(true);
+  std::ostringstream cut;
+  writer.write(cut);
+  if (cut.str().find("(INTERCONNECT in out") != std::string::npos)
+    throw std::runtime_error("loop-cut net arc was exported");
 }
 
 static void require(bool value, const char* message)
@@ -151,6 +156,10 @@ static void cellArcAndCheckValues()
         "(HOLD (posedge D) (posedge CK) (-2.0000000000::-2.0000000000))", "(WIDTH (posedge CK) (2.0000000000::4.0000000000))",
         "(PERIOD CK (4.0000000000::2.0000000000))"})
     require(out.str().find(expected) != std::string::npos, expected);
+  arc.set_is_loop_disable(true);
+  std::ostringstream cut;
+  SdfWriter(db, config).write(cut);
+  require(cut.str().find("(IOPATH") == std::string::npos, "loop-cut cell arc was exported");
 }
 
 // A condition that was not traversed must retain its own delay identity.

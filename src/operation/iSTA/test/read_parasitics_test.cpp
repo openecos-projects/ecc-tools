@@ -23,7 +23,7 @@ void require(bool value, const char* message)
 void checkImport(const std::filesystem::path& file, const char* unit, const char* resistance_unit, double resistance_scale = 1.)
 {
   // Both spellings use the same physical fF scale. Repeated CAP records must
-  // sum before the 1 zF node floor; RES-only nodes need the same treatment.
+  // sum without adding charge to zero-capacitance or resistor-only nodes.
   std::ofstream output(file);
   output << R"(*SPEF "IEEE 1481-1999"
 *DESIGN "probe"
@@ -57,7 +57,7 @@ void checkImport(const std::filesystem::path& file, const char* unit, const char
 *RES
 )";
   const std::array<const char*, 8> resistor_nodes{"in", "n:1", "n:2", "n:3", "n:4", "n:5", "n:6", "load:A"};
-  const std::array<double, 7> resistances{-1., 0., .001, .009, .01, 10., .1};
+  const std::array<double, 7> resistances{1e-8, 0., .001, .009, .01, 10., .1};
   for (std::size_t index = 0; index < resistances.size(); ++index)
     output << index + 1 << ' ' << resistor_nodes[index] << ' ' << resistor_nodes[index + 1] << ' ' << resistances[index] / resistance_scale << '\n';
   output << "*END\n";
@@ -72,19 +72,20 @@ void checkImport(const std::filesystem::path& file, const char* unit, const char
     auto& net = parasitics.nets().at("n");
     auto& nodes = net.get_node_map();
     require(nodes.size() == 8 && net.get_resistor_list().size() == 7, "import changed RC topology");
-    for (const auto* name : {"in", "n:1", "n:2", "n:5", "load:A"})
-      require(std::abs(nodes.at(name).get_capacitance() - 1e-9) < 1e-15, "missing, zero, negative or sub-zF node capacitance was not normalized");
-    require(std::abs(nodes.at("n:3").get_capacitance() - 1.5e-9) < 1e-15, "node floor applied before summing duplicate CAP records");
+    for (const auto* name : {"in", "n:2", "n:5", "load:A"})
+      require(nodes.at(name).get_capacitance() == 0., "missing or nonpositive node capacitance acquired artificial charge");
+    require(std::abs(nodes.at("n:1").get_capacitance() - 5e-10) < 1e-15, "small positive node capacitance was inflated");
+    require(std::abs(nodes.at("n:3").get_capacitance() - 1.5e-9) < 1e-15, "duplicate CAP records were not summed");
     require(std::abs(nodes.at("n:4").get_capacitance() - .002) < 1e-15, "positive extracted capacitance changed");
     require(std::abs(nodes.at("n:6").get_capacitance() - 5e-7) < 1e-15, "sub-aF positive capacitance was inflated");
     double wire_cap = 0.;
     for (const auto& [name, node] : nodes)
       wire_cap += node.get_capacitance();
-    require(std::abs(wire_cap - .0020005065) < 1e-15, "incorrect imported wire capacitance or repeated-read accumulation");
-    const std::array<double, 7> expected_resistances{.01, .01, .01, .01, .01, 10., .1};
+    require(std::abs(wire_cap - .002000502) < 1e-15, "incorrect imported wire capacitance or repeated-read accumulation");
+    const std::array<double, 7> expected_resistances{1e-8, 0., .001, .009, .01, 10., .1};
     for (std::size_t index = 0; index < expected_resistances.size(); ++index)
       require(std::abs(net.get_resistor_list()[index].get_resistance() - expected_resistances[index]) < 1e-12,
-              "extracted resistance floor was not applied in physical ohms");
+              "physical resistance changed during unit conversion");
   }
 }
 

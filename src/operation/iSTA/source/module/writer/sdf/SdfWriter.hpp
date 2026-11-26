@@ -62,7 +62,7 @@ class SdfWriter
   void outputSdfGraphCellArc(std::ostream& sdf_file, Arc& arc);
   void outputSdfCellArcDelayMap(std::ostream& sdf_file, std::string& source_port_name, std::string& sink_port_name, SdfCellArcDelayMap& cell_arc_delay_map);
   void outputSdfOnlyCellArcList(std::ostream& sdf_file, Instance& instance);
-  void outputSdfOnlyCellArc(std::ostream& sdf_file, TimingCellArc& timing_cell_arc);
+  void outputSdfOnlyCellArc(std::ostream& sdf_file, Instance& instance, TimingCellArc& timing_cell_arc);
   void outputSdfCellArc(std::ostream& sdf_file, std::string& source_port_name, std::string& sink_port_name, std::string& condition, TransType input_trans_type,
                         SdfDelay& sdf_delay, SdfDelay* retaining = nullptr);
   void outputSdfTimingCheckList(std::ostream& sdf_file, Instance& instance);

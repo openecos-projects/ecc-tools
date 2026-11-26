@@ -18,6 +18,8 @@
 #include "tcl_sta.h"
 #include "tcl_util.h"
 
+#include <cmath>
+
 namespace tcl {
 
 // public
@@ -38,7 +40,7 @@ TclInitSTA::TclInitSTA(const char* cmd_name) : TclCmd(cmd_name)
   // int32_t min_slew_degradation;     // optional
   _config_list.push_back(std::make_pair("-min_slew_degradation", ValueType::kString));
   _config_list.push_back(std::make_pair("-adjust_driver_resistance", ValueType::kString));
-  _config_list.push_back(std::make_pair("-small_rc_fanout_reduction", ValueType::kString));
+  _config_list.push_back(std::make_pair("-small_net_limit_ps", ValueType::kDouble));
   _config_list.push_back(std::make_pair("-check_constant_capacitance", ValueType::kString));
   // std::string timing_corner;         // optional
   _config_list.push_back(std::make_pair("-timing_corner", ValueType::kString));
@@ -62,8 +64,16 @@ unsigned TclInitSTA::exec()
     return 0;
   }
   std::map<std::string, std::any> config_map = TclUtil::getConfigMap(this, _config_list);
+  if (config_map.contains("-small_net_limit_ps")) {
+    const double value = std::any_cast<double>(config_map.at("-small_net_limit_ps"));
+    if (!std::isfinite(value) || value < 0.) {
+      Tcl_SetObjResult(ecc::ScriptEngine::getOrCreateInstance()->get_interp(),
+                       Tcl_NewStringObj("-small_net_limit_ps must be finite and nonnegative", -1));
+      return 0;
+    }
+  }
   for (const std::string key :
-       {"-min_slew_degradation", "-adjust_driver_resistance", "-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
+       {"-min_slew_degradation", "-adjust_driver_resistance", "-check_constant_capacitance"}) {
     if (!config_map.contains(key))
       continue;
     std::string value = std::any_cast<std::string>(config_map.at(key));

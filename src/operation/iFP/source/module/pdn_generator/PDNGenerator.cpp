@@ -4238,7 +4238,7 @@ void PDNGenerator::buildMacroConnect(PGModel& pg_model)
     min_via_cache[key] = span;
     return span;
   };
-  // Innovus-style block-pin connection: when an upper-layer stripe crosses a
+  // For a block-pin connection, when an upper-layer stripe crosses a
   // macro PG pin, drop a via at the crossing instead of routing around the
   // macro.  The pin itself is the landing metal, so its own OBS is ignored.
   std::set<std::string> crossing_via_keys;

@@ -94,7 +94,7 @@ int main()
     near(result.actual, result.type == TimingCheckType::kPeriod ? 1.9 : .9, "local propagated pulse separation incorrect");
   }
   db.sdc().clockPinConstraints().clear();
-  // PT's single-pin pulse lookup uses the checked edge's slew on both
+  // A single-pin pulse lookup uses the checked edge's slew on both
   // related/constrained axes, not the closing edge's different slew.
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
     state.waveforms[TransType::kFall].slew_map[mode][TransType::kFall] = .08;

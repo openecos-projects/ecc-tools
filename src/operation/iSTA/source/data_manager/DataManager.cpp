@@ -20,10 +20,12 @@
 
 #include <algorithm>
 #include <any>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -63,6 +65,9 @@ void DataManager::destroyInst()
 
 void DataManager::readConfig(std::map<std::string, std::any>& config_map)
 {
+  const double small_net_limit = STAUTIL.getConfigValue<double>(config_map, "-small_net_limit_ps", Config{}.small_net_limit_ps);
+  if (!std::isfinite(small_net_limit) || small_net_limit < 0.)
+    throw std::invalid_argument("-small_net_limit_ps must be finite and nonnegative");
   Config& config = _config;
   /////////////////////////////////////////////
   config.temp_directory_path = STAUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./sta_temp_directory");
@@ -72,7 +77,7 @@ void DataManager::readConfig(std::map<std::string, std::any>& config_map)
   config.timing_path_limit = STAUTIL.getConfigValue<int32_t>(config_map, "-timing_path_limit", 20);
   config.min_slew_degradation = STAUTIL.getConfigValue<int32_t>(config_map, "-min_slew_degradation", 0);
   config.adjust_driver_resistance = STAUTIL.getConfigValue<int32_t>(config_map, "-adjust_driver_resistance", 0);
-  config.small_rc_fanout_reduction = STAUTIL.getConfigValue<int32_t>(config_map, "-small_rc_fanout_reduction", 1);
+  config.small_net_limit_ps = small_net_limit;
   config.check_constant_capacitance = STAUTIL.getConfigValue<int32_t>(config_map, "-check_constant_capacitance", 0);
   config.timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
   config.is_path_report_number_specified = STAUTIL.exist(config_map, std::string("-max_paths")) || STAUTIL.exist(config_map, std::string("-max_path"))
@@ -205,7 +210,7 @@ void DataManager::printConfig()
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.min_slew_degradation);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "adjust_driver_resistance");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.adjust_driver_resistance);
-  STALOG.info(Loc::current(), "  small_rc_fanout_reduction: ", _config.small_rc_fanout_reduction);
+  STALOG.info(Loc::current(), "  small_net_limit_ps: ", _config.small_net_limit_ps);
   STALOG.info(Loc::current(), "  check_constant_capacitance: ", _config.check_constant_capacitance);
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(1), "timing_path_limit");
   STALOG.info(Loc::current(), STAUTIL.getSpaceByTabNum(2), _config.timing_path_limit);

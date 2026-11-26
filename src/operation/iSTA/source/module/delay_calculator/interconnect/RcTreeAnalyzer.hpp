@@ -35,7 +35,6 @@ class RcTreeAnalyzer
   RcTreeAnalyzer(Database& database, PinCapacitanceCalculator& pin_capacitance) : _database(database), _pin_capacitance(pin_capacitance) {}
   RcTreeAnalyzer(const RcTreeAnalyzer&) = delete;
   RcTreeAnalyzer& operator=(const RcTreeAnalyzer&) = delete;
-  PinCapacitanceCalculator& pinCapacitance() { return _pin_capacitance; }
   void clear()
   {
     _parasitic_resistor_map_cache.clear();

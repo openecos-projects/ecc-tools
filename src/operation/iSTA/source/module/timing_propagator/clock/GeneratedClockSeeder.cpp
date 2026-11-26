@@ -63,8 +63,8 @@ void GeneratedClockSeeder::seed(ClockSource& clock)
     ClockState& state = timing_point.get_clock_state(clock.get_clock_name());
     const bool port = database.network().pins().at(pin_name).get_is_port();
     const auto constraint = database.sdc().get_port_constraint_map().find(pin_name);
-    // A remaining explicit port transition selects a fixed source waveform in
-    // PT2018, even if a different lane retains a driving-cell annotation.
+    // An explicit port transition selects the fixed source waveform even
+    // when another lane retains a driving-cell annotation.
     const bool fixed_transition = constraint != database.sdc().get_port_constraint_map().end() && constraint->second.get_has_input_transition();
     for (auto edge : {TransType::kRise, TransType::kFall})
       for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {

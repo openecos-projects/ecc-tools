@@ -147,7 +147,12 @@ bool STAInterface::initSTA(std::map<std::string, std::any> config_map)
 
 bool STAInterface::initialize(std::map<std::string, std::any> config_map, InputScope scope)
 {
-  for (const std::string key : {"-min_slew_degradation", "-adjust_driver_resistance", "-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
+  if (config_map.contains("-small_net_limit_ps")) {
+    const double value = std::any_cast<double>(config_map.at("-small_net_limit_ps"));
+    if (!std::isfinite(value) || value < 0.)
+      throw std::invalid_argument("-small_net_limit_ps must be finite and nonnegative");
+  }
+  for (const std::string key : {"-min_slew_degradation", "-adjust_driver_resistance", "-check_constant_capacitance"}) {
     if (config_map.contains(key)) {
       int32_t value = std::any_cast<int32_t>(config_map.at(key));
       if (value != 0 && value != 1)
@@ -210,9 +215,8 @@ bool STAInterface::tryInitConstraints(std::map<std::string, std::any> config_map
     const auto& errors = SdcCommand::getInst().getErrors();
     diagnostic = errors.empty() ? "native_sdc_load_failed" : "line " + std::to_string(errors.front().line_number) + ": " + errors.front().message;
   } catch (const std::exception& error) {
-    _initialized = false;
-    _model_ready = false;
-    _timing_ready = false;
+    // initialize() invalidates readiness at its mutation boundary. A rejected
+    // configuration never crosses that boundary and must preserve a live session.
     diagnostic = error.what();
   }
   return false;

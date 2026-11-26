@@ -1530,7 +1530,7 @@ bool testLayerCrossingViaFitsWithinStripes(const std::string& directory)
   addConnect("M99", "M10");
 
   // Vertical M10 stripe [368000, 374000] x [1500000, 1717500] (width 6000) crossed by:
-  // 1) y=1605000: 1000x1000 right-edge overlap (exact croc_yosys / innovus_1020 case)
+  // 1) y=1605000: 1000x1000 right-edge overlap
   // 2) y=1621000: 500x1000 tight right-edge overlap (requires rotated bottom + top enclosure)
   // 3) y=1717000: 1000x1000 flush at the top end of M10 (requires center shifting inside both stripes)
   addLine("VSS_B", "M10", PGSegmentType::kStripe, 371000, 1500000, 371000, 1717500, 6000);

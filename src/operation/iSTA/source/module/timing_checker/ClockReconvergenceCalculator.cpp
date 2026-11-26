@@ -44,7 +44,7 @@ double ClockReconvergenceCalculator::correction(const std::string& launch_pin, T
       const auto& sources = clock->second.get_source_list();
       return !values.propagated || (!values.propagated_pin.empty() && std::find(sources.begin(), sources.end(), values.propagated_pin) == sources.end());
     };
-    // PT supports local propagated-clock CRPR only at common clock sources.
+    // Local propagated-clock CRPR applies only at common clock sources.
     if (unsupported_local(launch_pin, launch_clock, analysis_type, launch_trans_type, launch_source)
         || unsupported_local(capture_pin, capture_clock, getCaptureAnalysisType(analysis_type), capture_trans_type, capture_source))
       return 0.0;

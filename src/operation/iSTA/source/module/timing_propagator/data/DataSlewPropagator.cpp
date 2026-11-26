@@ -16,10 +16,6 @@
 // ***************************************************************************************
 #include "DataSlewPropagator.hpp"
 
-#include <cstdio>
-#include <cstdlib>
-
-#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -41,133 +37,56 @@ bool DataSlewPropagator::shouldStopDataSlewPropagation(Arc& arc)
   return _database.graph().sinkPoint(arc).get_is_clock_point();
 }
 
-bool DataSlewPropagator::constant_driven_arc_enabled()
-{
-  static const bool enabled = [] {
-    const char* env = std::getenv("ISTA_CONST_CELL_SLEW");
-    return env == nullptr || std::atoi(env) != 0;
-  }();
-  return enabled;
-}
-
-// The arcs of a fanout cone driven by a logic constant are kept:
-// the liberty delay/transition tables are read at input_slew = 0 and the result
-// reaches SDF.  iSTA instead marks those arcs is_disable_arc, so they are
-// dropped from slew propagation and from the SDF net list.  Measured on i2c:
-// 2 cell + 4 net arcs disabled, exactly the arcs of the two TIELO-driven
-// fixio_buf instances, and REF emits INTERCONNECT/IOPATH for both of them.
-// A loop-cut arc is never re-enabled here; only the constant cone is.
-bool DataSlewPropagator::is_constant_driven_arc(Arc& arc)
-{
-  if (!constant_driven_arc_enabled() || arc.get_is_loop_disable() || !arc.get_is_disable_arc()) {
-    return false;
-  }
-  const auto& values = _database.graph().simValues();
-  const bool driver_side = arc.get_type() == ArcType::kNet;
-  const auto source_value = values.value(arc.get_source_pin(), driver_side);
-  if (!source_value.has_value()) {
-    return false;
-  }
-  return *source_value == TimingCaseValue::kZero || *source_value == TimingCaseValue::kOne
-         || *source_value == TimingCaseValue::kStatic;
-}
-
 void DataSlewPropagator::propagate()
 {
   auto measurement = _database.timingExecutionStats().measure(TimingPhase::kDataSlew);
   Database& database = _database;
-  static const int slew_rounds = [] {
-    const char* e = std::getenv("ISTA_SLEW_ROUNDS");
-    const int v = (e != nullptr) ? std::atoi(e) : 1;
-    return v > 0 ? v : 1;
-  }();
-  static const double slew_tol = [] {
-    const char* e = std::getenv("ISTA_SLEW_TOL");
-    return e != nullptr ? std::atof(e) : 0.0;
-  }();
-  for (int round = 0; round < slew_rounds; ++round) {
   for (int32_t vertex_idx : database.graph().vertexOrder()) {
     for (std::size_t arc_idx : database.graph().vertices()[vertex_idx].get_outgoing_arc_list()) {
-      if (_path_query.isDisableArc(database.graph().arcs()[arc_idx])
-          && !is_constant_driven_arc(database.graph().arcs()[arc_idx])) {
+      if (_path_query.isDisableArc(database.graph().arcs()[arc_idx])) {
         continue;
       }
       propagateDataSlewDelayArc(arc_idx);
-    }
-  }
-  }
-  // A constant-driven arc is disabled, so its sink vertex never receives an
-  // indegree from it and the vertex order can place that sink before its own
-  // driver.  Re-sweeping the constant cone picks up the driver slew produced by
-  // the first sweep; without it a port behind a tied buffer keeps slew 0 while
-  // The driver slew is reported unchanged.
-  if (!constant_driven_arc_enabled()) {
-    return;
-  }
-  std::vector<std::size_t> disabled_arc_list;
-  for (int32_t vertex_idx : database.graph().vertexOrder()) {
-    for (std::size_t arc_idx : database.graph().vertices()[vertex_idx].get_outgoing_arc_list()) {
-      Arc& arc = database.graph().arcs()[arc_idx];
-      if (arc.get_is_disable_arc() && !arc.get_is_loop_disable()) {
-        disabled_arc_list.push_back(arc_idx);
-      }
-    }
-  }
-  if (disabled_arc_list.empty()) {
-    return;
-  }
-  for (int sweep = 0; sweep < 3; ++sweep) {
-    for (std::size_t arc_idx : disabled_arc_list) {
-      propagateDataSlewDelayArc(arc_idx, AnalysisType::kMax, TransType::kRise, true);
-      propagateDataSlewDelayArc(arc_idx, AnalysisType::kMax, TransType::kFall, true);
-      propagateDataSlewDelayArc(arc_idx, AnalysisType::kMin, TransType::kRise, true);
-      propagateDataSlewDelayArc(arc_idx, AnalysisType::kMin, TransType::kFall, true);
     }
   }
 }
 
 void DataSlewPropagator::propagateDataSlewDelayArc(std::size_t arc_idx)
 {
-  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMax, TransType::kRise, false);
-  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMax, TransType::kFall, false);
-  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMin, TransType::kRise, false);
-  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMin, TransType::kFall, false);
+  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMax, TransType::kRise);
+  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMax, TransType::kFall);
+  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMin, TransType::kRise);
+  propagateDataSlewDelayArc(arc_idx, AnalysisType::kMin, TransType::kFall);
 }
 
-void DataSlewPropagator::propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type, bool force)
+void DataSlewPropagator::propagateDataSlewDelayArc(std::size_t arc_idx, AnalysisType analysis_type, TransType input_trans_type)
 {
   Database& database = _database;
   Arc& arc = database.graph().arcs()[arc_idx];
-  const bool constant_driven = is_constant_driven_arc(arc);
-  if (_path_query.isDisableArc(arc) && !constant_driven && !force) {
+  if (_path_query.isDisableArc(arc)) {
     return;
   }
   if (shouldStopDataSlewPropagation(arc)) {
     return;
   }
-  const bool source_gated = constant_driven || force;
-  if (!source_gated
-      && !allowsTransition(database.network(), database.graph().simValues(), arc.get_source_pin(), input_trans_type, arc.get_type() == ArcType::kNet)) {
+  if (!allowsTransition(database.network(), database.graph().simValues(), arc.get_source_pin(), input_trans_type, arc.get_type() == ArcType::kNet)) {
     return;
   }
   TimingPoint& source_point = database.graph().sourcePoint(arc);
-  // A constant-driven net has no driver slew; a constant-driven cell arc is still
-  // evaluated, because REF reads the liberty table at input_slew = 0 there.
-  if (!hasDataSlew(source_point, analysis_type, input_trans_type) && !source_gated) {
+  if (!hasDataSlew(source_point, analysis_type, input_trans_type)) {
     return;
   }
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
   for (TransType output_trans_type : _path_query.getOutputTransTypeList(arc, analysis_type, input_trans_type)) {
-    if (!source_gated
-        && !allowsTransition(database.network(), database.graph().simValues(), arc.get_sink_pin(), output_trans_type, arc.get_type() == ArcType::kCell)) {
+    if (!allowsTransition(database.network(), database.graph().simValues(), arc.get_sink_pin(), output_trans_type, arc.get_type() == ArcType::kCell)) {
       continue;
     }
-    updateDataSlewDelay(arc, source_point, sink_point, analysis_type, input_trans_type, output_trans_type, force);
+    updateDataSlewDelay(arc, source_point, sink_point, analysis_type, input_trans_type, output_trans_type);
   }
 }
 
 void DataSlewPropagator::updateDataSlewDelay(Arc& arc, TimingPoint& source_point, TimingPoint& sink_point, AnalysisType analysis_type,
-                                             TransType input_trans_type, TransType output_trans_type, bool force)
+                                             TransType input_trans_type, TransType output_trans_type)
 {
   double input_slew = _path_query.getDataSlew(source_point, analysis_type, input_trans_type);
   std::optional<double> output_slew_input;
@@ -180,17 +99,12 @@ void DataSlewPropagator::updateDataSlewDelay(Arc& arc, TimingPoint& source_point
   }
   double arc_delay = dc_result->get_delay();
   double output_slew = dc_result->get_slew();
-  updateGraphArcDelay(arc, analysis_type, input_trans_type, output_trans_type, arc_delay, force);
-  updateDataSlew(sink_point, analysis_type, output_trans_type, output_slew, force);
+  updateGraphArcDelay(arc, analysis_type, input_trans_type, output_trans_type, arc_delay);
+  updateDataSlew(sink_point, analysis_type, output_trans_type, output_slew);
 }
 
-void DataSlewPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay,
-                                            bool force)
+void DataSlewPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay)
 {
-  if (force && std::isfinite(arc_delay)) {
-    arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type] = arc_delay;
-    return;
-  }
   if (arc.get_graph_delay_map().count(analysis_type) == 0 || arc.get_graph_delay_map()[analysis_type].count(input_trans_type) == 0
       || arc.get_graph_delay_map()[analysis_type][input_trans_type].count(output_trans_type) == 0
       || isBetterDelay(arc_delay, arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type], analysis_type)) {
@@ -198,15 +112,8 @@ void DataSlewPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_typ
   }
 }
 
-void DataSlewPropagator::updateDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double data_slew, bool force)
+void DataSlewPropagator::updateDataSlew(TimingPoint& timing_point, AnalysisType analysis_type, TransType trans_type, double data_slew)
 {
-  // A constant cone is resolved in a follow-up sweep, after the tied driver has
-  // picked up its own slew.  The min-slew rule would keep the placeholder zero
-  // written by that first sweep, so the re-sweep overwrites it.
-  if (force && std::isfinite(data_slew)) {
-    timing_point.get_data_slew_map()[analysis_type][trans_type] = data_slew;
-    return;
-  }
   if (!hasDataSlew(timing_point, analysis_type, trans_type)
       || isBetterSlew(data_slew, timing_point.get_data_slew_map()[analysis_type][trans_type], analysis_type)) {
     timing_point.get_data_slew_map()[analysis_type][trans_type] = data_slew;

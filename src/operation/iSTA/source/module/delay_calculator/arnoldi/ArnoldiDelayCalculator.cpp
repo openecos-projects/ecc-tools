@@ -17,1641 +17,327 @@
 #include "ArnoldiDelayCalculator.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <map>
-#include <tuple>
-#include <string>
-#include <cstddef>
-#include <cstdint>
-#include <cstring>
 #include <limits>
+#include <numeric>
 #include <optional>
-#include <string>
-#include <unordered_map>
 #include <utility>
-#include <vector>
 
 #include "ArnoldiWaveformSolver.hpp"
-#include "TimingTolerance.hpp"
+#include "ThresholdNormalizer.hpp"
 
 namespace ista {
 namespace {
+const double kRelativeTolerance = std::sqrt(std::numeric_limits<double>::epsilon());
+constexpr int kIterationLimit = 2 * std::numeric_limits<double>::digits;
+
 struct DriverFit
 {
   double resistance;
   double ramp;
   double start;
+  bool delay_identified;
 };
 
-// Rising response of a ramp source driving one capacitance through R.
-double driverVoltage(double time, double tau, double ramp)
+// A linear source ramp behind R drives C dv/dt = (u-v)/R. The measured
+// transition bounds R by the step-response span, R*C*log(upper/lower).
+// For each R, the slew determines the ramp; the local library load sensitivity
+// then determines R. This removes the unknown time origin
+// from the scalar solve. All voltage arguments describe the remaining swing.
+std::optional<DriverFit> fitDriver(double capacitance, double delay, double sensitivity, double slew,
+                                   double lower, double upper, double threshold, double plateau_factor)
 {
-  if (time <= 0.)
-    return 0.;
-  if (time <= ramp)
-    return (time + tau * std::expm1(-time / tau)) / ramp;
-  return 1. - tau / ramp * (-std::expm1(-ramp / tau)) * std::exp(-(time - ramp) / tau);
-}
-
-// Start time and resistance both have decreasing voltage residuals. Retain
-// the bracket when a Newton step leaves the physical interval.
-template <class Residual, class Derivative>
-bool solveDriverParameter(double& value, double lower, double upper, Residual residual, Derivative derivative)
-{
-  if (!(lower < upper) || residual(lower) < 0. || residual(upper) > 0.)
-    return false;
-  value = std::clamp(value, lower, upper);
-  for (int iteration = 0; iteration < 50; ++iteration) {
-    const double error = residual(value);
-    if (!std::isfinite(error))
-      return false;
-    if (std::abs(error) < .001)
-      return true;
-    if (error > 0.)
-      lower = value;
-    else
-      upper = value;
-    const double next = value - error / derivative(value);
-    value = std::isfinite(next) && next > lower && next < upper ? next : lower + .5 * (upper - lower);
-  }
-  return false;
-}
-
-// Fit a ramp source and series resistance to two neighboring delay samples
-// and one physical slew. A flat delay slope alone cannot identify the driver
-// waveform. Use bounded alternating solves; reject inconsistent table data.
-std::optional<DriverFit> fitDriver(double capacitance, double delay, double next_delay, double slew, double lower, double upper)
-{
-  const double voltage_log = std::log(upper / lower);
-  const double bound = slew / (voltage_log * capacitance);
-  const double next_capacitance = 1.01 * capacitance;
-  if (!(capacitance > 0. && slew > 0. && bound > 0.) || !std::isfinite(bound) || !std::isfinite(delay) || !std::isfinite(next_delay) || next_delay < delay
-      || next_delay - delay > .01 * capacitance * bound)
+  if (!(capacitance > 0. && slew > 0.) || !std::isfinite(delay) || !std::isfinite(sensitivity) || !std::isfinite(slew))
     return std::nullopt;
-  double resistance = .9 * bound;
-  const double span = slew / (upper - lower);
-  double ramp = .5 * span;
-  double start = delay - .5 * span;
-  double tolerance = .010001;
-  // reference keeps the closed-form driver resistance instead of fitting it. The
-  // initial value below, .9 * bound, IS that closed form: `bound` is slew/(vlog*C)
-  // with slew already carrying the arc derate, so .9*bound == .45*S/(ln(7/3)*C).
-  // With the closed form the 1% step residual cannot vanish, so it must be dropped
-  // from the acceptance test or every fit is rejected (measured: 983 -> 2424 when
-  // only the solve was skipped).
-  static const bool rd_closed_form = [] {
-    const char* e = std::getenv("ISTA_FIT_RD_CLOSED");
-    return e != nullptr && *e != '0';
-  }();
-  for (int iteration = 0; iteration < 50; ++iteration) {
-    if (iteration > 0 && iteration % 10 == 0)
-      tolerance *= 2.;
-    if (resistance >= bound)
-      resistance = .9 * bound;
-    const double tau = resistance * capacitance;
-    double ramp_lower = 0., ramp_upper = span;
-    double ramp_tolerance = .001;
-    bool ramp_converged = false;
-    for (int trial = 0; trial < 50; ++trial) {
-      const double actual = ArnoldiWaveformSolver::rampTime(1. / tau, ramp, lower) - ArnoldiWaveformSolver::rampTime(1. / tau, ramp, upper);
-      const double error = actual / slew - 1.;
-      if (std::abs(error) < ramp_tolerance) {
-        ramp_converged = true;
+  const double bound = (slew / std::log(upper / lower)) / capacitance;
+  if (!(bound > 0.) || !std::isfinite(bound))
+    return std::nullopt;
+  const double target = sensitivity;
+  const auto ramp_at = [&](double resistance) {
+    double ramp = 0.;
+    ArnoldiWaveformSolver::solveRamp(1. / (resistance * capacitance), slew, lower, upper, ramp);
+    return ramp;
+  };
+  const auto load_sensitivity = [&](double resistance, double ramp) {
+    return resistance * ArnoldiWaveformSolver::rampTimeSensitivity(1. / (resistance * capacitance), ramp, threshold);
+  };
+
+  // A nonpositive or unattainable delay sensitivity does not identify this
+  // two-parameter source. Use the slew-limited RC model in that case. The
+  // plateau endpoint is determined by the upper voltage threshold, so it has
+  // the same measured span as the ideal step and a finite charge window.
+  double resistance = bound;
+  double ramp = plateau_factor * resistance * capacitance;
+  // Delay sensitivity need not be monotone for asymmetric thresholds: a
+  // crossing can move through the end of the ramp. Find the first sign
+  // change before bisection, selecting the lowest-resistance solution when
+  // the observations admit multiple sources. An unbracketed fit uses the
+  // explicitly defined slew limit above.
+  double low = 0., high = 0.;
+  if (target > 0.) {
+    constexpr int kBracketIntervals = 64;
+    for (int interval = 1; interval <= kBracketIntervals; ++interval) {
+      const double candidate = bound * (static_cast<double>(interval) / kBracketIntervals);
+      const double candidate_ramp = interval == kBracketIntervals ? ramp : ramp_at(candidate);
+      if (!(candidate_ramp >= 0.) || !std::isfinite(candidate_ramp))
+        return std::nullopt;
+      if (load_sensitivity(candidate, candidate_ramp) >= target) {
+        high = candidate;
         break;
       }
-      if (error > 0.)
-        ramp_upper = ramp;
-      else
-        ramp_lower = ramp;
-      ramp = ramp_lower + .5 * (ramp_upper - ramp_lower);
-      if ((trial + 1) % 10 == 0)
-        ramp_tolerance *= 2.;
+      low = candidate;
     }
-    if (!ramp_converged || !(ramp > 0.) || !std::isfinite(ramp))
-      return std::nullopt;
-    // Select the derivative from the segment containing the target crossing.
-    // Switching segments at each trial gives a different stopping point near
-    // the ramp end, which can change the later network-limited decision.
-    const bool crossing_during_ramp = driverVoltage(ramp, tau, ramp) >= .5;
-    const auto start_residual = [&](double value) { return 2. * driverVoltage(delay - value, tau, ramp) - 1.; };
-    const auto start_derivative = [&](double value) {
-      const double time = delay - value;
-      return crossing_during_ramp ? 2. * std::expm1(-time / tau) / ramp : 2. * (std::exp(-time / tau) - std::exp(-(time - ramp) / tau)) / ramp;
-    };
-    if (!solveDriverParameter(start, delay - span, delay, start_residual, start_derivative))
-      return std::nullopt;
-    const double target = next_delay - start;
-    const auto resistance_residual = [&](double value) { return 2. * driverVoltage(target, value * next_capacitance, ramp) - 1.; };
-    const auto resistance_derivative = [&](double value) {
-      const double next_tau = value * next_capacitance;
-      const double end = driverVoltage(ramp, next_tau, ramp) >= .5 ? 0. : target - ramp;
-      return 2. * next_capacitance / ramp * ((1. + target / next_tau) * std::exp(-target / next_tau) - (1. + end / next_tau) * std::exp(-end / next_tau));
-    };
-    const double maximum_resistance = (delay - start) / (std::log(2.) * capacitance);
-    if (!rd_closed_form
-        && !solveDriverParameter(resistance, 1e-5, maximum_resistance, resistance_residual, resistance_derivative))
-      return std::nullopt;
-    const double pole = 1. / (resistance * capacitance);
-    const double actual_slew = ArnoldiWaveformSolver::rampTime(pole, ramp, lower) - ArnoldiWaveformSolver::rampTime(pole, ramp, upper);
-    const double residual = std::abs(actual_slew / slew - 1.) + 2. * std::abs(driverVoltage(delay - start, resistance * capacitance, ramp) - .5)
-                            + (rd_closed_form ? 0. : std::abs(resistance_residual(resistance)));
-    {
-      static const char* fp2 = std::getenv("ISTA_DUMP_FITDRV");
-      if (fp2 != nullptr) {
-        if (FILE* f2 = std::fopen(fp2, "a"); f2 != nullptr) {
-          std::fprintf(f2, "FD,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
-                       static_cast<int>(residual <= tolerance && resistance < bound),
-                       capacitance, slew, delay, next_delay, start, ramp, resistance, tau, tolerance);
-          std::fclose(f2);
-        }
-      }
-    }
-    if (residual <= tolerance && resistance < bound)
-      return DriverFit{resistance, ramp, start};
   }
-  return std::nullopt;
+  const bool delay_identified = high > low;
+  if (delay_identified) {
+    bool converged = false;
+    for (int iteration = 0; iteration < kIterationLimit; ++iteration) {
+      resistance = std::midpoint(low, high);
+      ramp = ramp_at(resistance);
+      if (!(ramp >= 0.) || !std::isfinite(ramp))
+        return std::nullopt;
+      const double residual = load_sensitivity(resistance, ramp) - target;
+      if (!std::isfinite(residual))
+        return std::nullopt;
+      if (std::abs(residual) <= 32. * std::numeric_limits<double>::epsilon() * std::max(bound, target)
+          || std::nextafter(low, high) == high) {
+        converged = true;
+        break;
+      }
+      if (residual > 0.)
+        high = resistance;
+      else
+        low = resistance;
+    }
+    if (!converged)
+      return std::nullopt;
+  }
+  if (ramp == 0.)
+    ramp = plateau_factor * resistance * capacitance;
+  const double crossing = ArnoldiWaveformSolver::rampTime(1. / (resistance * capacitance), ramp, threshold);
+  if (!(ramp > 0.) || !std::isfinite(ramp) || !std::isfinite(crossing))
+    return std::nullopt;
+  return DriverFit{resistance, ramp, delay - crossing, delay_identified};
+}
+
+bool validModel(const ParasiticArnoldiModel& model)
+{
+  if (!model.get_is_valid() || model.get_order() <= 0 || !(model.get_total_capacitance() > 0.)
+      || !std::isfinite(model.get_total_capacitance()) || !(model.get_sqrt_total_capacitance() > 0.)
+      || !std::isfinite(model.get_sqrt_total_capacitance()))
+    return false;
+  const auto order = static_cast<std::size_t>(model.get_order());
+  const auto terms = model.get_term_node_list().size();
+  if (terms == 0 || model.get_diagonal_list().size() != order || model.get_off_diagonal_list().size() + 1 != order
+      || model.get_projection_list().size() != order)
+    return false;
+  for (const auto& row : model.get_projection_list()) {
+    if (row.size() != terms || !std::all_of(row.begin(), row.end(), [](double value) { return std::isfinite(value); }))
+      return false;
+  }
+  return true;
 }
 }  // namespace
 
-thread_local const char* g_dump_out_pin = "-";
-thread_local const char* g_dump_source_pin_cstr = "";
-// effC carried across rd re-solve passes; see ISTA_KEEP_EFFC_ACROSS_PASS below.
-thread_local std::map<std::tuple<std::string, int, int>, double> g_effc_carry;
-thread_local int g_dump_analysis_type = 0;
-
-// Diagnostic: replace the converged driver triple (rd, ramp, ceff) with externally
-// supplied values. The three form one joint fixed point -- rd feeds gd into G and b
-// and so changes the poles, ramp is the equivalent source transition, and ceff is the
-// load the ramp is built for -- so injecting any one of them alone breaks the balance
-// and measures nothing. Injecting all three leaves only the network model, the pole
-// solver and the waveform crossing, which is what separates a Ceff-iteration error
-// from everything downstream.
-struct RefDriverTriple
+std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& timing_arc, TransType edge, double input_slew,
+                                                                   const ParasiticArnoldiModel& model) const
 {
-  double rd = 0.;
-  double ramp = 0.;
-  double ceff = 0.;
-};
-
-struct RefDriverTable
-{
-  bool loaded = false;
-  std::map<std::tuple<std::string, int, int>, RefDriverTriple> values;
-};
-
-thread_local RefDriverTable g_ref_driver_table;
-
-const RefDriverTriple* refDriverTriple(const char* pin, int analysis, int trans)
-{
-  if (!g_ref_driver_table.loaded) {
-    g_ref_driver_table.loaded = true;
-    const char* path = std::getenv("ISTA_REF_DRIVER");
-    if (path == nullptr || *path == '\0')
-      return nullptr;
-    FILE* fp = std::fopen(path, "r");
-    if (fp == nullptr)
-      return nullptr;
-    char line[512];
-    while (std::fgets(line, sizeof(line), fp) != nullptr) {
-      std::string text(line);
-      std::vector<std::string> part;
-      std::size_t start = 0;
-      while (true) {
-        std::size_t comma = text.find(',', start);
-        part.push_back(text.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
-        if (comma == std::string::npos)
-          break;
-        start = comma + 1;
-      }
-      if (part.size() < 6)
-        continue;
-      RefDriverTriple triple;
-      triple.rd = std::atof(part[3].c_str());
-      triple.ramp = std::atof(part[4].c_str());
-      triple.ceff = std::atof(part[5].c_str());
-      g_ref_driver_table.values[std::make_tuple(part[0], std::atoi(part[1].c_str()), std::atoi(part[2].c_str()))] = triple;
-    }
-    std::fclose(fp);
-  }
-  if (pin == nullptr)
-    return nullptr;
-  std::string key(pin);
-  for (char& ch : key) {
-    if (ch == ':')
-      ch = '/';
-  }
-  const auto it = g_ref_driver_table.values.find(std::make_tuple(key, analysis, trans));
-  if (it == g_ref_driver_table.values.end())
-    return nullptr;
-  return &it->second;
-}
-
-std::optional<ArnoldiDelayResult> ArnoldiDelayCalculator::calculate(TimingArc& timing_arc, TransType output_trans_type, double input_slew,
-                                                                    const ParasiticArnoldiModel& arnoldi_model, bool adjust_drive_resistance) const
-{
-  if (!arnoldi_model.get_is_valid() || arnoldi_model.get_order() <= 0 || arnoldi_model.get_total_capacitance() <= 0.0) {
+  if (!validModel(model) || !(input_slew >= 0.) || !std::isfinite(input_slew))
     return std::nullopt;
-  }
-  // A zero input slew means the arc has not been propagated yet. Fitting the
-  // driver there produces a model whose ramp is far shorter than the one the
-  // real slew would give, and that stale fit then feeds the
-  // waveform the SDF reports. ISTA_SKIP_ZERO_SLEW=1 refuses it instead.
-  static const bool skip_zero_slew = [] {
-    const char* e = std::getenv("ISTA_SKIP_ZERO_SLEW");
-    return e != nullptr && *e != '0';
-  }();
-  if (skip_zero_slew && !(input_slew > 0.0)) {
+  const auto delay_table = timing_arc.get_delay_table_map().find(edge);
+  const auto slew_table = timing_arc.get_slew_table_map().find(edge);
+  if (delay_table == timing_arc.get_delay_table_map().end() || slew_table == timing_arc.get_slew_table_map().end()
+      || delay_table->second.get_value_list().empty() || slew_table->second.get_value_list().empty())
     return std::nullopt;
-  }
-  double total_capacitance = arnoldi_model.get_total_capacitance();
-  double delay_at_total_capacitance = tableDelay(timing_arc, output_trans_type, input_slew, total_capacitance);
-  double delay_at_half_capacitance = tableDelay(timing_arc, output_trans_type, input_slew, 0.5 * total_capacitance);
-  double delay_resistance = 0.0;
-  if (total_capacitance > ista::kTimingTolerance) {
-    delay_resistance = (delay_at_total_capacitance - delay_at_half_capacitance) / (0.5 * total_capacitance);
-  }
-  if (!(delay_resistance > 0.0)) {
-    delay_resistance = 1.0;
-  }
-
-  double slew_derate = 1.0;
-  double lower_threshold = 0.1;
-  double upper_threshold = 0.9;
-  double voltage_log = 0.0;
-  double min_slew_factor = 0.0;
-  double x1 = 0.0;
-  double y1 = 0.0;
-  ArnoldiWaveformSolver::thresholds(timing_arc, output_trans_type, slew_derate, lower_threshold, upper_threshold, voltage_log, min_slew_factor, x1, y1);
-
-  double output_threshold = output_trans_type == TransType::kRise ? timing_arc.get_output_threshold_pct_rise() : timing_arc.get_output_threshold_pct_fall();
-  if (output_threshold > 1.)
-    output_threshold *= .01;
-  const bool supported_thresholds
-      = lower_threshold < .5 && upper_threshold > .5 && std::abs(lower_threshold + upper_threshold - 1.) < 1e-12 && std::abs(output_threshold - .5) < 1e-12;
-  // The driver model is built once for the specified output load, that is the
-  // total capacitance of the net. The effective capacitance only feeds the
-  // library lookup used for the delay and slew targets, so refitting the driver
-  // at each effective-capacitance trial would move the model away from the one
-  // built for the total load.
-  static const bool fit_at_total_c = [] {
-    const char* e = std::getenv("ISTA_FIT_AT_TOTAL_C");
-    return e != nullptr && std::atoi(e) != 0;
-  }();
-  auto fit_table = [&](double capacitance) -> std::optional<DriverFit> {
-    if (!supported_thresholds)
-      return std::nullopt;
-    if (fit_at_total_c) capacitance = total_capacitance;
-    {
-      {
-        static const char* fc = std::getenv("ISTA_DUMP_FITCALL");
-        if (fc != nullptr) {
-          if (FILE* f3 = std::fopen(fc, "a"); f3 != nullptr) {
-            std::fprintf(f3, "FC,%d,%.15g,%.15g,%.15g,%.15g\n", static_cast<int>(output_trans_type),
-                         capacitance, total_capacitance, input_slew,
-                         slew_derate * tableSlew(timing_arc, output_trans_type, input_slew, capacitance));
-            std::fclose(f3);
-          }
-        }
-      }
-      static const char* fd = std::getenv("ISTA_DUMP_FIT");
-      if (fd != nullptr) {
-        if (FILE* fp = std::fopen(fd, "a"); fp != nullptr) {
-          std::fprintf(fp, "FIT,%s,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%d,%.12g\n", g_dump_out_pin, capacitance,
-                       tableDelay(timing_arc, output_trans_type, input_slew, capacitance),
-                       tableDelay(timing_arc, output_trans_type, input_slew, 1.01 * capacitance),
-                       slew_derate * tableSlew(timing_arc, output_trans_type, input_slew, capacitance),
-                       slew_derate, lower_threshold, upper_threshold, static_cast<int>(output_trans_type), input_slew);
-          std::fclose(fp);
-        }
-      }
-    }
-    static const bool fit_slew_at_total = [] {
-      const char* e = std::getenv("ISTA_FIT_SLEW_AT_TOTAL_C");
-      return e != nullptr && *e != '0';
-    }();
-    static const double fit_slew_scale = [] {
-      const char* e = std::getenv("ISTA_FIT_SLEW_SCALE");
-      return e != nullptr ? std::atof(e) : 1.0;
-    }();
-    const double fit_slew_cap = fit_slew_at_total ? total_capacitance : capacitance;
-    auto fitted = fitDriver(capacitance, tableDelay(timing_arc, output_trans_type, input_slew, capacitance),
-                            tableDelay(timing_arc, output_trans_type, input_slew, 1.01 * capacitance),
-                            fit_slew_scale * slew_derate * tableSlew(timing_arc, output_trans_type, input_slew, fit_slew_cap),
-                            lower_threshold, upper_threshold);
-    // Diagnostic only: zero the ramp start so the Ceff loop has to absorb the
-    // distributed-vs-lumped delay difference instead of the fit's free parameter.
-    static const bool zero_start = [] {
-      const char* e = std::getenv("ISTA_FIT_START_ZERO");
-      return e != nullptr && *e != '0';
-    }();
-    if (zero_start && fitted)
-      fitted->start = 0.;
-    return fitted;
-  };
-  static const bool rd_at_effc = [] {
-    const char* e = std::getenv("ISTA_RD_AT_EFFC");
-    return e != nullptr && *e != '0';
-  }();
-  // Reference reports the ceff of the second Ceff update plus a further rd solve.
-  static const bool ref_ceff_rd_pair = [] {
-    const char* e = std::getenv("ISTA_REF_CEFF_RD_PAIR");
-    return e != nullptr && *e != '0';
-  }();
-  // Replace (rd, ramp) with the two closed forms recovered from the reference.
-  static const bool ref_triple_closed_form = [] {
-    const char* e = std::getenv("ISTA_REF_TRIPLE");
-    return e != nullptr && *e != '0';
-  }();
-  double drive_resistance = tableResistance(timing_arc, output_trans_type, input_slew, rd_at_effc ? total_capacitance : total_capacitance,
-                                           voltage_log, slew_derate, delay_resistance);
-  if (!(drive_resistance > 0.0 && drive_resistance < 100.0)) {
-    drive_resistance = 1.0;
-  }
-  {
-    static const char* rp = std::getenv("ISTA_DUMP_RD");
-    if (rp != nullptr) {
-      if (FILE* fp = std::fopen(rp, "a"); fp != nullptr) {
-        std::fprintf(fp, "RD,%s,%d,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g\n", g_dump_out_pin,
-                     static_cast<int>(output_trans_type), input_slew, total_capacitance,
-                     delay_at_total_capacitance, delay_at_half_capacitance, delay_resistance,
-                     drive_resistance, voltage_log, slew_derate);
-        std::fclose(fp);
-      }
-    }
-  }
-  // Diagnostic only: pin the drive resistance so the surrounding model can be
-  // compared against an external tool without the local fit moving underneath.
-  static const double forced_resistance = [] {
-    const char* e = std::getenv("ISTA_FORCE_DRIVE_RES");
-    return e != nullptr ? std::atof(e) : 0.0;
-  }();
-  double driver_ramp = tableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, total_capacitance, lower_threshold, upper_threshold, voltage_log,
-                                 slew_derate, min_slew_factor);
-  if (!(driver_ramp > 0.0 && driver_ramp < 100.0)) {
-    driver_ramp = 0.5;
-  }
-
-  const double charge_resistance = drive_resistance;
-  const double charge_ramp = driver_ramp;
-  static const bool disable_driver_fit = [] {
-    const char* env = std::getenv("ISTA_DISABLE_DRIVER_FIT");
-    return env != nullptr && std::atoi(env) != 0;
-  }();
-  auto driver_fit = (disable_driver_fit || forced_resistance > 0.) ? std::nullopt : fit_table(total_capacitance);
-  const bool joint_fit = driver_fit.has_value();
-  if (driver_fit) {
-    drive_resistance = driver_fit->resistance;
-    driver_ramp = driver_fit->ramp;
-  }
-  // ISTA_FORCE_REF_PARAMS=<file> pins (rd, delta_t) to an externally supplied
-  // driver model so the whole network solve (driver and every sink) runs with
-  // the same parameters. t0 is intentionally ignored: a uniform time shift
-  // leaves every net delay unchanged. File rows are
-  // "pin,analysis,trans,rd,t0,delta_t".
-  {
-    static const char* ref_env = std::getenv("ISTA_FORCE_REF_PARAMS");
-    static const std::unordered_map<std::string, std::array<double, 3>> ref_map = [] {
-      std::unordered_map<std::string, std::array<double, 3>> result;
-      if (ref_env == nullptr) return result;
-      FILE* f = std::fopen(ref_env, "r");
-      if (f == nullptr) return result;
-      char line[512];
-      while (std::fgets(line, sizeof(line), f) != nullptr) {
-        std::string text(line);
-        std::vector<std::string> part;
-        std::size_t start = 0;
-        while (true) {
-          std::size_t comma = text.find(',', start);
-          part.push_back(text.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
-          if (comma == std::string::npos) break;
-          start = comma + 1;
-        }
-        if (part.size() < 6) continue;
-        result[part[0] + "," + part[1] + "," + part[2]] = {std::atof(part[3].c_str()), std::atof(part[4].c_str()), std::atof(part[5].c_str())};
-      }
-      std::fclose(f);
-      return result;
-    }();
-    if (!ref_map.empty()) {
-      // The exported pin_attr model carries a separate parameter set per analysis
-      // type, so the lookup must key on it; collapsing to analysis 1 made every
-      // min-corner arc reuse the max-corner drive resistance. The map keys keep
-      // reference's '/' separator, while iSTA names instance pins with ':', so normalise
-      // before lookup exactly like RefDriverTable does.
-      std::string probe(g_dump_out_pin != nullptr ? g_dump_out_pin : "-");
-      for (char& ch : probe) {
-        if (ch == ':')
-          ch = '/';
-      }
-      const std::string key = probe + "," + std::to_string(static_cast<int>(g_dump_analysis_type)) + ","
-                              + std::to_string(static_cast<int>(output_trans_type));
-      auto it = ref_map.find(key);
-      if (it != ref_map.end() && it->second[0] > 0. && it->second[2] > 0.) {
-        drive_resistance = it->second[0];
-        driver_ramp = it->second[2];
-      }
-    }
-  }
-  {
-    static const char* dr_dump = std::getenv("ISTA_DUMP_DRIVER");
-    if (dr_dump != nullptr) {
-      if (FILE* dr_fp = std::fopen(dr_dump, "a"); dr_fp != nullptr) {
-        std::fprintf(dr_fp, "DRV,%s,%d,%d,%.12g,%.12g,%.12g,%.12g,%d,%.12g\n", g_dump_out_pin, g_dump_analysis_type,
-                     static_cast<int>(output_trans_type),
-                     total_capacitance, input_slew, drive_resistance, driver_ramp, joint_fit ? 1 : 0, delay_resistance);
-        std::fclose(dr_fp);
-      }
-    }
-  }
-
-  // Diagnostic: reference's ceff_params show that its driver 50% point is
-  // 1.5989*(rd*ceff) with a 0.16% spread and no dependence on input slew, i.e.
-  // the reference drives the reduced network with a STEP after folding the input
-  // ramp into Ceff. ISTA_STEP_DRIVER=1 collapses the ramp to a step so the
-  // normalised crossing can be compared directly.
-  {
-    static const bool step_driver = [] {
-      const char* e = std::getenv("ISTA_STEP_DRIVER");
-      return e != nullptr && *e != '0';
-    }();
-    if (step_driver && driver_ramp > 0.)
-      driver_ramp = 1e-9;
-  }
-  // Diagnostic: record the driver triple the network is actually built from, so a
-  // recorded FIN row can be tied to the waveform that produced a given crossing.
-  // FIN stores the value AFTER the Ceff loop; the first poleResidue call here runs
-  // before it, and fitDriver's own resistance is a third number, so the three have
-  // to be told apart explicitly.
-  static const char* pdr = std::getenv("ISTA_DUMP_POLERD");
-  auto dump_poler = [&](const char* tag, const ParasiticArnoldiPoleResidue& pr_ref) {
-    if (pdr == nullptr)
-      return;
-    if (FILE* f = std::fopen(pdr, "a"); f != nullptr) {
-      std::fprintf(f, "PR,%s,%s,%d,%d,rd=%.15g,ramp=%.15g,ctot=%.15g,fit_start=%.15g,fit_ramp=%.15g,np=%zu",
-                   tag, g_dump_out_pin, static_cast<int>(g_dump_analysis_type),
-                   static_cast<int>(output_trans_type), drive_resistance, driver_ramp,
-                   total_capacitance, driver_fit ? driver_fit->start : 0., driver_fit ? driver_fit->ramp : 0.,
-                   pr_ref.get_pole_list().size());
-      for (double pv : pr_ref.get_pole_list()) std::fprintf(f, ",p=%.15g", pv);
-      const auto& pol = pr_ref.get_pole_list();
-      if (!pr_ref.get_residue_list().empty())
-        for (double rv : pr_ref.get_residue_list().front()) std::fprintf(f, ",r=%.15g", rv);
-      for (std::size_t ti = 0; ti < pr_ref.get_residue_list().size(); ti++) {
-        double m1 = 0.;
-        const auto& rw = pr_ref.get_residue_list()[ti];
-        for (std::size_t k = 0; k < rw.size() && k < pol.size(); k++)
-          if (pol[k] > 0.) m1 += rw[k] / pol[k];
-        std::fprintf(f, ",term%zu=%.15g", ti, m1);
-      }
-      std::fprintf(f, ",rdctot=%.15g", drive_resistance * total_capacitance);
-      std::fprintf(f, "\n");
-      std::fclose(f);
-    }
-  };
-  ParasiticArnoldiPoleResidue pole_residue = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
-  if (!pole_residue.get_is_valid()) {
+  const double time_scale = timing_arc.get_time_unit_scale(), cap_scale = timing_arc.get_cap_unit_scale();
+  if (!(time_scale > 0. && cap_scale > 0.) || !std::isfinite(time_scale) || !std::isfinite(cap_scale))
     return std::nullopt;
-  }
-  dump_poler("pre", pole_residue);
-  double waveform_resistance = drive_resistance;
-  auto update_waveform = [&](bool force = false) {
-    // Reuse the network response within 5% relative conductance change.
-    // G = 1/R: compare to the last actual rebuild, not the last driver fit,
-    // so successive small changes cannot accumulate beyond the tolerance.
-    // The 5% relative-conductance window is iSTA's own invention; the reference has no
-    // such reuse in its iteration (each solve builds the response from the current
-    // source resistance). Exposing the window makes the two behaviours separable.
-    static const double reuse_tol = [] {
-      const char* e = std::getenv("ISTA_MODEL_REUSE_TOL");
-      return e != nullptr ? std::atof(e) : 0.05;
-    }();
-    if (force || std::abs(waveform_resistance / drive_resistance - 1.) > reuse_tol) {
-      dump_poler("rebuild_pre", pole_residue);
-      auto updated = ArnoldiWaveformSolver::poleResidue(arnoldi_model, drive_resistance);
-      if (!updated.get_is_valid())
-        return false;
-      pole_residue = std::move(updated);
-      waveform_resistance = drive_resistance;
-      dump_poler("rebuild_post", pole_residue);
-    }
-    return true;
-  };
-
-  static const bool keep_effc_across_pass = [] {
-    const char* e = std::getenv("ISTA_KEEP_EFFC_ACROSS_PASS");
-    return e != nullptr && *e != '0';
-  }();
-  double effective_capacitance = total_capacitance;
-  if (keep_effc_across_pass) {
-    auto it = g_effc_carry.find(std::make_tuple(g_dump_out_pin, g_dump_analysis_type, static_cast<int>(output_trans_type)));
-    if (it != g_effc_carry.end() && it->second > 0. && it->second < total_capacitance)
-      effective_capacitance = it->second;
-  }
-  // The crossing reference must use the same capacitance the driver model was
-  // fitted against, otherwise the fitted start no longer places the 50% point
-  // at the library delay.
-  const auto reference_capacitance = [&]() { return fit_at_total_c ? total_capacitance : effective_capacitance; };
-  bool request_adjustment = false;
-  auto network_limited = [&]() {
-    if (!adjust_drive_resistance || !supported_thresholds)
-      return false;
-    double midpoint = 0.;
-    ArnoldiWaveformSolver::crossingTime(driver_ramp, pole_residue, 0, .5, midpoint);
-    double step_voltage = 0.;
-    for (std::size_t pole = 0; pole < pole_residue.get_pole_list().size(); ++pole)
-      step_voltage += pole_residue.get_residue_list().front()[pole] * std::exp(-pole_residue.get_pole_list()[pole] * midpoint);
-    if (!(std::isfinite(midpoint) && std::isfinite(step_voltage) && 2. * std::abs(step_voltage - .5) < .45))
-      return false;
-    // REF only rescales the driver when "the drive resistor is much less than the
-    // impedance of the network to ground" (RC-009). Without that guard the raw
-    // step-voltage test fires on ordinary nets whose driver is far stronger than
-    // the wire, and the rescaled driver then displaces a correct fit. Compare
-    // against the dominant network impedance R_eff = tau_0 / C_total.
-    static const double driver_ratio_limit = [] {
-      const char* env = std::getenv("ISTA_NETWORK_LIMITED_RATIO");
-      return env != nullptr ? std::atof(env) : 0.0;
-    }();
-    if (driver_ratio_limit > 0.0) {
-      const auto& pole_list = pole_residue.get_pole_list();
-      if (!pole_list.empty() && pole_list.front() > 0.0 && total_capacitance > 0.0) {
-        const double network_impedance = 1.0 / (pole_list.front() * total_capacitance);
-        if (std::isfinite(network_impedance) && network_impedance > 0.0
-            && drive_resistance > driver_ratio_limit * network_impedance)
-          return false;
-      }
-    }
-    return true;
-  };
-  // Convergence is judged on the delay, not on the fitted waveform, with an 8%
-  // relative band plus a 0.25 ps absolute floor. The comparison must use the
-  // *same* quantity across iterations; the default scalar check compares the
-  // fitted waveform against the table at the current Ceff, which the fit itself
-  // satisfies, so it can never move Ceff. ISTA_MODEL_CEFF_ITER=1 selects the
-  // delay-based criterion instead.
-  static const bool ref_ceff_iter_env = [] {
-    const char* e = std::getenv("ISTA_MODEL_CEFF_ITER");
-    return e != nullptr && *e != '0';
-  }();
-  // Gate the delay-based criterion on the total RC: the 8%/0.25 ps band is far
-  // too wide for the picosecond-scale nets that dominate gcd, where the default
-  // path is already closer. ISTA_MODEL_CEFF_RC_MIN_PS sets the cutoff in ps.
-  static const double ref_ceff_rc_min_ps = [] {
-    const char* e = std::getenv("ISTA_MODEL_CEFF_RC_MIN_PS");
-    return e != nullptr ? std::atof(e) : 0.0;
-  }();
-  const bool ref_ceff_iter = ref_ceff_iter_env && total_capacitance > 0.0
-                            && [&] {
-                                 const auto& poles = pole_residue.get_pole_list();
-                                 if (poles.empty() || !(poles.front() > 0.0))
-                                   return true;
-                                 const double rc_ps = 1.0 / poles.front() * 1e3;
-                                 return rc_ps >= ref_ceff_rc_min_ps;
-                               }();
-  auto fit_load = [&](bool match_crossing) {
-    double lower_capacitance = 0.;
-    double upper_capacitance = std::numeric_limits<double>::infinity();
-    double previous_residual = std::numeric_limits<double>::infinity();
-    bool converged = false;
-    // Fit the distributed source crossing for both ordinary and adjusted
-    // two-load drivers. Charge matching remains the fallback for table data
-    // that cannot identify a consistent two-load driver waveform.
-    for (int32_t iter = 0; iter < 64; ++iter) {
-      // Diagnostic only (ISTA_DUMP_CEFFIN, ISTA_DUMP_CEFFIN_PIN): one CI row per Ceff
-      // round carrying every quantity the round consumed. The values are snapshotted
-      // at the moment the round's decision is taken; a quantity that the current path
-      // never produces prints as nan, never as a fabricated 0. With the env unset the
-      // only cost is one null check per round, so the default path is unchanged.
-      static const char* const ci_path = std::getenv("ISTA_DUMP_CEFFIN");
-      static const char* const ci_pin = std::getenv("ISTA_DUMP_CEFFIN_PIN");
-      const bool ci_on = ci_path != nullptr
-                         && (ci_pin == nullptr || ci_pin[0] == '\0' || std::strcmp(ci_pin, g_dump_out_pin) == 0);
-      double ci_fit_start = std::numeric_limits<double>::quiet_NaN();
-      double ci_source = std::numeric_limits<double>::quiet_NaN();
-      double ci_ref = std::numeric_limits<double>::quiet_NaN();
-      double ci_nominal = std::numeric_limits<double>::quiet_NaN();
-      double ci_actual = std::numeric_limits<double>::quiet_NaN();
-      auto emit_ci = [&](bool round_converged) {
-        if (!ci_on)
-          return;
-        if (FILE* f = std::fopen(ci_path, "a"); f != nullptr) {
-          std::fprintf(f, "CI,%s,%d,%d,%d,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%d\n",
-                       g_dump_out_pin, g_dump_analysis_type, static_cast<int>(output_trans_type), iter, input_slew,
-                       effective_capacitance, total_capacitance, drive_resistance, driver_ramp, ci_fit_start, ci_source,
-                       ci_ref, ci_nominal, ci_actual, round_converged ? 1 : 0);
-          std::fclose(f);
-        }
-      };
-      // Adjustment can be needed at total C or during a later Ceff trial.
-      // Testing only the final waveform can miss the branch altogether.
-      static const bool keep_ceff_on_limited = [] {
-        const char* env = std::getenv("ISTA_KEEP_CEFF_ON_LIMITED");
-        return env != nullptr && std::atoi(env) != 0;
-      }();
-      if (!match_crossing && network_limited()) {
-        request_adjustment = true;
-        if (!keep_ceff_on_limited)
-          return false;
-      }
-      double capacitance = 0.;
-      static const bool ref_outer_solver = [] {
-        const char* e = std::getenv("ISTA_REF_OUTER_SOLVER");
-        return e != nullptr && *e != '0';
-      }();
-      if (ref_outer_solver && !match_crossing) {
-        const auto fit0 = driver_fit ? std::optional<DriverFit>(*driver_fit) : fit_table(total_capacitance);
-        const double rd0 = fit0 ? fit0->resistance : drive_resistance;
-        const double st0 = fit0 ? fit0->start : 0.;
-        const double td0 = fit0 ? fit0->ramp : driver_ramp;
-        const double ct = total_capacitance > 0. ? total_capacitance : 1e-9;
-        // +0x20: t50 at C, frozen for the whole outer solve.
-        const double t50_at_c = tableDelay(timing_arc, output_trans_type, input_slew, ct);
-        auto outer_g = [&](double trial_c, double& tau_out) {
-          const double d_time = t50_at_c - st0;
-          const double y = rd0 * trial_c;
-          if (!(y > 0.) || !(td0 > 0.) || !std::isfinite(d_time))
-            return std::numeric_limits<double>::quiet_NaN();
-          const double e = std::exp(-d_time / y);
-          const double tau = d_time + y * (e - 1.);
-          tau_out = tau;
-          return (tau * (1. / td0) - .5) / .5;
-        };
-        double lo_c = 1e-9;
-        double hi_c = ct;
-        double trial = ct;
-        bool solved_c = false;
-        for (int round = 0; round < 50; ++round) {
-          const double tol = .001 * std::pow(2., std::min(4, round / 10));
-          double tau_v = 0.;
-          const double g = outer_g(trial, tau_v);
-          if (!std::isfinite(g))
-            break;
-          if (std::abs(g) < tol) {
-            solved_c = true;
-            break;
-          }
-          if (g < 0.)
-            hi_c = trial;
-          else
-            lo_c = trial;
-          // Analytic derivative of g wrt C: dtau/dC = rd*(1 - e^(-D/y)*(1 + D/y)),
-          // which matched reference's measured Newton denominator -16.997879520645593.
-          const double d_time = t50_at_c - st0;
-          const double y = rd0 * trial;
-          const double e = std::exp(-d_time / y);
-          const double dtau = rd0 * (1. - e * (1. + d_time / y));
-          const double slope = 2. * dtau / td0;
-          double next_c = std::abs(slope) > 1e-300 ? trial - g / slope : std::numeric_limits<double>::quiet_NaN();
-          if (!std::isfinite(next_c) || next_c <= lo_c || next_c >= hi_c)
-            next_c = .5 * (lo_c + hi_c);
-          trial = next_c;
-        }
-        {
-          static const char* pd = std::getenv("ISTA_DUMP_REF_CEFF");
-          if (pd != nullptr) {
-            if (FILE* pf = std::fopen(pd, "a"); pf != nullptr) {
-              std::fprintf(pf, "PC,%s,%d,%d,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%d\n", g_dump_out_pin,
-                           g_dump_analysis_type, static_cast<int>(output_trans_type), iter, trial,
-                           effective_capacitance, rd0, st0, td0, ct, static_cast<int>(solved_c));
-              std::fclose(pf);
-            }
-          }
-        }
-        if (solved_c) {
-          effective_capacitance = trial;
-          if (!update_waveform(true))
-            return false;
-          converged = true;
-          emit_ci(converged);
-          break;
-        }
-        return false;
-      }
-      if (match_crossing || driver_fit) {
-        double source_time = 0.;
-        ArnoldiWaveformSolver::crossingTime(driver_ramp, pole_residue, 0, .5, source_time);
-        // The distributed source crossing is compared against the same
-        // network's dominant time constant. Using the lumped rd*Cref instead
-        // leaves a systematic gap (2.68 ps on s13207 fanout_net_3 versus a
-        // 1.48 ps acceptance band). ISTA_MODEL_FIRST_POLE=1 makes the two
-        // paths describe one response by using the first Arnoldi pole.
-        static const bool ref_first_pole = [] {
-          const char* e = std::getenv("ISTA_MODEL_FIRST_POLE");
-          return e != nullptr && *e != '0';
-        }();
-        const auto& ref_poles = pole_residue.get_pole_list();
-        const bool use_pole = ref_first_pole && !ref_poles.empty() && ref_poles.front() > 0.;
-        const double reference = ArnoldiWaveformSolver::rampTime(
-            use_pole ? ref_poles.front() : 1. / (drive_resistance * reference_capacitance()), driver_ramp, .5);
-        const double nominal = tableDelay(timing_arc, output_trans_type, input_slew, effective_capacitance);
-        const double actual = source_time + (driver_fit ? driver_fit->start : nominal - reference);
-        // ISTA_DUMP_CEFFIN snapshot: the five quantities that only exist on the
-        // crossing/fitted path. driver_fit is std::optional, so its start is read
-        // through a null check and left as nan when the optional is empty.
-        ci_fit_start = driver_fit ? driver_fit->start : std::numeric_limits<double>::quiet_NaN();
-        ci_source = source_time;
-        ci_ref = reference;
-        ci_nominal = nominal;
-        ci_actual = actual;
-        // Accept the fitted model by its delay error before another Ceff update
-        // can distort it. Keep this same waveform intact for every receiver.
-        // Internal time is ns: 1% of 25 ps supplies a 0.25 ps absolute floor.
-        {
-          static const char* dbg = std::getenv("ISTA_DUMP_CEFF_DEBUG");
-          if (dbg != nullptr) {
-            if (FILE* f = std::fopen(dbg, "a"); f != nullptr) {
-              std::fprintf(f, "DBG,%s,iter=%d,source=%.12g,nominal=%.12g,actual=%.12g,effC=%.12g,totC=%.12g,match=%d,"
-                              "fitstart=%.12g,reference=%.12g,ramp=%.12g,rd=%.12g\n",
-                           g_dump_out_pin, iter, source_time, nominal, actual, effective_capacitance, total_capacitance,
-                           match_crossing ? 1 : 0, driver_fit ? driver_fit->start : 0., reference, driver_ramp,
-                           drive_resistance);
-              std::fclose(f);
-            }
-          }
-        }
-        // ISTA_CEFF_ALWAYS_TOTAL keeps the lookup load at the net total
-        // capacitance: on s13207 fanout_net_3 the reported total and effective
-        // capacitance are both 0.078191 pF.
-        // When the 1% acceptance band below rejects the iter=0 model, the loop
-        // otherwise takes exactly one crossingCapacitance step (0.94-0.97 x
-        // total) and stops, so effC never really iterates.
-        static const bool always_total = [] {
-          const char* e = std::getenv("ISTA_CEFF_ALWAYS_TOTAL");
-          return e != nullptr && *e != '0';
-        }();
-        if (always_total) {
-          converged = true;
-          emit_ci(converged);
-          break;
-        }
-        // The default 1% acceptance band is far tighter than the 8% used for
-        // convergence, so the iter=0 model is rejected on large nets where it
-        // would otherwise be accepted. ISTA_CEFF_ACCEPT_PCT sweeps the
-        // band; the default 1.0 keeps every existing result unchanged.
-        static const double accept_pct = [] {
-          const char* e = std::getenv("ISTA_CEFF_ACCEPT_PCT");
-          return e != nullptr ? std::atof(e) : 1.0;
-        }();
-        static const bool ref_a_criterion = [] {
-          const char* e = std::getenv("ISTA_REF_A_CRITERION");
-          return e != nullptr && *e != '0';
-        }();
-        // NOTE: the trial capacitance of this round is `effective_capacitance`; the
-        // newly solved `capacitance` is only produced further below, so the first
-        // version of this gate compared against an uninitialised value and never ran.
-        if (ref_a_criterion && !ref_ceff_iter && driver_fit && effective_capacitance > 0.) {
-          const double trial_c = effective_capacitance;
-          const double rd_trial = tableResistance(timing_arc, output_trans_type, input_slew, trial_c, voltage_log, slew_derate, delay_resistance);
-          const double next_delay = tableDelay(timing_arc, output_trans_type, input_slew, 1.01 * trial_c);
-          const double tau_next = 1.01 * trial_c * rd_trial;
-          const double d_next = next_delay - driver_fit->start;
-          if (tau_next > 0. && std::isfinite(d_next) && driver_ramp > 0.) {
-            const double a_next = driverVoltage(d_next, tau_next, driver_ramp);
-            const double g_next = (a_next - .5) / .5;
-            static const char* ad = std::getenv("ISTA_DUMP_A");
-            if (ad != nullptr) {
-              if (FILE* af = std::fopen(ad, "a"); af != nullptr) {
-                std::fprintf(af, "AG,%s,%d,%d,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%d\n", g_dump_out_pin,
-                             g_dump_analysis_type, static_cast<int>(output_trans_type), iter, trial_c, a_next, g_next,
-                             d_next, tau_next, driver_ramp, static_cast<int>(std::abs(g_next) < .001));
-                std::fclose(af);
-              }
-            }
-            if (std::abs(g_next) < .001) {
-              converged = true;
-              emit_ci(converged);
-              break;
-            }
-          }
-        } else if (!ref_ceff_iter && accept_pct > 0.
-            && std::abs(actual - nominal) < .01 * accept_pct * std::max(std::abs(actual), .025)) {
-          converged = true;
-          emit_ci(converged);
-          break;
-        }
-        // A per-arc delay report prints TotalC in its "Effective capacitance"
-        // fields, so the Ceff actually used has to be recovered from the
-        // reported cell delay. For gcd `fixio_net_0` the delay corresponds to
-        // 9.4996 fF against a 9.5255 fF total, i.e. a 0.27% reduction.
-        // The charge-based definition below is the classical Ceff; the crossing fit
-        // gives 0.916 x total and is far off, so allow selecting the charge model.
-        static const bool charge_ceff = [] {
-          const char* e = std::getenv("ISTA_USE_CHARGE_CEFF");
-          return e != nullptr && *e != '0';
-        }();
-        static const bool ref_ceff_newton = [] {
-          const char* e = std::getenv("ISTA_REF_CEFF_NEWTON");
-          return e != nullptr && *e != '0';
-        }();
-        const bool newton_ok = ref_ceff_newton && driver_ramp > 0. && drive_resistance > 0. && source_time > 0.
-                               && total_capacitance > 0. && std::isfinite(source_time);
-        if (newton_ok) {
-          const double delta = source_time;
-          const double lo = 1e-9;
-          const double hi = total_capacitance;
-          double ceff = .5 * (lo + hi);
-          bool solved = false;
-          int newton_used = 0;
-          for (int newton = 0; newton < 40; ++newton) {
-            newton_used = newton;
-            const double tau = drive_resistance * ceff;
-            if (!(tau > 0.) || !std::isfinite(tau))
-              break;
-            const double z = delta / tau;
-            const double ez = std::exp(-z);
-            const double q = (delta + tau * (ez - 1.)) / driver_ramp;
-            const double residual = 2. * q - 1.;
-            if (std::abs(residual) < 1e-3) {
-              solved = true;
-              break;
-            }
-            const double slope = (2. / driver_ramp) * drive_resistance * ((ez - 1.) + z * ez);
-            if (!std::isfinite(slope) || slope == 0.)
-              break;
-            double next = ceff - residual / slope;
-            if (!std::isfinite(next) || next < lo || next > hi)
-              next = .5 * (lo + hi);
-            ceff = next;
-          }
-          {
-            static const char* nw_dump = std::getenv("ISTA_DUMP_REF_NEWTON");
-            if (nw_dump != nullptr) {
-              if (FILE* nf = std::fopen(nw_dump, "a"); nf != nullptr) {
-                std::fprintf(nf, "NW,%s,%d,rd=%.12g,T=%.12g,delta=%.12g,Ctot=%.12g,ceff=%.12g,it=%d\n", g_dump_out_pin,
-                             iter, drive_resistance, driver_ramp, delta, total_capacitance, ceff, newton_used);
-                std::fclose(nf);
-              }
-            }
-          }
-          if (solved) {
-            capacitance = ceff;
-          } else {
-            const auto fallback = ArnoldiWaveformSolver::crossingCapacitance(driver_ramp, drive_resistance, total_capacitance, source_time, .5);
-            if (!fallback)
-              return false;
-            capacitance = *fallback;
-          }
-        } else {
-          const auto matched = ArnoldiWaveformSolver::crossingCapacitance(driver_ramp, drive_resistance, total_capacitance, source_time, .5);
-          if (!matched)
-            return false;
-          capacitance = *matched;
-        }
-        if (charge_ceff) {
-          const double charge = ArnoldiWaveformSolver::effectiveCapacitance(driver_ramp, drive_resistance, pole_residue, driver_ramp);
-          if (charge > 0.0 && std::isfinite(charge))
-            capacitance = charge;
-        }
-      } else {
-        capacitance = ArnoldiWaveformSolver::effectiveCapacitance(driver_ramp, drive_resistance, pole_residue, driver_ramp);
-      }
-      if (!std::isfinite(capacitance) || capacitance <= 0.0) {
-        return false;
-      }
-      static const double ref_ceff_tol = [] {
-        const char* e = std::getenv("ISTA_REF_CEFF_TOL");
-        return e != nullptr ? std::atof(e) : 0.001;
-      }();
-      if (ref_ceff_tol > 0. && effective_capacitance > 0.) {
-        const double rel_change = std::abs(capacitance - effective_capacitance) / effective_capacitance;
-        if (rel_change < ref_ceff_tol) {
-          converged = true;
-          emit_ci(converged);
-          break;
-        }
-      }
-      static const int ceff_max_iter = [] {
-        const char* e = std::getenv("ISTA_CEFF_MAX_ITER");
-        return e != nullptr ? std::atoi(e) : 4;
-      }();
-      static const int ceff_max_iter_rise = [] {
-        const char* e = std::getenv("ISTA_CEFF_MAX_ITER_RISE");
-        return e != nullptr ? std::atoi(e) : -1;
-      }();
-      static const int ceff_max_iter_fall = [] {
-        const char* e = std::getenv("ISTA_CEFF_MAX_ITER_FALL");
-        return e != nullptr ? std::atoi(e) : -1;
-      }();
-      const int dir_max_iter = (output_trans_type == TransType::kRise) ? ceff_max_iter_rise : ceff_max_iter_fall;
-      const int effective_max_iter = dir_max_iter >= 0 ? dir_max_iter : ceff_max_iter;
-      if (effective_max_iter >= 0 && iter >= effective_max_iter) {
-        effective_capacitance = capacitance;
-        if (!match_crossing && driver_fit) {
-          const auto stop_fit = fit_table(effective_capacitance);
-          if (stop_fit) {
-            // Keep the time origin, resistance and ramp from the same fit.
-            driver_fit = stop_fit;
-            drive_resistance = stop_fit->resistance;
-            if (stop_fit->ramp > 0. && std::isfinite(stop_fit->ramp))
-              driver_ramp = stop_fit->ramp;
-            if (!update_waveform(true))
-              return false;
-          }
-        }
-        converged = true;
-        emit_ci(converged);
-        break;
-      }
-      {
-        // Diagnostic only: record the raw Ceff update so a clamped or one-shot
-        // step is distinguishable from a converged iteration. ISTA_DUMP_CEFF_STEP
-        // gates the log.
-        static const char* cs = std::getenv("ISTA_DUMP_CEFF_STEP");
-        if (cs != nullptr) {
-          if (FILE* fp = std::fopen(cs, "a"); fp != nullptr) {
-            std::fprintf(fp, "CS,%s,%d,%d,%d,%.12g,%.12g,%.12g,%d\n", g_dump_out_pin, g_dump_analysis_type,
-                         static_cast<int>(output_trans_type), iter, capacitance, effective_capacitance, total_capacitance,
-                         match_crossing ? 1 : 0);
-            std::fclose(fp);
-          }
-        }
-      }
-      const auto next_fit = !match_crossing && driver_fit ? fit_table(capacitance) : std::nullopt;
-      if (!match_crossing && driver_fit && !next_fit)
-        return false;
-      const double ramp = next_fit ? next_fit->ramp
-                                   : tableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, capacitance, lower_threshold, upper_threshold,
-                                               voltage_log, slew_derate, min_slew_factor);
-      if (!std::isfinite(ramp) || ramp <= 0.0)
-        return false;
-      if (ref_ceff_iter && !match_crossing) {
-        // Convergence stops when the delay stops moving:
-        // |delay_new - delay_old| < max(8% * delay_new, 0.25 ps). The 8% band is
-        // wide, so the loop normally ends after one Ceff update.
-        const double delay_new = tableDelay(timing_arc, output_trans_type, input_slew, capacitance);
-        const double delay_old = tableDelay(timing_arc, output_trans_type, input_slew, effective_capacitance);
-        // `rc_ceff_delay_min_diff_ps_donotuse` carries a `donotuse` suffix, so the
-        // absolute floor may be inert in reference. ISTA_MODEL_CEFF_NO_FLOOR=1 drops it.
-        static const bool no_floor = [] {
-          const char* e = std::getenv("ISTA_MODEL_CEFF_NO_FLOOR");
-          return e != nullptr && *e != '0';
-        }();
-        const double tolerance = no_floor ? .08 * std::abs(delay_new) : std::max(.08 * std::abs(delay_new), .25e-3);
-        converged = std::abs(delay_new - delay_old) < tolerance;
-      } else {
-        converged = !match_crossing && std::abs(capacitance - effective_capacitance) <= 1e-7 * std::max(capacitance, effective_capacitance)
-                    && std::abs(ramp - driver_ramp) <= 1e-7 * std::max(ramp, driver_ramp);
-      }
-      emit_ci(converged);
-      {
-        static const char* cv_dump = std::getenv("ISTA_DUMP_CEFF_ITER");
-        if (cv_dump != nullptr) {
-          if (FILE* cv_fp = std::fopen(cv_dump, "a"); cv_fp != nullptr) {
-            std::fprintf(cv_fp, "CV,%s,%d,%d,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n", g_dump_out_pin, g_dump_analysis_type, iter,
-                         converged ? 1 : 0, capacitance, effective_capacitance, ramp, drive_resistance, total_capacitance,
-                         input_slew);
-            std::fclose(cv_fp);
-          }
-        }
-      }
-      if (converged) {
-        effective_capacitance = capacitance;
-        if (keep_effc_across_pass)
-          g_effc_carry[std::make_tuple(std::string(g_dump_out_pin), g_dump_analysis_type, static_cast<int>(output_trans_type))] = capacitance;
-        driver_ramp = ramp;
-        if (next_fit) {
-          driver_fit = next_fit;
-          drive_resistance = next_fit->resistance;
-          const double previous_resistance = waveform_resistance;
-          if (!update_waveform())
-            return false;
-          if (waveform_resistance != previous_resistance) {
-            // A changed response invalidates both the crossing and its bracket.
-            lower_capacitance = 0.;
-            upper_capacitance = previous_residual = std::numeric_limits<double>::infinity();
-            converged = false;
-            continue;
-          }
-        }
-        break;
-      }
-      // Solve matched(C) - C = 0. Nonlinear tables can make plain fixed-point
-      // iteration oscillate around a valid solution. Retain the residual-sign
-      // bracket and switch to bisection when iteration stops making progress.
-      // A joint fit may rebuild the response when C changes: keep contracting
-      // steps instead of jumping to a different network model. Fixed-R charge
-      // and adjusted fits retain periodic bisection, including slow contraction.
-      if (capacitance > effective_capacitance)
-        lower_capacitance = effective_capacitance;
-      else
-        upper_capacitance = effective_capacitance;
-      const double residual = std::abs(capacitance - effective_capacitance);
-      {
-        static const char* it_dump = std::getenv("ISTA_DUMP_CEFF_ITER");
-        if (it_dump != nullptr && iter >= 0) {
-          if (FILE* it_fp = std::fopen(it_dump, "a"); it_fp != nullptr) {
-            std::fprintf(it_fp, "IT,%s,%d,%.12g,%.12g,%.12g,%.12g,%.12g\n", g_dump_out_pin, iter, capacitance,
-                         effective_capacitance, driver_ramp, total_capacitance, residual);
-            std::fclose(it_fp);
-          }
-        }
-      }
-      static const double ref_ceff_relax = [] {
-        const char* e = std::getenv("ISTA_REF_CEFF_RELAX");
-        return e != nullptr ? std::atof(e) : 0.0;
-      }();
-      if (std::isfinite(upper_capacitance)
-          && ((iter >= 8 && (!driver_fit || residual >= previous_residual)) || capacitance <= lower_capacitance || capacitance >= upper_capacitance)) {
-        effective_capacitance = lower_capacitance + .5 * (upper_capacitance - lower_capacitance);
-      } else if (ref_ceff_relax > 0. && ref_ceff_relax < 1.) {
-        effective_capacitance = (1. - ref_ceff_relax) * effective_capacitance + ref_ceff_relax * capacitance;
-      } else {
-        effective_capacitance = capacitance;
-      }
-      previous_residual = residual;
-      if (!match_crossing && driver_fit) {
-        driver_fit = effective_capacitance == capacitance ? next_fit : fit_table(effective_capacitance);
-        if (!driver_fit)
-          return false;
-        drive_resistance = driver_fit->resistance;
-        if (rd_at_effc && effective_capacitance > 0.) {
-          const double effc_rd = tableResistance(timing_arc, output_trans_type, input_slew, effective_capacitance, voltage_log,
-                                                 slew_derate, delay_resistance);
-          if (effc_rd > 0. && std::isfinite(effc_rd))
-            drive_resistance = effc_rd;
-        }
-        driver_ramp = driver_fit->ramp;
-        const double previous_resistance = waveform_resistance;
-        if (!update_waveform())
-          return false;
-        if (waveform_resistance != previous_resistance) {
-          lower_capacitance = 0.;
-          upper_capacitance = previous_residual = std::numeric_limits<double>::infinity();
-        }
-      } else {
-        driver_ramp = tableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, effective_capacitance, lower_threshold, upper_threshold,
-                                voltage_log, slew_derate, min_slew_factor);
-        if (!(driver_ramp > 0.) || !std::isfinite(driver_ramp))
-          return false;
-      }
-    }
-    return converged;
-  };
-  static const bool force_match_crossing = [] {
-    const char* e = std::getenv("ISTA_FORCE_MATCH_CROSSING");
-    return e != nullptr && *e != '0';
-  }();
-  bool converged = fit_load(force_match_crossing);
-  {
-    static const bool keep_driver_at_total = [] {
-      const char* e = std::getenv("ISTA_KEEP_DRIVER_AT_TOTAL_C");
-      return e != nullptr && *e != '0';
-    }();
-    if (keep_driver_at_total && effective_capacitance > 0.) {
-      const auto total_fit = fit_table(total_capacitance);
-      if (total_fit) {
-        drive_resistance = total_fit->resistance;
-        driver_ramp = total_fit->ramp;
-        driver_fit = total_fit;
-        if (!update_waveform(true))
-          return std::nullopt;
-        if (const char* kd = std::getenv("ISTA_DUMP_KEEP_DRIVER")) {
-          if (FILE* kf = std::fopen(kd, "a"); kf != nullptr) {
-            std::fprintf(kf, "KD,%s,%d,%d,%.15g,%.15g,%.15g,%.15g\n", g_dump_out_pin,
-                         static_cast<int>(g_dump_analysis_type), static_cast<int>(output_trans_type),
-                         drive_resistance, driver_ramp, total_fit->start, effective_capacitance);
-            std::fclose(kf);
-          }
-        }
-      }
-    }
-  }
-  // Diagnostic ceiling: replace the solved Ceff for a pin with an externally supplied
-  // value (the reference's own ceff_params export) and rebuild the waveform. This answers
-  // "if Ceff were exactly the reference's, how many arcs would still miss", which tells a
-  // Ceff-equation error apart from every downstream error. Rows are
-  // "pin,analysis,trans,ceff" with pin as "<inst>:<port>".
-  {
-    static const char* fc_env = std::getenv("ISTA_FORCE_CEFF");
-    static const std::unordered_map<std::string, double> fc_map = [] {
-      std::unordered_map<std::string, double> m;
-      if (fc_env == nullptr) return m;
-      FILE* f = std::fopen(fc_env, "r");
-      if (f == nullptr) return m;
-      char line[512];
-      while (std::fgets(line, sizeof(line), f) != nullptr) {
-        std::string text(line);
-        std::vector<std::string> part;
-        std::size_t start = 0;
-        while (true) {
-          std::size_t comma = text.find(',', start);
-          part.push_back(text.substr(start, comma == std::string::npos ? std::string::npos : comma - start));
-          if (comma == std::string::npos) break;
-          start = comma + 1;
-        }
-        if (part.size() < 4) continue;
-        m[part[0] + "," + part[1] + "," + part[2]] = std::atof(part[3].c_str());
-      }
-      std::fclose(f);
-      return m;
-    }();
-    if (!fc_map.empty() && g_dump_out_pin != nullptr) {
-      const std::string key = std::string(g_dump_out_pin) + "," + std::to_string(static_cast<int>(g_dump_analysis_type)) + "," +
-                              std::to_string(static_cast<int>(output_trans_type));
-      const auto it = fc_map.find(key);
-      if (it != fc_map.end() && it->second > 0.) {
-        effective_capacitance = it->second;
-        const bool rebuilt = update_waveform(true);
-        if (const char* fd = std::getenv("ISTA_DUMP_FORCE_CEFF")) {
-          if (FILE* fp = std::fopen(fd, "a"); fp != nullptr) {
-            std::fprintf(fp, "FC,%s,%d,%d,%.15g,%d\n", g_dump_out_pin, static_cast<int>(g_dump_analysis_type),
-                         static_cast<int>(output_trans_type), effective_capacitance, rebuilt ? 1 : 0);
-            std::fclose(fp);
-          }
-        }
-        if (!rebuilt)
-          return std::nullopt;
-      }
-    }
-  }
-  if (!converged && joint_fit && !request_adjustment) {
-    // Shielding may enter a locally inconsistent LUT segment even when the
-    // initial two-load fit was feasible. Restart the charge model from its
-    // original state; never reuse a partial joint fit as a valid waveform.
-    driver_fit.reset();
-    drive_resistance = charge_resistance;
-    driver_ramp = charge_ramp;
-    effective_capacitance = total_capacitance;
-    if (!update_waveform(true))
-      return std::nullopt;
-    converged = fit_load(false);
-  }
-  bool resistance_adjusted = false;
-  static const bool keep_ceff_on_limited2 = [] {
-    const char* env = std::getenv("ISTA_KEEP_CEFF_ON_LIMITED");
-    return env != nullptr && std::atoi(env) != 0;
-  }();
-  if (request_adjustment && !keep_ceff_on_limited2) {
-    const double transition = slew_derate * tableSlew(timing_arc, output_trans_type, input_slew, total_capacitance);
-    const double adjusted
-        = (upper_threshold - .5) * transition / ((upper_threshold - lower_threshold) * std::log(.5 / (1. - upper_threshold)) * total_capacitance);
-    if (!(adjusted > 0.) || !std::isfinite(adjusted))
-      return std::nullopt;
-    driver_fit.reset();
-    drive_resistance = adjusted;
-    effective_capacitance = total_capacitance;
-    driver_ramp = tableRamp(timing_arc, output_trans_type, input_slew, drive_resistance, total_capacitance, lower_threshold, upper_threshold, voltage_log,
-                            slew_derate, min_slew_factor);
-    if (!update_waveform(true) || !(driver_ramp > 0.) || !std::isfinite(driver_ramp))
-      return std::nullopt;
-    // The adjusted driver matches its lumped table delay to the distributed
-    // source crossing; receiver delay and slew use this same fitted waveform.
-    converged = fit_load(true);
-    resistance_adjusted = converged;
-  }
-  if (!converged)
+  const bool falling = edge == TransType::kFall;
+  double lower = normalizedThreshold(falling ? timing_arc.get_slew_lower_threshold_pct_fall() : timing_arc.get_slew_lower_threshold_pct_rise());
+  double upper = normalizedThreshold(falling ? timing_arc.get_slew_upper_threshold_pct_fall() : timing_arc.get_slew_upper_threshold_pct_rise());
+  double threshold = normalizedThreshold(falling ? timing_arc.get_output_threshold_pct_fall() : timing_arc.get_output_threshold_pct_rise());
+  const double derate = timing_arc.get_slew_derate();
+  if (!(lower > 0. && upper < 1. && upper > lower && threshold > 0. && threshold < 1. && derate > 0.) || !std::isfinite(derate))
     return std::nullopt;
-
-  if (ref_ceff_rd_pair && effective_capacitance > 0.) {
-    // Solve rd once more AT the converged ceff and leave ramp alone.
-    const auto pair_fit = fit_table(effective_capacitance);
-    if (pair_fit) {
-      static const char* pr_dump = std::getenv("ISTA_DUMP_REF_PAIR");
-      if (pr_dump != nullptr) {
-        if (FILE* pp = std::fopen(pr_dump, "a"); pp != nullptr) {
-          std::fprintf(pp, "PAIR,%s,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n", g_dump_out_pin, g_dump_analysis_type,
-                       input_slew, effective_capacitance, pair_fit->resistance, pair_fit->ramp, pair_fit->start,
-                       drive_resistance, driver_ramp);
-          std::fclose(pp);
-        }
-      }
-      if (pair_fit->resistance > 0. && std::isfinite(pair_fit->resistance)) {
-        drive_resistance = pair_fit->resistance;
-        if (driver_fit)
-          driver_fit->resistance = pair_fit->resistance;
-        update_waveform(true);
-      }
-    }
-  }
-  if (ref_triple_closed_form && effective_capacitance > 0. && voltage_log > 0.) {
-    static const double ustar = [] {
-      // Largest root of 2(1 - e^-u) = u by Newton from 1.5.
-      double u = 1.5;
-      for (int i = 0; i < 60; ++i) {
-        const double f = 2. * (1. - std::exp(-u)) - u;
-        const double df = 2. * std::exp(-u) - 1.;
-        if (!std::isfinite(f) || std::abs(df) < 1e-12)
-          break;
-        u -= f / df;
-      }
-      return u;
-    }();
-    const double ref_slew = tableSlew(timing_arc, output_trans_type, input_slew, effective_capacitance);
-    const double ref_rd = 0.9 * slew_derate * ref_slew / (voltage_log * effective_capacitance);
-    const double ref_ramp = ustar * ref_rd * effective_capacitance;
-    static const char* ref_dump = std::getenv("ISTA_DUMP_REF_TRIPLE");
-    if (ref_dump != nullptr) {
-      if (FILE* tp = std::fopen(ref_dump, "a"); tp != nullptr) {
-        std::fprintf(tp, "reference,%s,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n", g_dump_out_pin, g_dump_analysis_type,
-                     input_slew, effective_capacitance, ref_slew, ref_rd, ref_ramp, drive_resistance, driver_ramp);
-        std::fclose(tp);
-      }
-    }
-    if (ref_rd > 0. && std::isfinite(ref_rd) && ref_ramp > 0. && std::isfinite(ref_ramp)) {
-      drive_resistance = ref_rd;
-      driver_ramp = ref_ramp;
-      if (driver_fit) {
-        driver_fit->resistance = ref_rd;
-        driver_fit->ramp = ref_ramp;
-      }
-      update_waveform(true);
-    }
+  if (!falling) {
+    const double previous_lower = lower;
+    lower = 1. - upper;
+    upper = 1. - previous_lower;
+    threshold = 1. - threshold;
   }
 
+  // The longest ramp whose upper crossing is at the ramp end satisfies
+  // (1-exp(-x))/x = upper. It is a geometry/threshold limit, independent of
+  // a particular library, technology, or timing scale.
+  double plateau_low = 0., plateau_high = 1. / upper;
+  for (int iteration = 0; iteration < kIterationLimit; ++iteration) {
+    const double point = std::midpoint(plateau_low, plateau_high);
+    if (point == plateau_low || point == plateau_high)
+      break;
+    if (-std::expm1(-point) / point > upper)
+      plateau_low = point;
+    else
+      plateau_high = point;
+  }
+  const double plateau_factor = std::midpoint(plateau_low, plateau_high);
+  const double total = model.get_total_capacitance();
+  struct Evaluation
   {
-    static const char* fd = std::getenv("ISTA_DUMP_FINAL");
-    if (fd != nullptr) {
-      if (FILE* fp = std::fopen(fd, "a"); fp != nullptr) {
-        const double fin_chord = (total_capacitance > ista::kTimingTolerance)
-                                     ? (tableDelay(timing_arc, output_trans_type, input_slew, total_capacitance)
-                                        - tableDelay(timing_arc, output_trans_type, input_slew, 0.5 * total_capacitance))
-                                           / (0.5 * total_capacitance)
-                                     : 0.;
-        const double fin_table = tableResistance(timing_arc, output_trans_type, input_slew, total_capacitance, voltage_log, slew_derate, fin_chord);
-        // The analysis type is prepended so the min/max corners reported by the
-        // reference (pin_attr ceff_params_min / _max) can be matched row by row.
-        std::fprintf(fp, "FIN,%s,%d,%d,%.12g,%.12g,%.12g,%.12g,%.12g,%d,%.12g,%.12g,%.12g,%.12g,%.12g\n", g_dump_out_pin,
-                     g_dump_analysis_type, static_cast<int>(output_trans_type), drive_resistance, driver_ramp,
-                     driver_fit ? driver_fit->start : 0., effective_capacitance, total_capacitance,
-                     driver_fit ? 1 : 0, input_slew, lower_threshold, upper_threshold, fin_chord, fin_table);
-        std::fclose(fp);
-      }
-    }
-  }
-  if (const RefDriverTriple* injected = refDriverTriple(g_dump_out_pin, g_dump_analysis_type, static_cast<int>(output_trans_type));
-      injected != nullptr && injected->ramp > 0. && injected->ceff > 0.) {
-    // Replace all three at once: rd only mattered during the reduction (the caller
-    // already used it for G and b), while ramp and ceff drive the waveform here.
-    effective_capacitance = injected->ceff;
-    // ISTA_INJECT_KEEP_FIT=1 keeps the fitted start instead of resetting driver_fit,
-    // separating the effect of the three values from the effect of dropping the
-    // fitted source time.
-    static const bool inject_keep_fit = [] {
-      const char* e = std::getenv("ISTA_INJECT_KEEP_FIT");
-      return e != nullptr && *e != '0';
-    }();
-    if (!inject_keep_fit)
-      driver_fit.reset();
-    driver_ramp = injected->ramp;
-    // The source resistance is an input to the reduction (poleResidue builds G from
-    // it), so replacing only ceff and ramp leaves the waveform built from iSTA's own
-    // rd. Setting it here and forcing a rebuild makes the injected triple complete.
-    static const bool inject_rd = [] {
-      const char* e = std::getenv("ISTA_INJECT_RD");
-      return e != nullptr && *e != '0';
-    }();
-    if (inject_rd && injected->rd > 0. && std::isfinite(injected->rd)) {
-      drive_resistance = injected->rd;
-      if (!update_waveform(true))
+    double capacitance;
+    double residual;
+    DriverFit driver;
+    ParasiticArnoldiPoleResidue waveform;
+  };
+  const double nominal_slew = derate * tableSlew(timing_arc, edge, input_slew, total);
+  const double nominal_sensitivity = tableSensitivity(timing_arc, edge, input_slew, total);
+  const double slew_bound = nominal_slew / (total * std::log(upper / lower));
+  if (!(slew_bound > 0.) || !std::isfinite(slew_bound) || !std::isfinite(nominal_sensitivity))
+    return std::nullopt;
+  // In the slow-ramp limit the load delay is R*C, so the local delay slope
+  // estimates R. Bound it by the observed RC slew. With nonpositive delay
+  // sensitivity, explicitly use that boundary as an approximate source.
+  // Keep this approximate source fixed throughout a charge-only restart.
+  const double charge_resistance = nominal_sensitivity > 0. ? std::min(nominal_sensitivity, slew_bound) : slew_bound;
+  const auto charge_driver = [&](double capacitance, double delay, double slew) -> std::optional<DriverFit> {
+    if (!(slew > 0.) || !std::isfinite(delay) || !std::isfinite(slew))
+      return std::nullopt;
+    const double tau = charge_resistance * capacitance;
+    double ramp = 0.;
+    if (slew > tau * std::log(upper / lower))
+      ArnoldiWaveformSolver::solveRamp(1. / tau, slew, lower, upper, ramp);
+    // An extrapolated table can demand a transition faster than this fixed
+    // resistance permits. Use its minimum RC span, with a finite charge window.
+    if (ramp == 0.)
+      ramp = plateau_factor * tau;
+    const double crossing = ArnoldiWaveformSolver::rampTime(1. / tau, ramp, threshold);
+    if (!(ramp > 0.) || !std::isfinite(ramp) || !std::isfinite(crossing))
+      return std::nullopt;
+    return DriverFit{charge_resistance, ramp, delay - crossing, false};
+  };
+  const auto solve_load = [&](bool charge_only) -> std::optional<Evaluation> {
+    const auto fixed_waveform = charge_only ? ArnoldiWaveformSolver::poleResidue(model, charge_resistance) : ParasiticArnoldiPoleResidue{};
+    if (charge_only && !fixed_waveform.get_is_valid())
+      return std::nullopt;
+    const auto evaluate = [&](double capacitance) -> std::optional<Evaluation> {
+      const double delay = tableDelay(timing_arc, edge, input_slew, capacitance);
+      const double slew = derate * tableSlew(timing_arc, edge, input_slew, capacitance);
+      const auto driver = charge_only ? charge_driver(capacitance, delay, slew)
+                                     : fitDriver(capacitance, delay, tableSensitivity(timing_arc, edge, input_slew, capacitance),
+                                                 slew, lower, upper, threshold, plateau_factor);
+      if (!driver || (!charge_only && !driver->delay_identified))
         return std::nullopt;
-    }
-  }
-  double table_delay = tableDelay(timing_arc, output_trans_type, input_slew, effective_capacitance);
-  double reference_time = ArnoldiWaveformSolver::rampTime(1.0 / (drive_resistance * reference_capacitance()), driver_ramp, 0.5);
-  std::vector<double> delay_list;
-  // Raw (offset-free) 50% crossing of the driver node, exported so the caller can
-  // test which reference point the net delay is measured from.
-  double driver_crossing_raw = 0.;
-  std::vector<double> slew_list;
-  static const bool net_delay_t50_diff = [] {
-    const char* env = std::getenv("ISTA_NETDELAY_T50DIFF");
-    return env != nullptr && std::atoi(env) != 0;
-  }();
-  double driver_crossing = 0.0;
-  bool have_driver_crossing = false;
-  if (net_delay_t50_diff) {
-    ArnoldiWaveformSolver::crossingTime(driver_ramp, pole_residue, 0, .5, driver_crossing);
-    have_driver_crossing = std::isfinite(driver_crossing);
-  }
-  for (std::size_t term_idx = 0; term_idx < arnoldi_model.get_term_node_list().size(); term_idx++) {
-    double upper_time = 0.0;
-    double middle_time = 0.0;
-    double lower_time = 0.0;
-    static const double ramp_scale = [] {
-      const char* e = std::getenv("ISTA_DRIVER_RAMP_SCALE");
-      return e != nullptr ? std::atof(e) : 1.0;
-    }();
-    static const double ramp_scale_rise = [] {
-      const char* e = std::getenv("ISTA_DRIVER_RAMP_SCALE_RISE");
-      return e != nullptr ? std::atof(e) : 1.0;
-    }();
-    static const double ramp_scale_fall = [] {
-      const char* e = std::getenv("ISTA_DRIVER_RAMP_SCALE_FALL");
-      return e != nullptr ? std::atof(e) : 1.0;
-    }();
-    const double dir_scale = (output_trans_type == TransType::kRise) ? ramp_scale_rise : ramp_scale_fall;
-    const double total_scale = ramp_scale * dir_scale;
-    const double used_ramp = (std::abs(total_scale - 1.0) > 1e-12 && driver_ramp > 0.0) ? driver_ramp * total_scale : driver_ramp;
-    ArnoldiWaveformSolver::crossingTime(used_ramp, pole_residue, term_idx, upper_threshold, upper_time, 0.5, middle_time, lower_threshold, lower_time);
-    {
-      static const char* tr = std::getenv("ISTA_DUMP_TERM_RESID");
-      if (tr != nullptr) {
-        if (FILE* rf = std::fopen(tr, "a"); rf != nullptr) {
-          const auto& tpl_r = arnoldi_model.get_term_pin_list();
-          const char* tpn_r = term_idx < tpl_r.size() ? tpl_r[term_idx].c_str() : "";
-          std::fprintf(rf, "R,%s,%d,%zu,%zu,poles=", tpn_r, static_cast<int>(output_trans_type),
-                       term_idx, pole_residue.get_pole_list().size());
-          for (double pv : pole_residue.get_pole_list()) std::fprintf(rf, "%.9g,", pv);
-          std::fprintf(rf, "resid=");
-          for (double rv : pole_residue.get_residue_list()[term_idx]) std::fprintf(rf, "%.12g,", rv);
-          std::fprintf(rf, "\n");
-          std::fclose(rf);
-        }
+      // A joint evaluation owns its resistance and modal response. The charge
+      // fallback uses one fixed conductance matrix throughout its iteration.
+      auto waveform = charge_only ? fixed_waveform : ArnoldiWaveformSolver::poleResidue(model, driver->resistance);
+      if (!waveform.get_is_valid())
+        return std::nullopt;
+      double matched = 0.;
+      if (!charge_only) {
+        double crossing = 0.;
+        ArnoldiWaveformSolver::crossingTime(driver->ramp, waveform, 0, threshold, crossing);
+        const auto capacitance_at_crossing = ArnoldiWaveformSolver::crossingCapacitance(driver->ramp, driver->resistance, total, crossing, threshold);
+        if (!capacitance_at_crossing)
+          return std::nullopt;
+        matched = *capacitance_at_crossing;
+      } else {
+        matched = ArnoldiWaveformSolver::effectiveCapacitance(driver->ramp, driver->resistance, waveform, driver->ramp);
       }
-    }
-    {
-      static const char* dd = std::getenv("ISTA_DUMP_DELAYCOMP");
-      if (dd != nullptr) {
-        if (FILE* dp = std::fopen(dd, "a"); dp != nullptr) {
-          const auto& tpl = arnoldi_model.get_term_pin_list();
-          const char* tpn = term_idx < tpl.size() ? tpl[term_idx].c_str() : "";
-          std::fprintf(dp, "%s,%d,%zu,%d,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%d,%.15g,%.15g\n", tpn, static_cast<int>(output_trans_type), term_idx, g_dump_analysis_type,
-                       middle_time, lower_time, upper_time,
-                       driver_fit ? driver_fit->start : (table_delay - reference_time), table_delay, reference_time, driver_fit ? 1 : 0,
-                       input_slew, effective_capacitance);
-          std::fclose(dp);
-        }
+      if (!(matched > 0.) || !std::isfinite(matched))
+        return std::nullopt;
+      return Evaluation{capacitance, std::min(matched, total) - capacitance, *driver, std::move(waveform)};
+    };
+    const auto converged = [](const Evaluation& state) {
+      return std::abs(state.residual) <= kRelativeTolerance * state.capacitance;
+    };
+    auto state = evaluate(total);
+    if (!state || converged(*state))
+      return state;
+    double low = 0., high = total;
+    if (state->residual > 0.)
+      return std::nullopt;
+    // A charge root may lie above a nonpositive-slew extrapolation. Locate
+    // its feasible lower side without accepting a jump as a residual zero.
+    bool bracketed = false;
+    for (int iteration = 0; iteration < kIterationLimit; ++iteration) {
+      const double capacitance = std::midpoint(low, high);
+      auto trial = evaluate(capacitance);
+      if (!trial) {
+        if (!charge_only || bracketed)
+          return std::nullopt;
+        low = capacitance;
+        continue;
       }
+      state = std::move(trial);
+      if (converged(*state))
+        return state;
+      if (state->residual > 0.) {
+        low = capacitance;
+        bracketed = true;
+      } else
+        high = capacitance;
+      if (std::nextafter(low, high) == high)
+        break;
     }
-    static const bool waveform_only = [] {
-      const char* env = std::getenv("ISTA_DELAY_WAVEFORM_ONLY");
-      return env != nullptr && std::atoi(env) != 0;
-    }();
-    if (net_delay_t50_diff && have_driver_crossing && std::isfinite(middle_time)) {
-      // Reference's own definition; may go slightly negative when the solver stops on
-      // the same point for driver and sink. SDF clips it to the 1 fs floor later.
-      delay_list.push_back(middle_time - driver_crossing);
-    } else {
-      static const bool table_offset = [] {
-        const char* e = std::getenv("ISTA_NETDELAY_TABLE_OFFSET");
-        return e != nullptr && *e != '0';
-      }();
-      const double crossing_offset
-          = (driver_fit && !table_offset) ? driver_fit->start : table_delay - reference_time;
-      {
-        // Full chain for one sink, so the reported delay can be decomposed without
-        // guessing which intermediate quantity is off.
-        static const char* nd = std::getenv("ISTA_DUMP_NETDELAY");
-        if (nd != nullptr) {
-          if (FILE* nf = std::fopen(nd, "a"); nf != nullptr) {
-            const std::string& term_name = arnoldi_model.get_term_node_list()[term_idx];
-            std::fprintf(nf,
-                         "ND,%s,%d,%d,%zu,%s,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g,%.12g\n",
-                         g_dump_out_pin, g_dump_analysis_type, static_cast<int>(output_trans_type), term_idx, term_name.c_str(), total_capacitance,
-                         effective_capacitance, drive_resistance, driver_ramp, driver_fit ? driver_fit->start : -999.,
-                         table_delay, reference_time, crossing_offset, middle_time,
-                         middle_time + crossing_offset, input_slew);
-            std::fclose(nf);
-          }
-        }
-      }
-      if (term_idx == 0)
-        driver_crossing_raw = middle_time;
-      delay_list.push_back(waveform_only ? middle_time : middle_time + crossing_offset);
-    }
-    {
-      static const char* wd = std::getenv("ISTA_DUMP_ARD_WAVE");
-      if (wd != nullptr && term_idx == 0 && input_slew > 1e-6) {
-        if (FILE* wf = std::fopen(wd, "a"); wf != nullptr) {
-          const auto& pl = pole_residue.get_pole_list();
-          const auto& rl = pole_residue.get_residue_list()[term_idx];
-          auto vat = [&](double tt) {
-            double vv = 0.0;
-            for (std::size_t pi = 0; pi < pl.size(); ++pi) {
-              const double pv = pl[pi], rv = pi < rl.size() ? rl[pi] : 0.0;
-              if (std::isinf(pv)) { vv += rv * std::max(0., 1. - tt / driver_ramp); continue; }
-              const double ref2 = pv * tt, pr2 = pv * driver_ramp;
-              vv += rv * ((tt < driver_ramp) ? (1.0 - tt / driver_ramp - std::expm1(-ref2) / pr2)
-                                             : (-std::exp(pr2 - ref2) * std::expm1(-pr2) / pr2));
-            }
-            return vv;
-          };
-          auto bisect = [&](double lvl) {
-            double lo_t = 0.0, hi_t = driver_ramp;
-            while (vat(hi_t) > lvl && hi_t < 1e3) hi_t *= 2.0;
-            for (int it = 0; it < 200; ++it) {
-              const double mt = 0.5 * (lo_t + hi_t);
-              if (vat(mt) > lvl) lo_t = mt; else hi_t = mt;
-            }
-            return 0.5 * (lo_t + hi_t);
-          };
-          const double b70 = bisect(0.7), b30 = bisect(0.3);
-          extern thread_local const char* g_dump_source_pin_cstr;
-          std::fprintf(wf, "ARD,%s,%s,%d,%d,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,%.15g,np=%zu\n",
-                       g_dump_out_pin, g_dump_source_pin_cstr, g_dump_analysis_type, static_cast<int>(output_trans_type), input_slew, driver_ramp, effective_capacitance,
-                       table_delay, reference_time, upper_time, lower_time, b70, b30,
-                       (lower_time - upper_time) / slew_derate, (b30 - b70) / slew_derate, pl.size());
-          std::fclose(wf);
-        }
-      }
-    }
-    slew_list.push_back((lower_time - upper_time) / slew_derate);
-  }
-  if (delay_list.empty() || slew_list.empty()) {
     return std::nullopt;
-  }
+  };
+  auto state = solve_load(false);
+  // A piecewise-linear LUT has discontinuous local sensitivities. If its
+  // joint model has no root, restart a single continuous charge equation;
+  // never mix definitions or publish a partially converged joint waveform.
+  if (!state)
+    state = solve_load(true);
+  if (!state)
+    return std::nullopt;
 
-  {
-    static const char* rr = std::getenv("ISTA_DUMP_RESISTANCE");
-    if (rr != nullptr) {
-      if (FILE* rf = std::fopen(rr, "a"); rf != nullptr) {
-        std::fprintf(rf, "%d,%d,%.15g,%.15g,%.15g,%.15g,%.15g\n", static_cast<int>(output_trans_type),
-                     resistance_adjusted ? 1 : 0, drive_resistance, effective_capacitance, total_capacitance, driver_ramp, table_delay);
-        std::fclose(rf);
-      }
-    }
+  std::vector<double> delays, slews;
+  for (std::size_t term = 0; term < model.get_term_node_list().size(); ++term) {
+    double early = 0., middle = 0., late = 0.;
+    ArnoldiWaveformSolver::crossingTime(state->driver.ramp, state->waveform, term, upper, early, threshold, middle, lower, late);
+    if (!std::isfinite(early) || !std::isfinite(middle) || !std::isfinite(late) || late < early)
+      return std::nullopt;
+    delays.push_back(middle + state->driver.start);
+    slews.push_back((late - early) / derate);
   }
-  return ArnoldiDelayResult{effective_capacitance, drive_resistance,        std::move(delay_list), std::move(slew_list),
-                            driver_ramp,           driver_crossing_raw,     waveform_resistance,
-                            std::move(pole_residue), resistance_adjusted};
+  return ArnoldiDelayResult{state->capacitance, state->driver.resistance, std::move(delays), std::move(slews),
+                           state->driver.ramp, std::move(state->waveform)};
 }
 
-double ArnoldiDelayCalculator::sourceResistance(TimingArc& timing_arc, TransType output_trans_type, double input_slew,
-                                                 double total_capacitance) const
+double ArnoldiDelayCalculator::tableDelay(TimingArc& timing_arc, TransType edge, double input_slew, double output_load)
 {
-  if (!(total_capacitance > 0.))
-    return 0.;
-  // Mirror the same two inputs calculate() derives before tableResistance so the
-  // probe returns the identical rd for the identical capacitance.
-  double slew_derate = 1.0;
-  double lower_threshold = 0.1;
-  double upper_threshold = 0.9;
-  double voltage_log = 0.0;
-  double min_slew_factor = 0.0;
-  double x1 = 0.0;
-  double y1 = 0.0;
-  ArnoldiWaveformSolver::thresholds(timing_arc, output_trans_type, slew_derate, lower_threshold, upper_threshold, voltage_log, min_slew_factor, x1, y1);
-  double delay_resistance = 0.0;
-  if (total_capacitance > ista::kTimingTolerance) {
-    const double delay_at_total_capacitance = tableDelay(timing_arc, output_trans_type, input_slew, total_capacitance);
-    const double delay_at_half_capacitance = tableDelay(timing_arc, output_trans_type, input_slew, 0.5 * total_capacitance);
-    delay_resistance = (delay_at_total_capacitance - delay_at_half_capacitance) / (0.5 * total_capacitance);
-  }
-  if (!(delay_resistance > 0.0))
-    delay_resistance = 1.0;
-  double drive_resistance = tableResistance(timing_arc, output_trans_type, input_slew, total_capacitance, voltage_log, slew_derate, delay_resistance);
-  if (!(drive_resistance > 0.0 && drive_resistance < 100.0))
-    drive_resistance = 1.0;
-  {
-    // Diagnostic: decompose rd into its inputs so it can be aligned field by
-    // field with the reference's printed {rd, t0, delta_t, ceff} record.
-    static const char* rdd = std::getenv("ISTA_DUMP_RD");
-    if (rdd != nullptr) {
-      extern thread_local const char* g_dump_out_pin;
-      if (FILE* rp = std::fopen(rdd, "a"); rp != nullptr) {
-        std::fprintf(rp, "RD,%s,rd=%.15g,delay_rd=%.15g,table_rd=%.15g,Ctot=%.15g,table_slew=%.15g,vlog=%.15g,derate=%.15g,lo=%.15g,hi=%.15g\n",
-                     g_dump_out_pin == nullptr ? "-" : g_dump_out_pin, drive_resistance, delay_resistance,
-                     tableSlew(timing_arc, output_trans_type, input_slew, total_capacitance) / (voltage_log * total_capacitance),
-                     total_capacitance, tableSlew(timing_arc, output_trans_type, input_slew, total_capacitance), voltage_log, slew_derate,
-                     lower_threshold, upper_threshold);
-        std::fclose(rp);
-      }
-    }
-  }
-  return drive_resistance;
-}
-
-double ArnoldiDelayCalculator::tableResistance(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double total_capacitance,
-                                               double voltage_log, double slew_derate, double delay_resistance)
-{
-  if (!(total_capacitance > 0.0 && voltage_log > 0.0)) {
-    return 0.0;
-  }
-  double table_slew = tableSlew(timing_arc, output_trans_type, input_slew, total_capacitance);
-  static const double ref_derate = [] {
-    const char* e = std::getenv("ISTA_RD_REF_DERATE");
-    return e != nullptr ? std::atof(e) : 0.9;
-  }();
-  static const double analytic_h = [] {
-    const double u = [] {
-      double lo = 1., hi = 2.;
-      for (int i = 0; i < 200; ++i) {
-        const double m = .5 * (lo + hi);
-        if (2. * (1. - std::exp(-m)) < m) lo = m; else hi = m;
-      }
-      return .5 * (lo + hi);
-    }();
-    const double tau = 1.;
-    const auto voltage = [&](double t) {
-      if (t <= u) return t / u - (tau / u) * (1. - std::exp(-t / tau));
-      const double k = (tau / u) * (1. - std::exp(-u / tau));
-      return 1. - k * std::exp(-(t - u) / tau);
-    };
-    const auto crossing = [&](double target) {
-      double lo = 0., hi = u;
-      if (voltage(u) < target) { lo = u; hi = u + 80. * tau; }
-      for (int i = 0; i < 200; ++i) {
-        const double m = .5 * (lo + hi);
-        if (voltage(m) < target) lo = m; else hi = m;
-      }
-      return .5 * (lo + hi);
-    };
-    return crossing(.7) - crossing(.3);
-  }();
-  static const bool use_analytic_h = [] {
-    const char* e = std::getenv("ISTA_RD_ANALYTIC_H");
-    return e != nullptr && *e != '0';
-  }();
-  const double effective_derate = ref_derate >= 0.0 ? ref_derate : slew_derate;
-  double transition_time = effective_derate * table_slew;
-  double drive_resistance = use_analytic_h ? (slew_derate * table_slew / (analytic_h * total_capacitance))
-                                           : (transition_time / (voltage_log * total_capacitance));
-  // reference does not clamp its drive resistance to the chord resistance taken
-  // from the table delay at C and C/2; on gcd that chord is 1.3% below the
-  // measured rise value and 6.8% above the measured fall value, so the clamp
-  // pulls both quadrants onto the wrong number. ISTA_NO_RD_CLAMP=1 disables it.
-  // The reference only ever lowers rd, and it lowers it to 0.9*S/(ln(7/3)*C) -- never
-  // to the chord resistance. This clamp pulls rd onto that chord instead, which is
-  // 3.9% below the reference value on fanout_net_34, so it is off by default.
-  // ISTA_NO_RD_CLAMP=0 restores it.
-  static const bool no_rd_clamp = [] {
-    const char* e = std::getenv("ISTA_NO_RD_CLAMP");
-    return e == nullptr || *e != '0';
-  }();
-  if (!no_rd_clamp && delay_resistance > 0.0 && drive_resistance > delay_resistance) {
-    drive_resistance = delay_resistance;
-  }
-  return drive_resistance;
-}
-
-extern thread_local const char* g_dump_source_pin_cstr;
-
-double ArnoldiDelayCalculator::tableRamp(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double drive_resistance, double capacitance,
-                                         double lower_threshold, double upper_threshold, double voltage_log, double slew_derate, double min_slew_factor)
-{
-  if (!(drive_resistance > 0.0 && capacitance > 0.0 && voltage_log > 0.0)) {
-    return 0.0;
-  }
-  double table_slew = tableSlew(timing_arc, output_trans_type, input_slew, capacitance);
-  static const double ramp_derate = [] {
-    const char* env = std::getenv("ISTA_RAMP_DERATE");
-    return env != nullptr ? std::atof(env) : -1.0;
-  }();
-  double transition_time = (ramp_derate >= 0.0 ? ramp_derate : slew_derate) * table_slew;
-  double min_slew = drive_resistance * capacitance * min_slew_factor;
-  if (voltage_log * drive_resistance * capacitance >= transition_time) {
-    return min_slew;
-  }
-  double ramp = min_slew + 0.3 * transition_time;
-  ArnoldiWaveformSolver::solveRamp(1.0 / (drive_resistance * capacitance), transition_time, lower_threshold, upper_threshold, ramp);
-  static const char* rr_dump = std::getenv("ISTA_DUMP_RAMP");
-  if (rr_dump != nullptr) {
-    if (FILE* rp = std::fopen(rr_dump, "a"); rp != nullptr) {
-      std::fprintf(rp, "RP,%s,%s,%d,%d,table_slew=%.15g transition=%.15g min_slew=%.15g ramp=%.15g R=%.15g C=%.15g early=%d\n",
-                   g_dump_out_pin == nullptr ? "-" : g_dump_out_pin, g_dump_source_pin_cstr,
-                   static_cast<int>(output_trans_type), static_cast<int>(timing_arc.get_trigger_trans_type()), table_slew, transition_time, min_slew,
-                   ramp, drive_resistance, capacitance, voltage_log * drive_resistance * capacitance >= transition_time ? 1 : 0);
-      std::fclose(rp);
-    }
-  }
-  return ramp;
-}
-
-double ArnoldiDelayCalculator::tableDelay(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double output_load)
-{
-  if (timing_arc.get_delay_table_map().count(output_trans_type) == 0) {
-    return 0.0;
-  }
-  double converted_output_load = output_load * timing_arc.get_cap_unit_scale();
-  double table_slew = input_slew * timing_arc.get_time_unit_scale();
-  {
-    static const bool table_float32 = [] {
-      const char* e = std::getenv("ISTA_TABLE_FLOAT32");
-      return e == nullptr || *e != '0';
-    }();
-    if (table_float32) {
-      table_slew = static_cast<double>(static_cast<float>(table_slew));
-      converted_output_load = static_cast<double>(static_cast<float>(converted_output_load));
-    }
-  }
-  double delay = timing_arc.get_delay_table_map()[output_trans_type].findValue(table_slew, converted_output_load);
-  {
-    // Diagnostic only: the two NLDM axes reference reports as Input transition
-    // time and Effective capacitance, so the cell-arc gap can be attributed.
-    static const char* cp = std::getenv("ISTA_DUMP_CELLLOOKUP");
-    if (cp != nullptr) {
-      if (FILE* fp = std::fopen(cp, "a"); fp != nullptr) {
-        std::fprintf(fp, "CL,%s,%d,%d,%.17g,%.17g,%.17g,%d,%s\n", g_dump_out_pin == nullptr ? "-" : g_dump_out_pin,
-                     static_cast<int>(output_trans_type), static_cast<int>(timing_arc.get_trigger_trans_type()), input_slew,
-                     converted_output_load, delay / timing_arc.get_time_unit_scale(), timing_arc.get_arc_idx(),
-                     timing_arc.get_sdf_cond().c_str());
-        std::fclose(fp);
-      }
-    }
-  }
+  const double delay = timing_arc.get_delay_table_map().at(edge).findValue(input_slew * timing_arc.get_time_unit_scale(),
+                                                                         output_load * timing_arc.get_cap_unit_scale());
   return delay / timing_arc.get_time_unit_scale();
 }
 
-double ArnoldiDelayCalculator::tableSlew(TimingArc& timing_arc, TransType output_trans_type, double input_slew, double output_load)
+double ArnoldiDelayCalculator::tableSlew(TimingArc& timing_arc, TransType edge, double input_slew, double output_load)
 {
-  if (timing_arc.get_slew_table_map().count(output_trans_type) == 0) {
-    return input_slew;
-  }
-  double converted_output_load = output_load * timing_arc.get_cap_unit_scale();
-  double slew = timing_arc.get_slew_table_map()[output_trans_type].findValue(input_slew * timing_arc.get_time_unit_scale(), converted_output_load);
+  const double slew = timing_arc.get_slew_table_map().at(edge).findValue(input_slew * timing_arc.get_time_unit_scale(),
+                                                                       output_load * timing_arc.get_cap_unit_scale());
   return slew / timing_arc.get_time_unit_scale();
 }
 
+double ArnoldiDelayCalculator::tableSensitivity(TimingArc& timing_arc, TransType edge, double input_slew, double output_load)
+{
+  auto& table = timing_arc.get_delay_table_map().at(edge);
+  const auto& axes = table.get_axis_list();
+  const std::size_t axis_index = table.get_variable_type1() == TimingTableVariableType::kOutputCapacitance ? 0 : 1;
+  if ((axis_index == 1 && table.get_variable_type2() != TimingTableVariableType::kOutputCapacitance)
+      || axis_index >= axes.size() || axes[axis_index].size() < 2)
+    return 0.;
+  const auto& axis = axes[axis_index];
+  const double cap_scale = timing_arc.get_cap_unit_scale();
+  // Match findValue's right-hand segment at an interior knot and its end
+  // segments for extrapolation. No sample distance or perturbation is needed.
+  auto end = std::upper_bound(axis.begin(), axis.end(), output_load * cap_scale);
+  if (end == axis.begin())
+    ++end;
+  if (end == axis.end())
+    --end;
+  const double high = *end, low = *(end - 1);
+  if (std::abs(high - low) < ista::kTimingTolerance)
+    return 0.;
+  const double slew = input_slew * timing_arc.get_time_unit_scale();
+  return (table.findValue(slew, high) - table.findValue(slew, low)) / (high - low)
+         * cap_scale / timing_arc.get_time_unit_scale();
+}
 }  // namespace ista

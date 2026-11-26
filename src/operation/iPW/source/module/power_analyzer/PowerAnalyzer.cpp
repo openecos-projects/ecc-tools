@@ -498,8 +498,7 @@ double PowerAnalyzer::getTimingPowerArcOutputLoad(Instance& instance, TimingPowe
     return 0.0;
   }
   std::string output_pin_name = instance.get_instance_name() + ":" + timing_power_arc.get_sink_port();
-  // Match OpenSTA's power loadCap(..., MinMax::max()) convention: use the
-  // maximum of the two total net loads. This is a tool/model convention,
+  // Use the maximum of the two total net loads. This is a model convention,
   // not a general physical rule for reducing edge-dependent capacitance.
   return std::max(
       PWDC.getPowerOutputLoad(output_pin_name, AnalysisType::kMax, TransType::kRise),

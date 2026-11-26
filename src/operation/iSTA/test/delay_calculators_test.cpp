@@ -95,6 +95,35 @@ void testSmallRcCharge()
     require(std::abs(capacitance - 1.) < 1e-10, "fast RC pole changed a physical capacitor's charge");
   }
 }
+
+void testStepPlateauDriver()
+{
+  using namespace ista;
+  for (double capacitance : {.1, .2, 1.}) {
+    for (double slew : {.1, .2, .7, .9, 1., 2., 3.}) {
+      ParasiticArnoldiModel model;
+      model.set_is_valid(true);
+      model.set_order(1);
+      model.set_total_capacitance(capacitance);
+      model.set_sqrt_total_capacitance(std::sqrt(capacitance));
+      model.set_diagonal_list({0.});
+      model.set_projection_list({{1. / std::sqrt(capacitance)}});
+      model.set_term_node_list({"driver"});
+      TimingArc arc;
+      auto& delay = arc.get_delay_table_map()[TransType::kRise];
+      delay.set_variable_type1(TimingTableVariableType::kOutputCapacitance);
+      delay.set_axis_list({{0., 1.}});
+      delay.set_value_list({0., 50.});
+      arc.get_slew_table_map()[TransType::kRise].set_value_list({slew});
+      // The slew-derived R makes the RC step span equal the table slew.
+      // A steeper delay slope selects the charge model instead of a joint fit.
+      const auto result = ArnoldiDelayCalculator{}.calculate(arc, TransType::kRise, .1, model);
+      require(result && result->driver_ramp > 0., "step plateau lost the positive driver-ramp convention");
+      require(near(result->slews.at(0), slew), "step plateau changed the table slew");
+    }
+  }
+}
+
 double loadCrossing(double ramp, double threshold)
 {
   // Independent bisection of the integrated two-pole impulse response.
@@ -152,6 +181,7 @@ int main()
   testDmpCrossing();
   testInputPortResponse();
   testSmallRcCharge();
+  testStepPlateauDriver();
   // One RC step crosses 50% at tau * ln(2); a zero-pole ideal ramp at half its width.
   const std::vector<double> weights{1.0}, time_constants{2.0}, ideal{0.0};
   require(near(ArnoldiWaveformSolver::inputPortCrossing(time_constants, weights, 0.0, 0.5), 1.3862943611198906), "input-port step crossing changed");

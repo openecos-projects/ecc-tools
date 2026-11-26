@@ -34,7 +34,16 @@ int main()
   require(config.output_timing_reports == 1 && config.output_timing_features == 1 && config.timing_path_limit == 20 && config.min_slew_degradation == 0
               && config.adjust_driver_resistance == 0 && config.timing_corner.empty(),
           "default export config");
-  require(config.small_rc_fanout_reduction == 1 && config.check_constant_capacitance == 0, "default calculation/check policy changed");
+  require(config.check_constant_capacitance == 0, "default calculation/check policy changed");
+  const double default_limit = config.small_net_limit_ps;
+  for (double value : {0., 2., 5.}) {
+    options = {{"-small_net_limit_ps", value}};
+    STADM.readConfig(options);
+    require(config.small_net_limit_ps == value, "small network limit lost its ps-valued override");
+  }
+  options.clear();
+  STADM.readConfig(options);
+  require(config.small_net_limit_ps == default_limit, "small network limit leaked across initialization");
   options = {{"-nworst", int32_t{4}}, {"-thread_number", int32_t{0}}};
   STADM.readConfig(options);
   require(config.path_report_number == 4 && !config.is_path_report_number_specified, "nworst did not raise implicit max_paths");
@@ -53,7 +62,6 @@ int main()
              {"-timing_path_limit", int32_t{9}},
              {"-min_slew_degradation", int32_t{1}},
              {"-adjust_driver_resistance", int32_t{0}},
-             {"-small_rc_fanout_reduction", int32_t{0}},
              {"-check_constant_capacitance", int32_t{1}}};
   STADM.readConfig(options);
   require(config.path_report_number == 5 && config.endpoint_path_report_number == 8 && config.is_path_report_number_specified,
@@ -65,10 +73,10 @@ int main()
               && config.output_timing_features == 0 && config.timing_path_limit == 9 && config.min_slew_degradation == 1
               && config.adjust_driver_resistance == 0,
           "explicit config changed");
-  require(config.small_rc_fanout_reduction == 0 && config.check_constant_capacitance == 1, "explicit calculation/check policy ignored");
+  require(config.check_constant_capacitance == 1, "explicit calculation/check policy ignored");
   options.clear();
   STADM.readConfig(options);
-  require(config.small_rc_fanout_reduction == 1 && config.check_constant_capacitance == 0, "calculation/check policy leaked across initialization");
+  require(config.check_constant_capacitance == 0, "calculation/check policy leaked across initialization");
   require(!config.has_timing_report_slack_lesser_than && !config.has_timing_report_slack_greater_than && config.timing_report_slack_lesser_than == 0.25
               && config.timing_report_slack_greater_than == -0.75,
           "repeat import must disable bounds while retaining inactive values");

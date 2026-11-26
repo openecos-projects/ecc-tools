@@ -395,9 +395,9 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         if (std::get<3>(key) != source_role)
           continue;
         // The output electrical role of an inout PAD must not feed the PAD's
-        // input receiver. OpenSTA keeps these vertices separate; retaining
-        // this edge would create a false internal loop and a large bogus
-        // arrival at GPIO/SD input endpoints.
+        // input receiver. Keep these vertices separate; retaining this edge
+        // would create a false internal loop and a large bogus arrival at
+        // GPIO/SD input endpoints.
         if (cell && isolated_slew_pins.contains(arc.source_pin) && view.states[source].source_type == 2) {
           continue;
         }

@@ -99,9 +99,6 @@ void buildLibHeader(idb::LibLibrary& lib_library, LibertyLibrary& timing_library
     lib_library.set_cap_unit(idb::CapacitiveUnit::kPF);
     lib_library.set_resistance_unit(idb::ResistanceUnit::kkOHM);
   }
-  if (lib_library.get_library_features().empty()) {
-    lib_library.add_library_feature("report_delay_calculation");
-  }
 }
 
 std::unique_ptr<idb::LibCell> buildLibCell(idb::LibLibrary& lib_library, CharacterizedLibrary& tc_lib)

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <map>
 #include <stdexcept>
@@ -151,7 +152,18 @@ int main()
 
   tcl::registerCmdSTA();
   auto* engine = ecc::ScriptEngine::getOrCreateInstance();
-  for (const auto* option : {"-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
+  for (double value : {-1., std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    std::string diagnostic;
+    require(!sta.tryInitConstraints({{"-small_net_limit_ps", value}}, diagnostic) && !diagnostic.empty(),
+            "constraint-only initialization accepted an invalid small network limit");
+    require(sta.isTimingReady(), "constraint-only validation destroyed the live timing session");
+  }
+  for (const auto* value : {"-1", "Inf", "NaN"}) {
+    const std::string command = std::string("init_sta -small_net_limit_ps ") + value;
+    require(engine->evalString(command.c_str()) == TCL_ERROR, "invalid small network limit was accepted by Tcl");
+    require(sta.isTimingReady(), "invalid small network limit destroyed the live timing session");
+  }
+  for (const auto* option : {"-check_constant_capacitance"}) {
     const std::string command = std::string("init_sta ") + option + " 2";
     require(engine->evalString(command.c_str()) == TCL_ERROR, "invalid calculation/check switch was accepted by Tcl");
     require(sta.isTimingReady(), "invalid switch mutated the live timing session");

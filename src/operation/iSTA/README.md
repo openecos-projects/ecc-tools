@@ -50,51 +50,55 @@ same LEF POWER or GROUND type, without conflicting PG port types. Mixed nets
 with logic pins, and explicitly typed clock/reset/scan/tie-off nets, are not
 reclassified. Net names such as VDD/VSS alone are not evidence of supply use.
 
-## Driver fitting and minimum slew
+## Driver and receiver waveforms
 
-`init_sta -adjust_driver_resistance 1` allows the Arnoldi driver model to adjust
-its resistance when the distributed source waveform meets the network-limited
-voltage criterion. The adjusted model matches its lumped table crossing to the
-distributed source crossing; cell and wire values share the resulting waveform.
-`-adjust_driver_resistance 0` (the default) retains the unadjusted driver fit.
+The distributed calculator uses a linear voltage ramp behind a source resistance.
+It obtains the physical transition span from the library slew and derate. For a
+trial effective load C, it matches the local load derivative of the interpolated
+delay table together with that span. The derivative comes from the active table
+segment, including its extrapolation segments and axis/unit conventions. The
+delay at C sets the time origin, so translating a delay table
+does not change resistance, ramp width, effective load, or receiver slew.
 
-The adjustment remains experimental and is off by default. Validate its effect
-on the intended designs, particularly networks with large resistance and capacitance,
-before enabling it.
+Asymmetric thresholds can admit multiple parameter pairs. A 64-interval search
+brackets the first detected solution in increasing resistance, then bisection
+solves it. This finite search does not establish uniqueness or guarantee finding
+an arbitrarily narrow solution interval. The output crossing derivative follows
+directly from the linear-ramp RC response; no finite load perturbation is used.
 
-Adjustment requires symmetric slew thresholds around a 50% output delay
-threshold; other conventions retain the ordinary driver model. Select the
-same adjustment policy when comparing with a reference run.
+For an identifiable driver, effective capacitance equates the distributed source
+threshold time with its lumped RC counterpart. At convergence the source delay
+agrees with the library delay at that load. Every changed resistance rebuilds
+the modal response.
 
-`-min_slew_degradation 0` (the default) uses driver slew in minimum analysis
-only when that driver model was successfully adjusted and the receiver has
-compatible voltage and slew conventions. Other receivers retain their physical
-waveform. `-min_slew_degradation 1` always keeps the calculated receiver slew.
-Both policies retain the physical wire delay and its threshold correction.
-The former pi-resistance ratio approximation has been removed.
+Discontinuous table sensitivities or inconsistent delay/slew observations can
+prevent that model from converging. In that case a separate charge-equivalence
+solve restarts at total load with one fixed source resistance. The local delay
+slope estimates resistance through the slow-ramp first-moment limit, delay = R*C;
+the measured RC slew bounds it. Nonpositive slope uses the slew boundary as an
+explicit approximation. This does not identify a unique driver from flat delay
+data. The ramp then follows the library transition; an infeasible transition
+uses the minimum RC span. Its finite ramp is the longest one whose upper
+remaining-voltage crossing is at the ramp end. Effective capacitance is delivered
+charge divided by source voltage change over this ramp.
 
-Both integer options are accepted by Tcl, the C++ config map and the Python
-dictionary/JSON bindings. Values other than `0` or `1` are rejected at the public
-entry points. Empty Python values leave the option unspecified. Configure them
-before starting a run; changing internal configuration requires clearing the
-delay calculator's caches. Input ports with prescribed waveforms and the DMP
-fallback use their existing response models.
+Both residual solves keep capacitance in (0, Ctotal] and require relative error
+below sqrt(double epsilon). No partially converged joint model or jump at a
+table knot is accepted. Analytic inverse bounds are checked after rounding.
+The methods use no reference-output coefficients or absolute delay-error floor.
 
-These options describe the implemented driver and receiver rules; they do not
-establish equivalence with every reference-tool model or version. In particular,
-receiver replacement across different voltage or slew conventions still needs
-separate validation.
+Rise and fall calculations use the library's actual voltage thresholds. Each
+receiver retains its own physical waveform in both minimum and maximum
+analysis. Charge integration avoids cancellation for small time constants and
+strong shielding. Synthetic tests cover analytical RC crossings, charge balance,
+first moments, arrival translation, asymmetric thresholds, and unit scaling.
 
-## Effective capacitance and waveform calculation
+`adjust_driver_resistance` and `min_slew_degradation` remain accepted as legacy
+0/1 configuration fields in Tcl, C++ and Python. They have no effect on the
+physical model. The separate configurable capacitive approximation for small
+networks is described in [the small-network model](../../../docs/ista-small-network.md).
 
-The Arnoldi calculator fits effective capacitance and driver ramp together,
-including when the driver resistance is limited by the library slew. A
-residual-sign bracket handles nonlinear table cases where fixed-point iteration
-oscillates. Fitting uses bounded iteration and may accept a response at its update
-limit. Invalid fits return failure to the existing fallback chain.
-
-The modal solve preserves positive RC time constants without an absolute
-eigenvalue floor. Charge integration uses cancellation-resistant expressions,
-including for nearly instantaneous modes and strongly shielded loads. Cell and
-receiver delays use the same accepted waveform. The tests include independent
-RC charge calculations.
+SPEF import preserves finite nonnegative resistances and small positive
+capacitances. Negative or nonfinite resistance is rejected. Zero-resistance
+branches identify the same voltage: the reduced network contracts these nodes,
+sums their capacitances, and retains each terminal and parallel conductive branch.

@@ -29,27 +29,20 @@ class ArnoldiResponseCalculator
   {
     _driver_responses.clear();
     _responses.clear();
-    _ceff_by_pin.clear();
-    _basis_rd_by_net.clear();
   }
   DriverResponse& response(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type, double input_slew);
   bool loadFailed(Arc& arc, AnalysisType analysis, TransType edge, double slew);
   std::optional<double> wireDelay(Arc& arc, AnalysisType analysis_type, TransType trans_type, double input_slew);
   std::optional<double> loadSlew(Arc& arc, AnalysisType analysis_type, TransType trans_type, double input_slew);
-  // Effective capacitance the network solve converged to for this driver edge.
-  // Recorded during computeDriverResponse so the lookup is O(1).
-  std::optional<double> effectiveCapacitance(Arc& arc, AnalysisType analysis_type, TransType trans_type);
-  void recordEffectiveCapacitance(const std::string& output_pin, AnalysisType analysis_type, TransType trans_type, double ceff);
 
  private:
-  std::map<std::tuple<std::string, AnalysisType, TransType>, double> _ceff_by_pin;
-  std::map<std::string, double> _basis_rd_by_net;
   using TimingResultKey = std::tuple<std::string, std::uintptr_t, AnalysisType, TransType, double>;
   using DriverResultKey = std::tuple<std::string, AnalysisType, TransType, double>;
 
   TimingResultKey timingKey(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type, double input_slew);
   DriverResponse calculate(std::string& output_pin, TimingArc& timing_arc, AnalysisType analysis_type, TransType output_trans_type, double input_slew);
-  std::optional<DriverResponse> smallNetResponse(TimingArc& timing_arc, TransType edge, double slew, const ParasiticArnoldiModel& model);
+  std::optional<DriverResponse> capacitiveResponse(TimingArc& timing_arc, AnalysisType analysis, TransType edge, double input_slew,
+                                                ParasiticNet& parasitic_net, const ParasiticArnoldiModel& model);
   void cacheDriverResponse(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type, double driver_slew, DriverResponse& timing_result);
   DriverResultKey driverKey(std::string& output_pin, AnalysisType analysis_type, TransType output_trans_type, double driver_slew);
   Database& _database;

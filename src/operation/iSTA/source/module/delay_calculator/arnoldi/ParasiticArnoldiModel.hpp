@@ -16,11 +16,9 @@
 // ***************************************************************************************
 #pragma once
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -37,24 +35,6 @@ class ParasiticArnoldiModel
   int32_t get_order() const { return _order; }
   double get_total_capacitance() const { return _total_capacitance; }
   double get_sqrt_total_capacitance() const { return _sqrt_total_capacitance; }
-  // Small-network rise/fall time constants in ns. Only the balanced,
-  // limited-fanout model corrects the capacitive table source response.
-  const std::optional<std::array<double, 2>>& smallNetTimeConstants() const { return _small_net_time_constants; }
-  bool hasSmallNetSourceCorrection() const { return _small_net_source_correction; }
-  // Total RC (resistance * total load) per edge, in ns. The report shows the
-  // net slew degradation as a function of this quantity.
-  const std::array<double, 2>& totalTimeConstants() const { return _total_time_constants; }
-  void setTotalTimeConstants(std::array<double, 2> values) { _total_time_constants = values; }
-  // The single-pole regime for nets outside the reduced-fanout range: the net
-  // delay is ln2 * TotalR * TotalC for every receiver, which is the closed form
-  // of a first-order RC 50% crossing.
-  const int& lumpedMode() const { return _lumped_mode; }
-  void setLumpedMode(int value) { _lumped_mode = value; }
-  void setSmallNetTimeConstants(std::array<double, 2> values, bool correct_source)
-  {
-    _small_net_time_constants = values;
-    _small_net_source_correction = correct_source;
-  }
   std::vector<std::string>& get_term_node_list() { return _term_node_list; }
   const std::vector<std::string>& get_term_node_list() const { return _term_node_list; }
   std::vector<std::string>& get_term_pin_list() { return _term_pin_list; }
@@ -73,33 +53,6 @@ class ParasiticArnoldiModel
   void setZeroCapacitanceTerms(std::vector<bool> terms) { _zero_capacitance_terms = std::move(terms); }
   const std::vector<std::vector<double>>& responseProjection() const { return _response_projection; }
   void setResponseProjection(std::vector<std::vector<double>> values) { _response_projection = std::move(values); }
-  struct TwoPoleModel
-  {
-    bool valid = false;
-    double a00 = 0.;               // V^T diag(c) V, (0,0)
-    double a01 = 0.;               // V^T diag(c) V, (0,1) = (1,0)
-    double a11 = 0.;               // V^T diag(c) V, (1,1)
-    double c11 = 0.;               // V^T L V, (1,1) only: L annihilates the uniform v0
-    double u0 = 0.;                // V[driver,0] = -1/sqrt(n)
-    double u1 = 0.;                // V[driver,1]
-    std::vector<double> term_v1;   // V[term,1] per terminal
-  };
-  const TwoPoleModel& twoPole() const { return _two_pole; }
-  void setTwoPole(TwoPoleModel value) { _two_pole = std::move(value); }
-  struct KrylovModel
-  {
-    bool valid = false;
-    int32_t order = 0;
-    std::vector<std::vector<double>> v;   // term_num x order, v[i][k] = component k of V at terminal i
-    std::vector<std::vector<double>> a;   // order x order, V^T diag(C_pF) V
-    std::vector<std::vector<double>> g;   // order x order, V^T G V
-    std::vector<double> b;                // order, V^T b
-    std::vector<double> driver_projection;  // order, u = V^T e0
-    double driver_conductance = 0.;         // gd the reduction above was assembled with
-    std::vector<bool> zero_capacitance_terms;
-  };
-  const KrylovModel& krylov() const { return _krylov; }
-  void setKrylov(KrylovModel value) { _krylov = std::move(value); }
   // setter
   void set_is_valid(const bool is_valid) { _is_valid = is_valid; }
   void set_order(const int32_t order) { _order = order; }
@@ -114,14 +67,10 @@ class ParasiticArnoldiModel
   // function
 
  private:
-  std::array<double, 2> _total_time_constants{0., 0.};
-  int _lumped_mode{0};
   bool _is_valid = false;
   int32_t _order = 0;
   double _total_capacitance = 0.0;
   double _sqrt_total_capacitance = 0.0;
-  std::optional<std::array<double, 2>> _small_net_time_constants;
-  bool _small_net_source_correction = false;
   std::vector<std::string> _term_node_list;
   std::vector<std::string> _term_pin_list;
   std::map<std::string, std::size_t> _term_index_map;
@@ -130,8 +79,6 @@ class ParasiticArnoldiModel
   std::vector<std::vector<double>> _projection_list;
   std::vector<bool> _zero_capacitance_terms;
   std::vector<std::vector<double>> _response_projection;
-  TwoPoleModel _two_pole;
-  KrylovModel _krylov;
 };
 
 class ParasiticArnoldiPoleResidue

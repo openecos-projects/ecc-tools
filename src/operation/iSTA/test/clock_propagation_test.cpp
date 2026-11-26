@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MulanPSL-2.0
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -18,6 +19,7 @@ void generatedInsertion()
   Logger::initInst();
   Database db;
   Config config;
+  constexpr double rise_delay = .1, fall_delay = .2, early = .8, late = 1.2;
   auto add_pin = [&](const std::string& name, const std::string& instance, PinDirection direction) {
     auto& pin = db.network().pins()[name];
     pin.set_full_name(name);
@@ -38,7 +40,7 @@ void generatedInsertion()
   TimingArc timing;
   timing.set_sense(TimingArcSense::kNegative);
   for (auto edge : {TransType::kRise, TransType::kFall}) {
-    timing.get_delay_table_map()[edge].set_value_list({edge == TransType::kRise ? .1 : .2});
+    timing.get_delay_table_map()[edge].set_value_list({edge == TransType::kRise ? rise_delay : fall_delay});
     timing.get_slew_table_map()[edge].set_value_list({.05});
   }
   cell.get_timing_arc_list().push_back(timing);
@@ -81,8 +83,8 @@ void generatedInsertion()
   generated.set_master_clock_name("master");
   generated.set_master_source("clk");
   for (auto edge : {TransType::kRise, TransType::kFall}) {
-    db.sdc().timingDerates().set(AnalysisType::kMin, true, edge, DerateDelay::kCell, .8);
-    db.sdc().timingDerates().set(AnalysisType::kMax, true, edge, DerateDelay::kCell, 1.2);
+    db.sdc().timingDerates().set(AnalysisType::kMin, true, edge, DerateDelay::kCell, early);
+    db.sdc().timingDerates().set(AnalysisType::kMax, true, edge, DerateDelay::kCell, late);
   }
   GraphBuilder(db).build();
   DelayCalculator delay(db, config);
@@ -91,8 +93,12 @@ void generatedInsertion()
   std::string common;
   const auto correction = ClockReconvergenceCalculator(db).correction("launch:CK", TransType::kRise, "master", "capture:CK", TransType::kRise, "generated",
                                                                       AnalysisType::kMax, common, TransType::kFall, TransType::kRise);
-  // Same scalar-cell experiment: PT U-2022.12-SP3 and OpenSTA return .04 ns.
-  if (std::abs(correction - .04) > 1e-9 || common != "ci0:Y")
+  // Only ci0 is shared. Independent extrema vary its rise/fall delays in
+  // opposite directions; a shared multiplicative factor must vary both together.
+  const double independent = late * rise_delay - early * fall_delay;
+  const double correlated = std::max(early * (rise_delay - fall_delay), late * (rise_delay - fall_delay));
+  const double expected = independent - correlated;
+  if (std::abs(correction - expected) > 1e-9 || common != "ci0:Y")
     throw std::runtime_error("generated insertion trace lost common-path correction across opposite source phases");
   if (db.graph().points().at("ci0:Y").has_clock_state("generated"))
     throw std::runtime_error("generated insertion trace leaked into ordinary clock coverage");

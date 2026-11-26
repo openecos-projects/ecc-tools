@@ -127,8 +127,8 @@ unsigned TclSetDrivingCell::exec()
         || !timing_cell.get_port_map().at(timing_cell_arc.get_source_port()).get_is_input()) {
       continue;
     }
-    // OpenSTA chooses the first declared Liberty input, not the first
-    // timing-arc group (which may use a different ordering).
+    // Choose the first declared Liberty input, not the first timing-arc
+    // group (which may use a different ordering).
     const auto& candidate = timing_cell.get_port_map().at(timing_cell_arc.get_source_port());
     if (from_pin.empty() || candidate.get_declaration_index() < timing_cell.get_port_map().at(from_pin).get_declaration_index()) {
       from_pin = timing_cell_arc.get_source_port();

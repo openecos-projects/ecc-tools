@@ -1126,7 +1126,7 @@ int32_t DefRead::parse_net(defiNet* def_net)
     } else {
       design->connectPinToNet(pin, net);
     }
-    // Logical PG ports may be listed only in NETS (as in native Innovus DEF).
+    // Logical PG ports may be listed only in the NETS section.
     // Retain their association with the physical supply without requiring a
     // duplicate PIN connection or a SPECIAL marker in the exported netlist.
     if (pin->is_io_pin() && pin->get_net() == net && net->is_pdn() && (pin->get_term()->is_power() || pin->get_term()->is_ground())) {

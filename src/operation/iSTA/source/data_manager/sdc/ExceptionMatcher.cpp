@@ -74,7 +74,7 @@ int endpointSelectorSpecificity(const Network& network, const ExceptionObjects& 
 int getSpecificity(const Network& network, const TimingException& exception, std::string_view start, std::string_view launch_clock, std::string_view end,
                    std::string_view capture_clock)
 {
-  // Keep these bits aligned with OpenSTA's endpoint/through priority order.
+  // Endpoint selectors rank above through selectors; keep these bits distinct.
   int score = endpointSelectorSpecificity(network, exception.get_from_objects(), start, launch_clock, true, 1 << 6, 1 << 3)
               + endpointSelectorSpecificity(network, exception.get_to_objects(), end, capture_clock, false, 1 << 5, 1 << 2);
   if (!exception.get_through_list().empty()) {

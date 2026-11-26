@@ -16,6 +16,7 @@
 // ***************************************************************************************
 #include <tcl_util.h>
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -23,6 +24,17 @@
 #include "py_ista.h"
 
 namespace python_interface {
+
+namespace {
+double parseSmallNetLimit(const std::string& text)
+{
+  std::size_t consumed = 0;
+  const double value = std::stod(text, &consumed);
+  if (consumed != text.size() || !std::isfinite(value) || value < 0.)
+    throw std::invalid_argument("-small_net_limit_ps must be finite and nonnegative");
+  return value;
+}
+}  // namespace
 
 bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std::any>& config_map)
 {
@@ -58,7 +70,7 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
     config_map.insert(std::make_pair("-timing_path_limit", std::stoi(value)));
   }
   for (const std::string key :
-       {"-min_slew_degradation", "-adjust_driver_resistance", "-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
+       {"-min_slew_degradation", "-adjust_driver_resistance", "-check_constant_capacitance"}) {
     value = ecc::getJsonData(json, {"STA", key});
     if (!value.empty()) {
       if (value != "0" && value != "1")
@@ -67,6 +79,9 @@ bool initStaConfigMapByJSON(const std::string& config, std::map<std::string, std
     }
   }
   value = ecc::getJsonData(json, {"STA", "-timing_corner"});
+  const auto small_net_limit = ecc::getJsonData(json, {"STA", "-small_net_limit_ps"});
+  if (!small_net_limit.empty())
+    config_map["-small_net_limit_ps"] = parseSmallNetLimit(small_net_limit);
   if (!value.empty()) {
     config_map.insert(std::make_pair("-timing_corner", value));
   }
@@ -117,7 +132,7 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
     config_map["-timing_path_limit"] = std::stoi(config_dict["-timing_path_limit"]);
   }
   for (const std::string key :
-       {"-min_slew_degradation", "-adjust_driver_resistance", "-small_rc_fanout_reduction", "-check_constant_capacitance"}) {
+       {"-min_slew_degradation", "-adjust_driver_resistance", "-check_constant_capacitance"}) {
     const auto found = config_dict.find(key);
     if (found != config_dict.end() && !found->second.empty()) {
       const std::string& value = found->second;
@@ -129,6 +144,8 @@ void initStaConfigMapByDict(std::map<std::string, std::string>& config_dict, std
   if (config_dict.count("-timing_corner") > 0 && !config_dict["-timing_corner"].empty()) {
     config_map["-timing_corner"] = config_dict["-timing_corner"];
   }
+  if (const auto found = config_dict.find("-small_net_limit_ps"); found != config_dict.end() && !found->second.empty())
+    config_map["-small_net_limit_ps"] = parseSmallNetLimit(found->second);
   if (config_dict.count("-max_paths") > 0 && !config_dict["-max_paths"].empty()) {
     config_map["-max_paths"] = std::stoi(config_dict["-max_paths"]);
   }

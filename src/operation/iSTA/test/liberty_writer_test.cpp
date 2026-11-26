@@ -52,6 +52,7 @@ int main()
   std::string output = std::string(directory) + "/";
   try {
     auto built = ista::liberty_writer::buildLib(model.get_lib_list().front(), source_library);
+    require(built->get_library_features().empty(), "writer invented an unsupported library feature");
     require(built->get_time_unit() == idb::TimeUnit::kNS && built->get_cap_unit() == idb::CapacitiveUnit::kPF
                 && built->get_resistance_unit() == idb::ResistanceUnit::kkOHM,
             "fallback units changed");

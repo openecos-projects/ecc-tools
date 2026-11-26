@@ -109,7 +109,7 @@ static void failedReceiverPath()
           found = true;
           require(near(path.get_path_delay(), 1.2), "failed crossing did not propagate the explicit zero net delay");
         }
-  require(found, "PT2018 retains nonbounding endpoint paths after RC-005/008");
+  require(found, "RC failure must retain explicitly nonbounding endpoint paths");
   require(near(db.graph().points().at("u:A").get_data_slew_map().at(AnalysisType::kMax).at(TransType::kRise), .4),
           "failed receiver must retain source slew for downstream calculation");
   TimingJsonWriter(db, config).write();
@@ -289,7 +289,7 @@ int main()
             if (endpoint == "out" && path.get_analysis_type() == AnalysisType::kMax)
               chosen = &path;
       require(chosen && chosen->get_trans_type() == TransType::kFall, "fixture did not select the falling data path");
-      // A reference pin on an ideal clock includes source latency only (PT manual pp.2203-2204).
+      // A reference pin on an ideal clock includes source latency only.
       const double launch = scenario == 1 ? 5 : 10, capture = scenario == 1 ? 15 : (scenario == 2 || scenario >= 3) ? 16 : 18;
       const double in = choice == 0 ? 1 : 20, out = choice == 0 ? 20 : 1;
       require(chosen->get_input_delay() == in && chosen->get_output_delay() == out && chosen->get_launch_clock_transition() == TransType::kFall,

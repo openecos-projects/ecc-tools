@@ -57,16 +57,11 @@ DriverResponse InputPortResponseCalculator::calculate(ParasiticNet& parasitic_ne
   if (!model.get_is_valid() || model.get_order() <= 0) {
     return result;
   }
-  double derate = 1.0;
-  double lower = 0.1;
-  double upper = 0.9;
-  double voltage_log = 0.0;
-  double min_slew_factor = 0.0;
-  double x1 = 0.0;
-  double y1 = 0.0;
-  ArnoldiWaveformSolver::thresholds(database.liberty(), trans_type, derate, lower, upper, voltage_log, min_slew_factor, x1, y1);
   LibertyLibrary& library = database.liberty();
   bool is_fall = trans_type == TransType::kFall;
+  const double derate = library.get_slew_derate_from_library();
+  const double lower = normalizedThreshold(is_fall ? library.get_slew_lower_threshold_pct_fall() : library.get_slew_lower_threshold_pct_rise());
+  const double upper = normalizedThreshold(is_fall ? library.get_slew_upper_threshold_pct_fall() : library.get_slew_upper_threshold_pct_rise());
   double source_threshold = normalizedThreshold(is_fall ? library.get_output_threshold_pct_fall() : library.get_output_threshold_pct_rise());
   WaveformThresholds source{source_threshold, lower, upper, derate};
   double source_voltage = library.get_nom_voltage();

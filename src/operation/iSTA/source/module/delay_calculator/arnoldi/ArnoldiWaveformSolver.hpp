@@ -51,17 +51,17 @@ class ArnoldiWaveformSolver
   static std::optional<InputPortDelayResult> inputPortResponse(const ParasiticArnoldiModel& model, TransType transition, double input_slew,
                                                                const WaveformThresholds& source, const std::vector<WaveformThresholds>& loads);
   static ParasiticArnoldiPoleResidue poleResidue(const ParasiticArnoldiModel& arnoldi_model, double drive_resistance);
-  static void thresholds(const TimingArc& timing_arc, TransType trans_type, double& slew_derate, double& lower_threshold, double& upper_threshold,
-                         double& voltage_log, double& min_slew_factor, double& x1, double& y1);
-  static void thresholds(const LibertyLibrary& timing_library, TransType trans_type, double& slew_derate, double& lower_threshold, double& upper_threshold,
-                         double& voltage_log, double& min_slew_factor, double& x1, double& y1);
+  // Minimum nonnegative ramp matching the RC threshold span. Invalid or
+  // infeasible inputs yield NaN; the step-response span selects zero width.
   static void solveRamp(double pole, double transition_time, double lower_threshold, double upper_threshold, double& ramp);
   static double rampTime(double pole, double ramp, double voltage);
+  // Partial derivative of threshold time with respect to R*C, with ramp fixed.
+  static double rampTimeSensitivity(double pole, double ramp, double voltage);
+  // Lumped capacitance reproducing a distributed source threshold crossing.
+  static std::optional<double> crossingCapacitance(double driver_ramp, double drive_resistance, double total_capacitance,
+                                                   double crossing_time, double voltage);
   static double effectiveCapacitance(double driver_ramp, double drive_resistance, const ParasiticArnoldiPoleResidue& pole_residue,
                                      double effective_capacitance_time);
-  // Lumped capacitance whose ramp response reaches voltage at the given time.
-  // The passive source response bounds the solution by total_capacitance.
-  static std::optional<double> crossingCapacitance(double driver_ramp, double drive_resistance, double total_capacitance, double crossing_time, double voltage);
   static void crossingTime(double driver_ramp, const ParasiticArnoldiPoleResidue& pole_residue, std::size_t term_idx, double voltage, double& waveform_time);
   static void crossingTime(double driver_ramp, const ParasiticArnoldiPoleResidue& pole_residue, std::size_t term_idx, double upper_threshold,
                            double& upper_time, double mid_threshold, double& mid_time, double lower_threshold, double& lower_time);
@@ -70,14 +70,11 @@ class ArnoldiWaveformSolver
  private:
   static bool solveTridiagonal(const std::vector<double>& diagonal_list, const std::vector<double>& off_diagonal_list, std::vector<double>& eigenvalue_list,
                                std::vector<std::vector<double>>& eigenvector_list);
-  static void thresholdFactor(double lower_threshold, double upper_threshold, double& min_slew_factor, double& x1, double& y1);
   static double hInverse(double value);
   static void rampPoint(double pole_ramp, double voltage, double& pole_time, double& derivative);
   static double voltageAt(double time, double driver_ramp, const std::vector<double>& pole_list, const std::vector<double>& residue_list);
   static void voltageDerivative(double time, double driver_ramp, const std::vector<double>& pole_list, const std::vector<double>& residue_list, double& voltage,
                                 double& derivative);
-  static double bracketedTime(double driver_ramp, const std::vector<double>& pole_list, const std::vector<double>& residue_list, double voltage,
-                              double lower_time, double upper_time, double lower_voltage, double upper_voltage);
 };
 
 }  // namespace ista

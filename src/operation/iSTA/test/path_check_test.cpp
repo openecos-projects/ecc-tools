@@ -104,8 +104,8 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
   for (bool ignore : {false, true}) {
     db.sdc().get_path_exception_list().back().set_ignore_clock_latency(ignore);
     const auto budgeted = checker.checkPath(path, "ff:D", mode);
-    // PT2018: -ignore_clock_latency also excludes clock uncertainty. The
-    // endpoint setup/hold check remains part of the explicit data-path budget.
+    // The explicit data-path budget excludes clock latency and uncertainty
+    // when requested; the endpoint setup/hold check remains in the budget.
     const double expected_budget = ignore ? (mode == AnalysisType::kMax ? 2. : 4.) : (mode == AnalysisType::kMax ? 2.4 : 5.);
     require(budgeted && std::abs(budgeted->required() - expected_budget) < 1e-8, "path-delay budget applied the wrong clock uncertainty or latency");
   }
@@ -127,7 +127,7 @@ static void registerChecks(bool reverse, bool split_tables, ista::AnalysisType m
       for (auto& [edge, values] : table.get_check_table_map())
         values.set_value_list({-.2});
   const auto negative = checker.checkPath(path, "ff:D", mode);
-  require(negative && std::abs(negative->check().check_time + .14) < 1e-9, "negative check derate disagrees with PT absolute-variation semantics");
+  require(negative && std::abs(negative->check().check_time + .14) < 1e-9, "negative check derate disagrees with absolute-variation semantics");
 }
 
 // A recovery/removal table constrains the asynchronous pin; CK is related_pin.
@@ -243,7 +243,7 @@ static void checkSlewRange()
   require(result && std::abs(result->check().check_time - 1.1) < 1e-9, "hold must use the most restrictive check across physical slews");
 
   // Both conditional Liberty variants remain possible. A min data path must
-  // still satisfy the largest hold/removal requirement (PT2022 CEB fixture).
+  // still satisfy the largest hold/removal requirement.
   for (auto type : {TimingCheckType::kSetup, TimingCheckType::kHold, TimingCheckType::kRecovery, TimingCheckType::kRemoval}) {
     const auto mode = type == TimingCheckType::kSetup || type == TimingCheckType::kRecovery ? AnalysisType::kMax : AnalysisType::kMin;
     auto& check_arc = instance.get_check_arc_list().front();

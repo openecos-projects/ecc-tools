@@ -10,6 +10,31 @@
 #include "Utility.hpp"
 namespace ista {
 namespace {
+// Derate scope of an arc is named by the pin it starts from, the way the factor
+// lookup expects: -net for a net delay, -cell for a cell delay. Mirrors
+// TimingStateQuery::derateContext so a factor resolved while writing the SDF
+// matches the one resolved while propagating the same arc.
+DerateContext derateContext(Database& database, const std::string& pin_name)
+{
+  DerateContext context;
+  const auto& network = database.network();
+  const auto pin = network.pins().find(pin_name);
+  if (pin == network.pins().end())
+    return context;
+  context.net = pin->second.get_net_name();
+  if (pin->second.get_is_port())
+    return context;
+  context.instance = pin->second.get_instance_name();
+  const auto instance = network.instances().find(std::string(context.instance));
+  if (instance != network.instances().end()) {
+    const auto& cells = database.liberty().get_cell_map();
+    const auto cell = cells.find(instance->second.get_cell_name());
+    if (cell != cells.end())
+      context.lib_cell = cell->second.get_library_name() + "/" + cell->first;
+  }
+  return context;
+}
+
 std::vector<TransType> inputTransitions(TimingArc& timing_arc)
 {
   const auto trigger = timing_arc.get_trigger_trans_type();
@@ -63,7 +88,7 @@ SdfCellArcDelayMap SdfValueExtractor::graphCellArcDelays(Arc& arc)
   return values;
 }
 
-SdfCellArcDelayMap SdfValueExtractor::cellArcDelays(TimingCellArc& cell_arc)
+SdfCellArcDelayMap SdfValueExtractor::cellArcDelays(Instance& instance, TimingCellArc& cell_arc)
 {
   SdfCellArcDelayMap values;
   if (cell_arc.get_timing_arc_list().empty()) {
@@ -79,6 +104,12 @@ SdfCellArcDelayMap SdfValueExtractor::cellArcDelays(TimingCellArc& cell_arc)
       mergeCellArcDelay(values, timing_arc, transition, delay);
     }
   }
+  // These arcs exist in the library but were never built into the timing graph, so
+  // nothing upstream derated them. Apply the same -cell_delay factors a graph arc
+  // would have received, resolved from the pin the arc starts at.
+  const DerateContext context = derateContext(_database, STAUTIL.getString(instance.get_instance_name(), ":", cell_arc.get_source_port()));
+  for (auto& [key, delay] : values)
+    derateDelay(delay, DerateDelay::kCell, context);
   return values;
 }
 
@@ -86,6 +117,29 @@ SdfCheckValues SdfValueExtractor::checkValues(Instance& instance, TimingCheckArc
 {
   SdfCheckValues values{checkDelay(instance, check_arc, timing_arc, AnalysisType::kMin, transition),
                         checkDelay(instance, check_arc, timing_arc, AnalysisType::kMax, transition)};
+  // set_timing_derate reaches a timing check only through its own options:
+  // -cell_check for setup/hold, -min_period for PERIOD and -min_pulse_width for
+  // WIDTH. A -cell_delay entry must not move these numbers. Pulse checks carry a
+  // single value, so one untyped factor covers both corners there; the edge checks
+  // keep the early and late factors on their own corners.
+  const TimingCheckType check_type = check_arc.get_check_type();
+  const bool pulse = check_type == TimingCheckType::kPeriod || check_type == TimingCheckType::kWidth;
+  const DerateDelay kind = check_type == TimingCheckType::kPeriod ? DerateDelay::kPeriod
+                         : check_type == TimingCheckType::kWidth  ? DerateDelay::kWidth
+                                                                  : DerateDelay::kCheck;
+  const TimingDerates& factors = _database.sdc().timingDerates();
+  DerateContext context{.instance = instance.get_instance_name(), .lib_cell = {}, .net = {}};
+  const auto& cells = _database.liberty().get_cell_map();
+  const auto cell = cells.find(instance.get_cell_name());
+  if (cell != cells.end())
+    context.lib_cell = cell->second.get_library_name() + "/" + cell->first;
+  if (pulse) {
+    values.minimum = factors.apply(values.minimum, AnalysisType::kNone, false, transition, kind, context);
+    values.maximum = factors.apply(values.maximum, AnalysisType::kNone, false, transition, kind, context);
+  } else {
+    values.minimum = factors.apply(values.minimum, AnalysisType::kMin, false, transition, kind, context);
+    values.maximum = factors.apply(values.maximum, AnalysisType::kMax, false, transition, kind, context);
+  }
   // Preserve the format-specific policy: PERIOD keeps corner order; WIDTH and
   // edge checks sort corners, and HOLD additionally pairs with matching SETUP.
   if (check_arc.get_check_type() != TimingCheckType::kPeriod) {
@@ -145,13 +199,10 @@ void SdfValueExtractor::adjustHoldDelay(Instance& instance, TimingCheckArc& hold
     setup_timing_arc = &default_setup_timing_arc;
   }
 
-  double minimum_setup_delay = checkDelay(instance, *setup_timing_check_arc, *setup_timing_arc, AnalysisType::kMin, data_trans_type);
-  double maximum_setup_delay = checkDelay(instance, *setup_timing_check_arc, *setup_timing_arc, AnalysisType::kMax, data_trans_type);
-  if (minimum_setup_delay > maximum_setup_delay) {
-    std::swap(minimum_setup_delay, maximum_setup_delay);
-  }
-
-  if (adjustSdfHoldTimingCheckDelay(minimum_setup_delay, minimum_hold_delay, maximum_hold_delay)) {
+  // SETUP takes no HOLD adjustment, so this obtains its exported derates and
+  // corner ordering without recursively pairing another check.
+  const auto setup = checkValues(instance, *setup_timing_check_arc, *setup_timing_arc, data_trans_type);
+  if (adjustSdfHoldTimingCheckDelay(setup.minimum, minimum_hold_delay, maximum_hold_delay)) {
     STALOG.warn(Loc::current(), "Adjusted HOLD timing-check delay for ", instance.get_instance_name(), ": ", hold_timing_check_arc.get_data_port(),
                 " relative to ", hold_timing_check_arc.get_clock_port(), " would otherwise sum to less than zero with the matching SETUP delay.");
   }
@@ -225,32 +276,13 @@ bool SdfValueExtractor::hasCheckPins(Instance& instance, TimingCheckArc& timing_
 SdfDelay SdfValueExtractor::arcDelay(Arc& arc, TransType input_trans_type)
 {
   SdfDelay sdf_delay;
+  const DerateDelay kind = arc.get_type() == ArcType::kNet ? DerateDelay::kNet : DerateDelay::kCell;
+  const DerateContext context = derateContext(_database, arc.get_source_pin());
   if (!arc.get_graph_delay_map().empty()) {
-    updateDelay(sdf_delay, arc.get_graph_delay_map(), input_trans_type);
-  }
-  if (const char* sp = std::getenv("ISTA_DUMP_SDFARC"); sp != nullptr && arc.get_type() == ArcType::kNet) {
-    static const char* want = std::getenv("ISTA_DUMP_SDFARC_NET");
-    if (want == nullptr || arc.get_owner_name() == want) {
-      if (FILE* f = std::fopen(sp, "a"); f != nullptr) {
-        std::fprintf(f, "SA,%s,%s,%s,gm=%zu,iom=%zu", arc.get_owner_name().c_str(), arc.get_source_pin().c_str(),
-                     arc.get_sink_pin().c_str(), arc.get_graph_delay_map().size(), arc.get_input_output_delay_map().size());
-        for (auto& lv1 : arc.get_graph_delay_map())
-          for (auto& lv2 : lv1.second)
-            for (auto& lv3 : lv2.second)
-              std::fprintf(f, ",g%d_%d_%d=%.15g", static_cast<int>(lv1.first), static_cast<int>(lv2.first),
-                           static_cast<int>(lv3.first), lv3.second);
-        for (auto& lv1 : arc.get_input_output_delay_map())
-          for (auto& lv2 : lv1.second)
-            for (auto& lv3 : lv2.second)
-              std::fprintf(f, ",io%d_%d_%d=%.15g", static_cast<int>(lv1.first), static_cast<int>(lv2.first),
-                           static_cast<int>(lv3.first), lv3.second);
-        std::fprintf(f, "\n");
-        std::fclose(f);
-      }
-    }
+    updateDelay(sdf_delay, arc.get_graph_delay_map(), input_trans_type, kind, context);
   }
   if (!hasDelay(sdf_delay)) {
-    updateDelay(sdf_delay, arc.get_input_output_delay_map(), input_trans_type);
+    updateDelay(sdf_delay, arc.get_input_output_delay_map(), input_trans_type, kind, context);
   }
   if (arc.get_type() == ArcType::kNet) {
     if (arc.rcFailed(AnalysisType::kMin, TransType::kRise))
@@ -268,11 +300,14 @@ SdfDelay SdfValueExtractor::arcDelay(Arc& arc, TransType input_trans_type)
 SdfDelay SdfValueExtractor::timingArcDelay(Arc& arc, TimingArc& timing_arc, TransType input_trans_type, bool allow_aggregate)
 {
   SdfDelay sdf_delay;
+  const DerateDelay kind = arc.get_type() == ArcType::kNet ? DerateDelay::kNet : DerateDelay::kCell;
+  const DerateContext context = derateContext(_database, arc.get_source_pin());
   if (arc.get_timing_arc_delay_map().count(timing_arc.get_arc_idx()) > 0) {
-    updateDelay(sdf_delay, arc.get_timing_arc_delay_map()[timing_arc.get_arc_idx()], input_trans_type);
+    updateDelay(sdf_delay, arc.get_timing_arc_delay_map()[timing_arc.get_arc_idx()], input_trans_type, kind, context);
   }
   if (!hasDelay(sdf_delay) && allow_aggregate) {
-    sdf_delay = arcDelay(arc, input_trans_type);
+    // arcDelay() already applies the factors to what it returns.
+    return arcDelay(arc, input_trans_type);
   }
   return sdf_delay;
 }
@@ -300,8 +335,9 @@ SdfDelay SdfValueExtractor::cellArcDelay(TimingCellArc& timing_cell_arc, TimingA
 }
 
 void SdfValueExtractor::updateDelay(SdfDelay& sdf_delay, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& delay_map,
-                                    TransType input_trans_type)
+                                    TransType input_trans_type, DerateDelay kind, const DerateContext& context)
 {
+  const auto& derates = _database.sdc().timingDerates();
   for (std::pair<const AnalysisType, std::map<TransType, std::map<TransType, double>>>& analysis_delay_pair : delay_map) {
     AnalysisType analysis_type = analysis_delay_pair.first;
     if (analysis_type != AnalysisType::kMin && analysis_type != AnalysisType::kMax) {
@@ -313,11 +349,43 @@ void SdfValueExtractor::updateDelay(SdfDelay& sdf_delay, std::map<AnalysisType, 
       }
       for (std::pair<const TransType, double>& output_delay_pair : input_delay_pair.second) {
         if (output_delay_pair.first == TransType::kRise || output_delay_pair.first == TransType::kFall) {
-          sdf_delay.update(analysis_type, output_delay_pair.first, output_delay_pair.second);
+          // Vary each alternative before the entries collapse into one number per
+          // corner. A factor above one grows a negative delay toward zero, so the
+          // worst alternative can change; reducing first would hide it.
+          sdf_delay.update(analysis_type, output_delay_pair.first,
+                           derates.apply(output_delay_pair.second, analysis_type, false, output_delay_pair.first, kind, context));
         }
       }
     }
   }
+}
+
+void SdfValueExtractor::derateDelay(SdfDelay& sdf_delay, DerateDelay kind, const DerateContext& context)
+{
+  // set_timing_derate scales the calculated cell and net delays. It does not scale
+  // transitions, and it reaches a timing check only through -cell_check, so only the
+  // four delay entries are touched here. The nominal value stays in the graph: the
+  // factor belongs to path consumption, so the copy written to the SDF is scaled and
+  // the propagated state is left alone.
+  //
+  // Every arc lands in both a data-path and a clock-path reading, and the SDF carries
+  // one number per corner, so the data-path form (clock_path = false) is used. That
+  // matches the SDC here, where no derate names -data or -clock and the entry
+  // therefore covers both.
+  const auto& derates = _database.sdc().timingDerates();
+
+  // Apply through TimingDerates::apply instead of scaling by hand. A scaled net
+  // delay can be negative, and a plain multiply would let a late factor move such
+  // a value earlier; apply() keeps the direction of the nominal value.
+  auto scale = [&](std::optional<double>& value, AnalysisType analysis_type, TransType trans_type) {
+    if (!value)
+      return;
+    value = derates.apply(*value, analysis_type, false, trans_type, kind, context);
+  };
+  scale(sdf_delay.get_rise_min_delay(), AnalysisType::kMin, TransType::kRise);
+  scale(sdf_delay.get_rise_max_delay(), AnalysisType::kMax, TransType::kRise);
+  scale(sdf_delay.get_fall_min_delay(), AnalysisType::kMin, TransType::kFall);
+  scale(sdf_delay.get_fall_max_delay(), AnalysisType::kMax, TransType::kFall);
 }
 
 bool SdfValueExtractor::hasDelay(SdfDelay& sdf_delay)
@@ -396,22 +464,6 @@ AnalysisType SdfValueExtractor::captureAnalysis(AnalysisType analysis_type)
     return AnalysisType::kMax;
   }
   return AnalysisType::kNone;
-}
-
-
-void SdfValueExtractor::dumpPinSlew(const char* path)
-{
-  FILE* fp = std::fopen(path, "w");
-  if (fp == nullptr)
-    return;
-  std::fprintf(fp, "pin,min_rise,min_fall,max_rise,max_fall\n");
-  for (auto& entry : _database.network().pins()) {
-    std::string pin_name = entry.first;
-    std::fprintf(fp, "%s,%.13g,%.13g,%.13g,%.13g\n", pin_name.c_str(), slew(pin_name, AnalysisType::kMin, TransType::kRise),
-                 slew(pin_name, AnalysisType::kMin, TransType::kFall), slew(pin_name, AnalysisType::kMax, TransType::kRise),
-                 slew(pin_name, AnalysisType::kMax, TransType::kFall));
-  }
-  std::fclose(fp);
 }
 
 }  // namespace ista

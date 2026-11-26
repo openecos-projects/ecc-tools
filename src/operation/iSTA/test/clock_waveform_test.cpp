@@ -8,7 +8,7 @@ using namespace ista;
 
 int main()
 {
-  // Four-edge PT fixture {0,2,5,7}; second variant makes the second rising
+  // Four-edge fixture {0,2,5,7}; second variant makes the second rising
   // edge the setup winner, proving path dominance preserves edge identity.
   const double setup[3][4] = {{5, 2, 3, 5}, {4, 2, 2, 4}, {4, 2, 2, 4}};
   const double hold[3][4] = {{0, -3, -2, 0}, {0, -2, -2, 0}, {0, -2, -2, 0}};
