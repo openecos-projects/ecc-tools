@@ -49,7 +49,7 @@
 #include "IdbHalo.h"
 #include "IdbNet.h"
 #include "IdbObs.h"
-#include "../../../symbol/NamedTable.h"
+#include "database/symbol/NamedTable.h"
 #include "IdbPins.h"
 
 namespace idb {

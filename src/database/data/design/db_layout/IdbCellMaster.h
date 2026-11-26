@@ -37,7 +37,7 @@
 #include <string>
 #include <vector>
 
-#include "../../symbol/NamedTable.h"
+#include "database/symbol/NamedTable.h"
 
 #include "../../../basic/geometry/IdbGeometry.h"
 #include "../IdbEnum.h"

@@ -13,7 +13,6 @@ PUBLIC
         ${HOME_DATABASE}/data/design/db_design
         ${HOME_DATABASE}/data/design/db_layout
         ${HOME_DATABASE}/basic/geometry
-        ${HOME_DATABASE}/symbol
         ${HOME_DATABASE}/manager/service/def_service
 )
 

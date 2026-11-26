@@ -65,7 +65,7 @@ END NETS
 #include <unordered_map>
 #include <vector>
 
-#include "../../../symbol/NamedTable.h"
+#include "database/symbol/NamedTable.h"
 
 #include "../IdbEnum.h"
 // #include "IdbInstance.h"

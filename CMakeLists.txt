@@ -177,6 +177,10 @@ include_directories(SYSTEM
     ${THIRD_PARTY_HOME}/json
 )
 
+# Repo-rooted include paths: #include "database/symbol/NamedTable.h" works from
+# any target without deep-relative paths.
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 find_package(OpenMP REQUIRED)
 if (OPENMP_CXX_FOUND)
     message("OPENMP FOUND")
