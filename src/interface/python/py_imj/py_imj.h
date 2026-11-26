@@ -26,6 +26,7 @@ namespace python_interface {
 bool initMJ(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool insertFiller(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool checkAntenna(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
+bool repairAntenna(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool insertMetal(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool defFlatten(const std::optional<std::filesystem::path>& config, std::map<std::string, std::string>& config_dict);
 bool analyzeDriver();

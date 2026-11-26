@@ -87,6 +87,8 @@ void DataManager::buildConfig()
   _config.dm_temp_directory_path = _config.temp_directory_path + "data_manager/";
   // **********  AntennaChecker   ********** //
   _config.ac_temp_directory_path = _config.temp_directory_path + "antenna_checker/";
+  // **********  AntennaRepairer  ********** //
+  _config.ar_temp_directory_path = _config.temp_directory_path + "antenna_repairer/";
   // **********   DefFlattener    ********** //
   _config.df_temp_directory_path = _config.temp_directory_path + "def_flattener/";
   // **********  DriverAnalyzer  ********** //
@@ -107,6 +109,8 @@ void DataManager::buildConfig()
   MJUTIL.createDir(_config.dm_temp_directory_path);
   // **********  AntennaChecker   ********** //
   MJUTIL.createDir(_config.ac_temp_directory_path);
+  // **********  AntennaRepairer  ********** //
+  MJUTIL.createDir(_config.ar_temp_directory_path);
   // **********   DefFlattener    ********** //
   MJUTIL.createDir(_config.df_temp_directory_path);
   // **********  DriverAnalyzer  ********** //
@@ -143,6 +147,9 @@ void DataManager::printConfig()
   // **********  AntennaChecker   ********** //
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "AntennaChecker");
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.ac_temp_directory_path);
+  // **********  AntennaRepairer  ********** //
+  MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "AntennaRepairer");
+  MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.ar_temp_directory_path);
   // **********   DefFlattener    ********** //
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(1), "DefFlattener");
   MJLOG.info(Loc::current(), MJUTIL.getSpaceByTabNum(2), _config.df_temp_directory_path);

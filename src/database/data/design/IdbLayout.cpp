@@ -169,10 +169,6 @@ void IdbLayout::resetDefData()
   if (_track_grid_list != nullptr) {
     _track_grid_list->reset();
   }
-  if (_max_via_stack != nullptr) {
-    delete _max_via_stack;
-    _max_via_stack = nullptr;
-  }
 }
 
 void IdbLayout::initDie(int32_t ll_x, int32_t ll_y, int32_t ur_x, int32_t ur_y)

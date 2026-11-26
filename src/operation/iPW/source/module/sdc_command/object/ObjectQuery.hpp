@@ -70,6 +70,7 @@ std::set<std::string> findClocksFromObjects(Database& database, const std::vecto
 std::set<std::string> findExceptionObjects(Database& database, const std::vector<std::string>& objects);
 std::set<std::string> findClocks(Database& database, const std::vector<std::string>& objects);
 std::vector<std::string> findClockSources(Database& database, const std::vector<std::string>& objects);
+std::vector<std::string> findClockSources(Database& database, const std::vector<Tcl_Obj*>& objects);
 
 std::vector<std::string> getPortPinNames(Database& database, const std::vector<std::string>& object_list);
 std::vector<std::string> getObjectNames(Database& database, const std::string& object_list, bool name_only = false);

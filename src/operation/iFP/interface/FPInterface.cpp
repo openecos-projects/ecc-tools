@@ -1462,22 +1462,21 @@ void FPInterface::outputIOPinList()
     idb_pin->set_average_coordinate(io_pin.get_x(), io_pin.get_y());
     idb_pin->set_orient(unwrapPlacementOrientation(io_pin.get_orient()));
 
-    // IO-cell mode: the placed PAD already carries the physical access shape,
-    // and the reference flow keeps PINS logical-only. Emitting a port here
-    // would duplicate the cell's pin metal at the top level.
-    if (config.io_placer_mode != IOPlacerMode::kIOCell) {
-      for (IOPort& io_port : io_pin.get_new_port_list()) {
-        idb::IdbPort* idb_port = idb_term->add_port();
-        idb_port->set_coordinate(io_port.get_x(), io_port.get_y());
-        idb_port->set_orient(idb::IdbOrient::kN_R0);
-        if (io_port.get_placed()) {
+    for (IOPort& io_port : io_pin.get_new_port_list()) {
+      idb::IdbPort* idb_port = idb_term->add_port();
+      idb_port->set_orient(idb::IdbOrient::kN_R0);
+      if (io_port.get_placed()) {
+        if (io_pin.get_fixed()) {
+          idb_port->set_placement_status_fix();
+        } else {
           idb_port->set_placement_status_place();
         }
-        idb::IdbLayerShape* idb_layer_shape = idb_port->add_layer_shape();
-        idb_layer_shape->set_type_rect();
-        idb_layer_shape->set_layer(idb_layout->get_layers()->find_layer(io_port.get_layer_name()));
-        idb_layer_shape->add_rect(io_port.get_ll_x(), io_port.get_ll_y(), io_port.get_ur_x(), io_port.get_ur_y());
       }
+      idb::IdbLayerShape* idb_layer_shape = idb_port->add_layer_shape();
+      idb_layer_shape->set_type_rect();
+      idb_layer_shape->set_layer(idb_layout->get_layers()->find_layer(io_port.get_layer_name()));
+      idb_layer_shape->add_rect(io_port.get_ll_x(), io_port.get_ll_y(), io_port.get_ur_x(), io_port.get_ur_y());
+      idb_port->set_coordinate(io_port.get_x(), io_port.get_y());
     }
     idb_pin->set_bounding_box();
     io_pin.get_new_port_list().clear();

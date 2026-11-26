@@ -27,6 +27,7 @@ int registerCmdMJ()
   registerTclCmd(TclInitMJ, "init_mj");
   registerTclCmd(TclInsertFiller, "insert_filler");
   registerTclCmd(TclCheckAntenna, "check_antenna");
+  registerTclCmd(TclRepairAntenna, "repair_antenna");
   registerTclCmd(TclInsertMetal, "insert_metal");
   registerTclCmd(TclFlattenDef, "flatten_def");
   registerTclCmd(TclAnalyzeDriver, "analyze_driver");

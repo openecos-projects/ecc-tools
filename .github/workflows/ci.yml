@@ -33,12 +33,12 @@ jobs:
           cmake --build build --target ircx_process_parser_test ircx_process_evaluator_test --parallel 2
           ctest --test-dir build -R '^ircx_process_(parser|evaluator)_test$' --output-on-failure --no-tests=error
 
-      - name: Run iMJ design tools regression
+      - name: Run iMJ regressions
         env:
           SCCACHE_GHA_ENABLED: "true"
         run: |
-          cmake --build build --target test_imj_design_tools --parallel 2
-          ctest --test-dir build -R '^test_imj_design_tools$' --output-on-failure --no-tests=error
+          cmake --build build --target test_imj_design_tools test_imj_antenna_checker test_imj_antenna_reporting test_imj_antenna_repair --parallel 2
+          ctest --test-dir build -R '^test_imj_(design_tools|antenna_checker|antenna_reporting|antenna_repair)$' --output-on-failure --no-tests=error
 
       - name: Upload repaired wheel
         uses: actions/upload-artifact@v4
