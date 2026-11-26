@@ -187,7 +187,7 @@ struct ClockState : ClockWaveform
   void summarize()
   {
     static_cast<ClockWaveform&>(*this) = ClockWaveform{};
-    eachWaveform([this](TransType source, ClockWaveform& wave) {
+    eachWaveform([this](TransType, ClockWaveform& wave) {
       for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
         for (auto edge : {TransType::kRise, TransType::kFall}) {
           auto better = [mode](double value, std::optional<double> current) { return !current || (mode == AnalysisType::kMax ? value > *current : value < *current); };
