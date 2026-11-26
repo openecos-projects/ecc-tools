@@ -5,6 +5,7 @@ set(IRCX_TOOLKIT ${IRCX_SOURCE}/toolkit)
 
 ## build
 add_subdirectory(process)
+add_subdirectory(cap_table)
 add_subdirectory(${IRCX_DATA_MANAGER})
 add_subdirectory(${IRCX_MODULE})
 add_subdirectory(${IRCX_TOOLKIT})

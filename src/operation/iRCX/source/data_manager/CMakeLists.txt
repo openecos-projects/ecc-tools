@@ -15,6 +15,7 @@ target_link_libraries(ircx_data_manager
     PUBLIC
     ircx_toolkit
     ircx_process_parser
+    ircx_cap_table
 )
 
 target_include_directories(ircx_data_manager

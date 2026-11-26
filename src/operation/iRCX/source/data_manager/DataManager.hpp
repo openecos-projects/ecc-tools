@@ -56,8 +56,6 @@ class DataManager
   void buildDatabase();
   std::vector<CornerData> buildCornerDataList();
   std::string getTmprCornerName(std::string corner_name, double tmpr);
-  void buildCapTable(CornerData& corner_data, std::string captab_file_path);
-  void buildCapTableConfig(CornerData& corner_data, const std::string& header, const std::vector<std::string>& data_line_list);
   void buildLayerMapping(LayerTable& layer_table);
   void printConfig();
   void printDatabase();

@@ -64,9 +64,9 @@ class InterfaceFixture
 
   void prepare(bool has_lef = true, bool has_def = true)
   {
-    write("mapping.map", "M1 metal1\n");
+    write("mapping.map", "conducting_layers\nM1 metal1\nvia_layers\nmarker_layers\nremove_layers\nPO\nCT\n");
     write("typical.itf", "CONDUCTOR metal1 { THICKNESS=0.1 RPSQ=0.12 }\n");
-    write("typical.captab", "");
+    write("typical.captab", "P M1 SUBSTRATE - .2\n-1 -1 0 0 0\n-1 .2 0 0 0\n.2 -1 0 0 0\n.2 .2 0 0 0\n");
     write("ircx.config", R"({
       "thread_num": 1,
       "output": "output",
@@ -168,6 +168,99 @@ void checkExtraction()
     }
   }
   require(found_design && found_resistance, "SPEF is missing the design or resistance section");
+}
+
+void checkPatternGridInput(const std::string& scenario)
+{
+  InterfaceFixture fixture;
+  fixture.prepare();
+  const std::string grid = "P M1 SUBSTRATE - .2\n"
+                           "-1 -1 8 0 0\n-1 .2 5 0 3\n.2 -1 5 3 0\n.2 .2 2 3 3\n";
+  const std::string a_table = "A metal1 OVER SUBSTRATE\n.1 0 2\n2 0 3\n";
+  const std::string b_table = "B metal1 OVER SUBSTRATE UNDER metal2\n.1 0 2\n2 0 3\n";
+  const bool invalid = scenario.starts_with("reject_");
+  std::ofstream(fixture.directory() / "typical.captab")
+      << (scenario == "reject_a" ? a_table : scenario == "reject_b" ? b_table
+          : scenario == "reject_empty" ? "" : scenario == "reject_mixed" ? grid + a_table : grid);
+  if (scenario == "override" || scenario == "override_corners") {
+    const auto path = fixture.directory() / "explicit-grid.captab";
+    std::ofstream(path) << "P M1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
+    setenv("IRCX_PATTERN_GRID", path.c_str(), 1);
+  }
+  if (scenario == "corners" || scenario == "override_corners") {
+    std::ofstream(fixture.directory() / "other.captab")
+        << "P M1 SUBSTRATE - .2\n-1 -1 4 0 0\n-1 .2 4 0 0\n.2 -1 4 0 0\n.2 .2 4 0 0\n";
+    std::ofstream(fixture.directory() / "ircx.config") << R"({
+      "thread_num": 2, "output":"output", "mapping_file":"mapping.map",
+      "corners":[
+        {"name":"TYPICAL", "process_file":"typical.itf", "captab_file":"typical.captab", "temperature":[25,125]},
+        {"name":"OTHER", "process_file":"typical.itf", "captab_file":"other.captab"}]
+    })";
+  }
+  if (scenario == "overlap") fixture.addNet("n1", 1050);
+  if (scenario == "coupling" || scenario == "corners") fixture.addNet("n1", 1400);
+  if (scenario == "process_names") {
+    auto process_grid = grid;
+    process_grid.replace(process_grid.find("M1"), 2, "metal1");
+    std::ofstream(fixture.directory() / "typical.captab") << process_grid;
+  }
+  if (invalid) {
+    bool rejected = false;
+    try {
+      fixture.init();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("grid") != std::string::npos;
+    }
+    require(rejected, "non-P captab input must fail during initialization: " + scenario);
+    return;
+  }
+  fixture.init();
+  if (scenario == "process_names") {
+    bool rejected = false;
+    try {
+      RCXI.runRCX();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("missing pattern grid context: M1|SUBSTRATE|-") != std::string::npos;
+    }
+    require(rejected, "captab must use design layer names without a process-name fallback");
+    return;
+  }
+  if (scenario == "removed_mode") setenv("IRCX_MULTI_MODE", "off", 1);
+  if (scenario == "removed_prebuilt") setenv("IRCX_MULTI_MODE", "prebuilt", 1);
+  if (scenario == "removed_rank") setenv("IRCX_MULTI_RANK", "3", 1);
+  if (scenario == "removed_table") setenv("IRCX_PATTERN_TABLE", "unused.captab", 1);
+  if (scenario == "override_corners" || scenario.starts_with("removed_")) {
+    bool rejected = false;
+    try {
+      RCXI.runRCX();
+    } catch (const std::runtime_error& error) {
+      const std::string diagnostic(error.what());
+      rejected = diagnostic.find(scenario == "override_corners" ? "exactly one process corner" : "PatternGrid") != std::string::npos;
+    }
+    require(rejected, "unsupported extraction setting did not fail explicitly: " + scenario);
+    return;
+  }
+  RCXI.runRCX();
+  auto& database = RCXDM.getDatabase();
+  const int corners = scenario == "corners" ? 3 : 1;
+  require(database.get_corner_data_list().size() == corners, "unexpected number of P-grid corners");
+  for (int corner = 0; corner < corners; ++corner) {
+    for (int net = 0; net < database.get_layout_data().get_regular_net_num(); ++net) {
+      const auto& ground = database.get_rc_data().get_corner_net_ground_capacitance_list(ircx::CornerNetIdx(corner, net));
+      // The 1 um route has 0.1 um metal extensions at both ends.
+      const double expected = scenario == "override" || corner == 2 ? 4.8 : scenario == "coupling" || scenario == "corners" ? 6.0 : 9.6;
+      require(ground.size() == 1 && std::isfinite(ground.front()) && std::abs(ground.front() - expected) < 1e-10,
+              "unexpected P-grid capacitance: got " + (ground.empty() ? std::string("no edges") : std::to_string(ground.front())));
+    }
+  }
+  if (scenario == "coupling" || scenario == "corners") {
+    const auto& coupling = database.get_rc_data().get_merged_coupling_capacitance_map();
+    require(coupling.size() == 1, "grid coupling must be assembled once per reciprocal pair");
+    for (int corner = 0; corner < corners; ++corner)
+      require(std::abs(coupling.begin()->second.at(corner) - (corner == 2 ? 0.0 : 3.6)) < 1e-10,
+              "coupling used the wrong corner grid");
+  }
+  RCXI.destroyRCX();
 }
 
 bool hasUnescapedDollar(const std::string& text)
@@ -473,10 +566,13 @@ int main(int argc, char** argv)
 {
   try {
     require(setenv("ECC_LOGGER_THROW_ON_ERROR", "1", 1) == 0, "cannot enable exception error reporting");
-    require(setenv("IRCX_MULTI_MODE", "off", 1) == 0, "cannot select the test extraction mode");
+    for (const char* name : {"IRCX_MULTI_MODE", "IRCX_MULTI_RANK", "IRCX_PATTERN_GRID", "IRCX_PATTERN_TABLE", "IRCX_MULTI_OUTPUT",
+                             "IRCX_XLAYER_TABLE", "IRCX_CROSSING_TRANSMISSION"}) unsetenv(name);
     const std::string scenario = argc > 1 ? argv[1] : "extract";
     if (scenario == "extract") {
       checkExtraction();
+    } else if (scenario.starts_with("captab_")) {
+      checkPatternGridInput(scenario.substr(7));
     } else if (scenario == "missing_database") {
       checkMissingDatabase(false, false);
     } else if (scenario == "missing_lef") {

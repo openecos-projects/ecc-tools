@@ -18,8 +18,7 @@
 
 #include <tuple>
 
-#include "CapTableConfig.hpp"
-#include "CapTableEntry.hpp"
+#include "grid/PatternGrid.hpp"
 #include "Corner.hpp"
 #include "CornerData.hpp"
 #include "Logger.hpp"
@@ -204,7 +203,7 @@ std::vector<CornerData> DataManager::buildCornerDataList()
     }
     CornerData prototype;
     prototype.set_process_technology(model);
-    buildCapTable(prototype, corner.get_captab_file_path());
+    prototype.set_pattern_grid(std::make_shared<const pattern::PatternGrid>(corner.get_captab_file_path()));
     for (double temperature : corner.get_tmpr_list()) {
       auto data = prototype;
       data.set_corner_name(getTmprCornerName(corner.get_corner_name(), temperature));
@@ -228,82 +227,6 @@ std::string DataManager::getTmprCornerName(std::string corner_name, double tmpr)
     }
   }
   return RCXUTIL.getString(corner_name, "_", tmpr_name, "C");
-}
-
-void DataManager::buildCapTable(CornerData& corner_data, std::string captab_file_path)
-{
-  std::ifstream* captab_file_stream = RCXUTIL.getInputFileStream(captab_file_path);
-  if (!captab_file_stream->is_open()) {
-    RCXUTIL.closeFileStream(captab_file_stream);
-    return;
-  }
-
-  std::string header;
-  std::vector<std::string> data_line_list;
-  std::string line;
-  while (std::getline(*captab_file_stream, line)) {
-    line = RCXUTIL.getTrimmedString(line);
-    if (line.empty() || line[0] == '#') {
-      continue;
-    }
-
-    bool is_header = line.size() > 2 && (line[0] == 'A' || line[0] == 'B') && line[1] == ' ' && line.find("OVER") != std::string::npos;
-    if (is_header) {
-      if (!header.empty()) {
-        buildCapTableConfig(corner_data, header, data_line_list);
-      }
-      header = line;
-      data_line_list.clear();
-    } else if (!header.empty()) {
-      data_line_list.push_back(line);
-    }
-  }
-  if (!header.empty()) {
-    buildCapTableConfig(corner_data, header, data_line_list);
-  }
-  RCXUTIL.closeFileStream(captab_file_stream);
-}
-
-void DataManager::buildCapTableConfig(CornerData& corner_data, const std::string& header, const std::vector<std::string>& data_line_list)
-{
-  std::istringstream header_stream(header);
-  std::string type_name;
-  std::string layer_name;
-  std::string over_keyword;
-  std::string over_layer_name;
-  if (!(header_stream >> type_name >> layer_name >> over_keyword >> over_layer_name)) {
-    return;
-  }
-
-  CapTableConfig cap_table_config;
-  cap_table_config.set_type(GetCapTableType()(type_name));
-  cap_table_config.set_layer_name(layer_name);
-  cap_table_config.set_over_layer_name(over_layer_name);
-
-  std::string under_keyword;
-  std::string under_layer_name;
-  if (header_stream >> under_keyword >> under_layer_name && under_keyword == "UNDER") {
-    cap_table_config.set_under_layer_name(under_layer_name);
-  }
-
-  for (const std::string& data_line : data_line_list) {
-    std::istringstream data_stream(data_line);
-    double spacing = 0.0;
-    double coupling_capacitance = 0.0;
-    double ground_capacitance = 0.0;
-    if (!(data_stream >> spacing >> coupling_capacitance >> ground_capacitance)) {
-      continue;
-    }
-
-    CapTableEntry cap_table_entry;
-    cap_table_entry.set_spacing(spacing);
-    cap_table_entry.set_coupling_capacitance(coupling_capacitance);
-    cap_table_entry.set_ground_capacitance(ground_capacitance);
-    cap_table_config.get_entry_list().push_back(std::move(cap_table_entry));
-  }
-  if (!cap_table_config.get_entry_list().empty()) {
-    corner_data.get_cap_table_config_list().push_back(std::move(cap_table_config));
-  }
 }
 
 void DataManager::buildLayerMapping(LayerTable& layer_table)

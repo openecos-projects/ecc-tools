@@ -1,29 +1,20 @@
-// Adapted from the frozen paper manuscript rank3 collector (2026-10-09).
+// Nearest-neighbor geometry and duplicate ownership for P-grid queries.
 #pragma once
-#include <array>
+#include <algorithm>
 #include <atomic>
 #include <boost/geometry.hpp>
 #include <boost/geometry/index/rtree.hpp>
-#include <charconv>
-#include <cmath>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
-#include <iomanip>
 #include <map>
-#include <memory>
-#include <mutex>
-#include <set>
-#include <sstream>
+#include <optional>
 #include <unordered_map>
 
-#include "Logger.hpp"
-#include "PatternCapacitanceTable.hpp"
-#include "RankedNeighbors.hpp"
+#include "NearestNeighbors.hpp"
 #include "TopoPool.hpp"
 namespace ircx::pattern {
-class MultiNeighborCache
+class GridNeighborhood
 {
   struct Entry
   {
@@ -37,55 +28,28 @@ class MultiNeighborCache
   struct LayerIndex
   {
     std::vector<std::size_t> ids;
-    double max_half_width = 0;
     SpatialIndex spatial;
   };
   std::vector<Entry> entries_;
   std::unordered_map<ircx::TopoEdge*, std::size_t> entry_ids_;
-  std::atomic<std::int64_t> spans_{0}, total_dbu_{0}, duplicate_dbu_{0}, overlap_spans_{0}, overlap_dbu_{0}, field_fallback_spans_{0}, field_fallback_dbu_{0};
+  std::atomic<std::int64_t> spans_{0}, total_dbu_{0}, duplicate_dbu_{0}, overlap_spans_{0}, overlap_dbu_{0};
   std::atomic<std::int64_t> grid_dbu_{0}, grid_width_clamped_dbu_{0}, grid_gap_clamped_dbu_{0};
   std::map<std::pair<int32_t, bool>, LayerIndex> index_;
-  bool active_ = false, grid_ = false;
-  int rank_ = 3;
-  std::unique_ptr<const captable::Library> library_;
-  mutable std::array<std::atomic<std::int64_t>, 3> library_queries_{};
-  mutable std::array<std::atomic<std::int64_t>, 3> library_dbu_{};
+  std::optional<std::filesystem::path> report_directory_;
   static std::size_t owner(const ircx::TopoEdge& e) { return (std::size_t(e.get_is_special_net()) << 32) | std::uint32_t(e.get_net_idx()); }
-  static std::filesystem::path outputPath(const char* name)
-  {
-    const char* dir = std::getenv("IRCX_MULTI_OUTPUT");
-    return std::filesystem::path(dir ? dir : ".") / name;
-  }
 
  public:
   struct Piece
   {
     std::int64_t lo, hi;
     std::vector<ircx::TopoEdge*> neighbors;
-    std::string key;
+    bool duplicate = false;
     std::size_t nleft = 0;
   };
-  explicit MultiNeighborCache(ircx::TopoPool& pool)
+  explicit GridNeighborhood(ircx::TopoPool& pool)
   {
-    const char* mode = std::getenv("IRCX_MULTI_MODE");
-    if (!mode || std::string(mode) == "off")
-      return;
-    active_ = true;
-    grid_ = std::string(mode) == "grid";
-    if (!grid_ && std::string(mode) != "prebuilt")
-      RCXLOG.error(ircx::Loc::current(), "invalid multi mode");
-    const char* rank = std::getenv("IRCX_MULTI_RANK");
-    if (rank) {
-      const auto end = rank + std::strlen(rank);
-      const auto parsed = std::from_chars(rank, end, rank_);
-      if (parsed.ec != std::errc{} || parsed.ptr != end)
-        RCXLOG.error(Loc::current(), "invalid neighbor rank");
-    }
-    if (grid_ && rank_ != 1) {
-      RCXLOG.error(ircx::Loc::current(), "grid mode requires rank 1");
-    }
-    if (rank_ < 1 || rank_ > 3)
-      RCXLOG.error(ircx::Loc::current(), "invalid neighbor rank");
+    const char* output = std::getenv("IRCX_MULTI_OUTPUT");
+    if (output && *output) report_directory_ = output;
     auto add = [&](auto& edge) {
       if (edge.get_is_via())
         return;
@@ -93,7 +57,6 @@ class MultiNeighborCache
       auto a = edge.get_line_segment().get_is_horizontal() ? boost::polygon::yl(r) : boost::polygon::xl(r);
       auto b = edge.get_line_segment().get_is_horizontal() ? boost::polygon::yh(r) : boost::polygon::xh(r);
       auto& index = index_[{edge.get_layer_idx(), edge.get_line_segment().get_is_horizontal()}];
-      index.max_half_width = std::max(index.max_half_width, double(b - a) / 2);
       index.ids.push_back(entries_.size());
       entry_ids_[&edge] = entries_.size();
       entries_.push_back({&edge, a, b});
@@ -118,34 +81,14 @@ class MultiNeighborCache
       }
       index.spatial = SpatialIndex(values.begin(), values.end());
     }
-    if (std::string(mode) == "prebuilt") {
-      const char* path = std::getenv("IRCX_PATTERN_TABLE");
-      const char* grid = std::getenv("IRCX_PATTERN_GRID");
-      if (!path || !*path)
-        RCXLOG.error(ircx::Loc::current(), "missing prebuilt capacitance table");
-      if (!grid || !*grid)
-        RCXLOG.error(ircx::Loc::current(), "prebuilt mode requires independent grid fallback");
-      library_ = std::make_unique<const captable::Library>(path);
-    }
-
   }
-  ~MultiNeighborCache()
+  ~GridNeighborhood()
   {
-    if (!active_)
-      return;
-    if (library_) {
-      std::ofstream report(outputPath("prebuilt_stats.txt"));
-      const char* names[] = {"supported", "geometry_fallback", "domain_fallback"};
-      for (std::size_t i = 0; i < 3; ++i)
-        report << names[i] << "_queries " << library_queries_[i] << '\n'
-               << names[i] << "_dbu " << library_dbu_[i] << '\n';
-      if (!report)
-        std::abort();
-    }
-    std::ofstream out(outputPath("multi_stats.txt"));
+    if (!report_directory_) return;
+    std::ofstream out(*report_directory_ / "grid_stats.txt");
     out << "spans " << spans_ << "\ntotal_dbu " << total_dbu_ << "\nduplicate_dbu " << duplicate_dbu_ << "\noverlap_spans " << overlap_spans_
-        << "\noverlap_dbu " << overlap_dbu_ << "\nfield_fallback_spans " << field_fallback_spans_ << "\nfield_fallback_dbu " << field_fallback_dbu_
-        << "\ngrid_dbu " << grid_dbu_ << "\ngrid_width_clamped_dbu " << grid_width_clamped_dbu_ << "\ngrid_gap_clamped_dbu " << grid_gap_clamped_dbu_ << '\n';
+        << "\noverlap_dbu " << overlap_dbu_ << "\ngrid_dbu " << grid_dbu_ << "\ngrid_width_clamped_dbu " << grid_width_clamped_dbu_
+        << "\ngrid_gap_clamped_dbu " << grid_gap_clamped_dbu_ << '\n';
   }
   void recordGridCoverage(std::int64_t length, bool width_clamped, bool gap_clamped)
   {
@@ -155,39 +98,7 @@ class MultiNeighborCache
     if (gap_clamped)
       grid_gap_clamped_dbu_ += length;
   }
-  void recordFieldFallback(std::int64_t length)
-  {
-    ++field_fallback_spans_;
-    field_fallback_dbu_ += length;
-  }
-  bool active() const { return active_; }
-  bool collecting() const { return false; }
-  bool gridded() const { return grid_; }
-  bool tabulated() const { return bool(library_); }
-  // Each caller owns its result: concurrent and consecutive queries cannot alias.
-  std::vector<double> caps(const std::string& key, std::int64_t length = 0) const
-  {
-    auto result = queryCaps(key, length);
-    if (result.status == captable::Status::error)
-      RCXLOG.error(Loc::current(), result.error);
-    return result.caps;
-  }
-  captable::QueryResult queryCaps(const std::string& key, std::int64_t length = 0) const
-  {
-    if (key == "__ZERO")
-      return {captable::Status::ok, {0.}, {}};
-    if (key == "__FALLBACK" || !library_)
-      return {captable::Status::geometry_fallback, {}, {}};
-    auto result = library_->queryChecked(key);
-    if (result.status == captable::Status::error)
-      return result;
-    const auto status = static_cast<std::size_t>(result.status);
-    ++library_queries_[status];
-    library_dbu_[status] += length;
-    return result;
-  }
-  std::vector<Piece> pieces(ircx::TopoEdge& master, std::int64_t lo, std::int64_t hi, double micron_per_dbu, const std::string& layer, const std::string& below,
-                            const std::string& above)
+  std::vector<Piece> pieces(ircx::TopoEdge& master, std::int64_t lo, std::int64_t hi, double micron_per_dbu)
   {
     ++spans_;
     total_dbu_ += hi - lo;
@@ -198,7 +109,7 @@ class MultiNeighborCache
     const double range = 8. / micron_per_dbu;
     std::vector<SpatialValue> candidates;
     index.spatial.query(boost::geometry::index::intersects(Box(Point(lo, mx0 - range), Point(hi, mx1 + range))), std::back_inserter(candidates));
-    std::vector<RankedItem> sides[2];
+    std::vector<NearestItem> sides[2];
     std::vector<std::pair<std::int64_t, std::int64_t>> masks;
     const auto master_id = entry_ids_.at(&master);
     bool overlap = false;
@@ -220,7 +131,7 @@ class MultiNeighborCache
       double gap = side == 0 ? mx0 - e.x1 : e.x0 - mx1;
       if (gap > range)
         continue;
-      sides[side].push_back({e.edge->get_line_segment().get_lower(), e.edge->get_line_segment().get_upper(), id, owner(*e.edge), e.x0, e.x1});
+      sides[side].push_back({e.edge->get_line_segment().get_lower(), e.edge->get_line_segment().get_upper(), id, e.x0, e.x1});
     }
     if (overlap) {
       ++overlap_spans_;
@@ -228,26 +139,16 @@ class MultiNeighborCache
     }
     std::sort(sides[0].begin(), sides[0].end(), [](auto a, auto b) { return a.x1 != b.x1 ? a.x1 > b.x1 : a.id < b.id; });
     std::sort(sides[1].begin(), sides[1].end(), [](auto a, auto b) { return a.x0 != b.x0 ? a.x0 < b.x0 : a.id < b.id; });
-    auto left = rankedRuns(lo, hi, sides[0], rank_), right = rankedRuns(lo, hi, sides[1], rank_);
+    auto left = nearestRuns(lo, hi, sides[0]), right = nearestRuns(lo, hi, sides[1]);
     std::vector<Piece> out;
     std::size_t i = 0, j = 0;
     while (i < left.size() && j < right.size()) {
       auto a = std::max(left[i].lo, right[j].lo), b = std::min(left[i].hi, right[j].hi);
       if (a < b) {
-        Piece piece{a, b, {}, {}};
-        std::ostringstream key;
-        if (!grid_)
-          key << layer << ' ' << below << ' ' << (above.empty() ? "-" : above) << ' ' << 2 * std::llround(1. / micron_per_dbu) << ' ' << 2 * (mx1 - mx0) << ' '
-              << left[i].ids.size() << ' ' << right[j].ids.size();
+        Piece piece{a, b, {}};
         for (const auto& ids : {left[i].ids, right[j].ids})
-          for (auto id : ids) {
-            const auto& e = entries_[id];
-            if (!grid_)
-              key << ' ' << 2 * e.x0 - (std::int64_t(mx0) + mx1) << ' ' << 2 * e.x1 - (std::int64_t(mx0) + mx1);
-            piece.neighbors.push_back(e.edge);
-          }
+          for (auto id : ids) piece.neighbors.push_back(entries_[id].edge);
         piece.nleft = left[i].ids.size();
-        piece.key = overlap ? "__FALLBACK" : (grid_ ? "__GRID" : key.str());
         out.push_back(std::move(piece));
       }
       auto end = std::min(left[i].hi, right[j].hi);
@@ -280,7 +181,7 @@ class MultiNeighborCache
             copy.hi = a;
             owned.push_back(copy);
           }
-          owned.push_back({a, b, {}, "__ZERO"});
+          owned.push_back({a, b, {}, true});
           cursor = b;
         }
         if (cursor < part.hi) {

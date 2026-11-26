@@ -85,7 +85,7 @@ class ResistanceFixture
   {
     write(filename, text);
     loadConfiguration(std::string(R"([{"name":"TEST",")") + (legacy ? "itf_file" : "process_file") + "\":\"" + filename
-                      + R"(","captab_file":"empty.captab","temperature":[)" + std::to_string(temperature) + "]}]");
+                      + R"(","captab_file":"zero.captab","temperature":[)" + std::to_string(temperature) + "]}]");
     if (RCXDM.getDatabase().get_corner_data_list().size() != 1) {
       throw std::runtime_error("process was not loaded");
     }
@@ -101,7 +101,7 @@ class ResistanceFixture
   void loadConfiguration(const std::string& corners)
   {
     write("mapping.map", mapping_text);
-    write("empty.captab", "");
+    write("zero.captab", "P M1 SUBSTRATE - .2\n-1 -1 0 0 0\n-1 .2 0 0 0\n.2 -1 0 0 0\n.2 .2 0 0 0\n");
     write("rcx.json", R"({"thread_num":2,"mapping_file":"mapping.map","output":"output","corners":)" + corners + "}");
     std::map<std::string, std::any> config{{"-config", (_directory / "rcx.json").string()}};
     RCXDM.input(config);
@@ -241,9 +241,9 @@ std::vector<Test> processInputTests()
          ResistanceFixture fixture;
          fixture.writeProcess("a", "metal metal1 {Thickness .1 Resistance .12}");
          fixture.writeProcess("b", "metal metal1 {Thickness .1 Resistance .24}");
-         fixture.loadConfiguration(R"([{"name":"A","process_file":"a","captab_file":"empty.captab"},
-           {"name":"B","process_file":"b","captab_file":"empty.captab"},
-           {"name":"C","process_file":"a","captab_file":"empty.captab","process_options":{"extensions":["dielectric_surface_fields"]}}])");
+         fixture.loadConfiguration(R"([{"name":"A","process_file":"a","captab_file":"zero.captab"},
+           {"name":"B","process_file":"b","captab_file":"zero.captab"},
+           {"name":"C","process_file":"a","captab_file":"zero.captab","process_options":{"extensions":["dielectric_surface_fields"]}}])");
          const auto& corners = RCXDM.getDatabase().get_corner_data_list();
          if (corners[0].get_process_technology() == corners[1].get_process_technology()
              || corners[0].get_process_technology() != corners[2].get_process_technology())
@@ -254,9 +254,9 @@ std::vector<Test> processInputTests()
        [] {
          ResistanceFixture fixture;
          fixture.loadInput("metal metal1 {Thickness .1 Resistance .12}", "process");
-         fixture.loadConfiguration(R"([{"name":"A","process_file":"process","itf_file":"./process","captab_file":"empty.captab"}])");
-         for (const auto& corner : {R"([{"name":"A","captab_file":"empty.captab"}])",
-                                   R"([{"name":"A","process_file":"missing","captab_file":"empty.captab"}])"}) {
+         fixture.loadConfiguration(R"([{"name":"A","process_file":"process","itf_file":"./process","captab_file":"zero.captab"}])");
+         for (const auto& corner : {R"([{"name":"A","captab_file":"zero.captab"}])",
+                                   R"([{"name":"A","process_file":"missing","captab_file":"zero.captab"}])"}) {
            bool failed = false;
            try {
              fixture.loadConfiguration(corner);
@@ -325,8 +325,8 @@ std::vector<Test> processInputTests()
        [] {
          ResistanceFixture fixture;
          fixture.writeProcess("process.data", "metal metal1 {Thickness .1 Resistance .12}");
-         fixture.loadConfiguration(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab","temperature":[25,125]},
-                                       {"name":"B","process_file":"process.data","captab_file":"empty.captab"}])");
+         fixture.loadConfiguration(R"([{"name":"A","process_file":"process.data","captab_file":"zero.captab","temperature":[25,125]},
+                                       {"name":"B","process_file":"process.data","captab_file":"zero.captab"}])");
          const auto& corners = RCXDM.getDatabase().get_corner_data_list();
          if (corners.size() != 3 || corners[0].get_process_technology() != corners[1].get_process_technology()
              || corners[0].get_process_technology() != corners[2].get_process_technology())
@@ -360,10 +360,10 @@ std::vector<Test> processInputTests()
          const auto model = RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology();
          for (const auto& corners :
               {std::string("["), std::string("null"), std::string("[7]"),
-               std::string(R"([{"name":7,"process_file":"process.data","captab_file":"empty.captab"}])"),
-               std::string(R"([{"name":"A","process_file":7,"captab_file":"empty.captab"}])"),
-               std::string(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab","temperature":["hot"]}])"),
-               std::string(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab","process_options":{"extensions":[7]}}])")}) {
+               std::string(R"([{"name":7,"process_file":"process.data","captab_file":"zero.captab"}])"),
+               std::string(R"([{"name":"A","process_file":7,"captab_file":"zero.captab"}])"),
+               std::string(R"([{"name":"A","process_file":"process.data","captab_file":"zero.captab","temperature":["hot"]}])"),
+               std::string(R"([{"name":"A","process_file":"process.data","captab_file":"zero.captab","process_options":{"extensions":[7]}}])")}) {
            bool logged_error = false;
            try {
              fixture.loadConfiguration(corners);
@@ -383,7 +383,7 @@ std::vector<Test> processInputTests()
          for (const auto& tail : {R"("temperature":25)", R"("process_options":{"extensions":"dielectric_surface_fields"})"}) {
            bool failed = false;
            try {
-             fixture.loadConfiguration(std::string(R"([{"name":"A","process_file":"process.data","captab_file":"empty.captab",)") + tail + "}]");
+             fixture.loadConfiguration(std::string(R"([{"name":"A","process_file":"process.data","captab_file":"zero.captab",)") + tail + "}]");
            } catch (const std::runtime_error&) {
              failed = true;
            }
@@ -398,7 +398,7 @@ std::vector<Test> processInputTests()
          const auto original = RCXDM.getDatabase().get_corner_data_list()[0].get_process_technology();
          bool failed = false;
          try {
-           fixture.loadConfiguration(R"([{"name":"A","process_file":"process.data","itf_file":"other.data","captab_file":"empty.captab"}])");
+           fixture.loadConfiguration(R"([{"name":"A","process_file":"process.data","itf_file":"other.data","captab_file":"zero.captab"}])");
          } catch (const std::exception&) {
            failed = true;
          }
