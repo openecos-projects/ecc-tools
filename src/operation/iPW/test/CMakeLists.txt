@@ -21,3 +21,8 @@ add_executable(test_ipw_sdc_clock_source EXCLUDE_FROM_ALL sdc_clock_source_test.
 target_link_libraries(test_ipw_sdc_clock_source PRIVATE ipw_sdc_command ipw_data_manager)
 add_test(NAME ipw_sdc_clock_source COMMAND test_ipw_sdc_clock_source)
 set_tests_properties(ipw_sdc_clock_source PROPERTIES TIMEOUT 30)
+
+add_executable(test_ipw_supply_power EXCLUDE_FROM_ALL supply_power_test.cpp)
+target_link_libraries(test_ipw_supply_power PRIVATE ipw_interface ipw_power_analyzer ipw_power_reporter liberty gtest)
+add_test(NAME ipw_supply_power COMMAND test_ipw_supply_power)
+set_tests_properties(ipw_supply_power PROPERTIES TIMEOUT 60)

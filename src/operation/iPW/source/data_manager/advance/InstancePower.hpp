@@ -18,6 +18,7 @@
 
 #include "PowerGroupType.hpp"
 #include "PowerValue.hpp"
+#include "PowerSupply.hpp"
 #include "PWHeader.hpp"
 
 namespace ipw {
@@ -31,6 +32,7 @@ class InstancePower
   PowerGroupType get_power_group_type() const { return _power_group_type; }
   double get_voltage() const { return _voltage; }
   PowerValue& get_power_value() { return _power_value; }
+  std::map<std::string, SupplyPower>& get_supply_power() { return _supply_power; }
   // setter
   void set_power_group_type(const PowerGroupType& power_group_type) { _power_group_type = power_group_type; }
   void set_voltage(const double voltage) { _voltage = voltage; }
@@ -41,6 +43,7 @@ class InstancePower
   PowerGroupType _power_group_type = PowerGroupType::kNone;
   double _voltage = 0.0;
   PowerValue _power_value;
+  std::map<std::string, SupplyPower> _supply_power;
 };
 
 }  // namespace ipw

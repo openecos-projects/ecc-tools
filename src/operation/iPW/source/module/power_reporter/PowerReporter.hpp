@@ -54,12 +54,6 @@ class PowerReporter
   void outputPowerAttribute(std::ofstream* power_report_file);
   void outputInstancePower();
   void outputPeakInstancePower(std::ofstream* instance_power_file);
-  void outputInstancePowerRow(
-      std::ofstream* instance_power_file,
-      const std::string& instance_name,
-      const double voltage,
-      PowerValue& power_value
-  );
   void outputCellPowerReport(
       const std::string& directory_path,
       std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,

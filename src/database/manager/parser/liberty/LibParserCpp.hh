@@ -434,6 +434,7 @@ class LibertyReader
   unsigned visitCell(LibertyGroupStmt* group);
   unsigned visitSequential(LibertyGroupStmt* group);
   unsigned visitPin(LibertyGroupStmt* group);
+  unsigned visitSupplyPin(LibertyGroupStmt* group);
   unsigned visitBus(LibertyGroupStmt* group);
   unsigned visitTiming(LibertyGroupStmt* group);
   unsigned visitInternalPower(LibertyGroupStmt* group);
@@ -473,6 +474,7 @@ class LibertyReader
   unsigned visitCell(liberty_ast::LibGroup* group);
   unsigned visitSequential(liberty_ast::LibGroup* group);
   unsigned visitPin(liberty_ast::LibGroup* group);
+  unsigned visitSupplyPin(liberty_ast::LibGroup* group);
   unsigned visitBus(liberty_ast::LibGroup* group);
   unsigned visitTiming(liberty_ast::LibGroup* group);
   unsigned visitInternalPower(liberty_ast::LibGroup* group);

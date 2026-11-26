@@ -15,6 +15,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PWInterface.hpp"
+#include "LibertySupplies.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -654,6 +655,7 @@ void PWInterface::wrapTimingCell(idb::LibCell* lib_cell)
   timing_cell.set_library_name(lib_library->get_lib_name());
   timing_cell.set_area(lib_cell->get_cell_area());
   timing_cell.set_nom_voltage(lib_library->get_nom_voltage());
+  wrapLibertySupplies(timing_cell, *lib_cell);
   timing_cell.set_cell_leakage_power(lib_cell->get_cell_leakage_power() * 1E-3);
   // Timing uses check arcs to establish register clock/data pins. Importing
   // state functions for power must not change that timing classification.
@@ -695,6 +697,7 @@ void PWInterface::wrapTimingCellPort(TimingCell& timing_cell, idb::LibPort* lib_
 {
   std::string port_name = lib_port->get_port_name();
   TimingCellPort timing_cell_port;
+  timing_cell_port.set_related_power_pin(lib_port->get_related_power_pin());
   timing_cell_port.set_capacitance(lib_port->get_port_cap());
   for (idb::AnalysisMode analysis_mode : {idb::AnalysisMode::kMax, idb::AnalysisMode::kMin}) {
     for (idb::TransType trans_type : {idb::TransType::kRise, idb::TransType::kFall}) {

@@ -195,6 +195,7 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   /////////////////////////////////////////////
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
   EMIRDM.getConfig().instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-instance_power_file_path", "");
+  EMIRDM.getConfig().supply_ground_pins = EMIRUTIL.getConfigValue<std::map<std::string, std::string>>(config_map, "-supply_ground_pins", {});
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
   EMIRDM.getConfig().pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
   EMIRDM.getConfig().add_ploc_from_top_def = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0) == 1;
@@ -435,6 +436,9 @@ void EMIRInterface::wrapPowerPinList(PowerNet& power_net, idb::IdbSpecialNet* id
 
 void EMIRInterface::wrapPowerPin(PowerNet& power_net, idb::IdbPin* idb_pin, bool is_source)
 {
+  if (!idb_pin->is_io_pin()) {
+    power_net.get_pin_has_geometry()[{idb_pin->get_instance()->get_id(), idb_pin->get_pin_name()}] = !idb_pin->get_port_box_list().empty();
+  }
   for (idb::IdbLayerShape* idb_layer_shape : idb_pin->get_port_box_list()) {
     wrapPowerPinShape(power_net, idb_pin, idb_layer_shape, is_source);
   }

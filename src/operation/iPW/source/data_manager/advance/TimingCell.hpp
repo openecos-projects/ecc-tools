@@ -17,6 +17,7 @@
 #pragma once
 
 #include "PWHeader.hpp"
+#include "PowerSupply.hpp"
 #include "TimingCellArc.hpp"
 #include "TimingCellPort.hpp"
 #include "TimingLeakagePower.hpp"
@@ -35,6 +36,8 @@ class TimingCell
   std::vector<TimingSequential>& get_sequentials() { return _sequentials; }
   std::string& get_library_name() { return _library_name; }
   double get_nom_voltage() const { return _nom_voltage; }
+  std::map<std::string, PowerSupply>& get_power_supplies() { return _power_supplies; }
+  const std::map<std::string, PowerSupply>& get_power_supplies() const { return _power_supplies; }
   double get_cell_leakage_power() const { return _cell_leakage_power; }
   std::map<std::string, TimingCellPort>& get_port_map() { return _port_map; }
   std::vector<TimingCellArc>& get_cell_arc_list() { return _cell_arc_list; }
@@ -143,6 +146,7 @@ class TimingCell
   double _area = 0.0;
   std::vector<TimingSequential> _sequentials;
   std::string _library_name;
+  std::map<std::string, PowerSupply> _power_supplies;
   double _nom_voltage = 0.0;
   double _cell_leakage_power = 0.0;
   std::map<std::string, TimingCellPort> _port_map;

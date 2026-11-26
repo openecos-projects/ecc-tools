@@ -1,5 +1,6 @@
 add_library(ipw_interface
     ${IPW_INTERFACE}/PWInterface.cpp
+    ${IPW_INTERFACE}/LibertySupplies.cpp
 )
 
 target_link_libraries(ipw_interface

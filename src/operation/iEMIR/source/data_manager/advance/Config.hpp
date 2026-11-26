@@ -36,6 +36,7 @@ class Config
   // **********       EMIR        ********** //
   std::string temp_directory_path;
   std::string instance_power_file_path;
+  std::map<std::string, std::string> supply_ground_pins;
   std::string ploc_file_path;
   std::vector<std::string> pad_files;
   bool add_ploc_from_top_def = false;

@@ -8,6 +8,7 @@ endif()
 
 add_library(iemir_graph_builder
     ${IEMIR_MODULE}/graph_builder/GraphBuilder.cpp
+    ${IEMIR_MODULE}/graph_builder/DeviceLayerPins.cpp
 )
 
 target_link_libraries(iemir_graph_builder

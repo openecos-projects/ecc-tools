@@ -29,7 +29,8 @@ void register_iemir(py::module& m)
 {
   m.def("init_emir", init_emir, py::arg("temp_directory_path") = py::none(), py::arg("instance_power_file_path") = py::none(),
         py::arg("thread_number") = 128, py::arg("technology_file_path") = py::none(), py::arg("ploc_file_path") = py::none(),
-        py::arg("pad_files") = std::vector<std::filesystem::path>{}, py::arg("add_ploc_from_top_def") = false);
+        py::arg("pad_files") = std::vector<std::filesystem::path>{}, py::arg("add_ploc_from_top_def") = false,
+        py::arg("supply_ground_pins") = std::map<std::string, std::string>{});
   m.def("run_emir", run_emir);
   m.def("destroy_emir", destroy_emir);
 }
