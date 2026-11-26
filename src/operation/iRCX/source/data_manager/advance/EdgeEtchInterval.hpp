@@ -36,9 +36,7 @@ class EdgeEtchInterval
   double get_thickness() const { return _thickness; }
   double get_height() const { return _height; }
   const std::vector<EffectiveWireSegment>& get_resistance_segments() const { return _resistance_segments; }
-  const std::vector<EffectiveWireSegment>& get_capacitance_segments() const { return _capacitance_segments; }
   void set_resistance_segments(std::vector<EffectiveWireSegment> segments) { _resistance_segments = std::move(segments); }
-  void set_capacitance_segments(std::vector<EffectiveWireSegment> segments) { _capacitance_segments = std::move(segments); }
   // setter
   void set_start_coord(double start_coord) { _start_coord = start_coord; }
   void set_end_coord(double end_coord) { _end_coord = end_coord; }
@@ -62,7 +60,6 @@ class EdgeEtchInterval
   // Drawn coordinates above remain immutable during process evaluation.
   // Effective segments below use scaled physical coordinates in micrometres.
   std::vector<EffectiveWireSegment> _resistance_segments;
-  std::vector<EffectiveWireSegment> _capacitance_segments;
 };
 
 }  // namespace ircx

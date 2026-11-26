@@ -168,7 +168,8 @@ class ResistanceFixture
         expectNear(new_intervals[i].get_end_coord(), old_intervals[i].get_end_coord());
         expectNear(new_intervals[i].get_lower_spacing(), old_intervals[i].get_lower_spacing());
         expectNear(new_intervals[i].get_upper_spacing(), old_intervals[i].get_upper_spacing());
-        expectNear(new_intervals[i].get_capacitance_segments().front().geometry.width, old_intervals[i].get_capacitance_segments().front().geometry.width);
+        expectNear(new_intervals[i].get_resistance_segments().front().geometry.width,
+                   old_intervals[i].get_resistance_segments().front().geometry.width);
       }
     }
   }
@@ -538,7 +539,6 @@ std::vector<Test> wireTests()
          const auto& interval = RCXDM.getDatabase().get_corner_net_etch_profile_pool().get_item({0, 0}).get_edge_interval_list(0)[0];
          expectNear(interval.get_width(), .2);
          expectNear(interval.get_resistance_segments().front().geometry.width, .2);
-         expectNear(interval.get_capacitance_segments().front().geometry.width, .16);
          fixture.extractAndExpect(.6);
        }},
       {"odd database widths preserve rectangle sidewall positions", [] {

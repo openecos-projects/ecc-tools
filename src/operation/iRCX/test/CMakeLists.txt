@@ -37,7 +37,8 @@ if(BUILD_TESTING)
   )
 
   add_test(NAME ircx_interface_test COMMAND ircx_interface_test)
-  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping spef_writer_sections spef_writer_names)
+  foreach(scenario missing_database missing_lef missing_def retry_after_missing_database spef_escaping spef_writer_sections spef_writer_names
+                   grid_capacitive_etch grid_invalid_resistive_etch)
     add_test(NAME ircx_interface_${scenario} COMMAND ircx_interface_test ${scenario})
   endforeach()
   foreach(scenario grid override corners coupling overlap process_names reject_a reject_b reject_empty reject_mixed

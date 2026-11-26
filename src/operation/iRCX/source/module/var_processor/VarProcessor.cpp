@@ -190,21 +190,18 @@ ProcessResult<void, std::string> VarProcessor::applyCornerEffectiveGeometry(std:
       wires[i].spans.push_back(span);
     }
   }
-  for (auto domain : {ProcessEffectType::kResistance, ProcessEffectType::kCapacitance}) {
-    auto result = evaluateWireGeometryProfiles(wires, domain);
-    if (!result) return result.error;
-    for (std::size_t i = 0; i < wires.size(); ++i) {
-      const auto& edge = *edges[i];
-      if (edge.get_is_special_net()) continue;
-      auto& profile = database.get_corner_net_etch_profile_pool().get_item({static_cast<int32_t>(corner_index), edge.get_net_idx()});
-      auto intervals = profile.get_edge_interval_list(edge.get_edge_idx());
-      std::vector<std::vector<EffectiveWireSegment>> pieces(intervals.size());
-      for (auto& segment : (*result)[i]) pieces[segment.source_span].push_back(std::move(segment));
-      for (std::size_t j = 0; j < intervals.size(); ++j) {
-        if (domain == ProcessEffectType::kResistance) intervals[j].set_resistance_segments(std::move(pieces[j]));
-        else intervals[j].set_capacitance_segments(std::move(pieces[j]));
-      }
-    }
+  // P-grid capacitance is indexed by drawn geometry, not process-etched walls.
+  // Only resistance extraction consumes the effective geometry prepared here.
+  auto result = evaluateWireGeometryProfiles(wires, ProcessEffectType::kResistance);
+  if (!result) return result.error;
+  for (std::size_t i = 0; i < wires.size(); ++i) {
+    const auto& edge = *edges[i];
+    if (edge.get_is_special_net()) continue;
+    auto& profile = database.get_corner_net_etch_profile_pool().get_item({static_cast<int32_t>(corner_index), edge.get_net_idx()});
+    auto intervals = profile.get_edge_interval_list(edge.get_edge_idx());
+    std::vector<std::vector<EffectiveWireSegment>> pieces(intervals.size());
+    for (auto& segment : (*result)[i]) pieces[segment.source_span].push_back(std::move(segment));
+    for (std::size_t j = 0; j < intervals.size(); ++j) intervals[j].set_resistance_segments(std::move(pieces[j]));
   }
   return {};
 }

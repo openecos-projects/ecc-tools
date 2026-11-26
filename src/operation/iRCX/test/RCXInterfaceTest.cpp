@@ -263,6 +263,53 @@ void checkPatternGridInput(const std::string& scenario)
   RCXI.destroyRCX();
 }
 
+void checkGridGeometry(bool invalid_resistance)
+{
+  InterfaceFixture fixture;
+  fixture.prepare();
+  fixture.addNet("n1", 1400);
+  // Drawn width/gap are both 0.2 um. Expanding each wall by 0.15 um
+  // overlaps the effective wires; only the resistance domain needs those walls.
+  std::ofstream(fixture.directory() / "typical.itf")
+      << "CONDUCTOR metal1 { THICKNESS=0.1 RPSQ=0.12 RESISTIVE_ONLY_ETCH="
+      << (invalid_resistance ? "-0.15 CAPACITIVE_ONLY_ETCH=0" : "0.02 CAPACITIVE_ONLY_ETCH=-0.15") << " }\n";
+  std::ofstream(fixture.directory() / "typical.captab")
+      << "P M1 SUBSTRATE - .2\n-1 -1 8 0 0\n-1 .2 5 0 3\n.2 -1 5 3 0\n.2 .2 2 3 3\n";
+  fixture.init();
+  const auto path = fixture.directory() / "output/spef_writer/interface_test_TYPICAL_25C.spef";
+  if (invalid_resistance) {
+    bool rejected = false;
+    try {
+      RCXI.runRCX();
+    } catch (const std::runtime_error& error) {
+      rejected = std::string(error.what()).find("overlapping or nonfinite adjacent wire geometry") != std::string::npos;
+    }
+    require(rejected, "P-grid extraction must still reject invalid resistance geometry");
+    require(!std::filesystem::exists(path), "invalid resistance geometry published a SPEF");
+    return;
+  }
+
+  RCXI.runRCX();
+  auto& rc = RCXDM.getDatabase().get_rc_data();
+  for (int net = 0; net < 2; ++net) {
+    const auto& resistance = rc.get_corner_net_resistance_list(ircx::CornerNetIdx(0, net));
+    // Process-derived R = 0.12 * 1 / (0.2 - 2 * 0.02) = 0.75 ohm.
+    require(resistance.size() == 1 && std::abs(resistance.front() - 0.75) < 1e-10,
+            "P-grid extraction lost the resistance process geometry");
+    const auto& ground = rc.get_corner_net_ground_capacitance_list(ircx::CornerNetIdx(0, net));
+    // Drawn length including end extensions is 1.2 um; P-grid ground C is 5 fF/um.
+    require(ground.size() == 1 && std::abs(ground.front() - 6.0) < 1e-10,
+            "P-grid capacitance must use drawn geometry");
+  }
+  const auto& coupling = rc.get_merged_coupling_capacitance_map();
+  require(coupling.size() == 1 && std::abs(coupling.begin()->second.at(0) - 3.6) < 1e-10,
+          "P-grid coupling must use the drawn gap and be counted once");
+  RCXI.destroyRCX();
+  spef::SpefReader reader;
+  require(reader.read(path.string()) && reader.getSpefFile()->nets.size() == 2,
+          "P-grid extraction did not publish a readable two-net SPEF");
+}
+
 bool hasUnescapedDollar(const std::string& text)
 {
   bool in_quotes = false;
@@ -571,6 +618,8 @@ int main(int argc, char** argv)
     const std::string scenario = argc > 1 ? argv[1] : "extract";
     if (scenario == "extract") {
       checkExtraction();
+    } else if (scenario == "grid_capacitive_etch" || scenario == "grid_invalid_resistive_etch") {
+      checkGridGeometry(scenario == "grid_invalid_resistive_etch");
     } else if (scenario.starts_with("captab_")) {
       checkPatternGridInput(scenario.substr(7));
     } else if (scenario == "missing_database") {
