@@ -27,7 +27,7 @@ bool init_emir(const std::optional<std::filesystem::path>& temp_directory_path,
                const std::optional<std::filesystem::path>& instance_power_file_path, const int& thread_number,
                const std::optional<std::filesystem::path>& technology_file_path, const std::optional<std::filesystem::path>& ploc_file_path,
                const std::vector<std::filesystem::path>& pad_files, bool add_ploc_from_top_def,
-               const std::map<std::string, std::string>& supply_ground_pins)
+               const std::map<std::string, std::string>& supply_ground_pins, bool allow_unmapped_pg_pins)
 {
   const std::string temp_directory_path_ = path_or_empty(temp_directory_path);
   const std::string instance_power_file_path_ = path_or_empty(instance_power_file_path);
@@ -52,6 +52,7 @@ bool init_emir(const std::optional<std::filesystem::path>& temp_directory_path,
   if (!pad_files_.empty()) config_map["-pad_files"] = pad_files_;
   config_map["-add_ploc_from_top_def"] = static_cast<int32_t>(add_ploc_from_top_def);
   config_map["-supply_ground_pins"] = supply_ground_pins;
+  config_map["-allow_unmapped_pg_pins"] = allow_unmapped_pg_pins;
 
   EMIRI.initEMIR(config_map);
   return true;

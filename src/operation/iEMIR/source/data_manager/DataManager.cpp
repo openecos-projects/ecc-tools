@@ -534,6 +534,7 @@ void DataManager::printConfig()
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ploc_file_path);
   for (const auto& path : _config.pad_files) EMIRLOG.info(Loc::current(), "pad_files: ", path);
   EMIRLOG.info(Loc::current(), "add_ploc_from_top_def: ", _config.add_ploc_from_top_def);
+  EMIRLOG.info(Loc::current(), "allow_unmapped_pg_pins: ", _config.allow_unmapped_pg_pins);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "technology_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.technology_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "temperature_c");

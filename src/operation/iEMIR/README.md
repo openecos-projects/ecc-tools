@@ -117,6 +117,22 @@ ecc_py.destroy_emir()
 The supported electrical model is an ideal DC source. Per-source voltage,
 R/L/C fields and package-subcircuit sections are rejected.
 
+### Exploratory runs with missing PG contacts
+
+Python `init_emir(..., allow_unmapped_pg_pins=True)` permits a nonzero-current
+PG pin without a graph contact to be reported and omitted on that graph. The
+default is `False` (fatal). This option does not repair connectivity or move
+current to another pin, and does not relax missing DEF PG connections, input
+power conservation, voltage consistency, source validation or solver checks.
+
+`emir_reporter/supply_coverage.tsv` lists each explicit supply's power/ground
+contact status and current; `supply_coverage.rpt` totals the power with either
+contact absent and the omitted power-side/ground-side currents separately.
+These totals cover explicit per-supply records, not legacy single-supply rows.
+A valid contact still receives its current even if the other side is absent.
+IR/EM report headers flag this mode as exploratory: successful execution is
+not full-chip EMIR signoff. The analysis copies remain in `ir_analyzer/`.
+
 ## Supply contact input and validation
 
 PLOC coordinates are absolute design coordinates in microns. The recommended

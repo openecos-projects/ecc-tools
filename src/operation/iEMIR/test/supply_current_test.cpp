@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 
 #include "DeviceLayerPins.hpp"
 #include "InstancePowerReader.hpp"
@@ -131,6 +132,60 @@ TEST_F(SupplyFileTest, UnselectedRailsAreReportedButMissingDefContactsFail)
   EXPECT_NE(contents.find("\tVI\tGI\t0\t0\n"), std::string::npos);
   database.get_power_net_map().erase("VI");
   EXPECT_THROW(reportSupplyCoverage(database, report.string()), std::runtime_error);
+  EXPECT_THROW(reportSupplyCoverage(database, report.string(), true), std::runtime_error);
+}
+
+TEST_F(SupplyFileTest, ExploratoryModeReportsUnmappedPinsWithoutInventingCurrentContacts)
+{
+  for (const auto& missing : {"VC", "GC"}) {
+    SCOPED_TRACE(missing);
+    Database database;
+    auto& power = database.get_instance_power_map()[0];
+    power.get_supply_currents() = {{"VC", {"GC", 1.2, 0.002}}};
+    for (const auto& pin : {"VC", "GC"}) {
+      const auto type = pin[0] == 'V' ? PowerNetType::kPower : PowerNetType::kGround;
+      auto& net = database.get_power_net_map()[pin];
+      net.set_type(type);
+      net.get_pin_has_geometry()[{0, pin}] = true;
+      database.get_power_graph_map()[pin] = graph(pin, type, pin);
+    }
+    auto& unmapped_graph = database.get_power_graph_map().at(missing);
+    unmapped_graph.get_instance_pin_node_id_list_map().clear();
+    const auto report = directory / "supply_coverage.tsv";
+    EXPECT_THROW(reportSupplyCoverage(database, report.string()), std::runtime_error);
+    EXPECT_NO_THROW(reportSupplyCoverage(database, report.string(), true));
+
+    std::ifstream input(directory / "supply_coverage.rpt");
+    std::map<std::string, double> summary;
+    for (std::string line; std::getline(input, line);) {
+      if (line.starts_with('#')) continue;
+      std::istringstream row(line);
+      std::string key;
+      double value;
+      ASSERT_TRUE(row >> key >> value);
+      summary[key] = value;
+    }
+    const bool missing_power = missing[0] == 'V';
+    EXPECT_EQ(summary, (std::map<std::string, double>{
+                           {"allow_unmapped_pg_pins", 1},
+                           {"total_explicit_supply_power_w", 1.2 * 0.002},
+                           {"power_side_analyzed_w", missing_power ? 0.0 : 1.2 * 0.002},
+                           {"incomplete_supply_power_w", 1.2 * 0.002},
+                           {"unmapped_power_current_a", missing_power ? 0.002 : 0.0},
+                           {"unmapped_ground_current_a", missing_power ? 0.0 : 0.002},
+                           {"supplies_without_both_contacts", 1}}));
+    std::ifstream coverage(report);
+    std::string rows((std::istreambuf_iterator<char>(coverage)), {});
+    EXPECT_NE(rows.find(missing_power ? "\tVC\tGC\t0\t1\n" : "\tVC\tGC\t1\t0\n"), std::string::npos);
+    EXPECT_TRUE(unmapped_graph.get_instance_pin_node_id_list_map().empty());
+    IAModel omitted, retained;
+    buildSupplyCurrent(unmapped_graph, 0, power, omitted);
+    buildSupplyCurrent(database.get_power_graph_map().at(missing_power ? "GC" : "VC"), 0, power, retained);
+    EXPECT_TRUE(omitted.get_node_current_map().empty());
+    EXPECT_DOUBLE_EQ(omitted.get_pin_mapped_current(), 0.0);
+    EXPECT_DOUBLE_EQ(retained.get_pin_mapped_current(), 0.002);
+    EXPECT_DOUBLE_EQ(power.get_supply_currents().at("VC").current, 0.002);
+  }
 }
 
 TEST(SupplyCurrent, DeviceLayerPinUsesOnlyDefConnectedSameNetContacts)

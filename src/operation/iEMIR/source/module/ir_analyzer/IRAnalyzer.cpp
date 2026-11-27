@@ -63,7 +63,8 @@ void IRAnalyzer::analyze()
 {
   Monitor monitor;
   EMIRLOG.info(Loc::current(), "Starting...");
-  reportSupplyCoverage(EMIRDM.getDatabase(), EMIRUTIL.getString(EMIRDM.getConfig().ia_temp_directory_path, "supply_coverage.tsv"));
+  reportSupplyCoverage(EMIRDM.getDatabase(), EMIRUTIL.getString(EMIRDM.getConfig().ia_temp_directory_path, "supply_coverage.tsv"),
+                       EMIRDM.getConfig().allow_unmapped_pg_pins);
 
   std::string diagnostics_path = EMIRUTIL.getString(EMIRDM.getConfig().ia_temp_directory_path, "solver_diagnostics.csv");
   std::ofstream diagnostics_file(diagnostics_path);

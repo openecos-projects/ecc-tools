@@ -37,6 +37,7 @@ class Config
   std::string temp_directory_path;
   std::string instance_power_file_path;
   std::map<std::string, std::string> supply_ground_pins;
+  bool allow_unmapped_pg_pins = false;
   std::string ploc_file_path;
   std::vector<std::string> pad_files;
   bool add_ploc_from_top_def = false;

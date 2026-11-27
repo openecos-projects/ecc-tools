@@ -14,6 +14,10 @@ of power-pin names to return-ground-pin names. It fills missing return metadata;
 it does not override a known Liberty association or change physical connectivity.
 The default is empty: there are no built-in PDK-specific pin pairs.
 
+Python `init_emir(..., allow_unmapped_pg_pins=False)` remains strict by default.
+Explicit `True` permits exploratory runs with missing graph contacts, not
+missing logical DEF PG connections. No contact or current is fabricated.
+
 `InstancePowerReader::read(path, supply_ground_pins)` reads iPW's native TSV.
 The Python orchestrator must not convert or rewrite that artifact.
 
@@ -44,6 +48,13 @@ records selected/unselected power and ground contacts; omitted source domains
 are not signed off. Multi-supply peak-window export is not implemented and is
 rejected rather than exporting averaged per-rail values as peak values.
 
+In exploratory mode, the missing side omits its current and an available
+opposite contact still receives it. `supply_coverage.rpt` reports incomplete
+power and omitted power/ground current separately; it and the per-supply TSV
+are published under `emir_reporter/` too. These cover explicit PG records, not
+legacy single-supply totals. IR/EM headers flag exploratory results as not
+full-chip signoff; successful execution is not a repaired power network.
+
 ## 4. Validation
 
 | Input | Result |
@@ -53,7 +64,8 @@ rejected rather than exporting averaged per-rail values as peak values.
 | Duplicate PG rows or generic and PG rows mixed for one instance | Reject |
 | Invalid numbers, inconsistent component sum or `P = V × I` | Reject |
 | Different voltages on one physical power net | Reject with net / instance / pin context |
-| Nonzero current lacking a DEF PG connection or selected graph contact | Reject |
+| Nonzero current lacking a DEF PG connection | Reject in both modes |
+| Nonzero current lacking a selected graph contact | Reject by default; explicit exploratory mode warns and reports omitted current |
 | Connected supply without selected PLOC sources | Report omitted coverage; not full-chip signoff |
 
 ## 5. Examples
@@ -72,6 +84,8 @@ per-supply leakage aggregation, V2 conservation, legacy fallback, and peak guard
 `iemir_supply_current_test` checks distinct-rail voltages, same-net conflicts,
 current conservation, V1/V2 parsing, explicit return fallback, missing PG
 contacts, coverage, and same-instance/same-net device-layer pin aliases.
+It also checks missing power/ground contacts under the strict and exploratory
+policies, reported current totals, and unchanged current/contact data.
 Both run in CI with existing Liberty-parser and EMIR IR/EM regressions.
 
 ## 7. Wrong vs correct

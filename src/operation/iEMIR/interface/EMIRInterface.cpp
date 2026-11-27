@@ -16,6 +16,8 @@
 // ***************************************************************************************
 #include "EMIRInterface.hpp"
 
+#include <filesystem>
+
 #include "DataManager.hpp"
 #include "EMAnalyzer.hpp"
 #include "EMIRReporter.hpp"
@@ -138,6 +140,11 @@ void EMIRInterface::runEMIR()
 
   IRAnalyzer::initInst();
   EMIRIA.analyze();
+  for (const auto* name : {"supply_coverage.tsv", "supply_coverage.rpt"}) {
+    std::filesystem::copy_file(std::filesystem::path(EMIRDM.getConfig().ia_temp_directory_path) / name,
+                              std::filesystem::path(EMIRDM.getConfig().er_temp_directory_path) / name,
+                              std::filesystem::copy_options::overwrite_existing);
+  }
 
   EMAnalyzer::initInst();
   EMIREA.analyze();
@@ -196,6 +203,7 @@ void EMIRInterface::wrapConfig(std::map<std::string, std::any>& config_map)
   EMIRDM.getConfig().temp_directory_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-temp_directory_path", "./emir_temp_directory");
   EMIRDM.getConfig().instance_power_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-instance_power_file_path", "");
   EMIRDM.getConfig().supply_ground_pins = EMIRUTIL.getConfigValue<std::map<std::string, std::string>>(config_map, "-supply_ground_pins", {});
+  EMIRDM.getConfig().allow_unmapped_pg_pins = EMIRUTIL.getConfigValue<bool>(config_map, "-allow_unmapped_pg_pins", false);
   EMIRDM.getConfig().ploc_file_path = EMIRUTIL.getConfigValue<std::string>(config_map, "-ploc_file_path", "");
   EMIRDM.getConfig().pad_files = EMIRUTIL.getConfigValue<std::vector<std::string>>(config_map, "-pad_files", {});
   EMIRDM.getConfig().add_ploc_from_top_def = EMIRUTIL.getConfigValue<int32_t>(config_map, "-add_ploc_from_top_def", 0) == 1;
