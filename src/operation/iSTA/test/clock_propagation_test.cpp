@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "ClockArcPropagator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "ClockPropagator.hpp"
 #include "ClockReconvergenceCalculator.hpp"
 #include "GraphBuilder.hpp"
@@ -94,7 +96,7 @@ void generatedInsertion()
   // Same scalar-cell experiment: PT U-2022.12-SP3 and OpenSTA return .04 ns.
   if (std::abs(correction - .04) > 1e-9 || common != "ci0:Y")
     throw std::runtime_error("generated insertion trace lost common-path correction across opposite source phases");
-  if (db.graph().points().at("ci0:Y").has_clock_state("generated"))
+  if (db.graph().points().at("ci0:Y").has_clock_state(clockId(db, "generated")))
     throw std::runtime_error("generated insertion trace leaked into ordinary clock coverage");
   Logger::destroyInst();
 }
@@ -121,8 +123,8 @@ void sourceProbe()
   StartpointInitializer(db, delay).seed(starts);
   for (auto mode : {AnalysisType::kMax, AnalysisType::kMin})
     for (auto edge : {TransType::kRise, TransType::kFall})
-      for (auto& [tag, path] : db.graph().points().at("in").get_path_state_map().at(mode).at(PathSourceType::kInput).at(edge)) {
-        double expected = path.get_clock_name() == "a" ? 1.0 : 3.0;
+      for (auto& [tag, path] : db.graph().points().at("in").get_path_state_map().at(pathStateCombo(mode, PathSourceType::kInput, edge))) {
+        double expected = std::string(launchClockName(db, path.get_clock_name())) == "a" ? 1.0 : 3.0;
         if (edge == TransType::kFall)
           expected += 5.0;
         if (std::fabs(path.get_arrival() - expected) > 1e-9 || std::fabs(path.get_launch_time() - expected) > 1e-9)
@@ -164,37 +166,37 @@ void sharedArc(bool slow_first, AnalysisType mode, TransType edge, bool derate =
   arc.set_source_pin("u:A");
   arc.set_sink_pin("u:Y");
   arc.setLibertyArcId(LibertyArcId{"BUF", 0});
-  arc.get_input_output_delay_map()[mode][edge][output] = 0.;
+  arc.get_input_output_delay_map().set(mode, edge, output, 0.);
   db.graph().arcs().push_back(arc);
   std::vector<std::string> sources{"u:A"};
-  ClockSource slow("slow", sources, true), fast("fast", sources, true);
+  ClockSource slow("slow", sources, true, clockId(db, "slow")), fast("fast", sources, true, clockId(db, "fast"));
   for (auto name : {"slow", "fast"}) {
-    auto& state = db.graph().points().at("u:A").get_clock_state(name);
-    state.waveforms[edge].physical_arrival_map[mode][edge] = 0.;
-    state.waveforms[edge].physical_slew_map[mode][edge] = name == std::string("slow") ? 2. : .1;
+    auto& state = db.graph().points().at("u:A").get_clock_state(clockId(db, name));
+    state.waveformSlot(edge).physical_arrival_map.set(mode, edge, 0.);
+    state.waveformSlot(edge).physical_slew_map.set(mode, edge, name == std::string("slow") ? 2. : .1);
     if (mixed) {
       // Opposite source phases reconverged into the same local transition.
-      state.waveforms[output].physical_arrival_map[mode][edge] = 5.;
-      state.waveforms[output].physical_slew_map[mode][edge] = .45;
+      state.waveformSlot(output).physical_arrival_map.set(mode, edge, 5.);
+      state.waveformSlot(output).physical_slew_map.set(mode, edge, .45);
     }
     state.summarize();
-    db.graph().points().at("u:Y").get_clock_state(name);
+    db.graph().points().at("u:Y").get_clock_state(clockId(db, name));
   }
   for (auto* clock : (slow_first ? std::vector<ClockSource*>{&slow, &fast} : std::vector<ClockSource*>{&fast, &slow})) {
     propagation.propagateSlew(*clock, 0, mode, edge, false);
     propagation.propagateArrival(*clock, 0, mode, edge, false);
   }
   for (auto name : {"slow", "fast"}) {
-    auto& state = db.graph().points().at("u:Y").get_clock_state(name);
+    auto& state = db.graph().points().at("u:Y").get_clock_state(clockId(db, name));
     double expected = (std::string(name) == "slow" ? 3.0 : 1.1) * factor;
     if (mixed) {
-      if (state.waveforms.size() != 2 || std::fabs(*state.waveforms.at(output).physicalArrival(mode, output) - 6.45) > 1e-9
-          || std::fabs(*state.waveforms.at(edge).physicalArrival(mode, output) - expected) > 1e-9)
+      if (state.waveformCount() != 2 || std::fabs(*state.waveform(output)->physicalArrival(mode, output) - 6.45) > 1e-9
+          || std::fabs(*state.waveform(edge)->physicalArrival(mode, output) - expected) > 1e-9)
         throw std::runtime_error("opposite clock source phases shared a delay winner or cache entry");
       continue;
     }
-    if (std::fabs(state.physical_arrival_map.at(mode).at(edge) - expected) > 1e-9
-        || std::fabs(state.physical_predecessor_arc_delay_map.at(mode).at(edge) - expected) > 1e-9)
+    if (std::fabs(state.physical_arrival_map.get(mode, edge).value() - expected) > 1e-9
+        || std::fabs(state.physical_predecessor_arc_delay_map.get(mode, edge).value() - expected) > 1e-9)
       throw std::runtime_error("named clock consumed another clock's aggregated arc delay");
   }
 }

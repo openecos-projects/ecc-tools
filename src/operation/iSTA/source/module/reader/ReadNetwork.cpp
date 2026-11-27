@@ -261,7 +261,7 @@ std::string netInstancePinName(idb::IdbPin* idb_pin)
 void appendNetPin(Network& network, Net& net, std::string& pin_name)
 {
   std::vector<std::string>& pin_name_list = net.get_pin_name_list();
-  if (STAUTIL.exist(network.pins(), pin_name) && !STAUTIL.exist(pin_name_list, pin_name)) {
+  if (network.pins().contains(pin_name) && !STAUTIL.exist(pin_name_list, pin_name)) {
     pin_name_list.push_back(pin_name);
   }
 }

@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "ClockPropagator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DataManager.hpp"
 #include "DataPropagator.hpp"
 #include "DelayCalculator.hpp"
@@ -135,10 +137,12 @@ void conditionalPath(const LibertyLibrary& library)
   for (auto& arc : db.graph().arcs()) {
     if (arc.get_type() != ArcType::kCell) continue;
     for (auto analysis : {AnalysisType::kMax, AnalysisType::kMin}) {
-      auto& lanes = arc.get_input_output_delay_map().at(analysis);
-      require(!lanes.contains(TransType::kFall) || lanes.at(TransType::kFall).empty(),
+      require(!arc.get_input_output_delay_map().get(analysis, TransType::kFall, TransType::kRise)
+               && !arc.get_input_output_delay_map().get(analysis, TransType::kFall, TransType::kFall),
               "false when condition created a zero-delay control lane");
-      require(lanes.at(TransType::kRise).size() == 2, "active conditional control lanes were removed");
+      require(arc.get_input_output_delay_map().get(analysis, TransType::kRise, TransType::kRise)
+                  && arc.get_input_output_delay_map().get(analysis, TransType::kRise, TransType::kFall),
+              "active conditional control lanes were removed");
     }
   }
   ClockPropagator(db, STADC).propagate();
@@ -177,7 +181,7 @@ void path(const LibertyLibrary& library, bool disabled, bool clock)
   STADC.initialize(db.graph());
   ClockPropagator(db, STADC).propagate();
   if (clock) {
-    require(db.graph().driverPoint("u:Y").find_clock_state("control") == nullptr, "clock propagated through three-state control by default");
+    require(db.graph().driverPoint("u:Y").find_clock_state(clockId(db, "control")) == nullptr, "clock propagated through three-state control by default");
     return;
   }
   DataPropagator(db, STADC).propagate();

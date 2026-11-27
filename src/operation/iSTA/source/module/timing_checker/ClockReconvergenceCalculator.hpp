@@ -40,12 +40,12 @@ class ClockReconvergenceCalculator
   using CacheMode = ClockPinValuesQuery::CacheMode;
   explicit ClockReconvergenceCalculator(Database& database, CacheMode cache = CacheMode::kNone)
       : _database(database), _cache_mode(cache), _clock_pin_values(database, cache) {}
-  double correction(const std::string& launch_pin, TransType launch_trans_type, std::string_view launch_clock, const std::string& capture_pin,
+  double correction(std::string_view launch_pin, TransType launch_trans_type, std::string_view launch_clock, std::string_view capture_pin,
                     TransType capture_trans_type, std::string_view capture_clock, AnalysisType analysis_type, std::string& common_pin_name,
                     std::optional<TransType> launch_source = std::nullopt, std::optional<TransType> capture_source = std::nullopt);
   // Returns the physical clock path from source to endpoint in propagation order.
   // Virtual clocks and pins without clock propagation return an empty list.
-  std::vector<ClockPathPointInfo> getClockPathPins(const std::string& clock_pin_name, std::string_view clock_name, AnalysisType analysis_type,
+  std::vector<ClockPathPointInfo> getClockPathPins(std::string_view clock_pin_name, std::string_view clock_name, AnalysisType analysis_type,
                                                    TransType trans_type, std::optional<TransType> source = std::nullopt);
 
  private:
@@ -74,12 +74,12 @@ class ClockReconvergenceCalculator
   // Each cached path retains its own transitions and source-edge metadata.
   std::map<std::pair<std::size_t, int32_t>, std::size_t> _prefix_ids;
   std::vector<PrefixNode> _prefixes;
-  const IndexedClockPath& indexedClockPath(const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+  const IndexedClockPath& indexedClockPath(std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition,
                                            std::optional<TransType> source);
   std::size_t commonPrefixDepth(std::size_t launch, std::size_t capture) const;
   std::size_t ancestor(std::size_t prefix, std::size_t level) const;
   double getClockCommonPathDelayDelta(const ClockPathPoint& common_pin, std::string_view clock_name);
-  std::vector<ClockPathPoint> getClockPathPinList(const std::string& clock_pin_name, std::string_view clock_name, AnalysisType analysis_type,
+  std::vector<ClockPathPoint> getClockPathPinList(std::string_view clock_pin_name, std::string_view clock_name, AnalysisType analysis_type,
                                                   TransType trans_type, std::optional<TransType> source);
   AnalysisType getCaptureAnalysisType(AnalysisType analysis_type);
 };

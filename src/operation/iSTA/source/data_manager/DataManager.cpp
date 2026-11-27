@@ -255,8 +255,8 @@ void DataManager::printConfig()
 void DataManager::printDatabase()
 {
   std::size_t port_num = 0;
-  for (std::pair<const std::string, Pin>& pin_pair : _database.network().pins()) {
-    if (pin_pair.second.get_is_port()) {
+  for (const auto& id : _database.network().pins().sortedIds()) {
+    if (_database.network().pins().get(id).get_is_port()) {
       port_num++;
     }
   }

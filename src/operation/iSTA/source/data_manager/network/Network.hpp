@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -9,6 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "NamedTable.h"
 #include "network/HierarchyPin.hpp"
 #include "network/Instance.hpp"
 #include "network/Net.hpp"
@@ -17,6 +19,17 @@
 namespace ista {
 class LibertyLibrary;
 class LibertyPort;
+
+// Domain tags for ecc::symbol::Id<Domain>/NamedTable<T, Domain>; never
+// defined, used only to keep distinct name domains from being interchangeable
+// at the type level even though every Id<Domain> is the same uint32_t at
+// runtime.
+struct InstanceTag;
+using InstanceTable = ecc::symbol::NamedTable<Instance, InstanceTag>;
+struct PinTag;
+using PinTable = ecc::symbol::NamedTable<Pin, PinTag>;
+struct NetTag;
+using NetTable = ecc::symbol::NamedTable<Net, NetTag>;
 
 struct NetSegment
 {
@@ -34,14 +47,14 @@ class Network
  public:
   std::string& name() { return _name; }
   const std::string& name() const { return _name; }
-  std::map<std::string, Instance>& instances() { return _instances; }
-  const std::map<std::string, Instance>& instances() const { return _instances; }
-  std::map<std::string, Pin>& pins() { return _pins; }
-  const std::map<std::string, Pin>& pins() const { return _pins; }
-  std::map<std::string, Net>& nets() { return _nets; }
-  const std::map<std::string, Net>& nets() const { return _nets; }
-  std::map<std::string, HierarchyPin>& hierarchyPins() { return _hierarchy_pins; }
-  const std::map<std::string, HierarchyPin>& hierarchyPins() const { return _hierarchy_pins; }
+  InstanceTable& instances() { return _instances; }
+  const InstanceTable& instances() const { return _instances; }
+  PinTable& pins() { return _pins; }
+  const PinTable& pins() const { return _pins; }
+  NetTable& nets() { return _nets; }
+  const NetTable& nets() const { return _nets; }
+  std::map<std::string, HierarchyPin, std::less<>>& hierarchyPins() { return _hierarchy_pins; }
+  const std::map<std::string, HierarchyPin, std::less<>>& hierarchyPins() const { return _hierarchy_pins; }
   std::unordered_map<std::string, size_t>& hierarchyIndices() { return _hierarchy_indices; }
   const std::unordered_map<std::string, size_t>& hierarchyIndices() const { return _hierarchy_indices; }
   const std::map<std::string, NetSegment>& netSegments() const { return _net_segments; }
@@ -68,10 +81,10 @@ class Network
   std::unordered_map<std::string, std::string> _net_query_names;
   std::unordered_map<std::string, std::vector<std::string>> _pin_nets;
   std::string _name;
-  std::map<std::string, Instance> _instances;
-  std::map<std::string, Pin> _pins;
-  std::map<std::string, Net> _nets;
-  std::map<std::string, HierarchyPin> _hierarchy_pins;
+  InstanceTable _instances;
+  PinTable _pins;
+  NetTable _nets;
+  std::map<std::string, HierarchyPin, std::less<>> _hierarchy_pins;
   std::unordered_map<std::string, size_t> _hierarchy_indices;
 };
 }  // namespace ista

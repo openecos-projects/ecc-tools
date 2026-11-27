@@ -193,7 +193,7 @@ TimingArc* SdfValueExtractor::findSetupArc(TimingCheckArc& setup_timing_check_ar
 LibertyCell* SdfValueExtractor::timingCell(Instance& instance)
 {
   Database& database = _database;
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return nullptr;
   }
@@ -247,8 +247,8 @@ SdfDelay SdfValueExtractor::arcDelay(Arc& arc, TransType input_trans_type)
 SdfDelay SdfValueExtractor::timingArcDelay(Arc& arc, TimingArc& timing_arc, TransType input_trans_type, bool allow_aggregate)
 {
   SdfDelay sdf_delay;
-  if (arc.get_timing_arc_delay_map().count(timing_arc.get_arc_idx()) > 0) {
-    updateDelay(sdf_delay, arc.get_timing_arc_delay_map()[timing_arc.get_arc_idx()], input_trans_type);
+  if (const auto* grid = arc.findTimingArcDelay(timing_arc.get_arc_idx())) {
+    updateDelay(sdf_delay, *grid, input_trans_type);
   }
   if (!hasDelay(sdf_delay) && allow_aggregate) {
     sdf_delay = arcDelay(arc, input_trans_type);
@@ -278,25 +278,13 @@ SdfDelay SdfValueExtractor::cellArcDelay(TimingCellArc& timing_cell_arc, TimingA
   return sdf_delay;
 }
 
-void SdfValueExtractor::updateDelay(SdfDelay& sdf_delay, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& delay_map,
-                                    TransType input_trans_type)
+void SdfValueExtractor::updateDelay(SdfDelay& sdf_delay, const ArcIoGrid<double>& delay_map, TransType input_trans_type)
 {
-  for (std::pair<const AnalysisType, std::map<TransType, std::map<TransType, double>>>& analysis_delay_pair : delay_map) {
-    AnalysisType analysis_type = analysis_delay_pair.first;
-    if (analysis_type != AnalysisType::kMin && analysis_type != AnalysisType::kMax) {
-      continue;
-    }
-    for (std::pair<const TransType, std::map<TransType, double>>& input_delay_pair : analysis_delay_pair.second) {
-      if (input_trans_type != TransType::kNone && input_delay_pair.first != input_trans_type) {
-        continue;
-      }
-      for (std::pair<const TransType, double>& output_delay_pair : input_delay_pair.second) {
-        if (output_delay_pair.first == TransType::kRise || output_delay_pair.first == TransType::kFall) {
-          sdf_delay.update(analysis_type, output_delay_pair.first, output_delay_pair.second);
-        }
-      }
-    }
-  }
+  delay_map.each([&](AnalysisType analysis_type, TransType input, TransType output, double delay) {
+    if (input_trans_type != TransType::kNone && input != input_trans_type)
+      return;
+    sdf_delay.update(analysis_type, output, delay);
+  });
 }
 
 bool SdfValueExtractor::hasDelay(SdfDelay& sdf_delay)
@@ -384,8 +372,8 @@ void SdfValueExtractor::dumpPinSlew(const char* path)
   if (fp == nullptr)
     return;
   std::fprintf(fp, "pin,min_rise,min_fall,max_rise,max_fall\n");
-  for (auto& entry : _database.network().pins()) {
-    std::string pin_name = entry.first;
+  for (const auto& id : _database.network().pins().sortedIds()) {
+    std::string pin_name(_database.network().pins().nameOf(id));
     std::fprintf(fp, "%s,%.13g,%.13g,%.13g,%.13g\n", pin_name.c_str(), slew(pin_name, AnalysisType::kMin, TransType::kRise),
                  slew(pin_name, AnalysisType::kMin, TransType::kFall), slew(pin_name, AnalysisType::kMax, TransType::kRise),
                  slew(pin_name, AnalysisType::kMax, TransType::kFall));

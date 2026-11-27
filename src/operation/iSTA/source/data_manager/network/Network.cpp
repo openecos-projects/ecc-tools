@@ -62,10 +62,11 @@ const std::string& Network::physicalNet(const std::string& name) const
 {
   if (!_net_segments.empty())
     return netSegment(name).physical_net;
-  const auto found = _nets.find(name);
-  if (found == _nets.end())
+  // find() only succeeds when the key equals `name`, so the validated key
+  // found->first is always the argument itself; return it directly.
+  if (!_nets.contains(name))
     throw std::invalid_argument("net no longer exists: " + name);
-  return found->first;
+  return name;
 }
 
 std::string Network::netQueryName(const std::string& physical_name) const
@@ -128,13 +129,13 @@ const HierarchyPin& Network::checkedHierarchyPin(const std::string& name) const
 
 bool Network::crossesHierarchyPin(const HierarchyPin& boundary, std::string_view from, std::string_view to) const
 {
-  auto d = pins().find(std::string(from));
-  auto l = pins().find(std::string(to));
+  auto d = pins().find(from);
+  auto l = pins().find(to);
   if (d == pins().end() || l == pins().end() || from == to)
     return false;
-  if (d->second.get_net_name() != boundary.net || l->second.get_net_name() != boundary.net || !driver(d->second) || !load(l->second))
+  if (d->get_net_name() != boundary.net || l->get_net_name() != boundary.net || !driver(*d) || !load(*l))
     return false;
-  const bool d_inside = inside(*this, d->second, boundary), l_inside = inside(*this, l->second, boundary);
+  const bool d_inside = inside(*this, *d, boundary), l_inside = inside(*this, *l, boundary);
   return (boundary.direction != PinDirection::kOutput && !d_inside && l_inside) || (boundary.direction != PinDirection::kInput && d_inside && !l_inside);
 }
 
@@ -174,20 +175,20 @@ const LibertyPort* Network::libertyPort(const LibertyLibrary& liberty, const Pin
   if (instance == instances().end())
     return nullptr;
   const auto& cells = liberty.get_cell_map();
-  const auto cell = cells.find(instance->second.get_cell_name());
+  const auto cell = cells.find(instance->get_cell_name());
   if (cell == cells.end())
     return nullptr;
-  const auto port = cell->second.get_port_map().find(pin.get_pin_name());
-  return port == cell->second.get_port_map().end() ? nullptr : &port->second;
+  const auto port = cell->get_port_map().find(pin.get_pin_name());
+  return port == cell->get_port_map().end() ? nullptr : &port->second;
 }
 
 TransType Network::launchClockTransition(std::string_view start) const
 {
-  const auto pin = pins().find(std::string(start));
-  if (pin != pins().end() && !pin->second.get_is_port()) {
-    const auto instance = instances().find(pin->second.get_instance_name());
-    if (instance != instances().end() && instance->second.get_is_sequential()) {
-      const std::vector<TimingArc>& arcs = instance->second.get_clock_to_q_arc().get_timing_arc_list();
+  const auto pin = pins().find(start);
+  if (pin != pins().end() && !pin->get_is_port()) {
+    const auto instance = instances().find(pin->get_instance_name());
+    if (instance != instances().end() && instance->get_is_sequential()) {
+      const std::vector<TimingArc>& arcs = instance->get_clock_to_q_arc().get_timing_arc_list();
       if (!arcs.empty() && arcs.front().get_trigger_trans_type() == TransType::kFall) {
         return TransType::kFall;
       }

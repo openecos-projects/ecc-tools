@@ -8,6 +8,9 @@
 #include <stdexcept>
 
 #include "CheckArcExtractor.hpp"
+
+#include "clock_id_helper.hpp"
+#include "graph/PathTagTable.hpp"
 #include "DelayCalculator.hpp"
 #include "PathChecker.hpp"
 #include "PathReportWriter.hpp"
@@ -125,9 +128,9 @@ int main(int argc, char** argv)
   }
   auto& clock_point = db.graph().points()["ff:CK"];
   clock_point.set_is_clock_point(true);
-  clock_point.setDefaultClock("capture");
-  clock_point.setLaunchClock("capture");
-  clock_point.get_clock_state("capture").waveforms[TransType::kRise].arrival_map[AnalysisType::kMin][TransType::kRise] = 0.;
+  clock_point.setDefaultClock(clockId(db, "capture"));
+  clock_point.setLaunchClock(clockId(db, "capture"));
+  clock_point.get_clock_state(clockId(db, "capture")).waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 0.);
   TimingClockUncertainty uncertainty;
   uncertainty.set_from_clocks({"launch"});
   uncertainty.set_to_clocks({"capture"});
@@ -135,10 +138,13 @@ int main(int argc, char** argv)
   uncertainty.set_setup(true);
   uncertainty.set_hold(false);
   db.sdc().get_clock_uncertainty_list().push_back(uncertainty);
-  auto& state = db.graph().points()["ff:D"].get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise]["path"];
-  state.set_path_state_tag("path");
-  state.set_start_point("in");
-  state.set_clock_name("launch");
+  PathTagTable::Key tag_key;
+  tag_key.clock_name = "path";
+  const uint32_t path_tag = db.pathTags().intern(tag_key);
+  auto& state = db.graph().points()["ff:D"].get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise)][path_tag];
+  state.set_path_state_tag(path_tag);
+  state.set_start_point(startPointId(db, "in"));
+  state.set_clock_name(launchClockId(db, "launch"));
   state.set_trans_type(TransType::kRise);
   state.set_arrival(3);
   DelayCalculator delay(db, config);

@@ -46,7 +46,8 @@ std::string selector(const char* suffix, TransType type)
 {
   return std::string(" -") + (type == TransType::kRise ? "rise_" : type == TransType::kFall ? "fall_" : "") + suffix + " ";
 }
-std::string clocks(const std::set<std::string>& names)
+template <typename Compare>
+std::string clocks(const std::set<std::string, Compare>& names)
 {
   return sdcQuery("get_clocks", {names.begin(), names.end()});
 }
@@ -101,8 +102,8 @@ void writeClocks(Database& database, std::ostream& out)
   auto& map = database.sdc().get_clock_map();
   // Iterative topological traversal avoids recursion limits on deep chains.
   std::set<std::string> pending;
-  for (const auto& [name, clock] : map)
-    pending.insert(name);
+  for (const auto& id : map.sortedIds())
+    pending.insert(std::string(map.nameOf(id)));
   while (!pending.empty()) {
     bool progress = false;
     for (auto iter = pending.begin(); iter != pending.end();) {
@@ -123,7 +124,9 @@ void writeClocks(Database& database, std::ostream& out)
     if (!progress)
       throw std::runtime_error("cyclic generated clock dependencies");
   }
-  for (auto& [name, clock] : map) {
+  for (const auto& id : map.sortedIds()) {
+    const std::string name(map.nameOf(id));
+    TimingClock& clock = map.get(id);
     const std::string target = sdcQuery("get_clocks", {name});
     for (const auto& [analysis, transitions] : clock.get_transition_map()) {
       for (const auto& [transition, value] : transitions)

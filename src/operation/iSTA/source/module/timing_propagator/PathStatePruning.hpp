@@ -16,16 +16,16 @@ class PathStatePruning
  public:
   explicit PathStatePruning(const Database& database) : _database(database), _matcher(database.sdc(), database.network()) {}
 
-  bool canPruneTo(const std::string& endpoint, const std::string& launch) const
+  bool canPruneTo(const std::string& endpoint, LaunchClockId launch_id) const
   {
+    // Exception matchers work on text; resolve the interned name once.
+    const std::string launch(_database.clockNameSymbols().view(launch_id.value));
     const auto& graph = _database.graph();
     if (graph.clockGatingChecks().contains(endpoint))
       return false;
-    for (const auto& [mode, sources] : graph.points().at(endpoint).get_path_state_map())
-      for (const auto& [source, edges] : sources)
-        for (const auto& [edge, states] : edges)
-          if (!states.empty())
-            return false;  // A seeded endpoint can retain a path-specific slew.
+    for (const auto& [combo, states] : graph.points().at(endpoint).get_path_state_map())
+      if (!states.empty())
+        return false;  // A seeded endpoint can retain a path-specific slew.
     const auto& pin = _database.network().pins().at(endpoint);
     const auto& sdc = _database.sdc();
     for (auto mode : {AnalysisType::kMin, AnalysisType::kMax})
@@ -43,7 +43,7 @@ class PathStatePruning
             // Empty exception progress deliberately evaluates only clock groups.
             if (_matcher.isFalsePath("", launch, endpoint, clock, mode, edge, origin, {}))
               continue;
-            if (definition->second.edgeCount() != 2 || hasPathDelay(launch, endpoint, clock, mode, edge, origin) || ++count > 1)
+            if (definition->edgeCount() != 2 || hasPathDelay(launch, endpoint, clock, mode, edge, origin) || ++count > 1)
               return false;
           }
           return true;
@@ -61,7 +61,7 @@ class PathStatePruning
         } else {
           const auto instance = _database.network().instances().find(pin.get_instance_name());
           if (instance != _database.network().instances().end())
-            for (const auto& arc : instance->second.get_check_arc_list()) {
+            for (const auto& arc : instance->get_check_arc_list()) {
               const auto type = arc.get_check_type();
               if (arc.get_data_port() != endpoint
                   || !(mode == AnalysisType::kMax ? type == TimingCheckType::kSetup || type == TimingCheckType::kRecovery
@@ -76,10 +76,10 @@ class PathStatePruning
               if (point == graph.points().end())
                 return false;
               bool clock_found = false;
-              for (const auto& [clock, state] : point->second.get_clock_state_map())
+              for (const auto& [clock, state] : point->get_clock_state_map())
                 if (!state.is_source_path_only) {
                   clock_found = true;
-                  if (!admit(arc.get_clock_port(), clock, arc.get_clock_trans_type()))
+                  if (!admit(arc.get_clock_port(), std::string(sdc.get_clock_map().nameOf(clock)), arc.get_clock_trans_type()))
                     return false;
                 }
               if (!clock_found)

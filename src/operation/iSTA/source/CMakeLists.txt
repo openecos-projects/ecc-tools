@@ -10,7 +10,7 @@ target_include_directories(ista_common INTERFACE
 )
 add_library(ista_model INTERFACE)
 target_include_directories(ista_model INTERFACE ${ISTA_DATA_MANAGER})
-target_link_libraries(ista_model INTERFACE ista_common ista_logger)
+target_link_libraries(ista_model INTERFACE ista_common ista_logger ecc_symbol)
 
 ## build
 add_subdirectory(${ISTA_DATA_MANAGER})

@@ -90,8 +90,8 @@ void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
   for (const auto& [name, constraint] : database.sdc().get_port_constraint_map()) {
     const auto pin_it = database.network().pins().find(name);
     const auto exported = pins.find(name);
-    if (pin_it == database.network().pins().end() || exported == pins.end() || !pin_it->second.get_is_port()
-        || (pin_it->second.get_direction() != PinDirection::kInput && pin_it->second.get_direction() != PinDirection::kInout))
+    if (pin_it == database.network().pins().end() || exported == pins.end() || !pin_it->get_is_port()
+        || (pin_it->get_direction() != PinDirection::kInput && pin_it->get_direction() != PinDirection::kInout))
       continue;
     exported->second->max_rise_slew_ps = constraint.get_input_transition(AnalysisType::kMax, TransType::kRise) * snapshot.time_unit_ps;
     exported->second->max_fall_slew_ps = constraint.get_input_transition(AnalysisType::kMax, TransType::kFall) * snapshot.time_unit_ps;
@@ -107,13 +107,13 @@ void seedStructuralElectricalInputs(TimingData& snapshot, Database& database)
       continue;
     double rise = 0.0;
     double fall = 0.0;
-    for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
+    for (const auto& [clock_id, state] : point->get_clock_state_map()) {
       (void) state;
-      const auto clock = database.sdc().get_clock_map().find(clock_name);
-      if (clock == database.sdc().get_clock_map().end())
+      if (!database.sdc().get_clock_map().contains(clock_id))
         continue;
-      rise = std::max(rise, modelTransitionPs(clock->second, TransType::kRise, snapshot.time_unit_ps));
-      fall = std::max(fall, modelTransitionPs(clock->second, TransType::kFall, snapshot.time_unit_ps));
+      auto& clock = database.sdc().get_clock_map().get(clock_id);
+      rise = std::max(rise, modelTransitionPs(clock, TransType::kRise, snapshot.time_unit_ps));
+      fall = std::max(fall, modelTransitionPs(clock, TransType::kFall, snapshot.time_unit_ps));
     }
     exported->second->max_rise_slew_ps = rise;
     exported->second->max_fall_slew_ps = fall;

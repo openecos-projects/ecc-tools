@@ -25,8 +25,8 @@ namespace ista {
 namespace {
 inline bool allowsTransition(const Network& network, const SimValues& values, std::string_view pin_name, TransType trans_type, bool driver)
 {
-  const auto pin = network.pins().find(std::string(pin_name));
-  const bool separate_driver = driver && pin != network.pins().end() && pin->second.get_direction() == PinDirection::kInout;
+  const auto pin = network.pins().find(pin_name);
+  const bool separate_driver = driver && pin != network.pins().end() && pin->get_direction() == PinDirection::kInout;
   return values.allowsTransition(pin_name, trans_type, separate_driver);
 }
 }  // namespace

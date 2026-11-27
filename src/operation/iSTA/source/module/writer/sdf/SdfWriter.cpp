@@ -154,22 +154,22 @@ bool SdfWriter::isSdfOutputOnlyCellArc(Arc& arc)
 {
   Database& database = _database;
   auto source_pin_it = database.network().pins().find(arc.get_source_pin());
-  if (source_pin_it == database.network().pins().end() || source_pin_it->second.get_is_port()) {
+  if (source_pin_it == database.network().pins().end() || source_pin_it->get_is_port()) {
     return false;
   }
-  auto instance_it = database.network().instances().find(source_pin_it->second.get_instance_name());
+  auto instance_it = database.network().instances().find(source_pin_it->get_instance_name());
   if (instance_it == database.network().instances().end()) {
     return false;
   }
 
   bool has_output_pin = false;
-  for (std::string& pin_name : instance_it->second.get_pin_name_list()) {
+  for (std::string& pin_name : instance_it->get_pin_name_list()) {
     auto pin_it = database.network().pins().find(pin_name);
     if (pin_it == database.network().pins().end()) {
       continue;
     }
 
-    const PinDirection direction = pin_it->second.get_direction();
+    const PinDirection direction = pin_it->get_direction();
     if (direction == PinDirection::kInput || direction == PinDirection::kInout) {
       return false;
     }
@@ -184,8 +184,11 @@ void SdfWriter::outputSdfCellList(std::ostream& sdf_file)
 {
   Database& database = _database;
   buildInstanceCellArcMap();
-  for (std::pair<const std::string, Instance>& instance_pair : database.network().instances()) {
-    outputSdfCell(sdf_file, instance_pair.second);
+  // SDF (CELL ...) block order is a compatibility surface (locked by
+  // name_order_invariant_test.cpp): sortedIds() reproduces the
+  // instance-name-lexicographic order std::map iteration gave before.
+  for (const auto& id : database.network().instances().sortedIds()) {
+    outputSdfCell(sdf_file, database.network().instances().get(id));
   }
 }
 

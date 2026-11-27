@@ -54,18 +54,18 @@ void ClockArcPropagator::propagateArrival(ClockSource& clock, std::size_t arc_id
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
   if ((respect_boundaries && arc.get_type() == ArcType::kNet
        && !database.sdc().clockAllowsNetArc(database.network(), std::string(clock.get_clock_name()), arc.get_source_pin(), arc.get_sink_pin()))
-      || (respect_boundaries && (!source_point.has_clock_state(clock.get_clock_name()) || !sink_point.has_clock_state(clock.get_clock_name())))
-      || source_point.find_clock_state(clock.get_clock_name()) == nullptr || sink_point.find_clock_state(clock.get_clock_name()) == nullptr) {
+      || (respect_boundaries && (!source_point.has_clock_state(clock.id()) || !sink_point.has_clock_state(clock.id())))
+      || source_point.find_clock_state(clock.id()) == nullptr || sink_point.find_clock_state(clock.id()) == nullptr) {
     return;
   }
-  auto& source_state = source_point.get_clock_state(clock.get_clock_name());
-  auto& sink_state = sink_point.get_clock_state(clock.get_clock_name());
-  for (const auto& [source_edge, source] : source_state.waveforms) {
+  auto& source_state = source_point.get_clock_state(clock.id());
+  auto& sink_state = sink_point.get_clock_state(clock.id());
+  source_state.eachWaveform([&](TransType source_edge, ClockWaveform& source) {
     if (!source.physicalArrival(analysis_type, input_trans_type) || !source.physicalSlew(analysis_type, input_trans_type))
-      continue;
+      return;
     for (auto output : getOutputTransTypeList(arc, analysis_type, input_trans_type))
-      updateClockPathState(clock.get_clock_name(), source_edge, arc, source, sink_state.waveforms[source_edge], analysis_type, input_trans_type, output);
-  }
+      updateClockPathState(clock.get_clock_name(), source_edge, arc, source, sink_state.waveformSlot(source_edge), analysis_type, input_trans_type, output);
+  });
   sink_state.summarize();
 }
 
@@ -80,21 +80,23 @@ void ClockArcPropagator::updateClockPathState(std::string_view clock_name, Trans
   const double arrival = roundTime(*source.physicalArrival(analysis_type, input_trans_type) + delay);
   const auto current = sink.physicalArrival(analysis_type, output_trans_type);
   if (!current || isBetterArrival(arrival, *current, analysis_type)) {
-    sink.physical_arrival_map[analysis_type][output_trans_type] = arrival;
-    sink.predecessor_source_map[analysis_type][output_trans_type] = source_edge;
-    sink.physical_predecessor_map[analysis_type][output_trans_type] = arc.get_source_pin();
-    sink.predecessor_vertex_map[analysis_type][output_trans_type] = arc.get_source_vertex_idx();
-    sink.physical_predecessor_arc_delay_map[analysis_type][output_trans_type] = delay;
-    sink.physical_predecessor_trans_type_map[analysis_type][output_trans_type] = input_trans_type;
+    sink.physical_arrival_map.set(analysis_type, output_trans_type, arrival);
+    sink.predecessor_source_map.set(analysis_type, output_trans_type, source_edge);
+    // The source pin of a graph arc always exists in the network; if a
+    // synthetic arc ever lacks it, the predecessor simply stays absent.
+    if (const auto pin_id = _database.network().pins().id(arc.get_source_pin()))
+      sink.physical_predecessor_map.set(analysis_type, output_trans_type, *pin_id);
+    sink.predecessor_vertex_map.set(analysis_type, output_trans_type, arc.get_source_vertex_idx());
+    sink.physical_predecessor_arc_delay_map.set(analysis_type, output_trans_type, delay);
+    sink.physical_predecessor_trans_type_map.set(analysis_type, output_trans_type, input_trans_type);
   }
 }
 
 void ClockArcPropagator::updateGraphArcDelay(Arc& arc, AnalysisType analysis_type, TransType input_trans_type, TransType output_trans_type, double arc_delay)
 {
-  if (arc.get_graph_delay_map().count(analysis_type) == 0 || arc.get_graph_delay_map()[analysis_type].count(input_trans_type) == 0
-      || arc.get_graph_delay_map()[analysis_type][input_trans_type].count(output_trans_type) == 0
-      || isBetterDelay(arc_delay, arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type], analysis_type)) {
-    arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type] = arc_delay;
+  const auto current = arc.get_graph_delay_map().get(analysis_type, input_trans_type, output_trans_type);
+  if (!current || isBetterDelay(arc_delay, *current, analysis_type)) {
+    arc.get_graph_delay_map().set(analysis_type, input_trans_type, output_trans_type, arc_delay);
   }
 }
 
@@ -122,12 +124,8 @@ double ClockArcPropagator::roundTime(double time)
 std::vector<TransType> ClockArcPropagator::getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   std::vector<TransType> output_trans_type_list;
-  if (arc.get_input_output_delay_map().count(analysis_type) == 0 || arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) == 0) {
-    return output_trans_type_list;
-  }
-  for (std::pair<const TransType, double>& delay_pair : arc.get_input_output_delay_map()[analysis_type][input_trans_type]) {
-    output_trans_type_list.push_back(delay_pair.first);
-  }
+  arc.get_input_output_delay_map().eachOutput(analysis_type, input_trans_type,
+                                              [&output_trans_type_list](TransType out, double) { output_trans_type_list.push_back(out); });
   return output_trans_type_list;
 }
 
@@ -161,18 +159,18 @@ void ClockArcPropagator::propagateSlew(ClockSource& clock, std::size_t arc_idx, 
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
   if ((respect_boundaries && arc.get_type() == ArcType::kNet
        && !database.sdc().clockAllowsNetArc(database.network(), std::string(clock.get_clock_name()), arc.get_source_pin(), arc.get_sink_pin()))
-      || (respect_boundaries && (!source_point.has_clock_state(clock.get_clock_name()) || !sink_point.has_clock_state(clock.get_clock_name())))
-      || source_point.find_clock_state(clock.get_clock_name()) == nullptr || sink_point.find_clock_state(clock.get_clock_name()) == nullptr) {
+      || (respect_boundaries && (!source_point.has_clock_state(clock.id()) || !sink_point.has_clock_state(clock.id())))
+      || source_point.find_clock_state(clock.id()) == nullptr || sink_point.find_clock_state(clock.id()) == nullptr) {
     return;
   }
-  auto& source_state = source_point.get_clock_state(clock.get_clock_name());
-  auto& sink_state = sink_point.get_clock_state(clock.get_clock_name());
-  for (const auto& [source_edge, source] : source_state.waveforms) {
+  auto& source_state = source_point.get_clock_state(clock.id());
+  auto& sink_state = sink_point.get_clock_state(clock.id());
+  source_state.eachWaveform([&](TransType source_edge, ClockWaveform& source) {
     if (!source.physicalSlew(analysis_type, input_trans_type))
-      continue;
+      return;
     for (auto output : getOutputTransTypeList(arc, analysis_type, input_trans_type))
-      updateClockSlewDelay(clock.get_clock_name(), source_edge, arc, source, sink_state.waveforms[source_edge], analysis_type, input_trans_type, output);
-  }
+      updateClockSlewDelay(clock.get_clock_name(), source_edge, arc, source, sink_state.waveformSlot(source_edge), analysis_type, input_trans_type, output);
+  });
   sink_state.summarize();
 }
 
@@ -188,6 +186,6 @@ void ClockArcPropagator::updateClockSlewDelay(std::string_view clock_name, Trans
   updateGraphArcDelay(arc, analysis_type, input_trans_type, output_trans_type, result->get_delay());
   const auto current = sink.physicalSlew(analysis_type, output_trans_type);
   if (!current || isBetterSlew(result->get_slew(), *current, analysis_type))
-    sink.physical_slew_map[analysis_type][output_trans_type] = result->get_slew();
+    sink.physical_slew_map.set(analysis_type, output_trans_type, result->get_slew());
 }
 }  // namespace ista

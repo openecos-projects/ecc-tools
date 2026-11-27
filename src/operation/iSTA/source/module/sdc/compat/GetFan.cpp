@@ -84,7 +84,7 @@ std::set<std::string> TclGetFan::getQueryPins(const std::vector<Tcl_Obj*>& objec
       } else if (kind == QueryObjectType::kNet) {
         for (const auto& pin_name : database.network().nets().at(database.network().physicalNet(match)).get_pin_name_list()) {
           auto pin = database.network().pins().find(pin_name);
-          if (pin != database.network().pins().end() && (_is_fanin || isLoad(pin->second)))
+          if (pin != database.network().pins().end() && (_is_fanin || isLoad(*pin)))
             roots.insert(pin_name);
         }
       }
@@ -104,10 +104,10 @@ PinDirection TclGetFan::getDirection(Pin& pin)
   Database& database = STADM.getDatabase();
   auto instance = database.network().instances().find(pin.get_instance_name());
   if (!pin.get_is_port() && instance != database.network().instances().end()) {
-    auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+    auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
     if (cell != database.liberty().get_cell_map().end()) {
-      auto port = cell->second.get_port_map().find(pin.get_pin_name());
-      if (port != cell->second.get_port_map().end()) {
+      auto port = cell->get_port_map().find(pin.get_pin_name());
+      if (port != cell->get_port_map().end()) {
         if (port->second.get_is_input() && port->second.get_is_output()) {
           return PinDirection::kInout;
         }
@@ -160,22 +160,22 @@ bool TclGetFan::isRegisterBoundary(Pin& pin)
     return false;
   }
   if (_is_fanin) {
-    if (!instance->second.get_is_sequential()) {
+    if (!instance->get_is_sequential()) {
       return false;
     }
-    if (pin.get_full_name() == instance->second.get_clock_pin_name()) {
+    if (pin.get_full_name() == instance->get_clock_pin_name()) {
       return true;
     }
-    auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+    auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
     if (cell != database.liberty().get_cell_map().end()) {
-      for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
+      for (TimingCellArc& arc : cell->get_cell_arc_list()) {
         if (arc.get_is_clock_arc() && pin.get_pin_name() == arc.get_source_port()) {
           return true;
         }
       }
     }
   } else {
-    for (TimingCheckArc& check : instance->second.get_check_arc_list()) {
+    for (TimingCheckArc& check : instance->get_check_arc_list()) {
       if (pin.get_full_name() == check.get_data_port()) {
         return true;
       }
@@ -194,10 +194,10 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
   if (fanin ? isLoad(pin) : isDriver(pin)) {
     auto net = database.network().nets().find(pin.get_net_name());
     if (net != database.network().nets().end()) {
-      for (const std::string& other_name : net->second.get_pin_name_list()) {
+      for (const std::string& other_name : net->get_pin_name_list()) {
         auto other = database.network().pins().find(other_name);
-        if (other != database.network().pins().end() && other_name != pin.get_full_name() && (fanin ? isDriver(other->second) : isLoad(other->second))
-            && isSearchPin(other->second)) {
+        if (other != database.network().pins().end() && other_name != pin.get_full_name() && (fanin ? isDriver(*other) : isLoad(*other))
+            && isSearchPin(*other)) {
           adjacent.push_back(other_name);
         }
       }
@@ -207,11 +207,11 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
   if (pin.get_is_port() || instance == database.network().instances().end()) {
     return adjacent;
   }
-  auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+  auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end()) {
     return adjacent;
   }
-  for (TimingCellArc& arc : cell->second.get_cell_arc_list()) {
+  for (TimingCellArc& arc : cell->get_cell_arc_list()) {
     // Fanin includes clock-to-Q up to the register clock pin. Fanout never
     // crosses a sequential element; reset and check arcs are not data paths.
     if (!arc.get_is_timing_graph_arc() || arc.get_is_disable_arc() || arc.get_is_clear_preset_arc() || (!_is_fanin && arc.get_is_clock_arc())) {
@@ -220,9 +220,9 @@ std::vector<std::string> TclGetFan::getAdjacentPins(Pin& pin, bool fanin)
     if (pin.get_pin_name() != (fanin ? arc.get_sink_port() : arc.get_source_port())) {
       continue;
     }
-    std::string other_name = instance->first + ":" + (fanin ? arc.get_source_port() : arc.get_sink_port());
+    std::string other_name = pin.get_instance_name() + ":" + (fanin ? arc.get_source_port() : arc.get_sink_port());
     auto other = database.network().pins().find(other_name);
-    if (other != database.network().pins().end() && isSearchPin(other->second)) {
+    if (other != database.network().pins().end() && isSearchPin(*other)) {
       adjacent.push_back(other_name);
     }
   }

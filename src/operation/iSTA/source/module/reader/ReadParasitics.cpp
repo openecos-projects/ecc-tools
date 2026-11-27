@@ -45,8 +45,8 @@ void ReadParasitics::readNet(spef::Net& spef_net)
     // extraction names the same connection after the port. Resolve only an
     // actual port alias, then validate every extracted terminal below.
     const auto port = _network.pins().find(net_name);
-    if (port != _network.pins().end() && port->second.get_is_port())
-      net_name = port->second.get_net_name();
+    if (port != _network.pins().end() && port->get_is_port())
+      net_name = port->get_net_name();
   }
   // An ECO can leave the old extracted terminals in SPEF. Those nodes must
   // not replace the loads of the linked netlist or become a fictitious RC tree.
@@ -81,15 +81,15 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   if (excl_driver_cc) {
     const auto net_it = _network.nets().find(net_name);
     if (net_it != _network.nets().end()) {
-      for (const auto& pin_name : net_it->second.get_pin_name_list()) {
+      for (const auto& pin_name : net_it->get_pin_name_list()) {
         const auto pin_it = _network.pins().find(pin_name);
         if (pin_it == _network.pins().end())
           continue;
-        const auto direction = pin_it->second.get_direction();
+        const auto direction = pin_it->get_direction();
         if (direction == PinDirection::kOutput || direction == PinDirection::kInout) {
-          driver_instance = pin_it->second.get_instance_name();
+          driver_instance = pin_it->get_instance_name();
           // SPEF node names use `instance:pin`; build the matching form.
-          driver_pin = driver_instance + ":" + pin_it->second.get_pin_name();
+          driver_pin = driver_instance + ":" + pin_it->get_pin_name();
           break;
         }
       }
@@ -111,7 +111,8 @@ void ReadParasitics::readNet(spef::Net& spef_net)
   // Apply this in pF after duplicate CAP entries have been summed, including
   // nodes present only in CONN/RES. Liberty pin capacitance is added later.
   constexpr double minimum_node_capacitance = 1e-9;
-  for (auto& [name, node] : parasitic_net.get_node_map()) {
+  for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+    ParasiticNode& node = parasitic_net.get_node_map().get(nid);
     node.set_capacitance(std::max(node.get_capacitance(), minimum_node_capacitance));
   }
   _parasitics.nets()[parasitic_net.get_net_name()] = parasitic_net;
@@ -124,7 +125,7 @@ bool ReadParasitics::connectionsMatch(const spef::Net& net, const std::string& n
     STALOG.warn(Loc::current(), "Ignoring SPEF net absent from the timing network: ", net.name);
     return false;
   }
-  const auto& pins = found->second.get_pin_name_list();
+  const auto& pins = found->get_pin_name_list();
   const std::unordered_set<std::string_view> pin_names(pins.begin(), pins.end());
   for (const auto& connection : net.conns) {
     if (connection.conn_direction == spef::ConnectionDirection::kInternal)

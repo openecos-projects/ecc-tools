@@ -29,8 +29,8 @@ namespace ista {
 void PinDirectionResolver::normalize()
 {
   Database& database = _database;
-  for (auto& pin_pair : database.network().pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : database.network().pins().sortedIds()) {
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_is_port()) {
       continue;
     }
@@ -61,7 +61,7 @@ void PinDirectionResolver::resolve()
   Database& database = _database;
   std::map<std::string, PinDirection> inout_pin_direction_map = makeInoutPinDirectionMap();
   for (std::pair<const std::string, PinDirection>& pin_direction_pair : inout_pin_direction_map) {
-    database.network().pins()[pin_direction_pair.first].set_direction(pin_direction_pair.second);
+    database.network().pins().at(pin_direction_pair.first).set_direction(pin_direction_pair.second);
   }
 }
 
@@ -69,8 +69,9 @@ std::map<std::string, PinDirection> PinDirectionResolver::makeInoutPinDirectionM
 {
   Database& database = _database;
   std::map<std::string, PinDirection> inout_pin_direction_map;
-  for (std::pair<const std::string, Pin>& pin_pair : database.network().pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_direction() != PinDirection::kInout) {
       continue;
     }
@@ -82,11 +83,11 @@ std::map<std::string, PinDirection> PinDirectionResolver::makeInoutPinDirectionM
     if (isFloatingInoutPin(pin)) {
       continue;
     }
-    PinDirection pin_direction = inferInoutPinDirection(pin_pair.first, pin, inout_pin_direction_map);
+    PinDirection pin_direction = inferInoutPinDirection(pin_name, pin, inout_pin_direction_map);
     if (pin_direction == PinDirection::kNone || pin_direction == PinDirection::kInout) {
-      STALOG.error(Loc::current(), "Failed to infer inout pin direction: pin=", pin_pair.first, " net=", pin.get_net_name());
+      STALOG.error(Loc::current(), "Failed to infer inout pin direction: pin=", pin_name, " net=", pin.get_net_name());
     }
-    inout_pin_direction_map[pin_pair.first] = pin_direction;
+    inout_pin_direction_map[pin_name] = pin_direction;
   }
   return inout_pin_direction_map;
 }
@@ -135,8 +136,8 @@ LibertyPort* PinDirectionResolver::libertyPort(Pin& pin)
   if (database.network().instances().count(pin.get_instance_name()) == 0) {
     return nullptr;
   }
-  Instance& instance = database.network().instances()[pin.get_instance_name()];
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  Instance& instance = database.network().instances().at(pin.get_instance_name());
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return nullptr;
   }
@@ -233,7 +234,7 @@ int32_t PinDirectionResolver::getUnresolvedInoutPinNum(Net& net, std::map<std::s
   Database& database = _database;
   int32_t unresolved_inout_pin_num = 0;
   for (std::string& pin_name : net.get_pin_name_list()) {
-    Pin& pin = database.network().pins()[pin_name];
+    Pin& pin = database.network().pins().at(pin_name);
     if (pin.get_direction() == PinDirection::kInout && inout_pin_direction_map.count(pin_name) == 0) {
       unresolved_inout_pin_num++;
     }
@@ -244,7 +245,7 @@ int32_t PinDirectionResolver::getUnresolvedInoutPinNum(Net& net, std::map<std::s
 bool PinDirectionResolver::isResolvedDriverPin(const std::string& pin_name, std::map<std::string, PinDirection>& inout_pin_direction_map)
 {
   Database& database = _database;
-  Pin& pin = database.network().pins()[pin_name];
+  Pin& pin = database.network().pins().at(pin_name);
   PinDirection direction = pin.get_direction();
   if (direction == PinDirection::kInout && inout_pin_direction_map.count(pin_name) > 0) {
     direction = inout_pin_direction_map[pin_name];

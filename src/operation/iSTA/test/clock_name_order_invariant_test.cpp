@@ -1,0 +1,79 @@
+// SPDX-License-Identifier: MulanPSL-2.0
+//
+// The per-point clock map is keyed by ClockId, so raw iteration follows SDC
+// definition order; output-facing consumers rely on name order, which
+// clockStatesInNameOrder() reconstructs. ClockNetworkBuilder's orderSources
+// walks the clock table in name order, so a point's default clock is the
+// name-first clock reaching it. Clocks here are defined in reverse name
+// order on purpose.
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#include "Database.hpp"
+
+#include "graph/TimingStateQuery.hpp"
+#include "DelayCalculator.hpp"
+#include "TimingAnalyzer.hpp"
+
+using namespace ista;
+
+namespace {
+
+void require(bool condition, const char* message)
+{
+  if (!condition)
+    throw std::runtime_error(message);
+}
+
+}  // namespace
+
+int main()
+{
+  Database db;
+  Config config;
+  for (const auto* name : {"in", "out"}) {
+    auto& pin = db.network().pins()[name];
+    pin.set_full_name(name);
+    pin.set_pin_name(name);
+    pin.set_is_port(true);
+    pin.set_net_name("wire");
+    pin.set_direction(std::string(name) == "in" ? PinDirection::kInput : PinDirection::kOutput);
+  }
+  auto& net = db.network().nets()["wire"];
+  net.set_net_name("wire");
+  net.set_pin_name_list({"in", "out"});
+  // SDC definition order is deliberately the reverse of name order.
+  for (const auto* name : {"zclk", "mclk", "aclk"}) {
+    auto& clock = db.sdc().get_clock_map()[name];
+    clock.set_clock_name(name);
+    clock.set_period(10);
+    clock.set_rise_edge(0);
+    clock.set_fall_edge(5);
+    clock.set_source_list({"in"});
+  }
+  db.sdc().get_port_constraint_map()["in"].set_input_transition(.05);
+  DelayCalculator delay(db, config);
+  TimingAnalyzer(db, delay).analyze();
+
+  // The id-keyed map iterates in SDC definition order by design; the
+  // name-ordered helper is the contract output consumers rely on.
+  auto& point = db.graph().points()["in"];
+  std::vector<std::string> iterated;
+  for (const auto& [clock_name, state] : clockStatesInNameOrder(point, db))
+    iterated.emplace_back(clock_name);
+  std::string actual;
+  for (const auto& name : iterated)
+    actual += name + ",";
+  require((iterated == std::vector<std::string>{"aclk", "mclk", "zclk"}),
+          (std::string("per-point clock state iteration left name order: ") + actual).c_str());
+
+  // The default clock is the name-first clock reaching the point, not the
+  // first-defined one.
+  require(point.defaultClock() == db.sdc().get_clock_map().id("aclk").value(), "default clock followed SDC definition order instead of name order");
+  require(point.findDefaultClockState() != nullptr, "default clock lost its clock state");
+
+  // Clock-state lookup by every name works and returns distinct states.
+  for (const auto* name : {"zclk", "mclk", "aclk"})
+    require(point.has_clock_state(db.sdc().get_clock_map().id(name).value()), "clock state missing after propagation");
+}

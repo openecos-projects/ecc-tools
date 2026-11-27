@@ -76,8 +76,8 @@ std::string objectFullName(Database& database, Tcl_Obj* object)
     case SdcObjectType::kPort:
     case SdcObjectType::kPin: {
       const auto pin = network.pins().find(name);
-      if (pin != network.pins().end() && pin->second.get_is_port() == (type == SdcObjectType::kPort))
-        return type == SdcObjectType::kPort ? name : pin->second.get_instance_name() + "/" + pin->second.get_pin_name();
+      if (pin != network.pins().end() && pin->get_is_port() == (type == SdcObjectType::kPort))
+        return type == SdcObjectType::kPort ? name : pin->get_instance_name() + "/" + pin->get_pin_name();
       if (type == SdcObjectType::kPin) {
         const auto boundary = network.hierarchyPins().find(name);
         if (boundary != network.hierarchyPins().end())
@@ -486,7 +486,9 @@ std::set<std::string> findClocksFromObjects(Tcl_Interp* interp, Database& databa
       continue;
     }
     for (const std::string& source : findClockSources(interp, database, {object})) {
-      for (auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+      for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+        const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+        TimingClock& clock = database.sdc().get_clock_map().get(id);
         if (std::find(clock.get_source_objects().begin(), clock.get_source_objects().end(), source) != clock.get_source_objects().end()) {
           result.insert(clock_name);
         }
@@ -524,8 +526,8 @@ ExceptionObjects findExceptionObjects(Tcl_Interp* interp, Database& database, co
                             : query == QueryObjectType::kCell
                                 ? database.network().instances().contains(name) || database.network().hierarchyCells().contains(name)
                             : query == QueryObjectType::kPort
-                                ? pin != database.network().pins().end() && pin->second.get_is_port()
-                                : database.network().isHierarchyPin(name) || (pin != database.network().pins().end() && !pin->second.get_is_port());
+                                ? pin != database.network().pins().end() && pin->get_is_port()
+                                : database.network().isHierarchyPin(name) || (pin != database.network().pins().end() && !pin->get_is_port());
         if (exists)
           names.push_back(name);
       } else
@@ -556,7 +558,7 @@ std::vector<std::string> resolvePinTargets(Tcl_Interp* interp, Database& databas
     std::vector<std::string> names;
     if (type != SdcObjectType::kNone) {
       const auto pin = database.network().pins().find(name);
-      if (pin == database.network().pins().end() || pin->second.get_is_port() != (type == SdcObjectType::kPort))
+      if (pin == database.network().pins().end() || pin->get_is_port() != (type == SdcObjectType::kPort))
         throw std::invalid_argument("pin or port no longer exists: " + name);
       names.push_back(name);
     } else {
@@ -572,7 +574,7 @@ std::vector<std::string> resolvePinTargets(Tcl_Interp* interp, Database& databas
       const auto pin = database.network().pins().find(target);
       if (pin == database.network().pins().end())
         throw std::invalid_argument("constraint requires leaf pins or top-level ports: " + target);
-      if (inputs_only && pin->second.get_direction() != PinDirection::kInput && pin->second.get_direction() != PinDirection::kInout)
+      if (inputs_only && pin->get_direction() != PinDirection::kInput && pin->get_direction() != PinDirection::kInout)
         throw std::invalid_argument("constraint requires input ports: " + target);
       targets.insert(target);
     }
@@ -657,7 +659,7 @@ std::vector<std::string> findClockSources(Tcl_Interp* interp, Database& database
       const auto net = database.network().nets().find(database.network().physicalNet(name));
       if (net == database.network().nets().end())
         throw std::invalid_argument("clock source net no longer exists: " + name);
-      for (const auto& pin_name : net->second.get_pin_name_list()) {
+      for (const auto& pin_name : net->get_pin_name_list()) {
         const auto& pin = database.network().pins().at(pin_name);
         if (pin.get_direction() == PinDirection::kInout
             || (pin.get_is_port() ? pin.get_direction() == PinDirection::kInput : pin.get_direction() == PinDirection::kOutput))

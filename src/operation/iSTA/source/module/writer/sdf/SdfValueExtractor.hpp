@@ -57,7 +57,7 @@ class SdfValueExtractor
   void mergeDelay(SdfDelay& target, SdfDelay& source);
   TimingCheckArc* findSetupCheck(LibertyCell& timing_cell, TimingCheckArc& hold_timing_check_arc);
   TimingArc* findSetupArc(TimingCheckArc& setup_timing_check_arc, TimingArc& hold_timing_arc, TransType data_trans_type);
-  void updateDelay(SdfDelay& sdf_delay, std::map<AnalysisType, std::map<TransType, std::map<TransType, double>>>& delay_map, TransType input_trans_type);
+  void updateDelay(SdfDelay& sdf_delay, const ArcIoGrid<double>& delay_map, TransType input_trans_type);
   double dataSlew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);
   double checkClockSlew(Instance& instance, TimingCheckArc& timing_check_arc, AnalysisType analysis_type, TransType data_trans_type);
   double slew(std::string& pin_name, AnalysisType analysis_type, TransType trans_type);

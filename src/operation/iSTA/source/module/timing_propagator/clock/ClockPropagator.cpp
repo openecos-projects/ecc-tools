@@ -42,6 +42,7 @@ void ClockPropagator::propagate()
 void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
 {
   Database& database = _database;
+  ClockNetworkBuilder network(_database);
   for (ClockSource& clock : sources) {
     _generated_clock_seeder.seed(clock);
     propagateClockSlewDelay(clock);
@@ -49,7 +50,7 @@ void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
       GraphVertex& vertex = database.graph().vertices()[vertex_idx];
       std::string& pin_name = vertex.get_pin_name();
       if (TimingPoint& timing_point = vertex.get_timing_point();
-          !timing_point.has_clock_state(clock.get_clock_name()) || ClockNetworkBuilder(_database).stopsAt(pin_name)) {
+          !timing_point.has_clock_state(clock.id()) || network.stopsAt(pin_name)) {
         continue;
       }
       for (const auto& arc_idx : vertex.get_outgoing_arc_list()) {
@@ -67,11 +68,12 @@ void ClockPropagator::propagateSources(std::vector<ClockSource>& sources)
 void ClockPropagator::propagateClockSlewDelay(ClockSource& clock)
 {
   Database& database = _database;
+  ClockNetworkBuilder network(_database);
   for (int32_t vertex_idx : database.graph().vertexOrder()) {
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     std::string& pin_name = vertex.get_pin_name();
     TimingPoint& timing_point = vertex.get_timing_point();
-    if (!timing_point.has_clock_state(clock.get_clock_name()) || ClockNetworkBuilder(_database).stopsAt(pin_name)) {
+    if (!timing_point.has_clock_state(clock.id()) || network.stopsAt(pin_name)) {
       continue;
     }
     for (std::size_t arc_idx : vertex.get_outgoing_arc_list()) {
@@ -89,11 +91,11 @@ void ClockPropagator::publishClock(ClockSource& clock)
   TimingClock& definition = database.sdc().get_clock_map().at(std::string(clock.get_clock_name()));
   for (GraphVertex& vertex : database.graph().vertices()) {
     TimingPoint& timing_point = vertex.get_timing_point();
-    if (timing_point.find_clock_state(clock.get_clock_name()) == nullptr) {
+    if (timing_point.find_clock_state(clock.id()) == nullptr) {
       continue;
     }
-    ClockState& clock_state = timing_point.get_clock_state(clock.get_clock_name());
-    for (auto& [source_edge, state] : clock_state.waveforms) {
+    ClockState& clock_state = timing_point.get_clock_state(clock.id());
+    clock_state.eachWaveform([&](TransType source_edge, ClockWaveform& state) {
       state.arrival_map.clear();
       state.slew_map.clear();
       state.predecessor_map.clear();
@@ -101,27 +103,26 @@ void ClockPropagator::publishClock(ClockSource& clock)
       state.predecessor_trans_type_map.clear();
       for (AnalysisType analysis : {AnalysisType::kMax, AnalysisType::kMin}) {
         for (TransType edge : {TransType::kRise, TransType::kFall}) {
-          const auto physical = state.physical_arrival_map.find(analysis);
-          if (physical == state.physical_arrival_map.end() || !physical->second.contains(edge))
+          const auto physical = state.physical_arrival_map.get(analysis, edge);
+          if (!physical)
             continue;
           const auto values
               = clockPinValues(database, vertex.get_pin_name(), clock.get_clock_name(), analysis, edge, AnalysisType::kNone, source_edge, &timing_point);
-          state.arrival_map[analysis][edge] = values.source_latency + (values.propagated ? physical->second.at(edge) : values.network_latency);
+          state.arrival_map.set(analysis, edge, values.source_latency + (values.propagated ? *physical : values.network_latency));
           if (values.propagated) {
-            state.slew_map[analysis][edge] = state.physical_slew_map[analysis][edge];
-            if (state.physical_predecessor_map[analysis].contains(edge)) {
-              state.predecessor_map[analysis][edge] = state.physical_predecessor_map[analysis][edge];
-              state.predecessor_arc_delay_map[analysis][edge] = state.physical_predecessor_arc_delay_map[analysis][edge];
-              state.predecessor_trans_type_map[analysis][edge] = state.physical_predecessor_trans_type_map[analysis][edge];
+            state.slew_map.set(analysis, edge, state.physical_slew_map.get(analysis, edge).value_or(0.0));
+            if (state.physical_predecessor_map.get(analysis, edge)) {
+              state.predecessor_map.set(analysis, edge, state.physical_predecessor_map.get(analysis, edge).value());
+              state.predecessor_arc_delay_map.set(analysis, edge, state.physical_predecessor_arc_delay_map.get(analysis, edge).value_or(0.0));
+              state.predecessor_trans_type_map.set(analysis, edge, state.physical_predecessor_trans_type_map.get(analysis, edge).value_or(TransType{}));
             }
           } else {
             const auto mode = definition.get_transition_map().find(analysis);
-            state.slew_map[analysis][edge]
-                = mode != definition.get_transition_map().end() && mode->second.contains(source_edge) ? mode->second.at(source_edge) : 0.0;
+            state.slew_map.set(analysis, edge, mode != definition.get_transition_map().end() && mode->second.contains(source_edge) ? mode->second.at(source_edge) : 0.0);
           }
         }
       }
-    }
+    });
     clock_state.summarize();
   }
 }

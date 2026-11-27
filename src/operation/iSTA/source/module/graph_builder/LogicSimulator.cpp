@@ -73,7 +73,7 @@ std::map<std::string, bool> LogicSimulator::constantInputs(const Instance& insta
     const auto value = _values.value(pin_name);
     if (pin == _network.pins().end() || !value || !isConstant(*value))
       continue;
-    values[pin->second.get_pin_name()] = *value == TimingCaseValue::kOne;
+    values[pin->get_pin_name()] = *value == TimingCaseValue::kOne;
   }
   return values;
 }
@@ -96,7 +96,8 @@ void LogicSimulator::propagateCaseValues()
   bool changed = true;
   for (std::size_t iteration = 0; changed && iteration <= _network.pins().size(); ++iteration) {
     changed = false;
-    for (const auto& [net_name, net] : _network.nets()) {
+    for (const auto& id : _network.nets().sortedIds()) {
+      const Net& net = _network.nets().get(id);
       for (const std::string& load : net.get_load_pin_list()) {
         const auto value = driverValue(net, load);
         if (value)
@@ -104,12 +105,14 @@ void LogicSimulator::propagateCaseValues()
       }
     }
 
-    for (const auto& [instance_name, instance] : _network.instances()) {
+    for (const auto& instance_id : _network.instances().sortedIds()) {
+      const std::string instance_name(_network.instances().nameOf(instance_id));
+      const Instance& instance = _network.instances().get(instance_id);
       const auto cell = _liberty.get_cell_map().find(instance.get_cell_name());
       if (cell == _liberty.get_cell_map().end())
         continue;
       const auto values = constantInputs(instance);
-      for (const auto& [port_name, port] : cell->second.get_port_map()) {
+      for (const auto& [port_name, port] : cell->get_port_map()) {
         if (!port.get_is_output())
           continue;
         const std::string output_pin = instance_name + ":" + port_name;
@@ -159,10 +162,10 @@ void LogicSimulator::disableInsensitiveArcs()
     const auto instance = _network.instances().find(arc.get_owner_name());
     if (instance == _network.instances().end())
       continue;
-    const auto cell = _liberty.get_cell_map().find(instance->second.get_cell_name());
+    const auto cell = _liberty.get_cell_map().find(instance->get_cell_name());
     if (cell == _liberty.get_cell_map().end())
       continue;
-    const auto values = constantInputs(instance->second);
+    const auto values = constantInputs(*instance);
     const auto* cell_arc = arc.libertyArcId() ? _liberty.findCellArc(*arc.libertyArcId()) : nullptr;
     bool enabled = cell_arc == nullptr || cell_arc->get_timing_arc_list().empty();
     if (cell_arc != nullptr) {
@@ -180,8 +183,8 @@ void LogicSimulator::disableInsensitiveArcs()
     // define both clock-to-Q and transparent latch data-to-Q sensitivity.
     if (arc.get_is_clock_arc() || (cell_arc != nullptr && cell_arc->get_is_latch_data_arc()))
       continue;
-    const auto output = cell->second.get_port_map().find(arc.get_library_sink_port());
-    if (output == cell->second.get_port_map().end())
+    const auto output = cell->get_port_map().find(arc.get_library_sink_port());
+    if (output == cell->get_port_map().end())
       continue;
     const auto& expression
         = cell_arc != nullptr && cell_arc->isThreeStateArc() ? output->second.get_three_state_expression() : output->second.get_function_expression();
@@ -196,7 +199,9 @@ void LogicSimulator::propagate()
   _values.clear();
   for (const auto& [pin, value] : _sdc.get_case_analysis_map())
     _values.setValue(pin, value);
-  for (const auto& [pin_name, pin] : _network.pins()) {
+  for (const auto& pin_id : _network.pins().sortedIds()) {
+    const std::string pin_name(_network.pins().nameOf(pin_id));
+    const Pin& pin = _network.pins().get(pin_id);
     if (pin.get_constant_value() != TimingCaseValue::kNone) {
       if (!_values.value(pin_name))
         _values.setValue(pin_name, pin.get_constant_value());

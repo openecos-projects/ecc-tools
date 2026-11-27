@@ -1,7 +1,8 @@
 {
   inputs.self.submodules = true;
+  inputs.nixpkgs-gcc11.url = "github:NixOS/nixpkgs/nixos-24.05";
   outputs = inputs@{
-    self, nixpkgs, flake-parts,
+    self, nixpkgs, nixpkgs-gcc11, flake-parts,
   }: let
     ecc-tools-bin = {
       lib,
@@ -101,6 +102,13 @@
             ) (old.patches or [ ]);
           });
         });
+    in let
+      # GCC 11 was removed from current nixpkgs; the 24.05 input still has it.
+      # Only the compiler stdenv comes from there. Dependencies stay in the
+      # main closure, so both uses below are compile/diagnostics gates, not
+      # fully consistent link/runtime environments.
+      pkgsGcc11 = import inputs.nixpkgs-gcc11 { inherit system; };
+      eccTools = self'.packages.default;
     in {
       # Re-export packages and the devShell as checks so CI
       # (`nix flake check`) builds them.
@@ -108,14 +116,29 @@
         devShell = config.devShells.default;
       };
       packages.default = pkgs.callPackage ecc-tools-bin { inherit boost191; };
-      devShells.default = pkgs.mkShell.override {
-        stdenv = pkgs.ccacheStdenv;
-      } {
-        buildInputs = self'.packages.default.rawBuildInputs;
-        nativeBuildInputs = self'.packages.default.rawNativeBuildInputs ++ (with pkgs; [ uv ]);
-        shellHook = ''
-          export CCACHE_DIR="$PWD/.ccache"
-        '';
+      # Toolchain dev environments: the same inputs as `default` under another
+      # compiler stdenv. Enter with `nix develop .#gcc13` / `.#gcc11`, then
+      # configure a scratch build dir; cmake picks up the shell's CC/CXX.
+      devShells = let
+        shellArgs = {
+          buildInputs = eccTools.rawBuildInputs;
+          nativeBuildInputs = eccTools.rawNativeBuildInputs ++ (with pkgs; [ uv ]);
+          shellHook = ''
+            export CCACHE_DIR="$PWD/.ccache"
+          '';
+        };
+      in {
+        default = pkgs.mkShell.override {
+          stdenv = pkgs.ccacheStdenv;
+        } shellArgs;
+        gcc13 = pkgs.mkShell.override {
+          stdenv = pkgs.ccacheStdenv.override { stdenv = pkgs.gcc13Stdenv; };
+        } shellArgs;
+        gcc11 = pkgsGcc11.mkShell.override {
+          # ccache must come from the same (24.05) package set: the current
+          # nixpkgs ccache wrapper eval fails on gcc11's meta.mainProgram.
+          stdenv = pkgsGcc11.ccacheStdenv.override { stdenv = pkgsGcc11.gcc11Stdenv; };
+        } shellArgs;
       };
     };
   };

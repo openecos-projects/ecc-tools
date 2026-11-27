@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "ClockPropagator.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DataManager.hpp"
 #include "DataPropagator.hpp"
 #include "DelayCalculator.hpp"
@@ -187,9 +189,9 @@ void testScopeAndBus()
   STADC.initialize(STADM.getDatabase().graph());
   STADM.getDatabase().graph().clearTiming();
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
-  require(db.graph().points().at("b/inner/sink:A").has_clock_state("local"), "clock marking missed inside load");
-  require(!db.graph().points().at("sibling:A").has_clock_state("local"), "clock marking leaked outside");
-  require(db.graph().points().at("sibling:A").has_clock_state("upstream"), "clock marking lost sibling");
+  require(db.graph().points().at("b/inner/sink:A").has_clock_state(clockId(db, "local")), "clock marking missed inside load");
+  require(!db.graph().points().at("sibling:A").has_clock_state(clockId(db, "local")), "clock marking leaked outside");
+  require(db.graph().points().at("sibling:A").has_clock_state(clockId(db, "upstream")), "clock marking lost sibling");
   STADC.clear();
   DelayCalculator::destroyInst();
   command("set_max_delay 7 -through [list [get_pins {b/C[0]}] [get_pins b/inner/CLK]]");
@@ -298,15 +300,14 @@ void testGeneratedInsertion()
   STADC.initialize(STADM.getDatabase().graph());
   STADM.getDatabase().graph().clearTiming();
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
-  const auto& target = db.graph().points().at("b/inner/sink:A").get_clock_state("gen");
-  require(target.physical_arrival_map.at(AnalysisType::kMax).at(TransType::kRise) > 0, "generated insertion delay lost");
+  const auto& target = db.graph().points().at("b/inner/sink:A").get_clock_state(clockId(db, "gen"));
+  require(target.physical_arrival_map.get(AnalysisType::kMax, TransType::kRise).value() > 0, "generated insertion delay lost");
   require(!target.physical_predecessor_map.empty(), "generated source path fell back to zero insertion");
   auto& target_point = db.graph().points().at("b/inner/sink:A");
   require(target_point.findDefaultClockState() == &target, "generated default state missing before data propagation");
   const auto generated_slew = target.slew(AnalysisType::kMax, TransType::kRise);
   DataPropagator(STADM.getDatabase(), STADC).propagate();
-  require(target_point.launchClock() == "master",
-          "fixture did not replace launch clock: " + target_point.launchClock() + " predecessor: " + target_point.get_predecessor());
+  require(target_point.launchClock() == clockId(db, "master"), "fixture did not replace launch clock");
   require(target_point.findDefaultClockState() == &target && target_point.findDefaultClockState()->slew(AnalysisType::kMax, TransType::kRise) == generated_slew,
           "data launch-clock summary replaced generated default clock state");
   STADC.clear();
@@ -333,11 +334,9 @@ block b(.CLK(clk),.Y(out)); block c(.CLK(clk),.Y(z)); endmodule
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
   DataPropagator(STADM.getDatabase(), STADC).propagate();
   auto& outside = db.graph().points().at("c/sink:A");
-  for (auto& [analysis, modes] : outside.get_path_state_map())
-    for (auto& [source, transitions] : modes)
-      for (auto& [transition, paths] : transitions)
-        for (auto& [tag, path] : paths)
-          require(path.get_clock_name() != "master", "clock-as-data escaped its boundary");
+  for (auto& [combo, paths] : outside.get_path_state_map())
+    for (auto& [tag, path] : paths)
+      require(std::string(launchClockName(db, path.get_clock_name())) != "master", "clock-as-data escaped its boundary");
   require(!db.graph().points().at("b/sink:A").get_path_state_map().empty(), "clock-as-data path missing inside boundary");
   command("create_generated_clock -name invalid -source [get_pins c/CLK] -master_clock master -divide_by 2 [get_pins c/CLK]");
   command("set_propagated_clock [all_clocks]");
@@ -385,9 +384,9 @@ BUF target(.A(b_out),.B(c_out),.Y(out)); endmodule
   STADC.initialize(STADM.getDatabase().graph());
   STADM.getDatabase().graph().clearTiming();
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
-  auto* sibling = db.graph().points().at("c/sink:A").find_clock_state("gen");
+  auto* sibling = db.graph().points().at("c/sink:A").find_clock_state(clockId(db, "gen"));
   require(!sibling || sibling->physical_arrival_map.empty(), "generated source replay restored a rejected sibling edge");
-  auto* target = db.graph().points().at("target:Y").find_clock_state("gen");
+  auto* target = db.graph().points().at("target:Y").find_clock_state(clockId(db, "gen"));
   require(target && !target->physical_predecessor_map.empty(), "generated reconvergent insertion path was lost");
   command("create_generated_clock -name invalid_chain -source [get_pins b/CLK] -master_clock gen -divide_by 2 [get_pins b/sink/A]");
   command("set_propagated_clock [all_clocks]");
@@ -452,12 +451,12 @@ BUF merge_cell(.A(b_out),.B(data),.Y(merged)); block d(.CLK(merged),.Y(out)); en
   STADM.getDatabase().graph().clearTiming();
   ClockPropagator(STADM.getDatabase(), STADC).propagate();
   DataPropagator(STADM.getDatabase(), STADC).propagate();
-  auto& paths = db.graph().points().at("d/sink:A").get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise];
+  auto& paths = db.graph().points().at("d/sink:A").get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise)];
   bool data_found = false;
   for (auto& [tag, path] : paths)
-    if (path.get_clock_name() == "master") {
+    if (std::string(launchClockName(db, path.get_clock_name())) == "master") {
       require(!path.get_is_clock_source_path(), "clock-origin data crossed a replacement boundary");
-      data_found |= path.get_start_point() == "data";
+      data_found |= startPointName(db, path.get_start_point()) == "data";
     }
   require(data_found, "clock-origin state discarded ordinary data at reconvergence");
   STADC.clear();

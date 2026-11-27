@@ -43,7 +43,7 @@ bool hasMinCaptureState(Database& database, const std::string& pin_name, TransTy
   const auto point = database.graph().points().find(pin_name);
   if (point == database.graph().points().end())
     return false;
-  for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
+  for (const auto& [clock_name, state] : point->get_clock_state_map()) {
     if (state.is_source_path_only || !database.sdc().get_clock_map().contains(clock_name))
       continue;
     if (state.is_structural && !clockPinValues(database, pin_name, clock_name, AnalysisType::kMin, transition).propagated)
@@ -59,10 +59,10 @@ bool hasLaunchClockState(Database& database, const TimingPathState& path)
 {
   if (path.get_input_delay().has_value())
     return true;
-  if (path.get_clock_name().empty() || path.get_crpr_clock_pin().empty())
+  if (!path.get_clock_name().valid() || !path.get_crpr_clock_pin().valid())
     return false;
-  const auto clock = database.sdc().get_clock_map().find(path.get_clock_name());
-  if (clock == database.sdc().get_clock_map().end() || clock->second.get_source_list().empty())
+  const auto clock = database.sdc().get_clock_map().find(launchClockName(database, path.get_clock_name()));
+  if (clock == database.sdc().get_clock_map().end() || clock->get_source_list().empty())
     return false;
   return true;
 }
@@ -146,13 +146,12 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
   std::unordered_set<std::string> endpoints(snapshot.end_points.begin(), snapshot.end_points.end());
   std::set<std::tuple<std::string, std::string, std::string, int32_t, int32_t, int32_t>> launch_keys;
   auto exportPoint = [&](const std::string& name, TimingPoint& point) {
-    const auto min_it = point.get_path_state_map().find(AnalysisType::kMin);
-    if (min_it == point.get_path_state_map().end())
+    if (!hasPathStateOfMode(point.get_path_state_map(), AnalysisType::kMin))
       return;
-    for (auto& [source_type, transitions] : min_it->second) {
-      for (auto& [transition, paths] : transitions) {
+    forEachPathStateOfMode(point.get_path_state_map(), AnalysisType::kMin,
+                           [&](PathSourceType source_type, TransType transition, std::map<uint32_t, TimingPathState>& paths) {
         if (transition == TransType::kNone)
-          continue;
+          return;
         const std::size_t edge = transition == TransType::kRise ? 0 : 1;
         for (auto& [tag, path] : paths) {
           if (!std::isfinite(path.get_arrival()))
@@ -170,14 +169,16 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             }
           }
           if (start_points.contains(name)) {
-            const auto key = std::make_tuple(name, path.get_clock_name(), path.get_path_state_tag(), static_cast<int32_t>(source_type),
+            const auto key = std::make_tuple(name, std::string(launchClockName(database, path.get_clock_name())),
+                                             std::string(database.pathTags().view(path.get_path_state_tag())),
+                                             static_cast<int32_t>(source_type),
                                              transitionCode(transition), transitionCode(path.get_launch_clock_trans_type()));
             if (launch_keys.insert(key).second) {
               TimingMinLaunchData launch;
               launch.start_point = name;
-              launch.launch_clock = path.get_clock_name();
-              launch.launch_pin = path.get_crpr_clock_pin();
-              launch.path_tag = path.get_path_state_tag();
+              launch.launch_clock = launchClockName(database, path.get_clock_name());
+              launch.launch_pin = pinNameOf(database, path.get_crpr_clock_pin());
+              launch.path_tag = database.pathTags().view(path.get_path_state_tag());
               launch.source_type = static_cast<int32_t>(source_type);
               launch.data_transition = transitionCode(transition);
               launch.launch_transition = transitionCode(path.get_launch_clock_trans_type());
@@ -195,8 +196,8 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             continue;
           const auto endpoint_pin = database.network().pins().find(name);
           const bool is_output_port
-              = endpoint_pin != database.network().pins().end() && endpoint_pin->second.get_is_port()
-                && (endpoint_pin->second.get_direction() == PinDirection::kOutput || endpoint_pin->second.get_direction() == PinDirection::kInout);
+              = endpoint_pin != database.network().pins().end() && endpoint_pin->get_is_port()
+                && (endpoint_pin->get_direction() == PinDirection::kOutput || endpoint_pin->get_direction() == PinDirection::kInout);
           if (is_output_port && !hasLaunchClockState(database, path))
             continue;
           const auto checked = checker.checkPathCandidates(path, name, AnalysisType::kMin);
@@ -208,13 +209,13 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
           for (const auto& candidate : checked) {
             const auto& check = candidate.check();
             TimingMinContextData context;
-            context.start_point = path.get_start_point();
+            context.start_point = startPointName(database, path.get_start_point());
             context.end_point = name;
-            context.launch_clock = path.get_clock_name();
-            context.launch_pin = path.get_crpr_clock_pin();
+            context.launch_clock = launchClockName(database, path.get_clock_name());
+            context.launch_pin = pinNameOf(database, path.get_crpr_clock_pin());
             context.capture_clock = check.capture_clock;
             context.capture_pin = check.capture_pin;
-            context.path_tag = path.get_path_state_tag();
+            context.path_tag = database.pathTags().view(path.get_path_state_tag());
             context.source_type = static_cast<int32_t>(source_type);
             context.check_type = static_cast<int32_t>(check.type);
             context.data_transition = transitionCode(path.get_trans_type());
@@ -269,15 +270,18 @@ void exportMinTiming(TimingData& snapshot, Database& database, const Config& con
             }
           }
         }
-      }
-    }
+        });
   };
 
-  for (auto& [name, point] : database.graph().points())
-    exportPoint(name, point);
-  for (auto& [name, point] : database.graph().driverPoints())
+  for (const auto& id : database.graph().points().sortedIds()) {
+    const std::string name(database.graph().points().nameOf(id));
+    exportPoint(name, database.graph().points().get(id));
+  }
+  for (const auto& id : database.graph().driverPoints().sortedIds()) {
+    const std::string name(database.graph().driverPoints().nameOf(id));
     if (!database.graph().points().contains(name))
-      exportPoint(name, point);
+      exportPoint(name, database.graph().driverPoints().get(id));
+  }
 
   // Contexts are now complete and immutable: borrowed strings remain valid.
   // A LUT and capture clock alone do not qualify a check whose min paths were

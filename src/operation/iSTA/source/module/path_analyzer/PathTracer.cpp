@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,11 +29,11 @@ TimingPath PathTracer::buildTimingPath(const std::string& end_point, AnalysisTyp
 {
   Database& database = _database;
   const TimingPathState& end_path_state = path_end.path();
-  const std::string& start_point = end_path_state.get_start_point();
+  const std::string start_point(startPointName(database, end_path_state.get_start_point()));
   const TransType trans_type = end_path_state.get_trans_type();
   std::vector<std::string> path_pin_name_list;
   std::vector<TransType> path_trans_type_list;
-  std::vector<std::string> path_state_tag_list;
+  std::vector<uint32_t> path_state_tag_list;
   std::vector<std::size_t> path_arc_idx_list;
   buildPathTrace(end_point, analysis_type, source_type, end_path_state, path_pin_name_list, path_trans_type_list, path_state_tag_list, path_arc_idx_list);
   const double required_time = path_end.required();
@@ -78,7 +79,7 @@ TimingPath PathTracer::buildTimingPath(const std::string& end_point, AnalysisTyp
 
 void PathTracer::buildPathTrace(const std::string& end_point, AnalysisType analysis_type, PathSourceType source_type, const TimingPathState& end_path_state,
                                 std::vector<std::string>& path_pin_name_list, std::vector<TransType>& path_trans_type_list,
-                                std::vector<std::string>& path_state_tag_list, std::vector<std::size_t>& path_arc_idx_list)
+                                std::vector<uint32_t>& path_state_tag_list, std::vector<std::size_t>& path_arc_idx_list)
 {
   Database& database = _database;
   std::string pin_name = end_point;
@@ -87,7 +88,7 @@ void PathTracer::buildPathTrace(const std::string& end_point, AnalysisType analy
     path_pin_name_list.push_back(pin_name);
     path_trans_type_list.push_back(state->get_trans_type());
     path_state_tag_list.push_back(state->get_path_state_tag());
-    if (state->get_predecessor().empty()) {
+    if (state->get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max()) {
       break;
     }
     std::size_t arc_idx = state->get_predecessor_arc_idx();
@@ -118,16 +119,16 @@ void PathTracer::updatePathDelay(TimingPath& timing_path, Arc* arc, double arc_d
 void PathTracer::updateClockInfo(TimingPath& timing_path, const TimingPathState& state, const PathCheck& check)
 {
   timing_path.set_launch_time(state.get_launch_time());
-  timing_path.set_clock_name(state.get_clock_name());
+  timing_path.set_clock_name(std::string(launchClockName(_database, state.get_clock_name())));
   TransType launch_transition = state.get_launch_clock_trans_type();
   // Propagation records the selected launch edge, including clock_fall IO.
   timing_path.set_launch_clock_transition(launch_transition);
   timing_path.set_launch_clock_pin_transition(state.get_crpr_clock_trans_type());
-  timing_path.set_launch_clock_pin(state.get_crpr_clock_pin());
-  const auto clock = _database.sdc().get_clock_map().find(state.get_clock_name());
+  timing_path.set_launch_clock_pin(std::string(pinNameOf(_database, state.get_crpr_clock_pin())));
+  const auto clock = _database.sdc().get_clock_map().find(launchClockName(_database, state.get_clock_name()));
   const double edge = clock == _database.sdc().get_clock_map().end()
                           ? 0.0
-                          : clock->second.edge(state.get_launch_clock_edge_index().value_or(launch_transition == TransType::kFall ? 1 : 0)).time;
+                          : clock->edge(state.get_launch_clock_edge_index().value_or(launch_transition == TransType::kFall ? 1 : 0)).time;
   timing_path.set_launch_clock_source_latency(state.get_launch_source_latency());
   timing_path.set_launch_clock_network_delay(state.get_launch_time() - edge - state.get_launch_source_latency());
   timing_path.set_capture_clock_name(check.capture_clock);
@@ -143,7 +144,7 @@ void PathTracer::updateClockInfo(TimingPath& timing_path, const TimingPathState&
 }
 
 TimingPathPoint PathTracer::makeTimingPathPoint(const std::string& pin_name, Arc* arc, AnalysisType analysis_type, PathSourceType source_type,
-                                                TransType input_trans_type, TransType trans_type, const std::string& path_state_tag)
+                                                TransType input_trans_type, TransType trans_type, uint32_t path_state_tag)
 {
   Database& database = _database;
   Pin& pin = database.network().pins()[pin_name];

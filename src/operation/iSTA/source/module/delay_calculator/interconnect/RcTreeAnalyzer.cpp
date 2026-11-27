@@ -35,7 +35,7 @@ bool RcTreeAnalyzer::hasDisabledDriver(const std::string& name, const std::strin
   const auto found = _database.network().nets().find(name);
   if (found == _database.network().nets().end())
     return false;
-  const auto& drivers = found->second.get_driver_pin_list();
+  const auto& drivers = found->get_driver_pin_list();
   return drivers.size() > 1
          && std::any_of(drivers.begin(), drivers.end(), [&](const auto& pin) { return pin != source && _database.graph().simValues().isDriverDisabled(pin); });
 }
@@ -48,13 +48,13 @@ double RcTreeAnalyzer::balancedDelay(ParasiticNet& net, const std::string& sourc
     const auto found = _database.network().nets().find(net.get_net_name());
     if (found == _database.network().nets().end())
       return 0.;
-    const auto& loads = found->second.get_load_pin_list();
+    const auto& loads = found->get_load_pin_list();
     const auto count = std::count_if(loads.begin(), loads.end(), [&](const auto& pin) { return pin != source; });
     if (count == 0)
       return 0.;
     double wire_cap = 0.;
-    for (const auto& [name, node] : net.get_node_map())
-      wire_cap += node.get_capacitance();
+    for (const auto& nid : net.get_node_map().sortedIds())
+      wire_cap += net.get_node_map().get(nid).get_capacitance();
     if (net.get_node_map().empty())
       wire_cap = net.get_lumped_capacitance();
     if (hasIncompleteNetwork(net, source))
@@ -69,8 +69,8 @@ double RcTreeAnalyzer::wireCapacitance(ParasiticNet& net) const
   if (net.get_lumped_capacitance() > 0.)
     return net.get_lumped_capacitance();
   double capacitance = 0.;
-  for (const auto& [name, node] : net.get_node_map())
-    capacitance += node.get_capacitance();
+  for (const auto& nid : net.get_node_map().sortedIds())
+    capacitance += net.get_node_map().get(nid).get_capacitance();
   return capacitance;
 }
 
@@ -85,7 +85,7 @@ bool RcTreeAnalyzer::hasIncompleteNetwork(ParasiticNet& net, const std::string& 
   auto root = nodeName(net, source);
   const auto& tree = rootedTree(net, root);
   const std::set<std::string> reachable(tree.nodes.begin(), tree.nodes.end());
-  for (const auto& pin : logical->second.get_pin_name_list()) {
+  for (const auto& pin : logical->get_pin_name_list()) {
     const auto node = nodeName(net, pin);
     if (node.empty() || !reachable.contains(node)) {
       entry->second = true;
@@ -225,8 +225,8 @@ void RcTreeAnalyzer::analyze(ParasiticNet& net, std::string& root, AnalysisType 
 double RcTreeAnalyzer::totalLoad(ParasiticNet& parasitic_net, AnalysisType analysis_type, TransType trans_type)
 {
   double total_load = 0.0;
-  for (std::pair<const std::string, ParasiticNode>& node_pair : parasitic_net.get_node_map()) {
-    std::string node_name = node_pair.first;
+  for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+    std::string node_name(parasitic_net.get_node_map().nameOf(nid));
     total_load += nodeLoad(parasitic_net, node_name, analysis_type, trans_type);
   }
   return total_load;

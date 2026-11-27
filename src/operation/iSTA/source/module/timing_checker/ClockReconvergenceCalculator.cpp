@@ -29,19 +29,19 @@
 
 #include "graph/TimingStateQuery.hpp"
 namespace ista {
-double ClockReconvergenceCalculator::correction(const std::string& launch_pin, TransType launch_trans_type, std::string_view launch_clock,
-                                                const std::string& capture_pin, TransType capture_trans_type, std::string_view capture_clock,
+double ClockReconvergenceCalculator::correction(std::string_view launch_pin, TransType launch_trans_type, std::string_view launch_clock,
+                                                std::string_view capture_pin, TransType capture_trans_type, std::string_view capture_clock,
                                                 AnalysisType analysis_type, std::string& common_pin_name, std::optional<TransType> launch_source,
                                                 std::optional<TransType> capture_source)
 {
   common_pin_name.clear();
   if (!_database.sdc().clockPinConstraints().empty()) {
-    auto unsupported_local = [&](const std::string& pin, std::string_view name, AnalysisType mode, TransType edge, std::optional<TransType> source) {
+    auto unsupported_local = [&](std::string_view pin, std::string_view name, AnalysisType mode, TransType edge, std::optional<TransType> source) {
       const auto clock = _database.sdc().get_clock_map().find(std::string(name));
-      if (clock == _database.sdc().get_clock_map().end() || clock->second.get_is_propagated())
+      if (clock == _database.sdc().get_clock_map().end() || clock->get_is_propagated())
         return false;
       const auto& values = _clock_pin_values.values(pin, name, mode, edge, AnalysisType::kNone, source);
-      const auto& sources = clock->second.get_source_list();
+      const auto& sources = clock->get_source_list();
       return !values.propagated || (!values.propagated_pin.empty() && std::find(sources.begin(), sources.end(), values.propagated_pin) == sources.end());
     };
     // PT supports local propagated-clock CRPR only at common clock sources.
@@ -80,7 +80,7 @@ double ClockReconvergenceCalculator::correction(const std::string& launch_pin, T
 }
 
 const ClockReconvergenceCalculator::IndexedClockPath& ClockReconvergenceCalculator::indexedClockPath(
-    const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition, std::optional<TransType> source)
+    std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition, std::optional<TransType> source)
 {
   const auto key = std::tuple{std::string_view(pin), clock, analysis, transition, source};
   if (const auto found = _clock_paths.find(key); found != _clock_paths.end())
@@ -131,7 +131,7 @@ std::size_t ClockReconvergenceCalculator::commonPrefixDepth(std::size_t launch, 
 double ClockReconvergenceCalculator::getClockCommonPathDelayDelta(const ClockPathPoint& common_pin, std::string_view clock_name)
 {
   const auto& point = _database.graph().vertices().at(common_pin.vertex).get_timing_point();
-  const auto* clock = point.find_clock_state(clock_name);
+  const auto* clock = point.find_clock_state(clockIdOf(_database, clock_name));
   const auto* state = clock ? clock->waveform(common_pin.source) : nullptr;
   if (!state)
     return 0.;
@@ -140,7 +140,7 @@ double ClockReconvergenceCalculator::getClockCommonPathDelayDelta(const ClockPat
   return early && late && std::isfinite(*early) && std::isfinite(*late) ? std::fabs(*late - *early) : 0.;
 }
 
-std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(const std::string& clock_pin_name, std::string_view clock_name,
+std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(std::string_view clock_pin_name, std::string_view clock_name,
                                                                                AnalysisType analysis_type, TransType trans_type,
                                                                                std::optional<TransType> source)
 {
@@ -157,7 +157,7 @@ std::vector<ClockPathPointInfo> ClockReconvergenceCalculator::getClockPathPins(c
   return result;
 }
 
-std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalculator::getClockPathPinList(const std::string& clock_pin_name,
+std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalculator::getClockPathPinList(std::string_view clock_pin_name,
                                                                                                             std::string_view clock_name,
                                                                                                             AnalysisType analysis_type, TransType trans_type,
                                                                                                             std::optional<TransType> source)
@@ -165,28 +165,29 @@ std::vector<ClockReconvergenceCalculator::ClockPathPoint> ClockReconvergenceCalc
   Database& database = _database;
   std::vector<ClockPathPoint> clock_path_pin_list;
   auto pin = database.network().pins().find(clock_pin_name);
-  int32_t vertex_idx = pin == database.network().pins().end() ? -1 : pin->second.get_load_vertex_idx();
+  int32_t vertex_idx = pin == database.network().pins().end() ? -1 : pin->get_load_vertex_idx();
   const auto* selected = clockPoint(database, clock_pin_name, clock_name);
   if (pin != database.network().pins().end() && selected && (vertex_idx < 0 || &database.graph().vertices()[vertex_idx].get_timing_point() != selected))
-    vertex_idx = pin->second.get_driver_vertex_idx();
+    vertex_idx = pin->get_driver_vertex_idx();
   TransType current_trans_type = trans_type;
   std::set<int32_t> visited;
   while (vertex_idx >= 0 && visited.insert(vertex_idx).second) {
     GraphVertex& vertex = database.graph().vertices()[vertex_idx];
     clock_path_pin_list.push_back({vertex_idx, current_trans_type, source});
-    const auto* clock = vertex.get_timing_point().find_clock_state(clock_name);
+    const auto* clock = vertex.get_timing_point().find_clock_state(clockIdOf(database, clock_name));
     const ClockWaveform* state = clock ? clock->waveform(source) : nullptr;
-    if (state == nullptr || !state->predecessor_map.contains(analysis_type) || !state->predecessor_map.at(analysis_type).contains(current_trans_type)) {
+    if (state == nullptr || !state->predecessor_map.get(analysis_type, current_trans_type)) {
       break;
     }
     TransType predecessor_trans_type = current_trans_type;
-    if (state->predecessor_trans_type_map.contains(analysis_type) && state->predecessor_trans_type_map.at(analysis_type).contains(current_trans_type)) {
-      predecessor_trans_type = state->predecessor_trans_type_map.at(analysis_type).at(current_trans_type);
+    if (const auto trans = state->predecessor_trans_type_map.get(analysis_type, current_trans_type)) {
+      predecessor_trans_type = *trans;
     }
-    if (!state->predecessor_vertex_map.contains(analysis_type) || !state->predecessor_vertex_map.at(analysis_type).contains(current_trans_type)) {
+    const auto predecessor_vertex = state->predecessor_vertex_map.get(analysis_type, current_trans_type);
+    if (!predecessor_vertex) {
       break;
     }
-    vertex_idx = state->predecessor_vertex_map.at(analysis_type).at(current_trans_type);
+    vertex_idx = *predecessor_vertex;
     if (source)
       source = state->predecessorSource(analysis_type, current_trans_type, *source);
     current_trans_type = predecessor_trans_type;

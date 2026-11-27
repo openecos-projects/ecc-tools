@@ -32,6 +32,7 @@
 #include "ClockReconvergenceCalculator.hpp"
 #include "TimingTolerance.hpp"
 #include "data/TransitionFilter.hpp"
+#include "graph/PathTagTable.hpp"
 
 namespace ista {
 
@@ -90,13 +91,18 @@ void RequiredPropagator::propagateCaptureRequired(double required_time)
       continue;
     auto& point = _database.graph().points().at(endpoint);
     endpoints.insert(&point);
-    const auto mode = point.get_path_state_map().find(AnalysisType::kMax);
-    if (mode == point.get_path_state_map().end()) {
+    auto& state_map = point.get_path_state_map();
+    const auto first = state_map.lower_bound(pathStateCombo(AnalysisType::kMax, PathSourceType::kNone, TransType::kNone));
+    if (first == state_map.end() || pathStateComboMode(first->first) != AnalysisType::kMax) {
       point.set_required(required_time);
       continue;
     }
-    for (const auto& [source, edges] : mode->second)
-      for (const auto& [edge, states] : edges) {
+    for (auto combo_it = first; combo_it != state_map.end() && pathStateComboMode(combo_it->first) == AnalysisType::kMax; ++combo_it)
+    {
+      const auto source = pathStateComboSource(combo_it->first);
+      const auto edge = pathStateComboTrans(combo_it->first);
+      auto& states = combo_it->second;
+      {
         auto& groups = frontiers[&point][source][edge];
         for (const auto& [tag, state] : states) {
           if (!captures.empty() && !captures.at(endpoint).contains(state.get_clock_name()))
@@ -118,12 +124,14 @@ void RequiredPropagator::propagateCaptureRequired(double required_time)
           }
         }
       }
+    }
   }
   for (auto vertex = _database.graph().vertexOrder().rbegin(); vertex != _database.graph().vertexOrder().rend(); ++vertex) {
     auto& point = _database.graph().vertices()[*vertex].get_timing_point();
     auto& target = frontiers[&point];
-    const auto mode = point.get_path_state_map().find(AnalysisType::kMax);
-    if (mode == point.get_path_state_map().end())
+    auto& point_states = point.get_path_state_map();
+    const auto first = point_states.lower_bound(pathStateCombo(AnalysisType::kMax, PathSourceType::kNone, TransType::kNone));
+    if (first == point_states.end() || pathStateComboMode(first->first) != AnalysisType::kMax)
       continue;
     for (auto index : _database.graph().vertices()[*vertex].get_outgoing_arc_list()) {
       auto& arc = _database.graph().arcs()[index];
@@ -139,21 +147,23 @@ void RequiredPropagator::propagateCaptureRequired(double required_time)
           if (!allowsTransition(_database.network(), _database.graph().simValues(), arc.get_sink_pin(), output, arc.get_type() == ArcType::kCell))
             continue;
           const double delay = _query.getDataArcDelay(arc, AnalysisType::kMax, input, output);
-          for (const auto& [source, edges] : mode->second) {
-            const auto source_edge = edges.find(input);
+          for (const auto source : {PathSourceType::kNone, PathSourceType::kInput, PathSourceType::kRegister}) {
+            const auto source_combo = point_states.find(pathStateCombo(AnalysisType::kMax, source, input));
             const auto sink_source = found->second.find(source);
-            if (source_edge == edges.end() || sink_source == found->second.end())
+            if (source_combo == point_states.end() || sink_source == found->second.end())
               continue;
+            const auto& source_edge = source_combo;
             const auto sink_edge = sink_source->second.find(output);
             if (sink_edge == sink_source->second.end())
               continue;
             std::set<TimingStateQuery::PathStateGroup> visited;
-            for (const auto& [tag, state] : source_edge->second) {
+            for (const auto& [tag, state] : source_combo->second) {
               const auto group = _query.pathStateGroup(state);
               if (!visited.insert(group).second)
                 continue;
               if (state.get_is_clock_source_path() && arc.get_type() == ArcType::kNet
-                  && !_database.sdc().clockAllowsNetArc(_database.network(), state.get_clock_name(), arc.get_source_pin(), arc.get_sink_pin()))
+                  && !_database.sdc().clockAllowsNetArc(_database.network(), launchClockName(_database, state.get_clock_name()), arc.get_source_pin(),
+                                                        arc.get_sink_pin()))
                 continue;
               const auto progress = matcher.advanceState(_through_index, state.get_exception_state_list(), arc.get_sink_pin(), output,
                                                          arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
@@ -175,15 +185,17 @@ void RequiredPropagator::propagateCaptureRequired(double required_time)
       for (auto& [edge, groups] : edges)
         for (auto& [group, candidates] : groups)
           candidates.releaseIndexes();
-    for (auto& [source, edges] : mode->second)
-      for (auto& [edge, states] : edges)
+    forEachPathStateOfMode(point_states, AnalysisType::kMax, [&](PathSourceType source, TransType edge, std::map<uint32_t, TimingPathState>& states) {
         for (auto& [tag, state] : states) {
           const auto group = target[source][edge].find(_query.pathStateGroup(state));
           if (group == target[source][edge].end())
             continue;
           for (const auto& candidate : group->second) {
             const auto& check = *candidate.check;
-            const double cppr = reconvergence.correction(state.get_crpr_clock_pin(), state.get_crpr_clock_trans_type(), state.get_clock_name(),
+            const auto& crpr_pin = state.get_crpr_clock_pin();
+            const double cppr = reconvergence.correction(crpr_pin.valid() ? _database.network().pins().nameOf(crpr_pin) : std::string_view{},
+                                                         state.get_crpr_clock_trans_type(),
+                                                         launchClockName(_database, state.get_clock_name()),
                                                          check.capture_pin, check.capture_pin_transition, check.capture_clock, AnalysisType::kMax, common,
                                                          state.get_launch_clock_trans_type(), check.capture_transition);
             double required = _query.roundTime(check.required_before_round + cppr);
@@ -198,6 +210,7 @@ void RequiredPropagator::propagateCaptureRequired(double required_time)
             }
           }
         }
+    });
   }
 }
 
@@ -206,7 +219,7 @@ double RequiredPropagator::resolveRequiredTime()
   Database& database = _database;
   double worst_arrival = 0.0;
   for (const std::string& end_point : database.graph().endpoints()) {
-    TimingPoint& timing_point = database.graph().points()[end_point];
+    TimingPoint& timing_point = database.graph().points().at(end_point);
     if (_query.isFinite(timing_point.get_arrival())) {
       worst_arrival = std::max(worst_arrival, timing_point.get_arrival());
     }
@@ -218,21 +231,21 @@ void RequiredPropagator::seedEndPointRequired(double required_time)
 {
   Database& database = _database;
   for (const std::string& end_point : database.graph().endpoints()) {
-    TimingPoint& point = database.graph().points()[end_point];
-    auto mode = point.get_path_state_map().find(AnalysisType::kMax);
-    if (mode == point.get_path_state_map().end()) {
+    TimingPoint& point = database.graph().points().at(end_point);
+    auto& state_map = point.get_path_state_map();
+    if (!hasPathStateOfMode(state_map, AnalysisType::kMax)) {
       point.set_required(required_time);
       continue;
     }
-    for (auto& [source, edges] : mode->second)
-      for (auto& [edge, states] : edges)
-        for (auto& [tag, state] : states) {
+    forEachPathStateOfMode(state_map, AnalysisType::kMax, [&](PathSourceType, TransType, std::map<uint32_t, TimingPathState>& states) {
+        for (const auto& [tag, state] : states) {
           if (auto end = _check.checkPath(state, end_point, AnalysisType::kMax)) {
             _required[&state] = end->required();
             _setup_checks[&state] = end->check().type == TimingCheckType::kSetup ? end->check().check_time : 0.0;
           } else if (!_query.isConstrainedEndPoint(end_point))
             _required[&state] = required_time;
         }
+    });
   }
 }
 
@@ -247,29 +260,33 @@ void RequiredPropagator::propagateRequiredArc(Arc& arc)
   }
   TimingPoint& source_point = database.graph().sourcePoint(arc);
   TimingPoint& sink_point = database.graph().sinkPoint(arc);
-  const auto source_mode = source_point.get_path_state_map().find(AnalysisType::kMax);
-  const auto sink_mode = sink_point.get_path_state_map().find(AnalysisType::kMax);
-  if (source_mode == source_point.get_path_state_map().end() || sink_mode == sink_point.get_path_state_map().end())
+  auto& source_map = source_point.get_path_state_map();
+  auto& sink_map = sink_point.get_path_state_map();
+  if (!hasPathStateOfMode(source_map, AnalysisType::kMax) || !hasPathStateOfMode(sink_map, AnalysisType::kMax))
     return;
   ExceptionMatcher matcher(database.sdc(), database.network());
-  for (auto& [source, edges] : source_mode->second) {
-    const auto sink_source = sink_mode->second.find(source);
-    if (sink_source == sink_mode->second.end())
-      continue;
-    for (auto& [input_edge, states] : edges)
-      for (auto output_edge : _query.getOutputTransTypeList(arc, AnalysisType::kMax, input_edge)) {
-        const auto sink_edge = sink_source->second.find(output_edge);
-        if (sink_edge == sink_source->second.end())
+  forEachPathStateOfMode(source_map, AnalysisType::kMax, [&](PathSourceType source, TransType input_edge, std::map<uint32_t, TimingPathState>& states) {
+    for (auto output_edge : _query.getOutputTransTypeList(arc, AnalysisType::kMax, input_edge)) {
+        const auto sink_edge = sink_map.find(pathStateCombo(AnalysisType::kMax, source, output_edge));
+        if (sink_edge == sink_map.end())
           continue;
         const double delay = _query.getDataArcDelay(arc, AnalysisType::kMax, input_edge, output_edge);
         for (auto& [tag, state] : states) {
           if (state.get_is_clock_source_path() && arc.get_type() == ArcType::kNet
-              && !database.sdc().clockAllowsNetArc(database.network(), state.get_clock_name(), arc.get_source_pin(), arc.get_sink_pin()))
+              && !database.sdc().clockAllowsNetArc(database.network(), launchClockName(database, state.get_clock_name()), arc.get_source_pin(),
+                                                   arc.get_sink_pin()))
             continue;
           const auto progress = matcher.advanceState(_through_index, state.get_exception_state_list(), arc.get_sink_pin(), output_edge,
                                                      arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
-          const auto target_tag = matcher.makePathStateTag(state.get_clock_name(), state.get_launch_clock_trans_type(), progress,
-                                                           state.get_is_clock_source_path(), state.crprPathTag(), state.get_launch_clock_edge_index());
+          PathTagTable::Key target_tag_key;
+          target_tag_key.clock_name = launchClockName(database, state.get_clock_name());
+          target_tag_key.launch_transition = state.get_launch_clock_trans_type();
+          target_tag_key.exception_state_list = progress;
+          target_tag_key.clock_source_path = state.get_is_clock_source_path();
+          const auto crpr_pin = state.crprPinId();
+          target_tag_key.crpr_path = crpr_pin.valid() ? database.network().pins().nameOf(crpr_pin) : std::string_view{};
+          target_tag_key.launch_clock_edge_index = state.get_launch_clock_edge_index();
+          const uint32_t target_tag = database.pathTags().intern(target_tag_key);
           const auto target = sink_edge->second.find(target_tag);
           if (target == sink_edge->second.end())
             continue;
@@ -282,7 +299,7 @@ void RequiredPropagator::propagateRequiredArc(Arc& arc)
             _required[&state] = candidate;
         }
       }
-  }
+    });
 }
 
 void RequiredPropagator::updateSlack()
@@ -292,10 +309,9 @@ void RequiredPropagator::updateSlack()
     TimingPoint& timing_point = vertex.get_timing_point();
     const TimingPathState* worst = nullptr;
     double slack = std::numeric_limits<double>::infinity(), required = 0.0;
-    const auto mode = timing_point.get_path_state_map().find(AnalysisType::kMax);
-    if (mode != timing_point.get_path_state_map().end())
-      for (const auto& [source, edges] : mode->second)
-        for (const auto& [edge, states] : edges)
+    auto& state_map = timing_point.get_path_state_map();
+    if (hasPathStateOfMode(state_map, AnalysisType::kMax))
+      forEachPathStateOfMode(state_map, AnalysisType::kMax, [&](PathSourceType, TransType, std::map<uint32_t, TimingPathState>& states) {
           for (const auto& [tag, state] : states) {
             const auto value = _required.find(&state);
             if (value != _required.end() && value->second - state.get_arrival() < slack) {
@@ -304,12 +320,13 @@ void RequiredPropagator::updateSlack()
               worst = &state;
             }
           }
+      });
     if (worst) {
       timing_point.set_arrival(worst->get_arrival());
       timing_point.set_required(required);
       timing_point.set_slack(slack);
       timing_point.set_launch_time(worst->get_launch_time());
-      timing_point.setLaunchClock(worst->get_clock_name());
+      timing_point.setLaunchClock(clockIdOf(_database, launchClockName(_database, worst->get_clock_name())));
       if (auto check = _setup_checks.find(worst); check != _setup_checks.end())
         timing_point.set_setup_check_time(check->second);
     }

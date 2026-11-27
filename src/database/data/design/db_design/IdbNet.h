@@ -61,8 +61,11 @@ END NETS
 #include <iostream>
 #include <map>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include "database/symbol/NamedTable.h"
 
 #include "../IdbEnum.h"
 // #include "IdbInstance.h"
@@ -75,6 +78,9 @@ namespace idb {
 
 class IdbInstanceList;
 class IdnInstance;
+
+// Domain tag for the iDB net name space.
+struct IdbNetTag;
 
 class IdbNet : public IdbObject
 {
@@ -316,9 +322,9 @@ class IdbNetList
     return number;
   }  
 
-  IdbNet* find_net(string name);
+  IdbNet* find_net(std::string_view name);
   IdbNet* find_net(size_t index);
-  bool contains(string name) { return find_net(name) != nullptr; }
+  bool contains(std::string_view name) { return find_net(name) != nullptr; }
   bool rename_net(IdbNet* net, string new_name);
 
   // setter
@@ -337,7 +343,7 @@ class IdbNetList
  private:
   uint64_t _mutex_index = 0;
   std::vector<IdbNet*> _net_list;
-  std::unordered_map<string, IdbNet*> _net_map;
+  ecc::symbol::NamedTable<IdbNet*, IdbNetTag> _net_map;
 };
 
 class IdbCheckNode

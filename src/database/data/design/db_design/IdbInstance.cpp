@@ -440,11 +440,11 @@ void IdbInstanceList::reset(bool delete_memory)
   std::vector<IdbInstance*>().swap(_instance_list);
 }
 
-IdbInstance* IdbInstanceList::find_instance(string name)
+IdbInstance* IdbInstanceList::find_instance(std::string_view name)
 {
-  auto instance = _instance_map.find(name);
-  if (instance != _instance_map.end()) {
-    return instance->second;
+  IdbInstance** instance = _instance_map.find(name);
+  if (instance != nullptr) {
+    return *instance;
   }
 
   return nullptr;
@@ -464,14 +464,14 @@ bool IdbInstanceList::rename_instance(string old_name, string new_name)
   if (old_name == new_name) {
     return true;
   }
-  auto old_iter = _instance_map.find(old_name);
-  if (old_iter == _instance_map.end() || _instance_map.find(new_name) != _instance_map.end()) {
+  IdbInstance** old_iter = _instance_map.find(old_name);
+  if (old_iter == nullptr || _instance_map.find(new_name) != nullptr) {
     return false;
   }
-  IdbInstance* instance = old_iter->second;
-  _instance_map.erase(old_iter);
+  IdbInstance* instance = *old_iter;
+  _instance_map.erase(old_name);
   instance->set_name(new_name);
-  _instance_map.emplace(new_name, instance);
+  _instance_map[new_name] = instance;
   return true;
 }
 
@@ -483,8 +483,8 @@ bool IdbInstanceList::contains(IdbInstance* instance)
 
   const auto& name = instance->get_name();
   if (!name.empty()) {
-    const auto iter = _instance_map.find(name);
-    if (iter != _instance_map.end() && iter->second == instance) {
+    IdbInstance** iter = _instance_map.find(name);
+    if (iter != nullptr && *iter == instance) {
       return true;
     }
   }
@@ -576,7 +576,6 @@ bool IdbInstanceList::add_instance_refs(const std::vector<IdbInstance*>& instanc
   instance_index.reserve(_instance_list.size() + instances.size());
   instance_index.insert(_instance_list.begin(), _instance_list.end());
   auto instance_map = _instance_map;
-  instance_map.reserve(_instance_map.size() + instances.size());
   std::vector<IdbInstance*> new_instances;
   new_instances.reserve(instances.size());
   for (auto* instance : instances) {
@@ -588,9 +587,9 @@ bool IdbInstanceList::add_instance_refs(const std::vector<IdbInstance*>& instanc
     }
     const auto& name = instance->get_name();
     if (!name.empty()) {
-      const auto [iter, inserted] = instance_map.emplace(name, instance);
+      const auto [id, inserted] = instance_map.try_emplace(name, instance);
       if (!inserted) {
-        if (iter->second != instance) {
+        if (instance_map.get(id) != instance) {
           return false;
         }
         continue;
@@ -606,10 +605,7 @@ bool IdbInstanceList::add_instance_refs(const std::vector<IdbInstance*>& instanc
 
 bool IdbInstanceList::erase_instance_ref(string name)
 {
-  auto map_iter = _instance_map.find(name);
-  if (map_iter != _instance_map.end()) {
-    _instance_map.erase(map_iter);
-  }
+  _instance_map.erase(name);
 
   auto iter = std::find_if(_instance_list.begin(), _instance_list.end(), [&name](auto instance) {
     return instance != nullptr && instance->get_name() == name;
@@ -640,10 +636,7 @@ bool IdbInstanceList::erase_instance_ref(IdbInstance* instance)
 bool IdbInstanceList::remove_instance(string name)
 {
   /// remove instance from instance list map
-  auto it_map = _instance_map.find(name);
-  if (it_map != _instance_map.end()) {
-    it_map = _instance_map.erase(it_map);
-  }
+  _instance_map.erase(name);
 
   /// remove instance from instance list
   auto it = std::find_if(_instance_list.begin(), _instance_list.end(), [name](auto instance) { return name == instance->get_name(); });

@@ -75,29 +75,29 @@ bool ReportPathContext::isMatchStartEndType(TimingPath& timing_path, StartEndTyp
 bool ReportPathContext::isPort(const std::string& name)
 {
   const auto pin = _database.network().pins().find(name);
-  return pin != _database.network().pins().end() && pin->second.get_is_port();
+  return pin != _database.network().pins().end() && pin->get_is_port();
 }
 
 bool ReportPathContext::isRegisterStartPoint(const std::string& name)
 {
   const auto pin = _database.network().pins().find(name);
-  if (pin == _database.network().pins().end() || pin->second.get_is_port())
+  if (pin == _database.network().pins().end() || pin->get_is_port())
     return false;
-  const auto instance = _database.network().instances().find(pin->second.get_instance_name());
-  if (instance == _database.network().instances().end() || !instance->second.get_is_sequential() || !hasClockPoint(instance->second.get_clock_pin_name()))
+  const auto instance = _database.network().instances().find(pin->get_instance_name());
+  if (instance == _database.network().instances().end() || !instance->get_is_sequential() || !hasClockPoint(instance->get_clock_pin_name()))
     return false;
-  return name == instance->second.get_output_pin_name();
+  return name == instance->get_output_pin_name();
 }
 
 bool ReportPathContext::isRegisterEndPoint(const std::string& name)
 {
   const auto pin = _database.network().pins().find(name);
-  if (pin == _database.network().pins().end() || pin->second.get_is_port())
+  if (pin == _database.network().pins().end() || pin->get_is_port())
     return false;
-  const auto instance = _database.network().instances().find(pin->second.get_instance_name());
-  if (instance == _database.network().instances().end() || !instance->second.get_is_sequential() || !hasClockPoint(instance->second.get_clock_pin_name()))
+  const auto instance = _database.network().instances().find(pin->get_instance_name());
+  if (instance == _database.network().instances().end() || !instance->get_is_sequential() || !hasClockPoint(instance->get_clock_pin_name()))
     return false;
-  for (const auto& check : instance->second.get_check_arc_list())
+  for (const auto& check : instance->get_check_arc_list())
     if (check.get_data_port() == name)
       return true;
   return false;
@@ -106,16 +106,18 @@ bool ReportPathContext::isRegisterEndPoint(const std::string& name)
 bool ReportPathContext::hasClockPoint(const std::string& name)
 {
   const auto point = _database.graph().points().find(name);
-  return point != _database.graph().points().end() && point->second.get_is_clock_point();
+  return point != _database.graph().points().end() && point->get_is_clock_point();
 }
 
 bool ReportPathContext::isClockSourceStartPoint(const std::string& name)
 {
   if (!isPort(name))
     return false;
-  for (const auto& [clock_name, clock] : _database.sdc().get_clock_map())
+  for (const auto& id : _database.sdc().get_clock_map().sortedIds()) {
+    const TimingClock& clock = _database.sdc().get_clock_map().get(id);
     if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), name) != clock.get_source_list().end())
       return true;
+  }
   return false;
 }
 
@@ -126,15 +128,15 @@ ReportEndpoint ReportPathContext::startPoint(TimingPath& path)
   if (pin == _database.network().pins().end())
     return result;
   const auto clock = getClockName(path);
-  const auto instance = _database.network().instances().find(pin->second.get_instance_name());
-  if (!pin->second.get_is_port() && instance != _database.network().instances().end()) {
-    if (instance->second.get_is_sequential() && isInternalStartPoint(path))
-      return {getReportPinName(instance->second.get_clock_pin_name()), "(internal path startpoint clocked by " + clock + ")"};
-    result.name = pin->second.get_instance_name();
+  const auto instance = _database.network().instances().find(pin->get_instance_name());
+  if (!pin->get_is_port() && instance != _database.network().instances().end()) {
+    if (instance->get_is_sequential() && isInternalStartPoint(path))
+      return {getReportPinName(instance->get_clock_pin_name()), "(internal path startpoint clocked by " + clock + ")"};
+    result.name = pin->get_instance_name();
   }
   if (isClockSourceStartPoint(path.get_start_point()))
     result.description = "(clock source '" + clock + "')";
-  else if (pin->second.get_is_port())
+  else if (pin->get_is_port())
     result.description = "(input port clocked by " + clock + ")";
   else
     result.description = (path.get_launch_clock_pin_transition() == TransType::kFall ? "(falling edge-triggered flip-flop clocked by "
@@ -148,11 +150,11 @@ bool ReportPathContext::isInternalStartPoint(TimingPath& path)
   const auto pin = _database.network().pins().find(path.get_start_point());
   if (pin == _database.network().pins().end())
     return false;
-  const auto instance = _database.network().instances().find(pin->second.get_instance_name());
+  const auto instance = _database.network().instances().find(pin->get_instance_name());
   if (instance == _database.network().instances().end())
     return false;
-  return path.get_start_point() == instance->second.get_clock_pin_name()
-         || (path.get_start_point() == instance->second.get_output_pin_name() && isTieDrivenConstantOutput(instance->second));
+  return path.get_start_point() == instance->get_clock_pin_name()
+         || (path.get_start_point() == instance->get_output_pin_name() && isTieDrivenConstantOutput(*instance));
 }
 
 bool ReportPathContext::isTieDrivenConstantOutput(const Instance& instance)
@@ -175,21 +177,21 @@ std::optional<bool> ReportPathContext::getTieDriverValue(const std::string& name
   const auto pin = _database.network().pins().find(name);
   if (pin == _database.network().pins().end())
     return std::nullopt;
-  const auto net = _database.network().nets().find(pin->second.get_net_name());
+  const auto net = _database.network().nets().find(pin->get_net_name());
   if (net == _database.network().nets().end())
     return std::nullopt;
-  for (const auto& driver_name : net->second.get_driver_pin_list()) {
+  for (const auto& driver_name : net->get_driver_pin_list()) {
     const auto driver = _database.network().pins().find(driver_name);
-    if (driver == _database.network().pins().end() || driver->second.get_is_port())
+    if (driver == _database.network().pins().end() || driver->get_is_port())
       continue;
-    const auto instance = _database.network().instances().find(driver->second.get_instance_name());
+    const auto instance = _database.network().instances().find(driver->get_instance_name());
     if (instance == _database.network().instances().end())
       continue;
-    const auto cell = _database.liberty().get_cell_map().find(instance->second.get_cell_name());
-    if (cell == _database.liberty().get_cell_map().end() || cell->second.get_is_sequential())
+    const auto cell = _database.liberty().get_cell_map().find(instance->get_cell_name());
+    if (cell == _database.liberty().get_cell_map().end() || cell->get_is_sequential())
       continue;
-    const auto port = cell->second.get_port_map().find(driver->second.get_pin_name());
-    if (port == cell->second.get_port_map().end() || !port->second.get_is_output())
+    const auto port = cell->get_port_map().find(driver->get_pin_name());
+    if (port == cell->get_port_map().end() || !port->second.get_is_output())
       continue;
     const auto value = port->second.get_function_expression().evaluate_constant({});
     if (value.has_value())
@@ -204,10 +206,10 @@ ReportEndpoint ReportPathContext::endPoint(TimingPath& path)
   const auto pin = _database.network().pins().find(path.get_end_point());
   if (pin == _database.network().pins().end())
     return result;
-  if (pin->second.get_is_port())
+  if (pin->get_is_port())
     result.description = "(output port clocked by " + path.get_capture_clock_name() + ")";
   else {
-    result.name = pin->second.get_instance_name();
+    result.name = pin->get_instance_name();
     result.description = getEndPointCheckText(path);
   }
   return result;
@@ -228,10 +230,10 @@ std::string ReportPathContext::getEndPointCheckText(TimingPath& path)
 bool ReportPathContext::shouldOutputTimingPoint(TimingPath& path, TimingPathPoint& point)
 {
   const auto pin = _database.network().pins().find(point.get_pin_name());
-  if (pin == _database.network().pins().end() || pin->second.get_is_port())
+  if (pin == _database.network().pins().end() || pin->get_is_port())
     return true;
-  return point.get_pin_name() == path.get_start_point() || point.get_pin_name() == path.get_end_point() || pin->second.get_direction() == PinDirection::kOutput
-         || pin->second.get_direction() == PinDirection::kInout;
+  return point.get_pin_name() == path.get_start_point() || point.get_pin_name() == path.get_end_point() || pin->get_direction() == PinDirection::kOutput
+         || pin->get_direction() == PinDirection::kInout;
 }
 
 std::string ReportPathContext::getLaunchClockEdgeText(TimingPath& path)
@@ -246,9 +248,9 @@ std::string ReportPathContext::getClockName(TimingPath& timing_path)
   if (!timing_path.get_clock_name().empty()) {
     return timing_path.get_clock_name();
   }
-  const std::map<std::string, TimingClock>& clock_map = database.sdc().get_clock_map();
+  const ClockTable& clock_map = database.sdc().get_clock_map();
   if (!clock_map.empty()) {
-    return clock_map.begin()->first;
+    return std::string(clock_map.nameOf(clock_map.sortedIds().front()));
   }
   return "clk";
 }
@@ -267,12 +269,12 @@ std::string_view ReportPathContext::getClockNetworkDelayLabel(TimingPath& path, 
 double ReportPathContext::getClockPeriod(const std::string& clock_name)
 {
   const Database& database = _database;
-  const std::map<std::string, TimingClock>& clock_map = database.sdc().get_clock_map();
+  const ClockTable& clock_map = database.sdc().get_clock_map();
   if (clock_map.count(clock_name) > 0) {
     return clock_map.at(clock_name).get_period();
   }
   if (!clock_map.empty()) {
-    return clock_map.begin()->second.get_period();
+    return clock_map.get(clock_map.sortedIds().front()).get_period();
   }
   return 0.0;
 }
@@ -282,10 +284,10 @@ std::string ReportPathContext::getStartClockPin(TimingPath& path)
   if (!path.get_launch_clock_pin().empty())
     return path.get_launch_clock_pin();
   const auto pin = _database.network().pins().find(path.get_start_point());
-  if (pin == _database.network().pins().end() || pin->second.get_is_port())
+  if (pin == _database.network().pins().end() || pin->get_is_port())
     return {};
-  const auto instance = _database.network().instances().find(pin->second.get_instance_name());
-  return instance == _database.network().instances().end() ? std::string{} : instance->second.get_clock_pin_name();
+  const auto instance = _database.network().instances().find(pin->get_instance_name());
+  return instance == _database.network().instances().end() ? std::string{} : instance->get_clock_pin_name();
 }
 
 std::optional<std::size_t> ReportPathContext::getPinFanout(const std::string& pin_name)
@@ -295,11 +297,11 @@ std::optional<std::size_t> ReportPathContext::getPinFanout(const std::string& pi
   if (pin_it == database.network().pins().end()) {
     return std::nullopt;
   }
-  auto net_it = database.network().nets().find(pin_it->second.get_net_name());
+  auto net_it = database.network().nets().find(pin_it->get_net_name());
   if (net_it == database.network().nets().end()) {
     return std::nullopt;
   }
-  const Net& net = net_it->second;
+  const Net& net = *net_it;
   const std::vector<std::string>& drivers = net.get_driver_pin_list();
   if (net.get_driver_pin() != pin_name && std::find(drivers.begin(), drivers.end(), pin_name) == drivers.end()) {
     return std::nullopt;
@@ -323,10 +325,10 @@ std::string ReportPathContext::getPointLabel(TimingPathPoint& point)
 {
   std::string label = getReportPinName(point.get_pin_name());
   const auto pin = _database.network().pins().find(point.get_pin_name());
-  if (pin != _database.network().pins().end() && pin->second.get_is_port()) {
-    if (pin->second.get_direction() == PinDirection::kInput)
+  if (pin != _database.network().pins().end() && pin->get_is_port()) {
+    if (pin->get_direction() == PinDirection::kInput)
       return label + " (in)";
-    if (pin->second.get_direction() == PinDirection::kOutput)
+    if (pin->get_direction() == PinDirection::kOutput)
       return label + " (out)";
   }
   if (!point.get_cell_name().empty())
@@ -365,9 +367,9 @@ std::string ReportPathContext::getPinLabel(const std::string& name)
   const auto pin = _database.network().pins().find(name);
   if (pin == _database.network().pins().end())
     return label;
-  const auto instance = _database.network().instances().find(pin->second.get_instance_name());
+  const auto instance = _database.network().instances().find(pin->get_instance_name());
   if (instance != _database.network().instances().end())
-    label += " (" + instance->second.get_cell_name() + ")";
+    label += " (" + instance->get_cell_name() + ")";
   return label;
 }
 

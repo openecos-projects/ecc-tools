@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "graph/PathTagTable.hpp"
 #include "sdc/ClockEdges.hpp"
 // ***************************************************************************************
 // Copyright (c) 2023-2025 Peng Cheng Laboratory
@@ -43,7 +44,7 @@ void StartpointInitializer::seed(std::vector<std::string>& startpoints)
     TimingPoint& timing_point = database.graph().driverPoint(start_point);
     timing_point.set_arrival(getStartPointArrival(start_point, AnalysisType::kMax));
     timing_point.set_launch_time(getStartPointLaunchTime(start_point, AnalysisType::kMax));
-    timing_point.setLaunchClock(getClockName(start_point));
+    timing_point.setLaunchClock(clockIdOf(database, getClockName(start_point)));
     seedPathState(start_point, AnalysisType::kMax);
     seedPathState(start_point, AnalysisType::kMin);
   }
@@ -197,7 +198,7 @@ double StartpointInitializer::getClockEdge(std::string_view clock_name, TransTyp
   if (clock == database.sdc().get_clock_map().end()) {
     return 0.0;
   }
-  return trans_type == TransType::kFall ? clock->second.get_fall_edge() : clock->second.get_rise_edge();
+  return trans_type == TransType::kFall ? clock->get_fall_edge() : clock->get_rise_edge();
 }
 
 double StartpointInitializer::getInputDelayClockTime(const TimingIoDelay& delay, AnalysisType analysis_type, std::optional<TransType> source)
@@ -215,10 +216,10 @@ double StartpointInitializer::getInputDelayClockTime(const TimingIoDelay& delay,
   const auto clock = clocks.find(delay.get_clock_name());
   if (clock != clocks.end()) {
     if (!delay.get_source_latency_included()) {
-      clock_time += clock->second.get_source_latency(analysis_type, clockVariation(analysis_type), delay.get_clock_trans_type());
+      clock_time += clock->get_source_latency(analysis_type, clockVariation(analysis_type), delay.get_clock_trans_type());
     }
-    if (!delay.get_network_latency_included() && !clock->second.get_is_propagated()) {
-      clock_time += clock->second.get_network_latency(analysis_type, delay.get_clock_trans_type());
+    if (!delay.get_network_latency_included() && !clock->get_is_propagated()) {
+      clock_time += clock->get_network_latency(analysis_type, delay.get_clock_trans_type());
     }
   }
   return clock_time;
@@ -239,10 +240,11 @@ bool StartpointInitializer::isClockSourceStartPoint(std::string& start_point)
 TimingClock* StartpointInitializer::getStartPointClock(std::string& start_point)
 {
   Database& database = _database;
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.sdc().get_clock_map()) {
-    for (std::string& clock_source : clock_pair.second.get_source_list()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
+    for (std::string& clock_source : clock.get_source_list()) {
       if (clock_source == start_point) {
-        return &clock_pair.second;
+        return &clock;
       }
     }
   }
@@ -335,7 +337,7 @@ std::optional<DelayResult> StartpointInitializer::getDrivingCellTiming(std::stri
   if (driving_cell == nullptr) {
     return std::nullopt;
   }
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (!timing_cell_map.contains(driving_cell->get_cell_name())) {
     return std::nullopt;
   }
@@ -447,16 +449,16 @@ std::string_view StartpointInitializer::getClockName(std::string& pin_name)
   if (!pin.get_is_port() && database.network().instances().count(pin.get_instance_name()) > 0) {
     Instance& instance = database.network().instances()[pin.get_instance_name()];
     if (instance.get_is_sequential() && database.graph().points().count(instance.get_clock_pin_name()) > 0) {
-      const auto& propagated_clock_name = database.graph().points()[instance.get_clock_pin_name()].launchClock();
-      if (!propagated_clock_name.empty()) {
-        return propagated_clock_name;
+      const auto propagated_clock = database.graph().points()[instance.get_clock_pin_name()].launchClock();
+      if (propagated_clock.valid()) {
+        return database.sdc().get_clock_map().nameOf(propagated_clock);
       }
     }
   }
   if (database.graph().points().count(pin_name) > 0) {
     TimingPoint& timing_point = database.graph().points()[pin_name];
-    if (timing_point.get_is_clock_point() && !timing_point.launchClock().empty()) {
-      return timing_point.launchClock();
+    if (timing_point.get_is_clock_point() && timing_point.launchClock().valid()) {
+      return database.sdc().get_clock_map().nameOf(timing_point.launchClock());
     }
   }
   if (pin.get_is_port()) {
@@ -472,7 +474,9 @@ std::vector<std::string> StartpointInitializer::getStartPointClockNames(std::str
 {
   Database& database = _database;
   std::set<std::string> names;
-  for (const auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
     if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), start_point) != clock.get_source_list().end())
       names.insert(clock_name);
   }
@@ -481,9 +485,9 @@ std::vector<std::string> StartpointInitializer::getStartPointClockNames(std::str
     Instance& instance = database.network().instances()[pin.get_instance_name()];
     if (instance.get_is_sequential() && database.graph().points().contains(instance.get_clock_pin_name())) {
       const auto& states = database.graph().points().at(instance.get_clock_pin_name()).get_clock_state_map();
-      for (const auto& [clock_name, state] : states)
+      for (const auto& [clock_id, state] : states)
         if (!state.is_source_path_only)
-          names.insert(clock_name);
+          names.insert(std::string(database.sdc().get_clock_map().nameOf(clock_id)));
     }
   }
   if (names.empty())
@@ -532,13 +536,13 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
       const auto definition = database.sdc().get_clock_map().find(clock_name);
       for (auto origin : origins) {
         const auto first = origin == TransType::kFall ? 1u : 0u;
-        const auto count = definition == database.sdc().get_clock_map().end() ? 2 : definition->second.edgeCount();
+        const auto count = definition == database.sdc().get_clock_map().end() ? 2 : definition->edgeCount();
         const double arrival = getStartPointArrival(start_point, clock_name, analysis_type, trans_type, origin);
         const double slew = getStartPointSlew(start_point, clock_name, analysis_type, trans_type, origin);
         const double launch = getStartPointLaunchTime(start_point, clock_name, analysis_type, trans_type, origin);
         for (size_t index = first; index < count; index += 2) {
           const double offset
-              = definition == database.sdc().get_clock_map().end() ? 0. : definition->second.edge(index).time - definition->second.edge(first).time;
+              = definition == database.sdc().get_clock_map().end() ? 0. : definition->edge(index).time - definition->edge(first).time;
           seedPathState(start_point, analysis_type, trans_type, clock_name, arrival + offset, slew, launch + offset, local, clock_source, std::nullopt, 0.,
                         index);
         }
@@ -561,9 +565,9 @@ void StartpointInitializer::seedInputPathState(std::string& start_point, Analysi
     if (!delay.get_source_latency_included() && clock != _database.sdc().get_clock_map().end())
       source_latency = clockPinValues(_database, delay.get_reference_pin(), clock_name, analysis_type, local, AnalysisType::kNone, source).source_latency;
     const size_t first = source == TransType::kFall ? 1 : 0;
-    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
+    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->edgeCount();
     for (size_t index = first; index < count; index += 2) {
-      const double offset = clock == _database.sdc().get_clock_map().end() ? 0. : clock->second.edge(index).time - clock->second.edge(first).time;
+      const double offset = clock == _database.sdc().get_clock_map().end() ? 0. : clock->edge(index).time - clock->edge(first).time;
       seedPathState(start_point, analysis_type, trans_type, clock_name, launch + offset + delay.get_delay() + (driver ? driver->get_delay() : 0.0),
                     getStartPointSlew(start_point, analysis_type, trans_type), launch + offset, local, false, delay.get_delay(), source_latency, index,
                     delay.get_reference_pin());
@@ -580,9 +584,9 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
     const auto transition = clock_source_path ? trans_type : clock_trans_type;
     const auto clock = _database.sdc().get_clock_map().find(std::string(clock_name));
     const size_t first = transition == TransType::kFall ? 1 : 0;
-    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->second.edgeCount();
+    const size_t count = clock == _database.sdc().get_clock_map().end() ? 2 : clock->edgeCount();
     for (size_t index = first; index < count; index += 2) {
-      const double offset = clock == _database.sdc().get_clock_map().end() ? 0 : clock->second.edge(index).time - clock->second.edge(first).time;
+      const double offset = clock == _database.sdc().get_clock_map().end() ? 0 : clock->edge(index).time - clock->edge(first).time;
       seedPathState(start_point, analysis_type, trans_type, clock_name, arrival + offset, slew, launch_time + offset, clock_trans_type, clock_source_path,
                     input_delay, input_source_latency, index, reference_pin);
     }
@@ -596,18 +600,24 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   std::string path_state_start_point = getPathStateStartPoint(start_point);
   TimingPoint& timing_point = database.graph().driverPoint(start_point);
   const auto launch_transition = edge_index ? (*edge_index % 2 ? TransType::kFall : TransType::kRise) : (clock_source_path ? trans_type : clock_trans_type);
+  const ExceptionMatcher matcher(database.sdc(), database.network());
   const std::vector<int32_t> initial_exception_state_list
-      = ExceptionMatcher(database.sdc(), database.network()).initState(path_state_start_point, clock_name, trans_type, analysis_type, launch_transition);
-  const std::vector<int32_t> exception_state_list
-      = ExceptionMatcher(database.sdc(), database.network()).advanceState(_through_index, initial_exception_state_list, start_point, trans_type);
+      = matcher.initState(path_state_start_point, clock_name, trans_type, analysis_type, launch_transition);
+  const std::vector<int32_t> exception_state_list = matcher.advanceState(_through_index, initial_exception_state_list, start_point, trans_type);
   const std::string crpr_pin = reference_pin.empty() ? getStartPointCrprClockPin(start_point) : std::string(reference_pin);
   const double crpr_bound = _path_query.clockPathBound(crpr_pin, clock_name, clock_trans_type, launch_transition);
   const bool preserve_crpr = crpr_bound > 0.;
-  const std::string path_state_tag
-      = ExceptionMatcher(database.sdc(), database.network())
-            .makePathStateTag(clock_name, launch_transition, exception_state_list, clock_source_path, preserve_crpr ? crpr_pin : "", edge_index);
-  std::map<std::string, TimingPathState>& path_state_map = _path_query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
-  if (path_state_map.count(path_state_tag) > 0 && !_path_query.isBetterArrival(arrival, path_state_map[path_state_tag].get_arrival(), analysis_type)) {
+  PathTagTable::Key tag_key;
+  tag_key.clock_name = clock_name;
+  tag_key.launch_transition = launch_transition;
+  tag_key.exception_state_list = exception_state_list;
+  tag_key.clock_source_path = clock_source_path;
+  tag_key.crpr_path = preserve_crpr ? crpr_pin : "";
+  tag_key.launch_clock_edge_index = edge_index;
+  const uint32_t path_state_tag = database.pathTags().intern(tag_key);
+  std::map<uint32_t, TimingPathState>& path_state_map = _path_query.getPathStateMap(timing_point, analysis_type, source_type, trans_type);
+  auto [slot, inserted] = path_state_map.try_emplace(path_state_tag);
+  if (!inserted && !_path_query.isBetterArrival(arrival, slot->second.get_arrival(), analysis_type)) {
     return;
   }
 
@@ -617,7 +627,7 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
     if (clock != database.sdc().get_clock_map().end())
       source_latency = clockPinValues(_database, crpr_pin, clock_name, analysis_type, clock_trans_type, AnalysisType::kNone, launch_transition).source_latency;
   }
-  TimingPathState& path_state = path_state_map[path_state_tag];
+  TimingPathState& path_state = slot->second;
   path_state.set_arrival(arrival);
   path_state.set_slew(slew);
   path_state.set_launch_time(launch_time);
@@ -626,16 +636,17 @@ void StartpointInitializer::seedPathState(std::string& start_point, AnalysisType
   path_state.set_launch_clock_trans_type(launch_transition);
   if (edge_index)
     path_state.set_launch_clock_edge_index(*edge_index);
-  path_state.set_start_point(path_state_start_point);
-  path_state.set_clock_name(clock_name);
+  // Start points keep their own symbol domain: constraint text may name a
+  // start point that never became a network pin.
+  path_state.set_start_point(StartPointId{database.startPointSymbols().intern(path_state_start_point)});
+  path_state.set_clock_name(LaunchClockId{database.clockNameSymbols().intern(clock_name)});
   path_state.set_is_clock_source_path(clock_source_path);
-  path_state.set_crpr_clock_pin(crpr_pin);
+  path_state.set_crpr_clock_pin(database.network().pins().id(crpr_pin).value_or(ecc::symbol::Id<PinTag>{}));
   path_state.set_preserve_crpr_path(preserve_crpr);
   path_state.setClockPathBound(crpr_bound);
   path_state.set_path_state_tag(path_state_tag);
-  path_state.set_predecessor_path_state_tag("");
+  path_state.set_predecessor_path_state_tag(0);
   path_state.set_exception_state_list(exception_state_list);
-  path_state.set_predecessor("");
   path_state.set_predecessor_arc_idx(std::numeric_limits<std::size_t>::max());
   path_state.set_predecessor_arc_delay(0.0);
   path_state.set_trans_type(trans_type);

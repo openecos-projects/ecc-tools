@@ -268,7 +268,7 @@ static void checkConditionalCombinationalArc()
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
     for (auto input : {TransType::kRise, TransType::kFall}) {
       const auto output = input == TransType::kRise ? TransType::kFall : TransType::kRise;
-      require(!arc.get_input_output_delay_map().at(mode).at(input).contains(input), "false combinational condition created a timing lane");
+      require(!arc.get_input_output_delay_map().get(mode, input, input), "false combinational condition created a timing lane");
       require(!calculator.arcDelay(arc, mode, input, input, .2), "disabled combinational lane returned a fallback delay");
       const auto valid = calculator.arcDelay(arc, mode, input, output, .2);
       require(valid && std::abs(valid->get_delay() - .1) < 1e-12, "active negative-unate condition was lost");

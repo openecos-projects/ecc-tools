@@ -57,7 +57,7 @@ TimingCellArc* LibertyArcSelector::cellArc(Arc& arc)
     return nullptr;
   }
   Instance& instance = database.network().instances()[arc.get_owner_name()];
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return nullptr;
   }
@@ -112,7 +112,7 @@ std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing
   if (!output_pin.empty()) {
     Database& database = _database;
     auto pin = database.network().pins().find(output_pin);
-    is_virtual_driver = pin != database.network().pins().end() && pin->second.get_is_port();
+    is_virtual_driver = pin != database.network().pins().end() && pin->get_is_port();
   }
   for (TimingArc& timing_arc : timing_cell_arc.get_timing_arc_list()) {
     if (timing_arc.isThreeStateArc()) {
@@ -131,13 +131,13 @@ std::vector<TimingArc*> LibertyArcSelector::cellCandidates(TimingCellArc& timing
     if (!timing_arc.get_when_expression().get_is_empty() && !output_pin.empty() && !is_virtual_driver) {
       Database& database = _database;
       auto pin = database.network().pins().find(output_pin);
-      if (pin != database.network().pins().end() && !pin->second.get_is_port()) {
+      if (pin != database.network().pins().end() && !pin->get_is_port()) {
         std::map<std::string, bool> values;
         for (LogicExpressionTerm& term : timing_arc.get_when_expression().get_term_list()) {
           if (term.get_operation_type() != LogicOperationType::kPort) {
             continue;
           }
-          const auto value = database.graph().simValues().value(pin->second.get_instance_name() + ":" + term.get_port_name());
+          const auto value = database.graph().simValues().value(pin->get_instance_name() + ":" + term.get_port_name());
           if (value && (*value == TimingCaseValue::kZero || *value == TimingCaseValue::kOne)) {
             values[term.get_port_name()] = *value == TimingCaseValue::kOne;
           }

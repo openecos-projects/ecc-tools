@@ -114,14 +114,14 @@ bool isActiveTimingVariant(Database& database, const TimingArc& timing_arc, cons
   if (timing_arc.get_when_expression().get_is_empty())
     return true;
   const auto pin = database.network().pins().find(output_pin);
-  if (pin == database.network().pins().end() || pin->second.get_is_port())
+  if (pin == database.network().pins().end() || pin->get_is_port())
     return true;
 
   std::map<std::string, bool> values;
   for (const auto& term : timing_arc.get_when_expression().get_term_list()) {
     if (term.get_operation_type() != LogicOperationType::kPort)
       continue;
-    const auto value = database.graph().simValues().value(pin->second.get_instance_name() + ":" + term.get_port_name());
+    const auto value = database.graph().simValues().value(pin->get_instance_name() + ":" + term.get_port_name());
     if (value && (*value == TimingCaseValue::kZero || *value == TimingCaseValue::kOne))
       values[term.get_port_name()] = *value == TimingCaseValue::kOne;
   }
@@ -247,7 +247,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   bool used_min_analysis_fallback = false;
   std::unordered_map<std::string, int32_t> pin_ids;
   pin_ids.reserve(database.network().pins().size());
-  for (auto& [name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string name(database.network().pins().nameOf(id));
+    const Pin& pin = database.network().pins().get(id);
     pin_ids.emplace(name, static_cast<int32_t>(snapshot.pins.size()));
     TimingPinData exported;
     exported.name = name;
@@ -267,7 +269,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     exported.min_fall_rat_ps = kUnconstrainedRequiredPs;
     const auto point_it = database.graph().points().find(name);
     if (point_it != database.graph().points().end()) {
-      TimingPoint& point = point_it->second;
+      TimingPoint& point = *point_it;
       exported.level = point.get_level();
       exported.max_rise_aat_ps = normalizedTime(point.get_arrival(), time_unit, kUnconstrainedArrivalPs, used_non_finite_fallback);
       exported.max_fall_aat_ps = exported.max_rise_aat_ps;
@@ -314,12 +316,12 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (pin_it == database.network().pins().end() || instance_it == database.network().instances().end()) {
       continue;
     }
-    const auto cell_it = library.get_cell_map().find(instance_it->second.get_cell_name());
+    const auto cell_it = library.get_cell_map().find(instance_it->get_cell_name());
     if (cell_it == library.get_cell_map().end()) {
       continue;
     }
-    const auto port_it = cell_it->second.get_port_map().find(pin_it->second.get_pin_name());
-    if (port_it == cell_it->second.get_port_map().end()) {
+    const auto port_it = cell_it->get_port_map().find(pin_it->get_pin_name());
+    if (port_it == cell_it->get_port_map().end()) {
       continue;
     }
     exported_pin.capacitance_pf = port_it->second.get_capacitance();
@@ -334,7 +336,8 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     }
   }
 
-  for (auto& [instance_name, instance] : database.network().instances()) {
+  for (const auto& id : database.network().instances().sortedIds()) {
+    const Instance& instance = database.network().instances().get(id);
     if (!instance.get_is_sequential())
       continue;
     if (!instance.get_clock_pin_name().empty())
@@ -342,7 +345,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     if (!instance.get_output_pin_name().empty())
       snapshot.ff_output_pins.push_back(instance.get_output_pin_name());
   }
-  for (auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
     snapshot.clock_names.push_back(clock_name);
     TimingClockData exported_clock;
     exported_clock.name = clock_name;
@@ -377,7 +382,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     exported.level = exported.is_clock_arc ? 0 : database.graph().sinkPoint(arc).get_level();
     const auto owner_it = database.network().instances().find(arc.get_owner_name());
     if (!arc.get_owner_name().empty() && owner_it != database.network().instances().end()) {
-      exported.library_cell = owner_it->second.get_cell_name();
+      exported.library_cell = owner_it->get_cell_name();
     } else if (arc.get_type() == ArcType::kCell && !arc.get_owner_name().empty()) {
       addDiagnostic("unsupported arc owner identity: " + arc.get_owner_name());
     }
@@ -390,7 +395,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
         std::size_t index = 0;
         bool matched_cell_arc = false;
         if (library_cell != library.get_cell_map().end()) {
-          for (TimingCellArc& candidate : library_cell->second.get_cell_arc_list()) {
+          for (TimingCellArc& candidate : library_cell->get_cell_arc_list()) {
             if (&candidate == cell_arc) {
               matched_cell_arc = true;
               for (TimingArc& timing_arc : candidate.get_timing_arc_list()) {
@@ -434,7 +439,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
       continue;
     }
     const auto current_pin = database.network().pins().find(current->second);
-    if ((current_pin == database.network().pins().end() || current_pin->second.get_net_name().empty()) && !sink->second.get_net_name().empty()) {
+    if ((current_pin == database.network().pins().end() || current_pin->get_net_name().empty()) && !sink->get_net_name().empty()) {
       current->second = arc.sink_pin;
     }
   }
@@ -444,7 +449,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
       name = it->second;
   }
 
-  for (auto& [net_name, net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const std::string net_name(database.network().nets().nameOf(id));
+    const Net& net = database.network().nets().get(id);
     if (net.get_driver_pin_list().empty()) {
       addDiagnostic("net without a resolved driver: " + net_name);
       continue;
@@ -459,7 +466,8 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
     }
   }
 
-  for (auto& [instance_name, instance] : database.network().instances()) {
+  for (const auto& id : database.network().instances().sortedIds()) {
+    Instance& instance = database.network().instances().get(id);
     const auto cell_it = cell_ids.find(instance.get_cell_name());
     if (cell_it == cell_ids.end())
       continue;

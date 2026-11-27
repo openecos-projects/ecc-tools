@@ -11,6 +11,7 @@
 #include "Database.hpp"
 #include "StartpointInitializer.hpp"
 #include "graph/Arc.hpp"
+#include "graph/PathTagTable.hpp"
 #include "graph/Graph.hpp"
 #include "graph/TimingPoint.hpp"
 #include "graph/TimingStateQuery.hpp"
@@ -84,14 +85,8 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
           for (const auto input_transition : {TransType::kRise, TransType::kFall}) {
             if (!allowsTransition(database.network(), database.graph().simValues(), arc.get_source_pin(), input_transition, arc.get_type() == ArcType::kNet))
               continue;
-            const auto source_analysis = source.get_path_state_map().find(analysis);
-            if (source_analysis == source.get_path_state_map().end())
-              continue;
-            const auto source_type_it = source_analysis->second.find(source_type);
-            if (source_type_it == source_analysis->second.end())
-              continue;
-            const auto path_it = source_type_it->second.find(input_transition);
-            if (path_it == source_type_it->second.end())
+            const auto path_it = source.get_path_state_map().find(pathStateCombo(analysis, source_type, input_transition));
+            if (path_it == source.get_path_state_map().end())
               continue;
             const auto outputs
                 = arc.get_type() == ArcType::kCell ? cellOutputTransitions(database, arc, input_transition) : std::vector<TransType>{input_transition};
@@ -104,16 +99,20 @@ void propagate(Database& database, ExceptionThroughIndex& through_index)
                   continue;
                 const auto progress = matcher.advanceState(through_index, source_state.get_exception_state_list(), arc.get_sink_pin(), output_transition,
                                                            arc.get_type() == ArcType::kNet ? arc.get_source_pin() : "");
-                const auto tag
-                    = matcher.makePathStateTag(source_state.get_clock_name(), source_state.get_launch_clock_trans_type(), progress,
-                                               source_state.get_is_clock_source_path(), source_state.crprPathTag(), source_state.get_launch_clock_edge_index());
-                auto& target_map = sink.get_path_state_map()[analysis][source_type][output_transition];
+                PathTagTable::Key tag_key;
+                tag_key.clock_name = launchClockName(database, source_state.get_clock_name());
+                tag_key.launch_transition = source_state.get_launch_clock_trans_type();
+                tag_key.exception_state_list = progress;
+                tag_key.clock_source_path = source_state.get_is_clock_source_path();
+                tag_key.crpr_path = pinNameOf(database, source_state.crprPinId());
+                tag_key.launch_clock_edge_index = source_state.get_launch_clock_edge_index();
+                const uint32_t tag = database.pathTags().intern(tag_key);
+                auto& target_map = sink.get_path_state_map()[pathStateCombo(analysis, source_type, output_transition)];
                 if (target_map.contains(tag))
                   continue;
                 TimingPathState target = source_state;
                 target.set_arrival(kModelReferenceArrival);
                 target.set_slew(kModelReferenceSlew);
-                target.set_predecessor(arc.get_source_pin());
                 target.set_predecessor_arc_idx(arc_index);
                 target.set_predecessor_arc_delay(0.0);
                 target.set_predecessor_path_state_tag(source_tag);
@@ -137,11 +136,11 @@ void StructuralTimingStateBuilder::build(Database& database, DelayCalculator& de
 {
   database.graph().clearTiming();
   ClockNetworkBuilder(database).build();
-  for (auto& [name, point] : database.graph().points())
-    for (auto& [clock, state] : point.get_clock_state_map())
+  for (const auto& id : database.graph().points().sortedIds())
+    for (auto& [clock, state] : database.graph().points().get(id).get_clock_state_map())
       state.is_structural = true;
-  for (auto& [name, point] : database.graph().driverPoints())
-    for (auto& [clock, state] : point.get_clock_state_map())
+  for (const auto& id : database.graph().driverPoints().sortedIds())
+    for (auto& [clock, state] : database.graph().driverPoints().get(id).get_clock_state_map())
       state.is_structural = true;
   ClockGatingChecker(database).infer();
   ExceptionThroughIndex through_index(database.sdc(), database.network());

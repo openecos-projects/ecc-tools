@@ -52,9 +52,10 @@ class RcModelBuilder
                                       double drive_resistance = 0.);
 
  private:
+  using DmpModelKey = std::tuple<std::string, std::string, AnalysisType, TransType>;
   using ArnoldiModelKey = std::tuple<std::string, std::string, AnalysisType, TransType, int64_t>;
 
-  std::string getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type);
+  DmpModelKey getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type);
   ParasiticDmpModel buildParasiticDmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type);
   void buildParasiticDmpPiModel(ParasiticDmpModel& dmp_model, std::vector<int32_t>& parent_idx_list, std::vector<double>& resistance_list,
                                 std::vector<double>& capacitance_list);
@@ -74,7 +75,7 @@ class RcModelBuilder
   Database& _database;
   const Config& _config;
   RcTreeAnalyzer& _rc;
-  std::map<std::string, ParasiticDmpModel> _parasitic_dmp_model_cache;
+  std::map<DmpModelKey, ParasiticDmpModel> _parasitic_dmp_model_cache;
   std::map<ArnoldiModelKey, ParasiticArnoldiModel> _parasitic_arnoldi_model_cache;
 };
 }  // namespace ista

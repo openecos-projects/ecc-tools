@@ -7,6 +7,8 @@
 
 #include "Config.hpp"
 #include "Database.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
 #include "sdc/ExceptionMatcher.hpp"
 #include "PathChecker.hpp"
@@ -78,9 +80,9 @@ static std::size_t requiredAllocations(std::size_t name_size)
   clock.set_is_propagated(true);
   auto& clock_point = graph.points()[capture];
   clock_point.set_is_clock_point(true);
-  auto& waveform = clock_point.get_clock_state("clk");
-  waveform.waveforms[TransType::kRise].arrival_map[AnalysisType::kMin][TransType::kRise] = 1.;
-  waveform.waveforms[TransType::kRise].arrival_map[AnalysisType::kMax][TransType::kRise] = 1.5;
+  auto& waveform = clock_point.get_clock_state(clockId(db, "clk"));
+  waveform.waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMin, TransType::kRise, 1.);
+  waveform.waveformSlot(TransType::kRise).arrival_map.set(AnalysisType::kMax, TransType::kRise, 1.5);
   waveform.summarize();
   db.network().pins()[capture].set_full_name(capture);
   db.network().pins()[capture].set_load_vertex_idx(count);
@@ -94,11 +96,14 @@ static std::size_t requiredAllocations(std::size_t name_size)
     vertex.set_pin_name(name);
     vertex.set_timing_point(&point);
     graph.vertexOrder().push_back(i);
-    auto& path = point.get_path_state_map()[AnalysisType::kMax][PathSourceType::kRegister][TransType::kRise]["clk"];
-    path.set_clock_name("clk");
-    path.set_start_point("p0");
+    PathTagTable::Key clk_key;
+    clk_key.clock_name = "clk";
+    const uint32_t clk_tag = db.pathTags().intern(clk_key);
+    auto& path = point.get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kRegister, TransType::kRise)][clk_tag];
+    path.set_clock_name(launchClockId(db, "clk"));
+    path.set_start_point(startPointId(db, "p0"));
     path.set_trans_type(TransType::kRise);
-    path.set_crpr_clock_pin(capture);
+    path.set_crpr_clock_pin(pinId(db, capture));
     path.set_crpr_clock_trans_type(TransType::kRise);
     path.set_launch_clock_trans_type(TransType::kRise);
     path.set_arrival(2. + i * .125);
@@ -109,7 +114,7 @@ static std::size_t requiredAllocations(std::size_t name_size)
       arc.set_sink_pin("p" + std::to_string(i + 1));
       arc.set_source_vertex_idx(i);
       arc.set_sink_vertex_idx(i + 1);
-      arc.get_input_output_delay_map()[AnalysisType::kMax][TransType::kRise][TransType::kRise] = .125;
+      arc.get_input_output_delay_map().set(AnalysisType::kMax, TransType::kRise, TransType::kRise, .125);
       vertex.get_outgoing_arc_list().push_back(graph.arcs().size());
       graph.arcs().push_back(arc);
     } else {

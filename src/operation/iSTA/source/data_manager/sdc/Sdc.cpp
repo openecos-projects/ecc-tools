@@ -49,7 +49,7 @@ void Sdc::setClockSources(const Network& network, TimingClock& clock, const std:
     else if (network.isHierarchyPin(object))
       updated_kinds.push_back(ClockSourceKind::kPin);
     else if (const auto pin = network.pins().find(object); pin != network.pins().end())
-      updated_kinds.push_back(pin->second.get_is_port() ? ClockSourceKind::kPort : ClockSourceKind::kPin);
+      updated_kinds.push_back(pin->get_is_port() ? ClockSourceKind::kPort : ClockSourceKind::kPin);
     else
       updated_kinds.push_back(network.hasNet(object) ? ClockSourceKind::kNet : ClockSourceKind::kPort);
   }
@@ -72,7 +72,7 @@ bool Sdc::matchesClockSource(const Network& network, const std::string& source, 
   return std::find(drivers.begin(), drivers.end(), pin) != drivers.end();
 }
 
-bool Sdc::clockAllowsNetArc(const Network& network, const std::string& name, const std::string& from, const std::string& to, int before) const
+bool Sdc::clockAllowsNetArc(const Network& network, std::string_view name, const std::string& from, const std::string& to, int before) const
 {
   if (!network.hasHierarchyPins())
     return true;
@@ -97,7 +97,9 @@ bool Sdc::clockAllowsNetArc(const Network& network, const std::string& name, con
   }
   // Only a boundary downstream of this clock's declared source replaces it.
   // Multiple clocks created with -add at the same boundary coexist.
-  for (const auto& [other_name, other] : _clock_map) {
+  for (const auto& id : _clock_map.sortedIds()) {
+    const std::string other_name(_clock_map.nameOf(id));
+    const TimingClock& other = _clock_map.get(id);
     if (other_name == name)
       continue;
     for (const auto& object : other.get_source_objects()) {
@@ -123,9 +125,9 @@ std::vector<std::pair<const LibertyCell*, const LibertyPort*>> Sdc::drivingCellP
       const auto cell = liberty.get_cell_map().find(drive.get_cell_name());
       if (cell == liberty.get_cell_map().end())
         continue;
-      const auto port = cell->second.get_port_map().find(drive.get_to_pin());
-      if (port != cell->second.get_port_map().end())
-        result.emplace_back(&cell->second, &port->second);
+      const auto port = cell->get_port_map().find(drive.get_to_pin());
+      if (port != cell->get_port_map().end())
+        result.emplace_back(cell, &port->second);
     }
   return result;
 }
@@ -243,10 +245,14 @@ void Sdc::setClockGroups(TimingClockGroup relation)
     if (existing.get_type() != TimingClockGroupType::kAsynchronous || relation.get_type() != TimingClockGroupType::kAsynchronous
         || existing.get_allow_paths() == relation.get_allow_paths())
       continue;
-    for (auto first = _clock_map.begin(); first != _clock_map.end(); ++first)
-      for (auto second = std::next(first); second != _clock_map.end(); ++second)
-        if (separates(existing, first->first, second->first) && separates(relation, first->first, second->first))
+    const auto clock_ids = _clock_map.sortedIds();
+    for (std::size_t i = 0; i < clock_ids.size(); ++i)
+      for (std::size_t j = i + 1; j < clock_ids.size(); ++j) {
+        const std::string first(_clock_map.nameOf(clock_ids[i]));
+        const std::string second(_clock_map.nameOf(clock_ids[j]));
+        if (separates(existing, first, second) && separates(relation, first, second))
           throw std::invalid_argument("conflicting asynchronous clock groups with and without -allow_paths");
+      }
   }
   auto updated = _clock_group_list;
   if (!relation.get_name().empty())

@@ -20,8 +20,8 @@ void ClockGatingChecker::infer()
   auto has_clock = [&](const std::string& pin) {
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
-      for (const auto& [clock, state] : point->second.get_clock_state_map())
-        if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
+      for (const auto& [clock, state] : point->get_clock_state_map())
+        if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms()))
           return true;
     return false;
   };
@@ -32,43 +32,53 @@ void ClockGatingChecker::infer()
   auto seed = [&](const std::string& pin) {
     const auto point = graph.points().find(pin);
     if (point != graph.points().end())
-      for (const auto& [clock, state] : point->second.get_clock_state_map())
-        if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty()))
-          pending.emplace_back(pin, clock);
+      for (const auto& [clock_id, state] : point->get_clock_state_map())
+        if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms()))
+          pending.emplace_back(pin, std::string(_database.sdc().get_clock_map().nameOf(clock_id)));
   };
-  for (const auto& [name, instance] : network.instances()) {
+  for (const auto& id : network.instances().sortedIds()) {
+    const Instance& instance = network.instances().get(id);
     if (!instance.get_is_sequential() && !instance.get_is_clock_gating())
       continue;
     seed(instance.get_clock_pin_name());
     for (const auto& check : instance.get_check_arc_list())
       seed(check.get_clock_port());
   }
-  for (const auto& [name, definition] : _database.sdc().get_clock_map())
+  for (const auto& id : _database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& definition = _database.sdc().get_clock_map().get(id);
     if (definition.get_is_generated())
       for (const auto& target : definition.get_source_list())
         pending.emplace_back(target, definition.get_master_clock_name());
-  for (const auto& [name, pin] : network.pins()) {
+  }
+  for (const auto& id : network.pins().sortedIds()) {
+    const std::string name(network.pins().nameOf(id));
+    const Pin& pin = network.pins().get(id);
     if (!pin.get_is_port() || (pin.get_direction() != PinDirection::kOutput && pin.get_direction() != PinDirection::kInout))
       continue;
     bool primary_root = false;
-    for (const auto& [clock, definition] : _database.sdc().get_clock_map())
+    for (const auto& clock_id : _database.sdc().get_clock_map().sortedIds()) {
+      TimingClock& definition = _database.sdc().get_clock_map().get(clock_id);
       if (!definition.get_is_generated())
         for (const auto& source : definition.get_source_objects())
           primary_root |= source == name;
+    }
     if (primary_root)
       continue;
     const auto incoming = graph.incomingArcs().find(name);
     if (incoming == graph.incomingArcs().end())
       continue;
-    for (auto index : incoming->second) {
+    for (auto index : *incoming) {
       auto& arc = graph.arcs()[index];
       if (arc.get_type() != ArcType::kNet || query.isDisableArc(arc))
         continue;
       const auto& point = graph.sourcePoint(arc);
-      for (const auto& [clock, state] : point.get_clock_state_map())
-        if (!state.is_source_path_only && (state.is_structural || !state.waveforms.empty())
+      for (const auto& [clock_id, state] : point.get_clock_state_map()) {
+        // Clock names stay the exchange format of the fanin walk below.
+        const auto clock = std::string(_database.sdc().get_clock_map().nameOf(clock_id));
+        if (!state.is_source_path_only && (state.is_structural || !!state.hasWaveforms())
             && _database.sdc().clockAllowsNetArc(network, clock, arc.get_source_pin(), name))
           pending.emplace_back(arc.get_source_pin(), clock);
+      }
     }
   }
   while (!pending.empty()) {
@@ -79,11 +89,11 @@ void ClockGatingChecker::infer()
     const auto incoming = graph.incomingArcs().find(pin);
     if (incoming == graph.incomingArcs().end())
       continue;
-    for (auto index : incoming->second) {
+    for (auto index : *incoming) {
       auto& arc = graph.arcs()[index];
       const auto* point = clockPoint(_database, arc.get_source_pin(), clock);
-      const auto* state = point ? point->find_clock_state(clock) : nullptr;
-      if (arc.get_is_clock_arc() || query.isDisableArc(arc) || !state || state->is_source_path_only || (!state->is_structural && state->waveforms.empty()))
+      const auto* state = point ? point->find_clock_state(clockIdOf(_database, clock)) : nullptr;
+      if (arc.get_is_clock_arc() || query.isDisableArc(arc) || !state || state->is_source_path_only || (!state->is_structural && !state->hasWaveforms()))
         continue;
       if (arc.get_type() == ArcType::kNet && !_database.sdc().clockAllowsNetArc(network, clock, arc.get_source_pin(), arc.get_sink_pin()))
         continue;
@@ -93,16 +103,16 @@ void ClockGatingChecker::infer()
   std::set<std::tuple<std::string, std::string, bool, std::string>> inferred;
   for (const auto& [output, output_clocks] : clock_fanin) {
     const auto pin = network.pins().find(output);
-    if (pin == network.pins().end() || pin->second.get_is_port())
+    if (pin == network.pins().end() || pin->get_is_port())
       continue;
-    const auto& instance = network.instances().at(pin->second.get_instance_name());
+    const auto& instance = network.instances().at(pin->get_instance_name());
     if (instance.get_is_sequential() || instance.get_is_clock_gating())
       continue;
     const auto cell = _database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell == _database.liberty().get_cell_map().end())
       continue;
-    const auto port = cell->second.get_port_map().find(pin->second.get_pin_name());
-    if (port == cell->second.get_port_map().end() || !port->second.get_is_output())
+    const auto port = cell->get_port_map().find(pin->get_pin_name());
+    if (port == cell->get_port_map().end() || !port->second.get_is_output())
       continue;
     const auto& function = port->second.get_function_expression();
     if (function.get_is_empty())
@@ -118,7 +128,7 @@ void ClockGatingChecker::infer()
     const auto incoming = graph.incomingArcs().find(output);
     if (incoming == graph.incomingArcs().end())
       continue;
-    for (auto clock_index : incoming->second) {
+    for (auto clock_index : *incoming) {
       auto& clock_arc = graph.arcs()[clock_index];
       const auto& clock_pin = clock_arc.get_source_pin();
       if (clock_arc.get_type() != ArcType::kCell || query.isDisableArc(clock_arc) || !clock_fanin.contains(clock_pin))
@@ -135,7 +145,7 @@ void ClockGatingChecker::infer()
         continue;
       const bool active_high = low_constant;
       values[clock_port] = active_high;
-      for (auto enable_index : incoming->second) {
+      for (auto enable_index : *incoming) {
         auto& enable_arc = graph.arcs()[enable_index];
         const auto& enable = enable_arc.get_source_pin();
         if (enable_arc.get_type() != ArcType::kCell || query.isDisableArc(enable_arc) || has_clock(enable))

@@ -96,7 +96,8 @@ void ReadLiberty::checkCellReferences() const
   // ReadNetwork has already removed PG terminals. Instance pin lists are
   // linked later by DataManager, so inspect the imported signal pins here.
   // Filler/tap cells with no signal terminals do not need a timing model.
-  for (const auto& [name, pin] : _network.pins()) {
+  for (const auto& id : _network.pins().sortedIds()) {
+    const Pin& pin = _network.pins().get(id);
     if (pin.get_is_port())
       continue;
     const auto& instance = _network.instances().at(pin.get_instance_name());
@@ -180,8 +181,8 @@ void ReadLiberty::readLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list)
 idb::LibLibrary* ReadLiberty::findReferenceLibrary(const std::vector<idb::LibLibrary*>& lib_list)
 {
   std::map<idb::LibLibrary*, std::pair<int32_t, int32_t>> lib_usage_map;
-  for (const std::pair<const std::string, Instance>& instance_pair : _network.instances()) {
-    const Instance& instance = instance_pair.second;
+  for (const auto& id : _network.instances().sortedIds()) {
+    const Instance& instance = _network.instances().get(id);
     for (idb::LibLibrary* lib : lib_list) {
       idb::LibCell* lib_cell = lib->findCell(instance.get_cell_name().c_str());
       if (lib_cell == nullptr) {

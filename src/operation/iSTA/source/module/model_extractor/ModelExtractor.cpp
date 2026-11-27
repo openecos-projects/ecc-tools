@@ -59,8 +59,8 @@ double ModelExtractor::getDesignArea()
 {
   Database& database = _database;
   double design_area = 0.0;
-  for (std::pair<const std::string, Instance>& instance_pair : database.network().instances()) {
-    Instance& instance = instance_pair.second;
+  for (const auto& id : database.network().instances().sortedIds()) {
+    Instance& instance = database.network().instances().get(id);
     if (database.liberty().get_cell_map().count(instance.get_cell_name()) == 0) {
       continue;
     }
@@ -71,8 +71,8 @@ double ModelExtractor::getDesignArea()
 void ModelExtractor::buildPorts(CharacterizedLibrary& tc_lib)
 {
   Database& database = _database;
-  for (std::pair<const std::string, Pin>& pin_pair : database.network().pins()) {
-    Pin& pin = pin_pair.second;
+  for (const auto& id : database.network().pins().sortedIds()) {
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_is_port()) {
       buildCharacterizedPort(tc_lib, pin);
     }
@@ -121,8 +121,9 @@ double ModelExtractor::getPortCapacitance(Pin& pin)
 void ModelExtractor::extractClockArcs(CharacterizedLibrary& tc_lib)
 {
   Database& database = _database;
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.sdc().get_clock_map()) {
-    for (std::string& clock_port_name : clock_pair.second.get_source_list()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
+    for (std::string& clock_port_name : clock.get_source_list()) {
       if (_model_path_query.isClockPort(clock_port_name)) {
         buildClockPathArc(tc_lib, clock_port_name, "min_clock_tree_path");
         buildClockPathArc(tc_lib, clock_port_name, "max_clock_tree_path");

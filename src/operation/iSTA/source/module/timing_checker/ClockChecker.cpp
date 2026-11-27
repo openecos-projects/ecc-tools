@@ -39,12 +39,14 @@ std::vector<ClockCheck> ClockChecker::check()
   std::map<std::tuple<std::string, std::string, TimingCheckType, TransType>, ClockCheck> worst;
   const auto& factors = _database.sdc().timingDerates();
   ClockReconvergenceCalculator reconvergence(_database);
-  for (const auto& [instance_name, instance] : _database.network().instances()) {
+  for (const auto& instance_id : _database.network().instances().sortedIds()) {
+    const std::string instance_name(_database.network().instances().nameOf(instance_id));
+    const Instance& instance = _database.network().instances().get(instance_id);
     auto cell = _database.liberty().get_cell_map().find(instance.get_cell_name());
     if (cell == _database.liberty().get_cell_map().end())
       continue;
-    const DerateContext context{instance_name, cell->second.get_library_name() + "/" + cell->first, {}};
-    for (auto& arc : cell->second.get_sdf_check_arc_list()) {
+    const DerateContext context{instance_name, cell->get_library_name() + "/" + instance.get_cell_name(), {}};
+    for (auto& arc : cell->get_sdf_check_arc_list()) {
       const auto type = arc.get_check_type();
       if (type != TimingCheckType::kWidth && type != TimingCheckType::kPeriod)
         continue;
@@ -56,11 +58,12 @@ std::vector<ClockCheck> ClockChecker::check()
       const auto logic = _database.graph().simValues().value(pin);
       if (logic && (*logic == TimingCaseValue::kZero || *logic == TimingCaseValue::kOne))
         continue;
-      for (const auto& [clock_name, state] : point->second.get_clock_state_map()) {
-        const auto definition = _database.sdc().get_clock_map().find(clock_name);
-        if (state.is_source_path_only || definition == _database.sdc().get_clock_map().end())
+      for (const auto& [clock_id, state] : point->get_clock_state_map()) {
+        if (state.is_source_path_only || !_database.sdc().get_clock_map().contains(clock_id))
           continue;
-        const auto& clock = definition->second;
+        const auto& clock = _database.sdc().get_clock_map().get(clock_id);
+        // Reports key on the name; resolve once at the boundary.
+        const std::string clock_name(_database.sdc().get_clock_map().nameOf(clock_id));
         if (!(clock.get_period() > 0.))
           continue;
         for (auto edge : {TransType::kRise, TransType::kFall}) {

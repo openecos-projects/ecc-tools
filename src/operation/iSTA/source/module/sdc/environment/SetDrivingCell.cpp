@@ -64,7 +64,7 @@ unsigned TclSetDrivingCell::exec()
 
   Database& database = STADM.getDatabase();
   const std::string cell_name = cell_option->getStringVal();
-  std::map<std::string, LibertyCell>& cell_map = database.liberty().get_cell_map();
+  auto& cell_map = database.liberty().get_cell_map();
   if (cell_name.empty() || !cell_map.contains(cell_name)) {
     setTclError("set_driving_cell library cell does not exist: " + cell_name);
     return 0;

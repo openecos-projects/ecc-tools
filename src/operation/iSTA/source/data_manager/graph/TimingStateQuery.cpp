@@ -50,9 +50,9 @@ bool TimingStateQuery::shouldStopDataPropagation(Arc& arc)
     return false;
   const auto point = _database.graph().points().find(enable);
   if (point != _database.graph().points().end())
-    for (const auto& [clock, state] : point->second.get_clock_state_map())
+    for (const auto& [clock, state] : point->get_clock_state_map())
       if (!state.is_source_path_only && _database.sdc().get_clock_map().contains(clock))
-        return false;
+        return false;  // key is now ClockId; contains(id) checks liveness
   // An ordinary data arrival at the gate pin is not a latch opening clock.
   return true;
 }
@@ -82,20 +82,22 @@ double TimingStateQuery::getClockArrival(const std::string& pin_name, AnalysisTy
   TimingPoint& timing_point = database.graph().points()[pin_name];
   if (timing_point.findDefaultClockState() == nullptr)
     return 0.0;
-  return getClockArrival(pin_name, timing_point.defaultClock(), analysis_type, trans_type);
+  const ClockId clock = timing_point.defaultClock();
+  return getClockArrival(pin_name, clock.valid() ? std::string_view(_database.sdc().get_clock_map().nameOf(clock)) : std::string_view(""), analysis_type, trans_type);
 }
 
 double TimingStateQuery::getClockArrival(const std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
                                          std::optional<TransType> source)
 {
-  const auto* point = clockPoint(_database, pin_name, clock_name);
-  if (point && point->find_clock_state(clock_name)->is_structural) {
-    const auto values = clockPinValues(_database, pin_name, clock_name, analysis_type, trans_type, AnalysisType::kNone, source, point);
+  const ClockId clock = clockIdOf(_database, clock_name);
+  const auto* point = clockPoint(_database, pin_name, clock);
+  if (point && point->find_clock_state(clock)->is_structural) {
+    const auto values = clockPinValues(_database, pin_name, clock, analysis_type, trans_type, AnalysisType::kNone, source, point);
     if (values.propagated)
       throw std::invalid_argument("structural timing preparation requires ideal clocks");
     return values.source_latency + values.network_latency;
   }
-  const ClockWaveform* state = clockWaveform(_database, pin_name, clock_name, source);
+  const ClockWaveform* state = clockWaveform(_database, pin_name, clock, source);
   return state == nullptr ? 0.0 : state->arrival(analysis_type, trans_type).value_or(0.0);
 }
 
@@ -114,48 +116,51 @@ double TimingStateQuery::getClockSlew(const std::string& pin_name, AnalysisType 
   TimingPoint& timing_point = database.graph().points()[pin_name];
   if (timing_point.findDefaultClockState() == nullptr)
     return 0.0;
-  return getClockSlew(pin_name, timing_point.defaultClock(), analysis_type, trans_type);
+  const ClockId clock = timing_point.defaultClock();
+  return getClockSlew(pin_name, clock.valid() ? std::string_view(_database.sdc().get_clock_map().nameOf(clock)) : std::string_view(""), analysis_type, trans_type);
 }
 
 double TimingStateQuery::getClockSlew(const std::string& pin_name, std::string_view clock_name, AnalysisType analysis_type, TransType trans_type,
                                       std::optional<TransType> source)
 {
-  const auto* point = clockPoint(_database, pin_name, clock_name);
-  if (point && point->find_clock_state(clock_name)->is_structural) {
-    auto& clock = _database.sdc().get_clock_map().at(std::string(clock_name));
+  const ClockId clock_id = clockIdOf(_database, clock_name);
+  const auto* point = clockPoint(_database, pin_name, clock_id);
+  if (point && point->find_clock_state(clock_id)->is_structural) {
+    auto& clock = _database.sdc().get_clock_map().get(clock_id);
     const auto mode = clock.get_transition_map().find(analysis_type);
     const auto edge = source.value_or(trans_type);
     return mode != clock.get_transition_map().end() && mode->second.contains(edge) ? mode->second.at(edge) : 0.0;
   }
-  const ClockWaveform* state = clockWaveform(_database, pin_name, clock_name, source);
+  const ClockWaveform* state = clockWaveform(_database, pin_name, clock_id, source);
   return state == nullptr ? 0.0 : state->slew(analysis_type, trans_type).value_or(0.0);
 }
 
-const TimingPoint* clockPoint(const Database& database, const std::string& pin, std::string_view clock)
+const TimingPoint* clockPoint(const Database& database, std::string_view pin, ClockId clock)
 {
   const auto receiver = database.graph().points().find(pin);
-  if (receiver != database.graph().points().end() && receiver->second.find_clock_state(clock))
-    return &receiver->second;
+  if (receiver != database.graph().points().end() && receiver->find_clock_state(clock))
+    return receiver;
   const auto driver = database.graph().driverPoints().find(pin);
-  return driver != database.graph().driverPoints().end() && driver->second.find_clock_state(clock) ? &driver->second : nullptr;
+  return driver != database.graph().driverPoints().end() && driver->find_clock_state(clock) ? &*driver : nullptr;
 }
 
-const ClockWaveform* clockWaveform(const Database& database, const std::string& pin, std::string_view clock, std::optional<TransType> source)
+const ClockWaveform* clockWaveform(const Database& database, std::string_view pin, ClockId clock, std::optional<TransType> source)
 {
   const auto* point = clockPoint(database, pin, clock);
   return point ? point->find_clock_state(clock)->waveform(source) : nullptr;
 }
 
-std::vector<TransType> clockSourceTransitions(const Database& database, const std::string& pin, std::string_view clock, AnalysisType mode, TransType local_edge)
+std::vector<TransType> clockSourceTransitions(const Database& database, std::string_view pin, ClockId clock, AnalysisType mode, TransType local_edge)
 {
   const auto* point = clockPoint(database, pin, clock);
   if (!point)
     return {local_edge};  // Virtual or unconstrained clock.
   std::vector<TransType> result;
   const auto* clock_state = point->find_clock_state(clock);
-  for (const auto& [source, wave] : clock_state->waveforms)
+  clock_state->eachWaveform([&](TransType source, const ClockWaveform& wave) {
     if (wave.arrival(mode, local_edge))
       result.push_back(source);
+  });
   // Model preparation deliberately has no numeric clock propagation.  Keep
   // the logical capture edge usable by PathChecker without manufacturing an
   // arrival/slew value.  A complete STA with an unreachable clock still
@@ -171,17 +176,21 @@ bool isIdealClockPin(const Database& database, const std::string& pin)
     for (const auto& [clock, state] : point.get_clock_state_map()) {
       if (state.is_source_path_only || !database.sdc().get_clock_map().contains(clock))
         continue;
-      for (const auto& [source, wave] : state.waveforms)
-        for (const auto& [analysis, edges] : wave.physical_slew_map)
-          for (const auto& [edge, slew] : edges)
-            if (!clockPinValues(database, pin, clock, analysis, edge, AnalysisType::kNone, source, &point).propagated)
-              return true;
+      bool unpropagated = false;
+      state.eachWaveform([&](TransType source, const ClockWaveform& wave) {
+        wave.physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
+          if (!unpropagated && !clockPinValues(database, pin, clock, analysis, edge, AnalysisType::kNone, source, &point).propagated)
+            unpropagated = true;
+        });
+      });
+      if (unpropagated)
+        return true;
     }
     return false;
   };
   const auto receiver = database.graph().points().find(pin);
   const auto driver = database.graph().driverPoints().find(pin);
-  return (receiver != database.graph().points().end() && ideal(receiver->second)) || (driver != database.graph().driverPoints().end() && ideal(driver->second));
+  return (receiver != database.graph().points().end() && ideal(*receiver)) || (driver != database.graph().driverPoints().end() && ideal(*driver));
 }
 
 std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::vector<const TimingIoDelay*>& definitions)
@@ -192,15 +201,17 @@ std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::
       result.push_back(*delay);
       continue;
     }
+    const ClockId wanted = clockIdOf(database, delay->get_clock_name());
     std::set<std::string> clocks;
     for (const auto* points : {&database.graph().points(), &database.graph().driverPoints()}) {
       const auto point = points->find(delay->get_reference_pin());
       if (point == points->end())
         continue;
-      for (const auto& [clock, state] : point->second.get_clock_state_map()) {
-        if (state.is_source_path_only || (!delay->get_clock_name().empty() && clock != delay->get_clock_name()))
+      for (const auto& [clock, state] : point->get_clock_state_map()) {
+        if (state.is_source_path_only || (!delay->get_clock_name().empty() && clock != wanted))
           continue;
-        clocks.insert(clock);
+        // Keep the resolved set name-ordered, as the string-keyed map gave.
+        clocks.insert(std::string(database.sdc().get_clock_map().nameOf(clock)));
       }
     }
     if (clocks.empty())
@@ -214,14 +225,13 @@ std::vector<TimingIoDelay> resolveIoDelays(const Database& database, const std::
   return result;
 }
 
-ClockPinValues clockPinValues(const Database& database, const std::string& pin, std::string_view clock_name, AnalysisType analysis, TransType transition,
+ClockPinValues clockPinValues(const Database& database, std::string_view pin, ClockId clock_id, AnalysisType analysis, TransType transition,
                               AnalysisType check, std::optional<TransType> source_edge, const TimingPoint* point)
 {
   ClockPinValues result;
-  const auto definition = database.sdc().get_clock_map().find(std::string(clock_name));
-  if (definition == database.sdc().get_clock_map().end())
+  if (!database.sdc().get_clock_map().contains(clock_id))
     return result;
-  const auto& clock = definition->second;
+  const auto& clock = database.sdc().get_clock_map().get(clock_id);
   result.propagated = clock.get_is_propagated();
   result.source_latency = clock.get_source_latency(analysis, clockVariation(analysis), source_edge.value_or(transition));
   result.network_latency = clock.get_network_latency(analysis, source_edge.value_or(transition));
@@ -257,46 +267,44 @@ ClockPinValues clockPinValues(const Database& database, const std::string& pin, 
       uncertainty_found = true;
     }
   };
-  std::string current = pin;
+  std::string current(pin);
   if (!point)
-    point = clockPoint(database, pin, clock_name);
+    point = clockPoint(database, pin, clock_id);
   // A physical predecessor is unique for this clock, analysis and edge. Bound
   // traversal as a guard against malformed traces without allocating a set.
   for (size_t remaining = database.graph().vertices().size() + 1; remaining && !current.empty(); --remaining) {
     auto entry = annotations.find(current);
     if (entry != annotations.end()) {
-      auto specific = entry->second.find(std::string(clock_name));
+      auto specific = entry->second.find(std::string(database.sdc().get_clock_map().nameOf(clock_id)));
       if (specific != entry->second.end())
         apply(specific->second, current);
       auto generic = entry->second.find("");
       if (generic != entry->second.end())
         apply(generic->second, current);
     }
-    const auto* clock_state = point ? point->find_clock_state(clock_name) : nullptr;
+    const auto* clock_state = point ? point->find_clock_state(clock_id) : nullptr;
     const auto* state = clock_state ? clock_state->waveform(source_edge) : nullptr;
     if (!state)
       break;
-    auto pred = state->physical_predecessor_map.find(analysis);
-    if (pred == state->physical_predecessor_map.end() || !pred->second.contains(trace_edge))
+    const auto pred = state->physical_predecessor_map.get(analysis, trace_edge);
+    if (!pred)
       break;
-    current = pred->second.at(trace_edge);
-    const auto vertices = state->predecessor_vertex_map.find(analysis);
-    if (vertices != state->predecessor_vertex_map.end() && vertices->second.contains(trace_edge)) {
-      const auto index = vertices->second.at(trace_edge);
-      point = index >= 0 && static_cast<size_t>(index) < database.graph().vertices().size() ? &database.graph().vertices()[index].get_timing_point() : nullptr;
+    current = std::string(database.network().pins().nameOf(*pred));
+    if (const auto index = state->predecessor_vertex_map.get(analysis, trace_edge)) {
+      const auto vertex_index = *index;
+      point = vertex_index >= 0 && static_cast<size_t>(vertex_index) < database.graph().vertices().size() ? &database.graph().vertices()[vertex_index].get_timing_point() : nullptr;
     } else {
-      point = clockPoint(database, current, clock_name);
+      point = clockPoint(database, current, clock_id);
     }
     if (source_edge)
       source_edge = state->predecessorSource(analysis, trace_edge, *source_edge);
-    auto edges = state->physical_predecessor_trans_type_map.find(analysis);
-    if (edges != state->physical_predecessor_trans_type_map.end() && edges->second.contains(trace_edge))
-      trace_edge = edges->second.at(trace_edge);
+    if (const auto next_edge = state->physical_predecessor_trans_type_map.get(analysis, trace_edge))
+      trace_edge = *next_edge;
   }
   return result;
 }
 
-const ClockPinValues& ClockPinValuesQuery::values(const std::string& pin, std::string_view clock, AnalysisType analysis, TransType transition,
+const ClockPinValues& ClockPinValuesQuery::values(std::string_view pin, std::string_view clock, AnalysisType analysis, TransType transition,
                                                   AnalysisType check, std::optional<TransType> source)
 {
   if (_mode == CacheMode::kNone) {
@@ -312,16 +320,17 @@ const ClockPinValues& ClockPinValuesQuery::values(const std::string& pin, std::s
 
 double TimingStateQuery::clockPathBound(const std::string& pin_name, std::string_view clock_name, TransType transition, std::optional<TransType> source) const
 {
+  const ClockId clock_id = clockIdOf(_database, clock_name);
   double bound = 0.;
   // Equal arrival at a leaf does not imply equal arrivals on its common prefix.
   // Inspect both selected early/late traces; flat ideal clocks keep one tag.
   for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
-    const auto* point = clockPoint(_database, pin_name, clock_name);
+    const auto* point = clockPoint(_database, pin_name, clock_id);
     auto edge = transition;
     auto origin = source;
     std::set<const TimingPoint*> visited;
     while (point && visited.insert(point).second) {
-      const auto* clock = point->find_clock_state(clock_name);
+      const auto* clock = point->find_clock_state(clock_id);
       const auto* state = clock ? clock->waveform(origin) : nullptr;
       if (!state)
         break;
@@ -329,18 +338,17 @@ double TimingStateQuery::clockPathBound(const std::string& pin_name, std::string
       const auto late = state->arrival(AnalysisType::kMax, edge);
       if (early && late && std::isfinite(*early) && std::isfinite(*late) && *early != *late)
         bound = std::max(bound, std::abs(*late - *early));
-      const auto predecessors = state->predecessor_vertex_map.find(mode);
-      if (predecessors == state->predecessor_vertex_map.end() || !predecessors->second.contains(edge))
+      const auto predecessor = state->predecessor_vertex_map.get(mode, edge);
+      if (!predecessor)
         break;
-      const auto vertex = predecessors->second.at(edge);
+      const auto vertex = *predecessor;
       if (vertex < 0 || static_cast<std::size_t>(vertex) >= _database.graph().vertices().size())
         break;
       point = &_database.graph().vertices()[vertex].get_timing_point();
       if (origin)
         origin = state->predecessorSource(mode, edge, *origin);
-      const auto edges = state->predecessor_trans_type_map.find(mode);
-      if (edges != state->predecessor_trans_type_map.end() && edges->second.contains(edge))
-        edge = edges->second.at(edge);
+      if (const auto next_edge = state->predecessor_trans_type_map.get(mode, edge))
+        edge = *next_edge;
     }
   }
   return bound;
@@ -359,20 +367,24 @@ bool TimingStateQuery::canPrunePathStates() const
   if (!sdc.clockPinConstraints().empty() || sdc.get_clock_map().empty() || _database.graph().endpoints().empty())
     return false;
   for (const auto& vertex : _database.graph().vertices())
-    for (const auto& [clock, state] : vertex.get_timing_point().get_clock_state_map())
+    for (const auto& [clock, state] : vertex.get_timing_point().get_clock_state_map()) {
+      bool unique = true;
       for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
         // Keep the local launch transition unique within a source-edge tag.
-        for (const auto& [source, wave] : state.waveforms)
+        state.eachWaveform([&](TransType source, const ClockWaveform& wave) {
           if (wave.arrival(mode, TransType::kRise) && wave.arrival(mode, TransType::kFall))
-            return false;
+            unique = false;
+        });
         for (auto edge : {TransType::kRise, TransType::kFall}) {
           int count = 0;
-          for (const auto& [source, wave] : state.waveforms)
-            count += wave.arrival(mode, edge).has_value();
+          state.eachWaveform([&](TransType source, const ClockWaveform& wave) { count += wave.arrival(mode, edge).has_value(); });
           if (count > 1)
-            return false;
+            unique = false;
         }
       }
+      if (!unique)
+        return false;
+    }
   return true;
 }
 
@@ -382,10 +394,10 @@ TimingStateQuery::PathStateGroup TimingStateQuery::pathStateGroup(const TimingPa
   const auto start_class = exceptions ? state.exceptionStartClass() : 0;
   // Direct/synthetic callers without forward classification remain separate.
   return {state.group(), progress ? *progress : state.get_exception_state_list(), start_class,
-          exceptions && start_class == 0 ? state.get_start_point() : std::string{}};
+          exceptions && start_class == 0 ? state.get_start_point() : StartPointId{}};
 }
 
-bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining_arcs, const std::vector<std::string_view>* allowed_clocks) const
+bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining_arcs, const std::vector<LaunchClockId>* allowed_clocks) const
 {
   bool pruned = false;
   auto allowed = [&](const TimingPathState& state) {
@@ -395,9 +407,9 @@ bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining
   // behind the witness at every later merge. Cover the entire continuation,
   // plus endpoint comparison/rounding, before discarding another launch tag.
   const double margin = (static_cast<double>(remaining_arcs) + 4.) * kTimingTolerance;
-  for (auto& [mode, sources] : point.get_path_state_map())
-    for (auto& [source, edges] : sources)
-      for (auto& [edge, states] : edges) {
+  for (auto& [combo, states] : point.get_path_state_map()) {
+      const auto mode = pathStateComboMode(combo);
+      {
         // A directly seeded state can carry a different slew. Its endpoint
         // check need not match the physical slew of arriving states.
         if (!states.empty()
@@ -428,6 +440,7 @@ bool TimingStateQuery::prunePathStates(TimingPoint& point, std::size_t remaining
             ++it;
         }
       }
+    }
   return pruned;
 }
 
@@ -439,12 +452,8 @@ double TimingStateQuery::roundTime(double time)
 std::vector<TransType> TimingStateQuery::getOutputTransTypeList(Arc& arc, AnalysisType analysis_type, TransType input_trans_type)
 {
   std::vector<TransType> output_trans_type_list;
-  if (arc.get_input_output_delay_map().count(analysis_type) == 0 || arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) == 0) {
-    return output_trans_type_list;
-  }
-  for (std::pair<const TransType, double>& delay_pair : arc.get_input_output_delay_map()[analysis_type][input_trans_type]) {
-    output_trans_type_list.push_back(delay_pair.first);
-  }
+  arc.get_input_output_delay_map().eachOutput(analysis_type, input_trans_type,
+                                              [&output_trans_type_list](TransType out, double) { output_trans_type_list.push_back(out); });
   return output_trans_type_list;
 }
 
@@ -452,8 +461,8 @@ double TimingStateQuery::getArcDelay(Arc& arc, AnalysisType analysis_type, Trans
 {
   if (arc.rcFailed(analysis_type, input_trans_type))
     return 0.;
-  if (arc.get_trans_delay_map().count(analysis_type) > 0 && arc.get_trans_delay_map()[analysis_type].count(input_trans_type) > 0) {
-    return arc.get_trans_delay_map()[analysis_type][input_trans_type];
+  if (const auto delay = arc.get_trans_delay_map().get(analysis_type, input_trans_type)) {
+    return *delay;
   }
   if (analysis_type == AnalysisType::kMin) {
     return arc.get_delay_min();
@@ -465,13 +474,11 @@ double TimingStateQuery::getArcDelay(Arc& arc, AnalysisType analysis_type, Trans
 {
   if (arc.rcFailed(analysis_type, output_trans_type))
     return 0.;
-  if (arc.get_graph_delay_map().count(analysis_type) > 0 && arc.get_graph_delay_map()[analysis_type].count(input_trans_type) > 0
-      && arc.get_graph_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0) {
-    return arc.get_graph_delay_map()[analysis_type][input_trans_type][output_trans_type];
+  if (const auto delay = arc.get_graph_delay_map().get(analysis_type, input_trans_type, output_trans_type)) {
+    return *delay;
   }
-  if (arc.get_input_output_delay_map().count(analysis_type) > 0 && arc.get_input_output_delay_map()[analysis_type].count(input_trans_type) > 0
-      && arc.get_input_output_delay_map()[analysis_type][input_trans_type].count(output_trans_type) > 0) {
-    return arc.get_input_output_delay_map()[analysis_type][input_trans_type][output_trans_type];
+  if (const auto delay = arc.get_input_output_delay_map().get(analysis_type, input_trans_type, output_trans_type)) {
+    return *delay;
   }
   return getArcDelay(arc, analysis_type, input_trans_type);
 }
@@ -489,16 +496,16 @@ DerateContext TimingStateQuery::derateContext(const std::string& pin_name) const
   const auto pin = network.pins().find(pin_name);
   if (pin == network.pins().end())
     return context;
-  context.net = pin->second.get_net_name();
-  if (pin->second.get_is_port())
+  context.net = pin->get_net_name();
+  if (pin->get_is_port())
     return context;
-  context.instance = pin->second.get_instance_name();
+  context.instance = pin->get_instance_name();
   const auto instance = network.instances().find(std::string(context.instance));
   if (instance != network.instances().end()) {
     const auto& cells = _database.liberty().get_cell_map();
-    const auto cell = cells.find(instance->second.get_cell_name());
+    const auto cell = cells.find(instance->get_cell_name());
     if (cell != cells.end())
-      context.lib_cell = cell->second.get_library_name() + "/" + cell->first;
+      context.lib_cell = cell->get_library_name() + "/" + instance->get_cell_name();
   }
   return context;
 }
@@ -535,21 +542,20 @@ bool TimingStateQuery::hasPathState(TimingPoint& timing_point, AnalysisType anal
 
 bool TimingStateQuery::hasPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type)
 {
-  return timing_point.get_path_state_map().count(analysis_type) > 0 && timing_point.get_path_state_map()[analysis_type].count(source_type) > 0
-         && timing_point.get_path_state_map()[analysis_type][source_type].count(trans_type) > 0
-         && !timing_point.get_path_state_map()[analysis_type][source_type][trans_type].empty();
+  const auto combo = timing_point.get_path_state_map().find(pathStateCombo(analysis_type, source_type, trans_type));
+  return combo != timing_point.get_path_state_map().end() && !combo->second.empty();
 }
 
-std::map<std::string, TimingPathState>& TimingStateQuery::getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
+std::map<uint32_t, TimingPathState>& TimingStateQuery::getPathStateMap(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type,
                                                                           TransType trans_type)
 {
-  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type];
+  return timing_point.get_path_state_map()[pathStateCombo(analysis_type, source_type, trans_type)];
 }
 
 TimingPathState& TimingStateQuery::getPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type, TransType trans_type,
-                                                const std::string& path_state_tag)
+                                                uint32_t path_state_tag)
 {
-  return timing_point.get_path_state_map()[analysis_type][source_type][trans_type][path_state_tag];
+  return timing_point.get_path_state_map()[pathStateCombo(analysis_type, source_type, trans_type)][path_state_tag];
 }
 
 TimingPathState* TimingStateQuery::getWorstPathState(TimingPoint& timing_point, AnalysisType analysis_type, PathSourceType source_type)
@@ -574,8 +580,8 @@ TimingPathState* TimingStateQuery::getWorstPathState(TimingPoint& timing_point, 
   }
 
   TimingPathState* best_path_state = nullptr;
-  std::map<std::string, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
-  for (std::pair<const std::string, TimingPathState>& path_state_pair : path_state_map) {
+  std::map<uint32_t, TimingPathState>& path_state_map = getPathStateMap(timing_point, analysis_type, source_type, trans_type);
+  for (auto& path_state_pair : path_state_map) {
     TimingPathState& path_state = path_state_pair.second;
     if (!isFinite(path_state.get_arrival())) {
       continue;
@@ -689,10 +695,11 @@ bool TimingStateQuery::isTimingCheckEndPoint(const std::string& end_point)
 TimingClock* TimingStateQuery::getStartPointClock(const std::string& start_point)
 {
   Database& database = _database;
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.sdc().get_clock_map()) {
-    for (std::string& clock_source : clock_pair.second.get_source_list()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& clock_pair = database.sdc().get_clock_map().get(id);
+    for (std::string& clock_source : clock_pair.get_source_list()) {
       if (clock_source == start_point) {
-        return &clock_pair.second;
+        return &clock_pair;
       }
     }
   }

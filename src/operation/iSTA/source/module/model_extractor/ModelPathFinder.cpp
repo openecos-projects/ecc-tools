@@ -101,8 +101,9 @@ bool ModelPathFinder::isClockPort(std::string& pin_name)
   if (!isPort(pin_name)) {
     return false;
   }
-  for (std::pair<const std::string, TimingClock>& clock_pair : database.sdc().get_clock_map()) {
-    for (std::string& clock_source : clock_pair.second.get_source_list()) {
+  for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+    TimingClock& clock = database.sdc().get_clock_map().get(id);
+    for (std::string& clock_source : clock.get_source_list()) {
       if (clock_source == pin_name) {
         return true;
       }

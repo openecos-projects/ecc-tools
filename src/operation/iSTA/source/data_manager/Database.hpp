@@ -8,6 +8,8 @@
 #include "check/FanoutCheck.hpp"
 #include "common/TimingExecutionStats.hpp"
 #include "graph/Graph.hpp"
+#include "graph/PathTagTable.hpp"
+#include "SymbolTable.h"
 #include "liberty/LibertyLibrary.hpp"
 #include "network/Network.hpp"
 #include "parasitics/Parasitics.hpp"
@@ -45,6 +47,21 @@ class Database
   TimingExecutionStats& timingExecutionStats() { return _timing_execution_stats; }
   const TimingExecutionStats& timingExecutionStats() const { return _timing_execution_stats; }
 
+  // Path-state tag interning; tag ids index the innermost level of every
+  // TimingPoint's path-state map.
+  PathTagTable& pathTags() { return _path_tags; }
+  const PathTagTable& pathTags() const { return _path_tags; }
+
+  // Launch-clock names on TimingPathState, interned. This is deliberately NOT
+  // the SDC clock table: states may carry names of clocks the SDC never
+  // defined, and distinct undefined names must stay distinct.
+  ecc::symbol::SymbolTable& clockNameSymbols() { return _clock_name_symbols; }
+  const ecc::symbol::SymbolTable& clockNameSymbols() const { return _clock_name_symbols; }
+  // TimingPathState start points, interned. Not Network::pins(): constraint
+  // text and fixtures may name start points that never became pins.
+  ecc::symbol::SymbolTable& startPointSymbols() { return _start_point_symbols; }
+  const ecc::symbol::SymbolTable& startPointSymbols() const { return _start_point_symbols; }
+
  private:
   Network _network;
   Graph _graph;
@@ -57,5 +74,8 @@ class Database
   std::vector<ElectricalCheck> _electrical_checks;
   std::vector<ClockCheck> _clock_checks;
   TimingExecutionStats _timing_execution_stats;
+  PathTagTable _path_tags;
+  ecc::symbol::SymbolTable _clock_name_symbols;
+  ecc::symbol::SymbolTable _start_point_symbols;
 };
 }  // namespace ista

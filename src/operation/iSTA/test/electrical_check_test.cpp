@@ -12,7 +12,10 @@
 
 #include "Config.hpp"
 #include "Database.hpp"
+
+#include "clock_id_helper.hpp"
 #include "DelayCalculator.hpp"
+#include "graph/PathTagTable.hpp"
 #include "ElectricalChecker.hpp"
 #include "ElectricalReportWriter.hpp"
 #include "FanoutChecker.hpp"
@@ -200,7 +203,7 @@ void checkInoutCapacitance()
   db.sdc().get_case_analysis_map().erase("src");
   checkMode(0);
   db.sdc().get_clock_map()["ideal"].set_is_propagated(false);
-  db.graph().driverPoint("buf:Y").get_clock_state("ideal").waveforms[TransType::kRise].physical_slew_map[AnalysisType::kMax][TransType::kRise] = .1;
+  db.graph().driverPoint("buf:Y").get_clock_state(clockId(db, "ideal")).waveformSlot(TransType::kRise).physical_slew_map.set(AnalysisType::kMax, TransType::kRise, .1);
   require(ElectricalChecker(db, delay).check().empty(), "ideal clock created inout cap checks");
   db.sdc().get_clock_map().clear();
   // Without a three_state expression the output is unconditionally enabled.
@@ -329,9 +332,12 @@ int main(int argc, char** argv)
   TimingAnalyzer(db, delay).analyze();
   db.sdc().electricalLimits() = ElectricalLimits{};
   auto& input = db.graph().driverPoint("in");
-  input.get_path_state_map()[AnalysisType::kMax][PathSourceType::kInput][TransType::kRise]["core"].set_clock_name("core");
-  input.get_clock_state("core").waveforms[TransType::kRise].physical_slew_map[AnalysisType::kMax][TransType::kRise] = .15;
-  input.get_clock_state("core").summarize();
+  PathTagTable::Key core_key;
+  core_key.clock_name = "core";
+  const uint32_t core_tag = db.pathTags().intern(core_key);
+  input.get_path_state_map()[pathStateCombo(AnalysisType::kMax, PathSourceType::kInput, TransType::kRise)][core_tag].set_clock_name(launchClockId(db, "core"));
+  input.get_clock_state(clockId(db, "core")).waveformSlot(TransType::kRise).physical_slew_map.set(AnalysisType::kMax, TransType::kRise, .15);
+  input.get_clock_state(clockId(db, "core")).summarize();
   db.sdc().electricalLimits().set({ElectricalRule::kTransition, LimitObject::kClock, "core", true, TransType::kRise, .1});
   auto checks = ElectricalChecker(db, delay).check();
   if (checks.size() != 1 || !checks.front().clock_path || std::abs(checks.front().slack() + .05) > 1e-9)

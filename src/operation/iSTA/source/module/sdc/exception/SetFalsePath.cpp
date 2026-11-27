@@ -32,22 +32,22 @@ bool isRegisterOutput(const Database& database, const ExceptionObject& object)
     return false;
   const auto& pins = database.network().pins();
   auto pin = pins.find(object.name);
-  if (pin == pins.end() || pin->second.get_is_port())
+  if (pin == pins.end() || pin->get_is_port())
     return false;
   const auto& constraints = database.sdc().get_port_constraint_map();
   auto constraint = constraints.find(object.name);
   if (constraint != constraints.end() && !constraint->second.get_input_delay_list().empty())
     return false;
   const auto& instances = database.network().instances();
-  auto instance = instances.find(pin->second.get_instance_name());
-  if (instance == instances.end() || !instance->second.get_is_sequential())
+  auto instance = instances.find(pin->get_instance_name());
+  if (instance == instances.end() || !instance->get_is_sequential())
     return false;
   const auto& cells = database.liberty().get_cell_map();
-  auto cell = cells.find(instance->second.get_cell_name());
+  auto cell = cells.find(instance->get_cell_name());
   if (cell == cells.end())
     return false;
-  const auto& ports = cell->second.get_port_map();
-  auto port = ports.find(pin->second.get_pin_name());
+  const auto& ports = cell->get_port_map();
+  auto port = ports.find(pin->get_pin_name());
   return port != ports.end() && port->second.get_is_output() && !port->second.get_is_input();
 }
 

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MulanPSL-2.0
 #include "ClockTreeGraphExporter.hpp"
 
+#include "graph/TimingStateQuery.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -75,21 +77,21 @@ const TimingPoint* timingPointFor(const Graph& graph, const Pin& pin)
   if (pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout) {
     const auto driver = graph.driverPoints().find(pin.get_full_name());
     if (driver != graph.driverPoints().end()) {
-      return &driver->second;
+      return driver;
     }
   }
   const auto point = graph.points().find(pin.get_full_name());
   if (point != graph.points().end()) {
-    return &point->second;
+    return point;
   }
   const auto driver = graph.driverPoints().find(pin.get_full_name());
-  return driver == graph.driverPoints().end() ? nullptr : &driver->second;
+  return driver == graph.driverPoints().end() ? nullptr : driver;
 }
 
-const ClockState* clockStateFor(const Graph& graph, const Pin& pin, const std::string& clock)
+const ClockState* clockStateFor(const Database& database, const Pin& pin, const std::string& clock)
 {
-  const TimingPoint* point = timingPointFor(graph, pin);
-  return point == nullptr ? nullptr : point->find_clock_state(clock);
+  const TimingPoint* point = timingPointFor(database.graph(), pin);
+  return point == nullptr ? nullptr : point->find_clock_state(clockIdOf(database, clock));
 }
 
 bool isInverter(const std::string& master)
@@ -110,7 +112,7 @@ bool isClockGate(const Database& database, const Instance* instance)
     return true;
   }
   const auto cell = database.liberty().get_cell_map().find(instance == nullptr ? std::string{} : instance->get_cell_name());
-  return cell != database.liberty().get_cell_map().end() && cell->second.get_is_clock_gating();
+  return cell != database.liberty().get_cell_map().end() && cell->get_is_clock_gating();
 }
 
 std::string nodeKind(const Database& database, const Pin& pin, bool root, bool sink)
@@ -129,9 +131,9 @@ std::string nodeKind(const Database& database, const Pin& pin, bool root, bool s
   if (instance == database.network().instances().end()) {
     return "other_boundary";
   }
-  const std::string& master = instance->second.get_cell_name();
+  const std::string& master = instance->get_cell_name();
   const bool output = pin.get_direction() == PinDirection::kOutput || pin.get_direction() == PinDirection::kInout;
-  if (isClockGate(database, &instance->second)) {
+  if (isClockGate(database, instance)) {
     return output ? "icg_output" : "icg_input";
   }
   if (isInverter(master)) {
@@ -141,7 +143,7 @@ std::string nodeKind(const Database& database, const Pin& pin, bool root, bool s
     return output ? "buffer_output" : "buffer_input";
   }
   const auto cell = database.liberty().get_cell_map().find(master);
-  if (cell != database.liberty().get_cell_map().end() && cell->second.get_is_macro()) {
+  if (cell != database.liberty().get_cell_map().end() && cell->get_is_macro()) {
     return "macro_boundary";
   }
   return "other_boundary";
@@ -153,8 +155,8 @@ std::string cellRole(const Database& database, const Pin& pin)
   if (instance == database.network().instances().end()) {
     return {};
   }
-  const std::string& master = instance->second.get_cell_name();
-  if (isClockGate(database, &instance->second)) {
+  const std::string& master = instance->get_cell_name();
+  if (isClockGate(database, instance)) {
     return "clock_gate";
   }
   if (isInverter(master)) {
@@ -164,7 +166,7 @@ std::string cellRole(const Database& database, const Pin& pin)
     return "buffer";
   }
   const auto cell = database.liberty().get_cell_map().find(master);
-  return cell != database.liberty().get_cell_map().end() && cell->second.get_is_macro() ? "macro" : "other";
+  return cell != database.liberty().get_cell_map().end() && cell->get_is_macro() ? "macro" : "other";
 }
 
 bool isNegativeUnate(const Database& database, const Arc& arc)
@@ -187,21 +189,21 @@ std::string netNameForArc(const Network& network, const Arc& arc)
     return {};
   }
   const auto sink = network.pins().find(arc.get_sink_pin());
-  if (sink != network.pins().end() && !sink->second.get_net_name().empty()) {
-    return sink->second.get_net_name();
+  if (sink != network.pins().end() && !sink->get_net_name().empty()) {
+    return sink->get_net_name();
   }
   const auto source = network.pins().find(arc.get_source_pin());
-  return source == network.pins().end() ? std::string{} : source->second.get_net_name();
+  return source == network.pins().end() ? std::string{} : source->get_net_name();
 }
 
 std::string cellMasterForArc(const Database& database, const Arc& arc)
 {
   const auto source = database.network().pins().find(arc.get_source_pin());
-  if (source == database.network().pins().end() || source->second.get_instance_name().empty()) {
+  if (source == database.network().pins().end() || source->get_instance_name().empty()) {
     return {};
   }
-  const auto instance = database.network().instances().find(source->second.get_instance_name());
-  return instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
+  const auto instance = database.network().instances().find(source->get_instance_name());
+  return instance == database.network().instances().end() ? std::string{} : instance->get_cell_name();
 }
 
 std::optional<double> finiteNs(const std::optional<double>& value, TimingTimeUnit unit)
@@ -236,8 +238,8 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
     ClockTreeClockData exported;
     exported.name = std::string(source.get_clock_name());
     const auto definition = database.sdc().get_clock_map().find(exported.name);
-    if (definition != database.sdc().get_clock_map().end() && definition->second.get_is_generated()) {
-      exported.master_clock_name = definition->second.get_master_clock_name();
+    if (definition != database.sdc().get_clock_map().end() && definition->get_is_generated()) {
+      exported.master_clock_name = definition->get_master_clock_name();
     }
 
     std::vector<std::string> point_names;
@@ -314,7 +316,7 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
     states.reserve(point_names.size());
     for (const std::string& name : point_names) {
       const Pin& pin = database.network().pins().at(name);
-      const ClockState* state = clockStateFor(database.graph(), pin, exported.name);
+      const ClockState* state = clockStateFor(database, pin, exported.name);
       states.push_back(state);
       const auto arrival
           = state == nullptr
@@ -340,7 +342,7 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
       node.name = nodeName(pin);
       node.instance_name = pin.get_instance_name();
       node.pin_name = pin.get_pin_name();
-      node.master = instance == database.network().instances().end() ? std::string{} : instance->second.get_cell_name();
+      node.master = instance == database.network().instances().end() ? std::string{} : instance->get_cell_name();
       const bool root = root_pins.contains(pin_key);
       const bool sink = sink_pins.contains(pin_key);
       node.kind = nodeKind(database, pin, root, sink);
@@ -364,14 +366,8 @@ ClockTreeGraphData exportClockTreeGraph(const Database& database)
             timing.analysis = "late";
             timing.source_edge = edgeName(kSourceEdge);
             timing.local_edge = edgeName(local);
-            const auto predecessor = waveform->physical_predecessor_map.find(kAnalysis);
-            if (predecessor != waveform->physical_predecessor_map.end()) {
-              const auto name = predecessor->second.find(local);
-              if (name != predecessor->second.end()) {
-                const auto pin = database.network().pins().find(name->second);
-                timing.predecessor = pin == database.network().pins().end() ? name->second : nodeName(pin->second);
-              }
-            }
+            if (const auto pin_id = waveform->physical_predecessor_map.get(kAnalysis, local))
+              timing.predecessor = nodeName(database.network().pins().get(*pin_id));
             if (arrival.has_value()) {
               timing.arrival_ns = std::max(0.0, *arrival - root_arrival);
             }

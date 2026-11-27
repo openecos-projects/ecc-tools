@@ -38,14 +38,10 @@ bool hasCaptureClock(Database& database, const std::string& pin_name, TransType 
   if (point == database.graph().points().end())
     return false;
   const auto& clocks = database.sdc().get_clock_map();
-  for (const auto& [name, state] : point->second.get_clock_state_map()) {
+  for (const auto& [name, state] : point->get_clock_state_map()) {
     if (state.is_source_path_only || !clocks.contains(name))
       continue;
-    const auto analysis = state.arrival_map.find(AnalysisType::kMin);
-    if (analysis == state.arrival_map.end())
-      continue;
-    const auto arrival = analysis->second.find(transition);
-    if (arrival != analysis->second.end() && std::isfinite(arrival->second))
+    if (const auto arrival = state.arrival_map.get(AnalysisType::kMin, transition); arrival && std::isfinite(*arrival))
       return true;
   }
   return false;

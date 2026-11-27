@@ -49,7 +49,7 @@ LibertyCell* ReceiverThresholdCalculator::sourceCell(std::string& source, Analys
       if (driving) {
         auto cell = _database.liberty().get_cell_map().find(driving->get_cell_name());
         if (cell != _database.liberty().get_cell_map().end())
-          from = &cell->second;
+          from = cell;
       }
     }
   }
@@ -61,7 +61,7 @@ void ReceiverThresholdCalculator::adjustSignalLevel(std::string& source, std::st
   auto* from = sourceCell(source, analysis, edge);
   auto* to = getThresholdTimingCell(load);
   const auto source_pin = _database.network().pins().find(source);
-  if (!to || !std::isfinite(slew) || (!from && (source_pin == _database.network().pins().end() || !source_pin->second.get_is_port())))
+  if (!to || !std::isfinite(slew) || (!from && (source_pin == _database.network().pins().end() || !source_pin->get_is_port())))
     return;
   const bool fall = edge == TransType::kFall;
   const auto thresholds = [fall](const auto& owner) -> WaveformThresholds {

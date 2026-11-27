@@ -68,7 +68,9 @@ std::uint64_t structureSignature(const Database& database)
 
   mixString(hash, network.name());
   mixValue(hash, network.pins().size());
-  for (const auto& [name, pin] : network.pins()) {
+  for (const auto& id : network.pins().sortedIds()) {
+    const std::string name(network.pins().nameOf(id));
+    const Pin& pin = network.pins().get(id);
     mixString(hash, name);
     mixValue(hash, static_cast<std::uint8_t>(pin.get_direction()));
     mixString(hash, pin.get_instance_name());
@@ -77,7 +79,9 @@ std::uint64_t structureSignature(const Database& database)
   }
 
   mixValue(hash, network.instances().size());
-  for (const auto& [name, instance] : network.instances()) {
+  for (const auto& id : network.instances().sortedIds()) {
+    const std::string name(network.instances().nameOf(id));
+    const Instance& instance = network.instances().get(id);
     mixString(hash, name);
     mixString(hash, instance.get_cell_name());
     mixValue(hash, instance.get_pin_name_list().size());
@@ -91,7 +95,9 @@ std::uint64_t structureSignature(const Database& database)
   }
 
   mixValue(hash, network.nets().size());
-  for (const auto& [name, net] : network.nets()) {
+  for (const auto& id : network.nets().sortedIds()) {
+    const std::string name(network.nets().nameOf(id));
+    const Net& net = network.nets().get(id);
     mixString(hash, name);
     mixString(hash, net.get_driver_pin());
     mixValue(hash, net.get_driver_pin_list().size());

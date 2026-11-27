@@ -28,7 +28,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
-#include <sstream>
 #include <string>
 #include <tuple>
 #include <unordered_set>
@@ -95,18 +94,15 @@ bool loopedSmallNetEnabled()
 }
 }  // namespace
 
-std::string RcModelBuilder::getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type,
-                                                    TransType trans_type)
+RcModelBuilder::DmpModelKey RcModelBuilder::getParasiticDmpModelKey(ParasiticNet& parasitic_net, std::string& source_node_name,
+                                                                    AnalysisType analysis_type, TransType trans_type)
 {
-  std::stringstream key_stream;
-  key_stream << parasitic_net.get_net_name() << "|" << source_node_name << "|" << static_cast<int32_t>(analysis_type) << "|"
-             << static_cast<int32_t>(trans_type);
-  return key_stream.str();
+  return {parasitic_net.get_net_name(), source_node_name, analysis_type, trans_type};
 }
 
 ParasiticDmpModel& RcModelBuilder::dmpModel(ParasiticNet& parasitic_net, std::string& source_node_name, AnalysisType analysis_type, TransType trans_type)
 {
-  std::string dmp_model_key = getParasiticDmpModelKey(parasitic_net, source_node_name, analysis_type, trans_type);
+  const DmpModelKey dmp_model_key = getParasiticDmpModelKey(parasitic_net, source_node_name, analysis_type, trans_type);
   if (_parasitic_dmp_model_cache.count(dmp_model_key) == 0) {
     _parasitic_dmp_model_cache[dmp_model_key] = buildParasiticDmpModel(parasitic_net, source_node_name, analysis_type, trans_type);
   }
@@ -319,7 +315,7 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
       double sum_c = 0.;
       for (double cv : capacitance_list) sum_c += cv;
       double net_c = 0.;
-      for (auto& kv : parasitic_net.get_node_map()) net_c += kv.second.get_capacitance();
+      for (const auto& nid : parasitic_net.get_node_map().sortedIds()) net_c += parasitic_net.get_node_map().get(nid).get_capacitance();
       if (FILE* fp = std::fopen(mc, "a"); fp != nullptr) {
         std::fprintf(fp, "MC,%s,%s,%zu,%zu,%.12g,%.12g,%zu\n", parasitic_net.get_net_name().c_str(),
                      source_node_name.c_str(), node_name_list.size(),
@@ -373,18 +369,20 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
   if (!tree_like && !loopedSmallNetEnabled())
     return arnoldi_model;
   const auto net = _database.network().nets().find(parasitic_net.get_net_name());
-  if (!arnoldi_model.get_is_valid() || net == _database.network().nets().end() || net->second.get_driver_pin_list().size() != 1
-      || net->second.get_driver_pin_list().front() != _rc.pinName(source_node_name))
+  if (!arnoldi_model.get_is_valid() || net == _database.network().nets().end() || net->get_driver_pin_list().size() != 1
+      || net->get_driver_pin_list().front() != _rc.pinName(source_node_name))
     return arnoldi_model;
-  const auto& loads = net->second.get_load_pin_list();
+  const auto& loads = net->get_load_pin_list();
   if (loads.empty() || loads.size() + 1 != arnoldi_model.get_term_pin_list().size())
     return arnoldi_model;
   for (const auto& pin : loads)
     if (pin == _rc.pinName(source_node_name) || !arnoldi_model.get_term_index_map().contains(pin))
       return arnoldi_model;
   double wire_capacitance = 0.;
-  for (const auto& [name, node] : parasitic_net.get_node_map())
+  for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+    const ParasiticNode& node = parasitic_net.get_node_map().get(nid);
     wire_capacitance += node.get_capacitance();
+  }
   const double resistance = _rc.totalResistance(parasitic_net) * 1e-3;
   // The driver resistance can be folded into the network with a floor tied to
   // the net resistance. The per-sink merge computes
@@ -456,7 +454,7 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
     if (balanced_tree) {
       const auto& sim = _database.graph().simValues();
       for (bool as_driver : {true, false}) {
-        const auto logic = sim.value(net->second.get_driver_pin_list().front(), as_driver);
+        const auto logic = sim.value(net->get_driver_pin_list().front(), as_driver);
         if (logic.has_value()
             && (*logic == TimingCaseValue::kZero || *logic == TimingCaseValue::kOne || *logic == TimingCaseValue::kStatic))
           constant_driver = true;
@@ -506,9 +504,12 @@ ParasiticArnoldiModel RcModelBuilder::buildParasiticArnoldiModel(ParasiticNet& p
   // or multi-driver network with this approximation.
   if (std::isfinite(resistance) && resistance > 0. && constants[0] >= 0. && constants[1] >= 0. && std::max(constants[0], constants[1]) < smallNetCutoff()) {
     const std::unordered_set<std::string> connected(node_name_list.begin(), node_name_list.end());
-    for (const auto& [name, node] : parasitic_net.get_node_map())
+    for (const auto& nid : parasitic_net.get_node_map().sortedIds()) {
+      const ParasiticNode& node = parasitic_net.get_node_map().get(nid);
+      const std::string name(parasitic_net.get_node_map().nameOf(nid));
       if (!connected.contains(name) || !std::isfinite(node.get_capacitance()) || node.get_capacitance() < 0.)
         return arnoldi_model;
+    }
     for (auto& resistor : parasitic_net.get_resistor_list())
       if (!connected.contains(resistor.get_source_node()) || !connected.contains(resistor.get_sink_node()) || !std::isfinite(resistor.get_resistance())
           || resistor.get_resistance() < 0.)

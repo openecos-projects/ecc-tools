@@ -37,6 +37,8 @@
 #include <string>
 #include <vector>
 
+#include "database/symbol/NamedTable.h"
+
 #include "../../../basic/geometry/IdbGeometry.h"
 #include "../IdbEnum.h"
 #include "../db_property/IdbMacroProperty.h"
@@ -142,6 +144,9 @@ class IdbCellMaster
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+// Domain tag for the iDB cell-master name space.
+struct IdbCellMasterTag;
+
 class IdbCellMasterList
 {
  public:
@@ -165,7 +170,7 @@ class IdbCellMasterList
 
  private:
   uint32_t _number;
-  std::map<string, IdbCellMaster*> _master_map;
+  ecc::symbol::NamedTable<IdbCellMaster*, IdbCellMasterTag> _master_map;
   vector<IdbCellMaster*> _master_List;
 };
 }  // namespace idb

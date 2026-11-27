@@ -73,8 +73,8 @@ static void verify(const char* path)
     if (arc.get_sink_pin() != "u:Q") continue;
     auto& family = *db.liberty().findCellArc(*arc.libertyArcId());
     for (auto& variant : family.get_timing_arc_list())
-      if (!variant.isRetaining()) arc.get_timing_arc_delay_map().erase(variant.get_arc_idx());
-    arc.get_graph_delay_map()[AnalysisType::kMin][ista::TransType::kRise][ista::TransType::kRise] = .5;
+      if (!variant.isRetaining()) arc.eraseTimingArcDelay(variant.get_arc_idx());
+    arc.get_graph_delay_map().set(AnalysisType::kMin, ista::TransType::kRise, ista::TransType::kRise, .5);
     auto values = SdfValueExtractor(db).graphCellArcDelays(arc);
     require(values.size() == 1 && values.begin()->first.retaining, "uncomputed normal reused a retain aggregate");
   }

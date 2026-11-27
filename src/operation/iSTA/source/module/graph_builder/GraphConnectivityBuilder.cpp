@@ -43,15 +43,17 @@ void GraphConnectivityBuilder::build()
 void GraphConnectivityBuilder::buildTimingPointList()
 {
   Database& database = _database;
-  for (std::pair<const std::string, Pin>& pin_pair : database.network().pins()) {
-    database.graph().points()[pin_pair.first] = TimingPoint();
+  for (const auto& id : database.network().pins().sortedIds()) {
+    database.graph().points()[std::string(database.network().pins().nameOf(id))] = TimingPoint();
   }
 }
 
 void GraphConnectivityBuilder::buildCellArcs()
 {
   Database& database = _database;
-  for (auto& [instance_name, instance] : database.network().instances()) {
+  for (const auto& instance_id : database.network().instances().sortedIds()) {
+    const std::string instance_name(database.network().instances().nameOf(instance_id));
+    Instance& instance = database.network().instances().get(instance_id);
     if (buildLibraryCellArcs(instance)) {
       continue;
     }
@@ -74,7 +76,7 @@ void GraphConnectivityBuilder::buildCellArcs()
 bool GraphConnectivityBuilder::buildLibraryCellArcs(Instance& instance)
 {
   Database& database = _database;
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(instance.get_cell_name()) == 0) {
     return false;
   }
@@ -183,8 +185,8 @@ void GraphConnectivityBuilder::rebuildCellArcListByPinDirection()
 void GraphConnectivityBuilder::buildNetDriverLoadList()
 {
   Database& database = _database;
-  for (std::pair<const std::string, Net>& net_pair : database.network().nets()) {
-    makeNetDriverLoad(net_pair.second);
+  for (const auto& id : database.network().nets().sortedIds()) {
+    makeNetDriverLoad(database.network().nets().get(id));
   }
 }
 
@@ -230,7 +232,9 @@ bool GraphConnectivityBuilder::isDriverPin(Pin& pin)
 void GraphConnectivityBuilder::buildNetArcs()
 {
   Database& database = _database;
-  for (auto& [net_name, net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const std::string net_name(database.network().nets().nameOf(id));
+    Net& net = database.network().nets().get(id);
     for (std::string& driver_pin : net.get_driver_pin_list()) {
       for (std::string& load_pin : net.get_load_pin_list()) {
         if (load_pin != driver_pin) {
@@ -246,12 +250,16 @@ void GraphConnectivityBuilder::buildGraphVertexList()
   Database& database = _database;
   database.graph().vertices().clear();
   database.graph().driverPoints().clear();
-  for (auto& [pin_name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     int32_t idx = addGraphVertex(pin_name, isDriverPin(pin), database.graph().points()[pin_name]);
     pin.set_load_vertex_idx(idx);
     pin.set_driver_vertex_idx(idx);
   }
-  for (auto& [pin_name, pin] : database.network().pins()) {
+  for (const auto& id : database.network().pins().sortedIds()) {
+    const std::string pin_name(database.network().pins().nameOf(id));
+    Pin& pin = database.network().pins().get(id);
     if (pin.get_direction() == PinDirection::kInout) {
       database.graph().vertices()[pin.get_load_vertex_idx()].set_is_driver(false);
       pin.set_driver_vertex_idx(addGraphVertex(pin_name, true, database.graph().driverPoints()[pin_name]));
@@ -310,7 +318,7 @@ bool GraphConnectivityBuilder::shouldDisableNetArc(const std::string& source_pin
   }
   Instance& source_instance = database.network().instances()[source_pin_inst.get_instance_name()];
   Instance& sink_instance = database.network().instances()[sink_pin_inst.get_instance_name()];
-  std::map<std::string, LibertyCell>& timing_cell_map = database.liberty().get_cell_map();
+  auto& timing_cell_map = database.liberty().get_cell_map();
   if (timing_cell_map.count(source_instance.get_cell_name()) == 0) {
     return false;
   }

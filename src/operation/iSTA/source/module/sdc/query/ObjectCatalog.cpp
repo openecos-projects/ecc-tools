@@ -96,9 +96,11 @@ std::map<std::string, std::vector<std::string>> cellPaths(const Network& network
     path.push_back(parent.empty() ? name : name.substr(parent.size() + 1));
   }
   // Networks supplied without an elaboration plan have only textual names.
-  for (const auto& [name, instance] : network.instances())
+  for (const auto& id : network.instances().sortedIds()) {
+    const std::string name(network.instances().nameOf(id));
     if (!paths.contains(name))
       paths[name] = splitPath(name);
+  }
   return paths;
 }
 
@@ -123,20 +125,24 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
   LibertyLibrary& library = database.liberty();
   if (type == QueryObjectType::kLibrary || type == QueryObjectType::kAny) {
     std::set<std::string> names(library.get_library_name_list().begin(), library.get_library_name_list().end());
-    for (auto& [cell_name, cell] : library.get_cell_map())
-      names.insert(cell.get_library_name());
+    for (const auto& id : library.get_cell_map().sortedIds())
+      names.insert(library.get_cell_map().get(id).get_library_name());
     for (const std::string& name : names)
       addObjectMatch(matches, name, name, "library");
   }
   if (type == QueryObjectType::kLibCell || type == QueryObjectType::kAny) {
-    for (auto& [cell_name, cell] : library.get_cell_map()) {
+    for (const auto& id : library.get_cell_map().sortedIds()) {
+      const std::string cell_name(library.get_cell_map().nameOf(id));
+      const LibertyCell& cell = library.get_cell_map().get(id);
       const std::string full_name = cell.get_library_name() + "/" + cell_name;
       addObjectMatch(matches, full_name, full_name, "lib_cell",
                      {{"area", std::to_string(cell.get_area())}, {"is_sequential", cell.get_is_sequential() ? "true" : "false"}});
     }
   }
   if (type == QueryObjectType::kLibPin || type == QueryObjectType::kAny) {
-    for (auto& [cell_name, cell] : library.get_cell_map()) {
+    for (const auto& id : library.get_cell_map().sortedIds()) {
+      const std::string cell_name(library.get_cell_map().nameOf(id));
+      const LibertyCell& cell = library.get_cell_map().get(id);
       for (auto& [pin_name, pin] : cell.get_port_map()) {
         const std::string full_name = cell.get_library_name() + "/" + cell_name + "/" + pin_name;
         addObjectMatch(matches, full_name, full_name, "lib_pin",
@@ -150,7 +156,9 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
     }
   }
   if (type == QueryObjectType::kClock || type == QueryObjectType::kAny) {
-    for (auto& [name, clock] : database.sdc().get_clock_map()) {
+    for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+      const std::string name(database.sdc().get_clock_map().nameOf(id));
+      TimingClock& clock = database.sdc().get_clock_map().get(id);
       addObjectMatch(matches, name, name, "clock",
                      {{"period", std::to_string(clock.get_period())},
                       {"is_generated", clock.get_is_generated() ? "true" : "false"},
@@ -158,7 +166,9 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
     }
   }
   if (type == QueryObjectType::kPort || type == QueryObjectType::kPin || type == QueryObjectType::kAny) {
-    for (auto& [name, pin] : database.network().pins()) {
+    for (const auto& id : database.network().pins().sortedIds()) {
+      const std::string name(database.network().pins().nameOf(id));
+      const Pin& pin = database.network().pins().get(id);
       if ((type == QueryObjectType::kPort && !pin.get_is_port()) || (type == QueryObjectType::kPin && pin.get_is_port()))
         continue;
       const std::string display = pin.get_is_port() ? name : pin.get_instance_name() + "/" + pin.get_pin_name();
@@ -167,7 +177,7 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
         attributes["pin_name"] = pin.get_pin_name();
         const auto instance = database.network().instances().find(pin.get_instance_name());
         if (instance != database.network().instances().end())
-          attributes["ref_name"] = instance->second.get_cell_name();
+          attributes["ref_name"] = instance->get_cell_name();
       }
       addObjectMatch(matches, name, display, pin.get_is_port() ? "port" : "pin", std::move(attributes));
     }
@@ -181,7 +191,9 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
   if (type == QueryObjectType::kCell || type == QueryObjectType::kAny) {
     for (const auto& name : database.network().hierarchyCells())
       addObjectMatch(matches, name, name, "cell", {{"is_hierarchical", "true"}, {"is_sequential", "false"}});
-    for (auto& [name, instance] : database.network().instances()) {
+    for (const auto& id : database.network().instances().sortedIds()) {
+      const std::string name(database.network().instances().nameOf(id));
+      const Instance& instance = database.network().instances().get(id);
       addObjectMatch(matches, name, name, "cell",
                      {{"ref_name", instance.get_cell_name()},
                       {"is_hierarchical", "false"},
@@ -193,17 +205,19 @@ std::vector<ObjectMatch> collectObjectMatches(Database& database, QueryObjectTyp
     if (!database.network().netSegments().empty()) {
       for (const auto& [name, segment] : database.network().netSegments()) {
         const auto physical = database.network().nets().find(segment.physical_net);
-        const auto fanout = physical == database.network().nets().end() ? 0 : physical->second.get_load_pin_list().size();
+        const auto fanout = physical == database.network().nets().end() ? 0 : physical->get_load_pin_list().size();
         addObjectMatch(matches, name, name, "net", {{"fanout", std::to_string(fanout)}});
       }
     } else
-      for (auto& [name, net] : database.network().nets()) {
+      for (const auto& id : database.network().nets().sortedIds()) {
+        const std::string name(database.network().nets().nameOf(id));
+        Net& net = database.network().nets().get(id);
         addObjectMatch(matches, name, name, "net", {{"fanout", std::to_string(net.get_load_pin_list().size())}});
         // Flattening can choose an inner segment as the physical net name.
         // Top-level port declarations still name the same connected net in SDC.
         for (const auto& pin_name : net.get_pin_name_list()) {
           const auto pin = database.network().pins().find(pin_name);
-          if (pin != database.network().pins().end() && pin->second.get_is_port() && pin->second.get_net_name() == name && pin_name != name)
+          if (pin != database.network().pins().end() && pin->get_is_port() && pin->get_net_name() == name && pin_name != name)
             matches.back().names.push_back(pin_name);
         }
       }
@@ -250,14 +264,16 @@ QueryObjectType getObjectType(Database& database, const std::string& name)
     return QueryObjectType::kPin;
   const auto pin = database.network().pins().find(name);
   if (pin != database.network().pins().end())
-    return pin->second.get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
+    return pin->get_is_port() ? QueryObjectType::kPort : QueryObjectType::kPin;
   if (database.sdc().get_clock_map().contains(name))
     return QueryObjectType::kClock;
   if (database.network().instances().contains(name) || database.network().hierarchyCells().contains(name))
     return QueryObjectType::kCell;
   if (database.network().hasNet(name))
     return QueryObjectType::kNet;
-  for (auto& [cell_name, cell] : database.liberty().get_cell_map()) {
+  for (const auto& id : database.liberty().get_cell_map().sortedIds()) {
+    const std::string cell_name(database.liberty().get_cell_map().nameOf(id));
+    const LibertyCell& cell = database.liberty().get_cell_map().get(id);
     const std::string lib_cell = cell.get_library_name() + "/" + cell_name;
     if (name == lib_cell)
       return QueryObjectType::kLibCell;
@@ -299,7 +315,9 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       if (target == QueryObjectType::kNet)
         addPinNets(object_name);
       if (target == QueryObjectType::kClock) {
-        for (const auto& [name, clock] : database.sdc().get_clock_map()) {
+        for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+          const std::string name(database.sdc().get_clock_map().nameOf(id));
+          TimingClock& clock = database.sdc().get_clock_map().get(id);
           const auto& sources = clock.get_source_objects();
           if (std::find(sources.begin(), sources.end(), object_name) != sources.end())
             result.insert(name);
@@ -323,15 +341,15 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       Instance& instance = database.network().instances().at(object_name);
       auto cell = database.liberty().get_cell_map().find(instance.get_cell_name());
       if (cell != database.liberty().get_cell_map().end())
-        result.insert(cell->second.get_library_name() + "/" + cell->first);
+        result.insert(cell->get_library_name() + "/" + instance.get_cell_name());
     }
     if (source == QueryObjectType::kPin && target == QueryObjectType::kLibPin) {
       Pin& pin = database.network().pins().at(object_name);
       auto instance = database.network().instances().find(pin.get_instance_name());
       if (instance != database.network().instances().end()) {
-        auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+        auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
         if (cell != database.liberty().get_cell_map().end())
-          result.insert(cell->second.get_library_name() + "/" + cell->first + "/" + pin.get_pin_name());
+          result.insert(cell->get_library_name() + "/" + instance->get_cell_name() + "/" + pin.get_pin_name());
       }
     }
     if (source == QueryObjectType::kLibPin && target == QueryObjectType::kLibCell)
@@ -343,7 +361,7 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       const std::string cell_name = object_name.substr(slash + 1);
       auto cell = database.liberty().get_cell_map().find(cell_name);
       if (cell != database.liberty().get_cell_map().end())
-        for (auto& [pin_name, pin] : cell->second.get_port_map())
+        for (auto& [pin_name, pin] : cell->get_port_map())
           result.insert(object_name + "/" + pin_name);
     }
     if (source == QueryObjectType::kPin || source == QueryObjectType::kPort) {
@@ -384,7 +402,9 @@ std::set<std::string> collectRelatedObjects(Database& database, const std::vecto
       }
     }
     if (target == QueryObjectType::kClock && (source == QueryObjectType::kPin || source == QueryObjectType::kPort)) {
-      for (auto& [clock_name, clock] : database.sdc().get_clock_map()) {
+      for (const auto& id : database.sdc().get_clock_map().sortedIds()) {
+        const std::string clock_name(database.sdc().get_clock_map().nameOf(id));
+        TimingClock& clock = database.sdc().get_clock_map().get(id);
         if (std::find(clock.get_source_list().begin(), clock.get_source_list().end(), object_name) != clock.get_source_list().end())
           result.insert(clock_name);
       }

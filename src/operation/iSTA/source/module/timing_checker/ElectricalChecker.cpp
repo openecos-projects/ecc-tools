@@ -25,17 +25,15 @@ double slewRange(const Library& library, TransType edge)
   const double upper = edge == TransType::kRise ? library.get_slew_upper_threshold_pct_rise() : library.get_slew_upper_threshold_pct_fall();
   return (normalize(upper) - normalize(lower)) / library.get_slew_derate_from_library();
 }
-std::set<std::string> dataClocks(const TimingPoint& point, AnalysisType analysis, TransType edge)
+std::set<std::string> dataClocks(const Database& database, const TimingPoint& point, AnalysisType analysis, TransType edge)
 {
   std::set<std::string> clocks;
-  auto mode = point.get_path_state_map().find(analysis);
-  if (mode != point.get_path_state_map().end())
-    for (const auto& [source, edges] : mode->second) {
-      const auto transition = edges.find(edge);
-      if (transition != edges.end())
-        for (const auto& [tag, state] : transition->second)
-          clocks.insert(state.get_clock_name());
-    }
+  for (const auto& [combo, states] : point.get_path_state_map()) {
+    if (pathStateComboMode(combo) != analysis || pathStateComboTrans(combo) != edge)
+      continue;
+    for (const auto& [tag, state] : states)
+      clocks.insert(std::string(launchClockName(database, state.get_clock_name())));
+  }
   if (clocks.empty())
     clocks.insert("");
   return clocks;
@@ -49,10 +47,10 @@ std::optional<double> ElectricalChecker::limit(ElectricalRule rule, const Pin& p
   std::string lib_pin;
   const auto instance = db.network().instances().find(pin.get_instance_name());
   if (!pin.get_is_port() && instance != db.network().instances().end()) {
-    const auto found = db.liberty().get_cell_map().find(instance->second.get_cell_name());
+    const auto found = db.liberty().get_cell_map().find(instance->get_cell_name());
     if (found != db.liberty().get_cell_map().end()) {
-      cell = &found->second;
-      lib_pin = cell->get_library_name() + "/" + found->first + "/" + pin.get_pin_name();
+      cell = found;
+      lib_pin = cell->get_library_name() + "/" + instance->get_cell_name() + "/" + pin.get_pin_name();
     }
   }
   auto result = db.sdc().electricalLimits().limit(rule, pin.get_full_name(), pin.get_is_port(), lib_pin, clock, clock_path, edge);
@@ -102,14 +100,16 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
     auto& point = vertex.get_timing_point();
     for (const auto& [analysis, edges] : point.get_data_slew_map())
       for (const auto& [edge, slew] : edges)
-        for (const auto& clock : dataClocks(point, analysis, edge))
+        for (const auto& clock : dataClocks(_database, point, analysis, edge))
           record(ElectricalRule::kTransition, pin, clock, false, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, false, edge));
-    for (const auto& [clock, state] : point.get_clock_state_map())
-      for (const auto& [analysis, edges] : state.physical_slew_map)
-        for (const auto& [edge, slew] : edges)
-          record(ElectricalRule::kTransition, pin, clock, true, analysis, edge, slew, limit(ElectricalRule::kTransition, pin, clock, true, edge));
+    for (const auto& [clock, state] : clockStatesInNameOrder(point, db))
+      state->physical_slew_map.each([&](AnalysisType analysis, TransType edge, double slew) {
+        record(ElectricalRule::kTransition, pin, std::string(clock), true, analysis, edge, slew,
+               limit(ElectricalRule::kTransition, pin, std::string(clock), true, edge));
+      });
   }
-  for (const auto& [name, net] : db.network().nets()) {
+  for (const auto& id : db.network().nets().sortedIds()) {
+    const Net& net = db.network().nets().get(id);
     std::set<std::string> drivers(net.get_driver_pin_list().begin(), net.get_driver_pin_list().end());
     if (!net.get_driver_pin().empty())
       drivers.insert(net.get_driver_pin());
@@ -150,10 +150,10 @@ std::vector<ElectricalCheck> ElectricalChecker::check()
             }
           };
           if (point) {
-            for (const auto& clock : dataClocks(*point, analysis, edge))
+            for (const auto& clock : dataClocks(_database, *point, analysis, edge))
               evaluate(clock, false);
-            for (const auto& [clock, state] : point->get_clock_state_map())
-              evaluate(clock, true);
+            for (const auto& [clock, state] : clockStatesInNameOrder(*point, db))
+              evaluate(std::string(clock), true);
           } else {
             evaluate("", false);
           }

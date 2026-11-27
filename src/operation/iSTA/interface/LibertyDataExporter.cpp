@@ -120,7 +120,7 @@ std::optional<std::string> logicSignature(const LibertyCellData& cell, const Lib
   if (cell.is_macro || cell.is_sequential || liberty == library.get_cell_map().end())
     return std::nullopt;
   std::string signature;
-  for (const auto& [name, port] : liberty->second.get_port_map()) {
+  for (const auto& [name, port] : liberty->get_port_map()) {
     if (!port.get_is_output())
       continue;
     if (port.get_function_expression().get_is_empty())
@@ -262,7 +262,9 @@ std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& li
 {
   std::vector<LibertyCellData> cells;
   cells.reserve(library.get_cell_map().size());
-  for (auto& [cell_name, cell] : library.get_cell_map()) {
+  for (const auto& id : library.get_cell_map().sortedIds()) {
+    const std::string cell_name(library.get_cell_map().nameOf(id));
+    LibertyCell& cell = library.get_cell_map().get(id);
     LibertyCellData exported;
     exported.name = cell_name;
     exported.area = cell.get_area();

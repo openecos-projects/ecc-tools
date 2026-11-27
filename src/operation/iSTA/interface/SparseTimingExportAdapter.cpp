@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <set>
 #include <string_view>
@@ -58,16 +59,16 @@ struct EndpointArcHash
 bool isBidirectionalCellPin(Database& database, const std::string& pin_name)
 {
   const auto pin = database.network().pins().find(pin_name);
-  if (pin == database.network().pins().end() || pin->second.get_is_port())
+  if (pin == database.network().pins().end() || pin->get_is_port())
     return false;
-  const auto instance = database.network().instances().find(pin->second.get_instance_name());
+  const auto instance = database.network().instances().find(pin->get_instance_name());
   if (instance == database.network().instances().end())
     return false;
-  const auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+  const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end())
     return false;
-  const auto port = cell->second.get_port_map().find(pin->second.get_pin_name());
-  return port != cell->second.get_port_map().end() && port->second.get_is_input() && port->second.get_is_output();
+  const auto port = cell->get_port_map().find(pin->get_pin_name());
+  return port != cell->get_port_map().end() && port->second.get_is_input() && port->second.get_is_output();
 }
 
 bool isTopLevelInoutNet(Database& database, const std::unordered_set<std::string>& inout_nets, const std::string& pin_name)
@@ -75,7 +76,7 @@ bool isTopLevelInoutNet(Database& database, const std::unordered_set<std::string
   if (inout_nets.empty())
     return false;
   const auto pin = database.network().pins().find(pin_name);
-  return pin != database.network().pins().end() && inout_nets.contains(pin->second.get_net_name());
+  return pin != database.network().pins().end() && inout_nets.contains(pin->get_net_name());
 }
 
 bool sameLaunchTag(const std::vector<std::string>& tags, int32_t lhs, int32_t rhs)
@@ -107,19 +108,19 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
   const auto pin = database.network().pins().find(data_pin);
   if (pin == database.network().pins().end())
     return -1;
-  const auto instance = database.network().instances().find(pin->second.get_instance_name());
+  const auto instance = database.network().instances().find(pin->get_instance_name());
   if (instance == database.network().instances().end())
     return -1;
-  const auto cell = database.liberty().get_cell_map().find(instance->second.get_cell_name());
+  const auto cell = database.liberty().get_cell_map().find(instance->get_cell_name());
   if (cell == database.liberty().get_cell_map().end())
     return -1;
 
   int32_t flat_id = 0;
-  for (const auto& arc : cell->second.get_cell_arc_list())
+  for (const auto& arc : cell->get_cell_arc_list())
     flat_id += static_cast<int32_t>(arc.get_timing_arc_list().size());
   const std::string local_data = localPortName(data_pin);
   const std::string local_clock = localPortName(clock_pin);
-  for (const auto& check : cell->second.get_check_arc_list()) {
+  for (const auto& check : cell->get_check_arc_list()) {
     for (const auto& arc : check.get_timing_arc_list()) {
       if (check.get_check_type() == check_type && check.get_clock_port() == local_clock && check.get_data_port() == local_data
           && check.get_clock_trans_type() == clock_transition && arc.get_arc_idx() == selected_arc_idx)
@@ -130,26 +131,28 @@ int32_t selectedCheckLibraryArcId(Database& database, const std::string& data_pi
   return -1;
 }
 
-std::map<StateKey, PathPair> pathStates(TimingPoint& point, int32_t role, AnalysisType analysis_type)
+std::map<StateKey, PathPair> pathStates(Database& database, TimingPoint& point, int32_t role, AnalysisType analysis_type)
 {
   std::map<StateKey, PathPair> result;
-  auto analysis = point.get_path_state_map().find(analysis_type);
-  if (analysis == point.get_path_state_map().end())
+  auto& state_map = point.get_path_state_map();
+  if (!hasPathStateOfMode(state_map, analysis_type))
     return result;
-  for (auto& [source, transitions] : analysis->second) {
+  forEachPathStateOfMode(state_map, analysis_type, [&](PathSourceType source, TransType transition, std::map<uint32_t, TimingPathState>& paths) {
     if (source == PathSourceType::kNone)
-      continue;
-    for (auto& [transition, paths] : transitions) {
-      if (transition != TransType::kRise && transition != TransType::kFall)
-        continue;
-      const int edge = transition == TransType::kRise ? 0 : 1;
-      for (auto& [tag, path] : paths) {
-        if (std::isfinite(path.get_arrival())) {
-          result[{static_cast<int32_t>(source), path.get_clock_name(), tag, role}][edge] = &path;
-        }
+      return;
+    if (transition != TransType::kRise && transition != TransType::kFall)
+      return;
+    const int edge = transition == TransType::kRise ? 0 : 1;
+    for (auto& [tag, path] : paths) {
+      if (std::isfinite(path.get_arrival())) {
+        // Resolve the interned tag id back to its canonical string here, at
+        // the export boundary, so StateKey ordering (and therefore the
+        // snapshot digest) is unchanged from the string-keyed map era.
+        result[{static_cast<int32_t>(source), std::string(launchClockName(database, path.get_clock_name())),
+                std::string(database.pathTags().view(tag)), role}][edge] = &path;
       }
     }
-  }
+  });
   return result;
 }
 
@@ -208,13 +211,14 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       continue;
     const auto net = database.network().nets().find(pin.net_name);
     if (net != database.network().nets().end()) {
-      const auto& connected = net->second.get_pin_name_list();
+      const auto& connected = net->get_pin_name_list();
       if (std::find(connected.begin(), connected.end(), pin.name) != connected.end())
         inout_nets.insert(pin.net_name);
     }
   }
   DelayCalculator calculator(database, STADM.getConfig());
-  for (auto& [name, net] : database.network().nets()) {
+  for (const auto& id : database.network().nets().sortedIds()) {
+    const Net& net = database.network().nets().get(id);
     if (!pin_ids.contains(net.get_driver_pin()))
       continue;
     auto& cap = view.reference_pin_cap[pin_ids.at(net.get_driver_pin())];
@@ -227,7 +231,8 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   view.clock_reached_pins.resize(view.domains.size(), 0);
   view.clock_reached_sequential_pins.resize(view.domains.size(), 0);
   std::set<std::string> sequential_clock_pins;
-  for (auto& [name, instance] : database.network().instances()) {
+  for (const auto& id : database.network().instances().sortedIds()) {
+    const Instance& instance = database.network().instances().get(id);
     if (instance.get_is_sequential()) {
       ++view.sequential_instances;
       sequential_clock_pins.insert(instance.get_clock_pin_name());
@@ -239,19 +244,22 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
   std::map<std::string, std::map<StateKey, int32_t>> pin_states;
   std::vector<PathPair> paths;
   auto collectStates = [&](auto& point_map, int32_t role) {
-    for (auto& [name, point] : point_map) {
-      for (auto& [clock, clock_state] : point.get_clock_state_map()) {
-        if (domains.contains(clock)) {
-          ++view.clock_reached_pins[domains.at(clock)];
+    for (const auto& id : point_map.sortedIds()) {
+      const std::string name(point_map.nameOf(id));
+      auto& point = point_map.get(id);
+      // Name order here feeds the exported clock_pin_sample ordering.
+      for (auto [clock_name, clock_state] : clockStatesInNameOrder(point, database)) {
+        if (domains.contains(std::string(clock_name))) {
+          ++view.clock_reached_pins[domains.at(std::string(clock_name))];
           if (sequential_clock_pins.contains(name))
-            ++view.clock_reached_sequential_pins[domains.at(clock)];
+            ++view.clock_reached_sequential_pins[domains.at(std::string(clock_name))];
           if (view.clock_pin_sample.size() < 30)
-            view.clock_pin_sample.push_back(clock + ":" + name);
+            view.clock_pin_sample.push_back(std::string(clock_name) + ":" + name);
         }
       }
-      for (auto& [key, pair] : pathStates(point, role, analysis)) {
+      for (auto& [key, pair] : pathStates(database, point, role, analysis)) {
         auto* representative = pair[0] != nullptr ? pair[0] : pair[1];
-        if (!domains.contains(representative->get_clock_name())) {
+        if (!domains.contains(std::string(launchClockName(database, representative->get_clock_name())))) {
           view.unsupported.push_back("unknown launch clock at " + name);
           continue;
         }
@@ -263,8 +271,10 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         state.pin = name;
         state.domain = domains.at(std::get<1>(key));
         state.tag = tag->second;
-        const auto launch_name = matcher.makePathStateTag(representative->get_clock_name(), representative->get_launch_clock_trans_type(), {},
-                                                          representative->get_is_clock_source_path(), representative->crprPathTag(),
+        const auto launch_name = matcher.makePathStateTag(launchClockName(database, representative->get_clock_name()),
+                                                          representative->get_launch_clock_trans_type(), {},
+                                                          representative->get_is_clock_source_path(),
+                                                          pinNameOf(database, representative->crprPinId()),
                                                           representative->get_launch_clock_edge_index());
         const auto [launch, new_launch] = launch_tags.emplace(launch_name, launch_tags.size());
         if (new_launch)
@@ -277,7 +287,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
           if (pair[edge] == nullptr)
             continue;
           state.valid[edge] = true;
-          state.seed[edge] = pair[edge]->get_predecessor().empty();
+          state.seed[edge] = pair[edge]->get_predecessor_arc_idx() == std::numeric_limits<std::size_t>::max();
           state.reference[edge] = pair[edge]->get_arrival() * snapshot.time_unit_ps;
           state.reference[edge + 2] = pair[edge]->get_slew() * snapshot.time_unit_ps;
         }
@@ -288,7 +298,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         // tagged graph from a register clock-to-Q arc.
         const auto pin = database.network().pins().find(name);
         const auto port_constraint = database.sdc().get_port_constraint_map().find(name);
-        if (pin != database.network().pins().end() && pin->second.get_is_port() && port_constraint != database.sdc().get_port_constraint_map().end()
+        if (pin != database.network().pins().end() && pin->get_is_port() && port_constraint != database.sdc().get_port_constraint_map().end()
             && (early ? port_constraint->second.get_has_input_delay_min() : port_constraint->second.get_has_input_delay_max()) && state.source_type != 2) {
           state.seed = state.valid;
         }
@@ -380,7 +390,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       }
       const auto sink_pin = database.network().pins().find(arc.sink_pin);
       const auto sink_constraint = database.sdc().get_port_constraint_map().find(arc.sink_pin);
-      const bool synthetic_output = !cell && sink_pin != database.network().pins().end() && sink_pin->second.get_is_port()
+      const bool synthetic_output = !cell && sink_pin != database.network().pins().end() && sink_pin->get_is_port()
                                     && sink_constraint != database.sdc().get_port_constraint_map().end()
                                     && (early ? sink_constraint->second.get_has_output_delay_min() : sink_constraint->second.get_has_output_delay_max());
       if (!active.contains({arc.source_pin, arc.sink_pin}) && !synthetic_output)
@@ -419,9 +429,15 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
               continue;
             const auto progress = matcher.advanceState(through_index, path->get_exception_state_list(), arc.sink_pin,
                                                        output == 0 ? TransType::kRise : TransType::kFall, cell ? "" : arc.source_pin);
+            PathTagTable::Key sink_tag_key;
+            sink_tag_key.clock_name = launchClockName(database, path->get_clock_name());
+            sink_tag_key.launch_transition = path->get_launch_clock_trans_type();
+            sink_tag_key.exception_state_list = progress;
+            sink_tag_key.clock_source_path = path->get_is_clock_source_path();
+            sink_tag_key.crpr_path = pinNameOf(database, path->crprPinId());
+            sink_tag_key.launch_clock_edge_index = path->get_launch_clock_edge_index();
             StateKey sink_key = key;
-            std::get<2>(sink_key) = matcher.makePathStateTag(path->get_clock_name(), path->get_launch_clock_trans_type(), progress,
-                                                             path->get_is_clock_source_path(), path->crprPathTag(), path->get_launch_clock_edge_index());
+            std::get<2>(sink_key) = std::string(database.pathTags().view(database.pathTags().intern(sink_tag_key)));
             std::get<3>(sink_key) = sink_role;
             auto sink = sinks->second.find(sink_key);
             if (sink == sinks->second.end())
@@ -505,7 +521,7 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
     auto& state = view.states[state_id];
     const auto pin = database.network().pins().find(state.pin);
     const auto constraint = database.sdc().get_port_constraint_map().find(state.pin);
-    if (pin != database.network().pins().end() && pin->second.get_is_port() && state.source_type == 2
+    if (pin != database.network().pins().end() && pin->get_is_port() && state.source_type == 2
         && constraint != database.sdc().get_port_constraint_map().end()
         && (early ? constraint->second.get_has_output_delay_min() : constraint->second.get_has_output_delay_max()) && !net_destinations.contains(state_id)) {
       state.seed = state.valid;
@@ -565,7 +581,8 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         }
       }
 
-      const auto resolved = matcher.resolve(path.get_start_point(), path.get_clock_name(), state.pin, capture, AnalysisType::kMax, path.get_trans_type(),
+      const auto resolved = matcher.resolve(startPointName(database, path.get_start_point()), launchClockName(database, path.get_clock_name()), state.pin,
+                                            capture, AnalysisType::kMax, path.get_trans_type(),
                                             check.capture_transition, path.get_exception_state_list());
       SparseTimingCheck row;
       row.state = state_id;
