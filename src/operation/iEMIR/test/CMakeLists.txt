@@ -49,3 +49,7 @@ if(IEMIR_TEST_PYTHON)
         COMMAND ${IEMIR_TEST_PYTHON} ${IEMIR_TEST}/em_evaluation_command_test.py
                 $<TARGET_FILE:ecc_bin>)
 endif()
+
+add_executable(iemir_supply_current_test ${IEMIR_TEST}/supply_current_test.cpp)
+target_link_libraries(iemir_supply_current_test PRIVATE iemir_ir_analyzer iemir_graph_builder iemir_toolkit gtest)
+add_test(NAME iemir_supply_current_test COMMAND iemir_supply_current_test)

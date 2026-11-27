@@ -3526,14 +3526,16 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     return PlanarCoord(INT32_MIN, INT32_MIN);
   };
 
-  auto detour_corridor = [&](Side side, int32_t width) {
+  auto detour_corridor = [&](Side side, int32_t width, bool layer_change) {
     // Keep the lateral leg just outside the core.  All stripes start at the
     // core boundary, so moving laterally in this corridor cannot cross a
     // stripe of either net.
     const auto& core = database.get_core();
     // Keep one full wire width between the corridor and the core boundary so
     // a detour cannot touch an existing route running along the boundary.
-    const int32_t margin = std::max(2 * width, 4 * grid);
+    // Change layer before reaching the same-layer detour corridor; otherwise
+    // the escape via/stub can land on an already accepted opposite-supply path.
+    const int32_t margin = std::max((layer_change ? 4 : 2) * width, 4 * grid);
     switch (side.value) {
       case Side::kBottom: return core.get_ll_y() - margin;
       case Side::kTop: return core.get_ur_y() + margin;
@@ -3567,12 +3569,10 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     return std::max(separation, configured_bridge_spacing);
   };
 
-  // Normal cells use direct extensions and straight bridges.  A cell whose
-  // outermost rail has no legal access point in the core range uses the
-  // corresponding Manhattan form for every connection.
-  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge,
-                               RouteMode::kManhattanDirectExtension, RouteMode::kManhattanBridge,
-                               RouteMode::kDetourEndOn, RouteMode::kDetourLayerChange}) {
+  // Restrict IO-core access to straight lines. Bend and layer-change detour
+  // candidates stay disabled until their corner/via geometry passes DRC.
+  // A blocked straight path must remain unresolved, not trigger a fallback.
+  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge}) {
     const bool direct = is_direct(mode);
     const bool detour = is_detour(mode);
     for (auto& task : tasks) {
@@ -3582,7 +3582,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       const int32_t port = task.port;
       const Side side = task.side;
       const bool normal_x = side.value == Side::kLeft || side.value == Side::kRight;
-      if ((is_bend(mode) || detour) != task.requires_manhattan) continue;
+      if (!is_bend(mode) && !detour && task.requires_manhattan) continue;
       auto can_add = [&](const std::string& layer, size_t stripe_id) {
         const auto& options = config.pg_io_core_connect;
         if (options.max_routes_per_stripe > 0 && task.routes_per_stripe[stripe_id] >= options.max_routes_per_stripe) return false;
@@ -3890,9 +3890,9 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
       for (const auto& [layer_name, rails] : task.rails) {
         auto found = task.targets->find(layer_name);
         if (found == task.targets->end()) continue;
-        // A detour is only needed when the regular direct/bridge forms failed
-        // to produce any contact on this pin layer.
-        if (detour && task.layers[layer_name].count() > 0) continue;
+        // Preserve successful straight paths. Fallbacks must not add redundant
+        // routes to a layer that already has a legal contact.
+        if ((detour || (is_bend(mode) && !task.requires_manhattan)) && task.layers[layer_name].count() > 0) continue;
         auto targets = found->second;
         const auto& first_pin = rails.front();
         const PlanarCoord center((first_pin.get_ll_x() + first_pin.get_ur_x()) / 2, (first_pin.get_ll_y() + first_pin.get_ur_y()) / 2);
@@ -3922,7 +3922,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
           if (detour && task.layers[layer_name].count() > 0) break;
           if (!can_add(layer_name, target.database_index)) continue;
           const bool perpendicular = normal_x ? target.segment.is_horizontal() : target.segment.is_vertical();
-          if (direct && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
+          if (direct && !detour && (!perpendicular || !config.pg_io_core_connect.allow_direct_extension)) continue;
           if (!config.pg_io_core_connect.allow_bridge && !direct) continue;
           // Bridges are reserved for stripes parallel to the IO edge.  The
           // Manhattan variant changes only the path geometry; it does not
@@ -3984,7 +3984,7 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
                 continue;
               }
               if (detour) {
-                const int32_t corridor = detour_corridor(side, width);
+                const int32_t corridor = detour_corridor(side, width, is_layer_change(mode));
                 if (corridor == INT32_MIN) continue;
                 std::vector<PlanarCoord> points;
                 if (normal_x) {
@@ -4014,8 +4014,10 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
                 // leaves the pin along the normal through io_inner, jogs
                 // laterally, then returns to the normal; the second form's
                 // first normal leg passes through io_inner on its own.
-                const PlanarCoord lateral_after_inner(end.get_x(), io_inner.get_y());
-                const PlanarCoord lateral_after_start(start.get_x(), end.get_y());
+                const PlanarCoord lateral_after_inner = normal_x ? PlanarCoord(io_inner.get_x(), end.get_y())
+                                                                : PlanarCoord(end.get_x(), io_inner.get_y());
+                const PlanarCoord lateral_after_start = normal_x ? PlanarCoord(end.get_x(), start.get_y())
+                                                                : PlanarCoord(start.get_x(), end.get_y());
                 const std::vector<std::vector<PlanarCoord>> candidates = {
                     {start, io_inner, lateral_after_inner, end},
                     {start, lateral_after_start, end},
@@ -4060,11 +4062,9 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         failures.push_back({terminal, "NO_LEGAL_PATH_" + layer});
         complete = false;
       }
-      std::string detail = FPUTIL.getString(terminal, " policy=", task.requires_manhattan ? "manhattan" : "straight",
-                                            " layer=", layer, " rails=", rails.size(), " routes=", stats.count(),
-                                            " stripes=", stats.stripes.size(), " direct=", stats.direct, " bridge=", stats.bridge,
-                                            " bend=", stats.bend, " detour=", stats.detour,
-                                            " candidates=", stats.candidates);
+      std::string detail = FPUTIL.getString(terminal, " policy=straight outside_core_range=", task.requires_manhattan, " layer=", layer,
+                                            " rails=", rails.size(), " routes=", stats.count(), " stripes=", stats.stripes.size(), " direct=", stats.direct,
+                                            " bridge=", stats.bridge, " bend=", stats.bend, " detour=", stats.detour, " candidates=", stats.candidates);
       for (const auto& [reason, count] : stats.rejected) detail += FPUTIL.getString(" ", reason, "=", count);
       layer_details.push_back(std::move(detail));
     }
@@ -4082,21 +4082,19 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     if (task.requires_manhattan) manhattan_instances.insert(task.instance->get_name());
   }
 
-  FPLOG.info(Loc::current(), "IO core PG: ", connected_ports, " connected ports, ", unresolved.size(),
-             " unresolved ports, ", ports_with_any_contact, " ports with any contact (direct=", direct_connections,
-             ", bridge=", bridge_connections, ", bend=", bend_connections, ", detour=", detour_connections,
-             ", layer_change=", layer_change_connections, ", manhattan_cells=", manhattan_instances.size(), ").");
+  FPLOG.info(Loc::current(), "IO core PG: ", connected_ports, " connected ports, ", unresolved.size(), " unresolved ports, ", ports_with_any_contact,
+             " ports with any contact (direct=", direct_connections, ", bridge=", bridge_connections, ", bend=", bend_connections,
+             ", detour=", detour_connections, ", layer_change=", layer_change_connections, ", out_of_core_cells=", manhattan_instances.size(), ").");
   if (!config.pg_temp_directory_path.empty()) {
     std::ofstream report(config.pg_temp_directory_path + "/io_core_connect.rpt");
-    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size()
-           << "\nPorts with any contact: " << ports_with_any_contact << "\nDirect connections: "
-           << direct_connections << "\nBridge connections: " << bridge_connections << "\n"
+    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size() << "\nPorts with any contact: " << ports_with_any_contact
+           << "\nDirect connections: " << direct_connections << "\nBridge connections: " << bridge_connections << "\n"
            << "Manhattan connections: " << bend_connections << "\n"
            << "Detour connections: " << detour_connections << "\n"
            << "Detour layer-change connections: " << layer_change_connections << "\n"
            << "Manhattan direct-extension connections: " << manhattan_direct_connections << "\n"
            << "Manhattan bridge connections: " << manhattan_bridge_connections << "\n"
-           << "Manhattan policy IO cells: " << manhattan_instances.size() << "\n"
+           << "Out-of-core IO cells: " << manhattan_instances.size() << "\n"
            << "Pin cross-section failures: " << pin_cross_section_failures << "\n"
            << "Stripe cross-section failures: " << stripe_cross_section_failures << "\n"
            << "IO inner-boundary failures: " << io_inner_boundary_failures << "\n"

@@ -53,21 +53,21 @@ class ReadLiberty
 {
  public:
   ReadLiberty(LibertyLibrary& liberty, const Network& network) : _liberty(liberty), _network(network) {}
-  void read();
+  void read(const std::vector<std::string>& min_lib_paths = {});
   void readPort(LibertyCell& timing_cell, idb::LibPort* lib_port);
   LogicExpression readLogicExpression(const std::string& expression_string);
 
  private:
   LibertyLibrary& _liberty;
   const Network& _network;
-  void readCells(const std::vector<idb::LibLibrary*>& lib_list);
+  void readCells(const std::vector<idb::LibLibrary*>& lib_list, const std::vector<std::string>& min_lib_paths);
   void checkCellReferences() const;
   void readLibraryInfo(const std::vector<idb::LibLibrary*>& lib_list);
   idb::LibLibrary* findReferenceLibrary(const std::vector<idb::LibLibrary*>& lib_list);
   TimingCapacitiveUnit capacitanceUnit(idb::LibLibrary* lib_library);
   TimingResistanceUnit resistanceUnit(idb::LibLibrary* lib_library);
   TimingTimeUnit timeUnit(idb::LibLibrary* lib_library);
-  void readCell(idb::LibCell* lib_cell);
+  LibertyCell readCell(idb::LibCell* lib_cell);
   void readClockChecks(LibertyCell& cell, idb::LibPort* port);
   void readLogicTerms(LogicExpression& logic_expression, LibertyExpr* liberty_expr);
   LogicOperationType logicOperation(const int32_t liberty_expr_op);

@@ -14,6 +14,7 @@ target_include_directories(iemir_ir_solver PUBLIC ${IEMIR_MODULE}/ir_analyzer)
 
 add_library(iemir_ir_analyzer
     ${IEMIR_MODULE}/ir_analyzer/IRAnalyzer.cpp
+    ${IEMIR_MODULE}/ir_analyzer/SupplyCurrent.cpp
 )
 
 target_link_libraries(iemir_ir_analyzer

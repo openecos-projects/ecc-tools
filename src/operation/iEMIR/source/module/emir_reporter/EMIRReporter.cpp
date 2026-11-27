@@ -172,6 +172,9 @@ void EMIRReporter::outputIRReportFile(const std::string& report_file_path)
 void EMIRReporter::outputIRReportHeader(std::ofstream* ir_report_file)
 {
   (*ir_report_file) << "# iEMIR static IR report\n";
+  if (EMIRDM.getConfig().allow_unmapped_pg_pins) {
+    (*ir_report_file) << "# EXPLORATORY: unmapped PG pins allowed; see supply_coverage.rpt. Not full-chip signoff.\n";
+  }
   (*ir_report_file) << "Design : " << EMIRDM.getDatabase().get_design_name() << "\n\n";
   (*ir_report_file) << "#Report locations (x, y) with worst voltage_drops/ground_bounces\n";
   (*ir_report_file) << "#voltage #ideal_volt   #net      #x_y_location     #layer_name\n";
@@ -392,6 +395,9 @@ void EMIRReporter::outputEMReport(ERModel& er_model)
 void EMIRReporter::outputEMReportHeader(std::ofstream* em_report_file, bool worst_only)
 {
   (*em_report_file) << "# iEMIR static EM/current report\n";
+  if (EMIRDM.getConfig().allow_unmapped_pg_pins) {
+    (*em_report_file) << "# EXPLORATORY: unmapped PG pins allowed; see supply_coverage.rpt. Not full-chip signoff.\n";
+  }
   (*em_report_file) << "Design : " << EMIRDM.getDatabase().get_design_name() << "\n\n";
   (*em_report_file) << "# EM MODE is AVG\n";
   if (worst_only) {

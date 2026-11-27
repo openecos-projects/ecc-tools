@@ -1,5 +1,6 @@
 add_library(ipw_power_analyzer
     ${IPW_MODULE}/power_analyzer/PowerAnalyzer.cpp
+    ${IPW_MODULE}/power_analyzer/SupplyPower.cpp
 )
 
 target_link_libraries(ipw_power_analyzer

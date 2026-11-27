@@ -17,6 +17,7 @@
 #pragma once
 
 #include "PowerActivity.hpp"
+#include "PowerValue.hpp"
 #include "PWHeader.hpp"
 #include "TransType.hpp"
 
@@ -55,6 +56,7 @@ class PAInstanceModel
   bool get_is_port_activity_map_built() const { return _is_port_activity_map_built; }
   const PAInstanceStaticContext* get_static_context() const { return _static_context; }
   double get_clock_pin_internal_power() const { return _clock_pin_internal_power; }
+  std::map<std::string, PowerValue>& get_supply_power_values() { return _supply_power_values; }
   // setter
   void set_static_context(const PAInstanceStaticContext* static_context) { _static_context = static_context; }
   void set_is_port_activity_map_built(const bool is_port_activity_map_built)
@@ -66,6 +68,7 @@ class PAInstanceModel
 
  private:
   std::map<std::string, PowerActivity> _port_activity_map;
+  std::map<std::string, PowerValue> _supply_power_values;
   std::map<TimingPowerArc*, double> _output_timing_power_arc_weight_map;
   std::map<OutputTimingPowerArcGroup, double> _output_timing_power_arc_weight_sum_map;
   std::map<LogicExpression*, PowerActivity> _logic_expression_activity_map;

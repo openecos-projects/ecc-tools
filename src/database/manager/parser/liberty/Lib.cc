@@ -880,6 +880,8 @@ LibPort::LibPort(const char* port_name) : _port_name(port_name)
 
 LibPort::LibPort(LibPort&& other) noexcept
     : _port_name(std::move(other._port_name)),
+      _related_power_pin(std::move(other._related_power_pin)),
+      _related_ground_pin(std::move(other._related_ground_pin)),
       _ower_cell(other._ower_cell),
       _port_type(other._port_type),
       _is_clock_pin(other._is_clock_pin),
@@ -903,6 +905,8 @@ LibPort& LibPort::operator=(LibPort&& rhs) noexcept
 {
   if (this != &rhs) {
     _port_name = std::move(rhs._port_name);
+    _related_power_pin = std::move(rhs._related_power_pin);
+    _related_ground_pin = std::move(rhs._related_ground_pin);
     _ower_cell = rhs._ower_cell;
     _port_type = rhs._port_type;
     _is_clock_pin = rhs._is_clock_pin;
@@ -926,6 +930,8 @@ LibPort& LibPort::operator=(LibPort&& rhs) noexcept
 
 void LibPort::inheritBusAttributes(const LibPort& bus)
 {
+  _related_power_pin = bus._related_power_pin;
+  _related_ground_pin = bus._related_ground_pin;
   _port_type = bus._port_type;
   _is_clock_pin = bus._is_clock_pin;
   _clock_gate_clock_pin = bus._clock_gate_clock_pin;
@@ -1814,6 +1820,7 @@ LibCell::~LibCell()
 
 LibCell::LibCell(LibCell&& other) noexcept
     : _cell_name(std::move(other._cell_name)),
+      _supply_pins(std::move(other._supply_pins)),
       _cell_leakage_power(other._cell_leakage_power),
       _has_cell_leakage_power(other._has_cell_leakage_power),
       _clock_gating_integrated_cell(std::move(other._clock_gating_integrated_cell)),
@@ -1830,6 +1837,7 @@ LibCell& LibCell::operator=(LibCell&& rhs) noexcept
 {
   if (this != &rhs) {
     _cell_name = std::move(rhs._cell_name);
+    _supply_pins = std::move(rhs._supply_pins);
     _cell_leakage_power = rhs._cell_leakage_power;
     _has_cell_leakage_power = rhs._has_cell_leakage_power;
     _clock_gating_integrated_cell = std::move(rhs._clock_gating_integrated_cell);

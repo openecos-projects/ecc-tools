@@ -75,6 +75,7 @@ void DataManager::readConfig(std::map<std::string, std::any>& config_map)
   config.small_rc_fanout_reduction = STAUTIL.getConfigValue<int32_t>(config_map, "-small_rc_fanout_reduction", 1);
   config.check_constant_capacitance = STAUTIL.getConfigValue<int32_t>(config_map, "-check_constant_capacitance", 0);
   config.timing_corner = STAUTIL.getConfigValue<std::string>(config_map, "-timing_corner", "");
+  config.min_lib_paths = STAUTIL.getConfigValue<std::vector<std::string>>(config_map, "-min_lib_paths", {});
   config.is_path_report_number_specified = STAUTIL.exist(config_map, std::string("-max_paths")) || STAUTIL.exist(config_map, std::string("-max_path"))
                                            || STAUTIL.exist(config_map, std::string("-path_report_number"));
   config.path_report_number = STAUTIL.getConfigValue<int32_t>(config_map, "-max_paths", 1);

@@ -269,7 +269,17 @@ unsigned LibertyReader::visitSimpleAttri(LibertySimpleAttrStmt* attri)
 
   auto is_attri = [attri_name](const char* candidate) { return isEqual(attri_name, candidate); };
 
-  if (is_attri("slew_lower_threshold_pct_rise")) {
+  if (is_attri("related_power_pin") || is_attri("related_ground_pin")) {
+    auto* value = liberty_convert_string_value(attri_value);
+    if (lib_port != nullptr) {
+      if (is_attri("related_power_pin")) {
+        lib_port->set_related_power_pin(value->value);
+      } else {
+        lib_port->set_related_ground_pin(value->value);
+      }
+    }
+    liberty_free_string_value(value);
+  } else if (is_attri("slew_lower_threshold_pct_rise")) {
     auto* attri_value_handle = liberty_convert_float_value(attri_value);
     double slew_lower_threshold_pct_rise = attri_value_handle->value;
     current_lib->set_slew_lower_threshold_pct_rise(slew_lower_threshold_pct_rise);
@@ -778,7 +788,13 @@ unsigned LibertyReader::visitComplexAttri(LibertyComplexAttrStmt* attri)
     cap_unit_convert = 0.001;
   }
 
-  if (isEqual(attri_name, "capacitive_load_unit")) {
+  if (isEqual(attri_name, "voltage_map")) {
+    auto* name = liberty_convert_string_value(attri_0);
+    auto* voltage = liberty_convert_float_value(attri_1);
+    the_lib->get_voltage_map()[name->value] = voltage->value;
+    liberty_free_string_value(name);
+    liberty_free_float_value(voltage);
+  } else if (isEqual(attri_name, "capacitive_load_unit")) {
     if ((liberty_convert_float_value(attri_0)->value == 1.0) && (isNoCaseEqual(liberty_convert_string_value(attri_1)->value, "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
     } else if (liberty_convert_float_value(attri_0)->value == 1.0 && isNoCaseEqual(liberty_convert_string_value(attri_1)->value, "ff")) {
@@ -982,7 +998,12 @@ unsigned LibertyReader::visitComplexAttri(liberty_ast::LibComplexAttribute* attr
     cap_unit_convert = 0.001;
   }
 
-  if (isEqual(attri_name, "capacitive_load_unit")) {
+  if (isEqual(attri_name, "voltage_map")) {
+    if (!attri_0 || !attri_0->isString() || !attri_1 || !attri_1->isFloat()) {
+      throw std::invalid_argument("voltage_map requires a name and a voltage");
+    }
+    the_lib->get_voltage_map()[getRawStringValue(attri_0)] = getRawFloatValue(attri_1);
+  } else if (isEqual(attri_name, "capacitive_load_unit")) {
     if ((getRawFloatValue(attri_0) == 1.0) && (isNoCaseEqual(getRawStringValue(attri_1), "pf"))) {
       the_lib->set_cap_unit(CapacitiveUnit::kPF);
     } else if (getRawFloatValue(attri_0) == 1.0 && isNoCaseEqual(getRawStringValue(attri_1), "ff")) {
@@ -1671,6 +1692,8 @@ unsigned LibertyReader::visitGroup(LibertyGroupStmt* group)
     is_ok = visitBus(group);
   } else if (isEqual(group_name, "pin")) {
     is_ok = visitPin(group);
+  } else if (isEqual(group_name, "pg_pin")) {
+    is_ok = visitSupplyPin(group);
   } else if (isEqual(group_name, "timing")) {
     is_ok = visitTiming(group);
   } else if (isEqual(group_name, "internal_power")) {
@@ -2149,6 +2172,8 @@ unsigned LibertyReader::visitGroup(liberty_ast::LibGroup* group)
     is_ok = visitBus(group);
   } else if (isEqual(group_name, "pin")) {
     is_ok = visitPin(group);
+  } else if (isEqual(group_name, "pg_pin")) {
+    is_ok = visitSupplyPin(group);
   } else if (isEqual(group_name, "timing")) {
     is_ok = visitTiming(group);
   } else if (isEqual(group_name, "internal_power")) {

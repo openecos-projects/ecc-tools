@@ -27,7 +27,8 @@ namespace py = pybind11;
 
 void register_ista(py::module& m)
 {
-  m.def("init_sta", initSTA, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{});
+  m.def("init_sta", initSTA, py::arg("config") = py::none(), py::arg("config_dict") = std::map<std::string, std::string>{},
+        py::arg("min_lib_paths") = std::vector<std::string>{});
   m.def("prepare_timing_model", prepareTimingModel);
   m.def("export_timing_model", exportTimingModel);
   m.def("run_sta", runSTA);

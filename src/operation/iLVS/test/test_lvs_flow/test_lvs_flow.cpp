@@ -215,6 +215,8 @@ void test_io_supply_ring_waiver(ilvs::Database& database)
   physical_graph.get_ground_instance_pin_net_map()["U2/VSS"] = "VSS";
   physical_graph.get_ground_instance_pin_net_map()["IO_POWER_vssio_left_0/VSSIO"] = "VSSIO";
   physical_graph.get_ground_instance_pin_net_map()["IO_POWER_vssio_right_0/VSSIO"] = "VSSIO";
+  physical_graph.get_io_supply_terminal_set() = {"IO_POWER_vddio_left_0/VDDIO", "g_iocell_x/VDDIO",
+                                                "IO_POWER_vssio_left_0/VSSIO", "IO_POWER_vssio_right_0/VSSIO"};
 
   physical_graph.get_terminal_component_map()["U1/VDD"] = 100;
   physical_graph.get_terminal_component_map()["U2/VDD"] = 101;
@@ -272,8 +274,11 @@ void via(const std::string& net, int bottom_layer, int top_layer, int x1, int y1
   graph().getOrCreateNetRoutingGraph(net).get_via_shape_idx_pair_list().emplace_back(bottom, top);
 }
 
-void terminal(const std::string& net, const std::string& name, ilvs::RoutingShape shape)
+void terminal(const std::string& net, const std::string& name, ilvs::RoutingShape shape, bool io_cell = false)
 {
+  if (io_cell) {
+    graph().get_io_supply_terminal_set().insert(name);
+  }
   auto& routing = graph().getOrCreateNetRoutingGraph(net);
   int index = static_cast<int>(routing.get_routing_shape_list().size());
   routing.get_terminal_shape_idx_map()[name].push_back(index);
@@ -434,27 +439,34 @@ int test_pg_connectivity()
          check(1, 0, 1);
          expectOpenGroups({{"VDD_AUX", {"AUX/VDD"}}});
        }},
-      {"complete_io_power_and_ground_rings_are_waived", [] {
-         graph().get_power_net_name_set().insert("VDDIO");
-         graph().get_ground_net_name_set().insert("VSSIO");
-         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10));
-         terminal("VDDIO", "IO2/VDDIO", makeRoutingShape(1, 10, 0, 20, 10));
-         terminal("VSSIO", "IO1/VSSIO", makeRoutingShape(1, 0, 20, 10, 30));
-         terminal("VSSIO", "IO2/VSSIO", makeRoutingShape(1, 10, 20, 20, 30));
+      {"complete_io_rings_do_not_depend_on_supply_names", [] {
+         graph().get_power_net_name_set().insert("VDDD");
+         graph().get_ground_net_name_set().insert("POC");
+         terminal("VDDD", "IO1/PWR", makeRoutingShape(1, 0, 0, 10, 10), true);
+         terminal("VDDD", "IO2/PWR", makeRoutingShape(1, 10, 0, 20, 10), true);
+         terminal("POC", "IO1/POC", makeRoutingShape(1, 0, 20, 10, 30), true);
+         terminal("POC", "IO2/POC", makeRoutingShape(1, 10, 20, 20, 30), true);
          supplies();
          check(0, 0, 0);
        }},
+      {"io_and_core_island_still_requires_core_supply", [] {
+         terminal("VDD", "IO/VDD", makeRoutingShape(1, 0, 0, 10, 10), true);
+         terminal("VDD", "CORE/VDD", makeRoutingShape(1, 10, 0, 20, 10));
+         supplies();
+         check(2, 0, 0);
+       }},
       {"io_ring_with_missing_terminal_geometry_is_not_waived", [] {
          graph().get_power_net_name_set().insert("VDDIO");
-         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10));
+         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10), true);
          graph().get_power_instance_pin_net_map()["IO2/VDDIO"] = "VDDIO";
+         graph().get_io_supply_terminal_set().insert("IO2/VDDIO");
          supplies();
          check(2, 0, 0);
        }},
       {"signal_bypass_cannot_waive_broken_io_ring", [] {
          graph().get_power_net_name_set().insert("VDDIO");
-         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10));
-         terminal("VDDIO", "IO2/VDDIO", makeRoutingShape(1, 20, 0, 30, 10));
+         terminal("VDDIO", "IO1/VDDIO", makeRoutingShape(1, 0, 0, 10, 10), true);
+         terminal("VDDIO", "IO2/VDDIO", makeRoutingShape(1, 20, 0, 30, 10), true);
          supplies();
          wire("signal", makeRoutingShape(1, 9, 4, 21, 6));
          check(2, 0, 1);
@@ -462,8 +474,8 @@ int test_pg_connectivity()
        }},
       {"signal_pin_bypass_cannot_waive_broken_io_ground_ring", [] {
          graph().get_ground_net_name_set().insert("VSSIO");
-         terminal("VSSIO", "IO1/VSSIO", makeRoutingShape(1, 0, 0, 10, 10));
-         terminal("VSSIO", "IO2/VSSIO", makeRoutingShape(1, 20, 0, 30, 10));
+         terminal("VSSIO", "IO1/VSSIO", makeRoutingShape(1, 0, 0, 10, 10), true);
+         terminal("VSSIO", "IO2/VSSIO", makeRoutingShape(1, 20, 0, 30, 10), true);
          terminal("signal", "U/A", makeRoutingShape(1, 9, 4, 21, 6));
          supplies();
          check(0, 2, 1);
@@ -481,7 +493,7 @@ int test_pg_connectivity()
          graph().get_power_net_name_set().insert("VDDIO");
          terminal("VDD", "ISLAND/VDD", makeRoutingShape(9, 100, 495, 110, 505));
          terminal("VDD", "SUPPLIED/VDD", makeRoutingShape(9, 490, 490, 510, 510));
-         terminal("VDDIO", "CLEAN/VDDIO", makeRoutingShape(8, 700, 700, 710, 710));
+         terminal("VDDIO", "CLEAN/VDDIO", makeRoutingShape(8, 700, 700, 710, 710), true);
          terminal("VSS", "U/VSS", makeRoutingShape(9, 520, 490, 540, 510));
          supplies();
          wire("VSS", makeRoutingShape(9, 105, 499, 530, 501));

@@ -321,7 +321,7 @@ void DataManager::readInstancePower()
   }
   std::vector<InstancePowerRecord> records;
   try {
-    records = InstancePowerReader::read(_config.instance_power_file_path);
+    records = InstancePowerReader::read(_config.instance_power_file_path, _config.supply_ground_pins);
   } catch (const std::exception& error) {
     EMIRLOG.error(Loc::current(), error.what());
   }
@@ -342,14 +342,22 @@ void DataManager::readInstancePower()
       unknown_record_num++;
       continue;
     }
-    InstancePower instance_power;
+    InstancePower& instance_power = instance_power_map[instance_iter->second];
+    if (instance_power.get_has_average_current() && (record.power_pin.empty() || instance_power.get_supply_currents().empty())) {
+      EMIRLOG.error(Loc::current(), "Duplicate power records resolve to DEF instance ", record.instance_name);
+    }
     instance_power.set_instance_id(instance_iter->second);
-    instance_power.set_voltage(record.voltage);
-    instance_power.set_internal_power(record.internal_power);
-    instance_power.set_switching_power(record.switching_power);
-    instance_power.set_leakage_power(record.leakage_power);
-    instance_power.set_average_current(record.average_current);
-    instance_power_map[instance_iter->second] = std::move(instance_power);
+    if (record.power_pin.empty()) {
+      instance_power.set_voltage(record.voltage);
+    } else if (!instance_power.get_supply_currents()
+                    .emplace(record.power_pin, SupplyCurrent{record.ground_pin, record.voltage, record.average_current})
+                    .second) {
+      EMIRLOG.error(Loc::current(), "Duplicate supply power for DEF instance ", record.instance_name, "/", record.power_pin);
+    }
+    instance_power.set_internal_power(instance_power.get_internal_power() + record.internal_power);
+    instance_power.set_switching_power(instance_power.get_switching_power() + record.switching_power);
+    instance_power.set_leakage_power(instance_power.get_leakage_power() + record.leakage_power);
+    instance_power.set_average_current(instance_power.get_average_current() + record.average_current);
     matched_total_power += record.total_power;
   }
   if (instance_power_map.empty() || report_total_power <= 0.0 || matched_total_power <= 0.0) {
@@ -526,6 +534,7 @@ void DataManager::printConfig()
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.ploc_file_path);
   for (const auto& path : _config.pad_files) EMIRLOG.info(Loc::current(), "pad_files: ", path);
   EMIRLOG.info(Loc::current(), "add_ploc_from_top_def: ", _config.add_ploc_from_top_def);
+  EMIRLOG.info(Loc::current(), "allow_unmapped_pg_pins: ", _config.allow_unmapped_pg_pins);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "technology_file_path");
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(2), _config.technology_file_path);
   EMIRLOG.info(Loc::current(), EMIRUTIL.getSpaceByTabNum(1), "temperature_c");

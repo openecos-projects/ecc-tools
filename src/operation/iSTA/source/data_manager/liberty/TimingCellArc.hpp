@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "common/AnalysisType.hpp"
 #include "liberty/TimingArc.hpp"
 
 namespace ista {
@@ -49,6 +50,9 @@ class TimingCellArc
     return false;
   }
   bool get_is_latch_data_arc() const { return _is_latch_data_arc; }
+  AnalysisType analysisType() const { return _analysis_type; }
+  void setAnalysisType(AnalysisType type) { _analysis_type = type; }
+  bool supportsAnalysis(AnalysisType type) const { return _analysis_type == AnalysisType::kNone || _analysis_type == type; }
   // setter
   void set_source_port(const std::string& source_port) { _source_port = source_port; }
   void set_sink_port(const std::string& sink_port) { _sink_port = sink_port; }
@@ -80,6 +84,7 @@ class TimingCellArc
   bool _is_disable_arc = false;
   bool _is_clear_preset_arc = false;
   bool _is_latch_data_arc = false;
+  AnalysisType _analysis_type = AnalysisType::kNone;
 };
 
 }  // namespace ista
