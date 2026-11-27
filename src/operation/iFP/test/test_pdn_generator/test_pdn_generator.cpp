@@ -1922,7 +1922,7 @@ int main(int argc, char* argv[])
   passed = ifp::testLayerCrossingViaFitsWithinStripes(directory) && passed;
   passed = ifp::testStripeEndKeepsCollinearIoWire(directory) && passed;
   passed = ifp::testIoWireSkipsLayerVia(directory) && passed;
-  passed = ifp::testIOCoreDetour(directory) && passed;
+  passed = ifp::testIOCoreStraightOnly(directory) && passed;
   passed = ifp::testConfiguredRailWidth(directory) && passed;
   passed = ifp::testViaMinimumArea(directory) && passed;
   passed = ifp::testTechnologyEdgeStripe(directory) && passed;

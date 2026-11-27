@@ -1,5 +1,6 @@
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 
 #include "DataManager.hpp"
 #include "FPInterface.hpp"
@@ -9,7 +10,7 @@
 
 namespace ifp {
 
-bool testIOCoreDetour(const std::string& directory)
+bool testIOCoreStraightOnly(const std::string& directory)
 {
   auto* previous_lef = dmInst->get_idb_lef_service();
   auto* previous_def = dmInst->get_idb_def_service();
@@ -22,11 +23,23 @@ bool testIOCoreDetour(const std::string& directory)
   addIDBViaRule(lef, "M10", "VIA_UPPER", "M2");
   lef.get_layout()->set_manufacture_grid(5);
 
-  enum class Scenario { kStraight, kBlocked, kOffset };
+  enum class Scenario
+  {
+    kBridge,
+    kExtension,
+    kBlocked,
+    kOffset,
+    kOutsideCore,
+    kBlockedAdvisory
+  };
   bool passed = true;
-  for (const auto scenario : {Scenario::kStraight, Scenario::kBlocked, Scenario::kOffset}) {
-    const bool blocked = scenario == Scenario::kBlocked;
+  for (const auto scenario :
+       {Scenario::kBridge, Scenario::kExtension, Scenario::kBlocked, Scenario::kOffset, Scenario::kOutsideCore, Scenario::kBlockedAdvisory}) {
+    const bool extension = scenario == Scenario::kExtension;
+    const bool blocked = scenario == Scenario::kBlocked || scenario == Scenario::kBlockedAdvisory;
     const bool offset = scenario == Scenario::kOffset;
+    const bool outside = scenario == Scenario::kOutsideCore;
+    const bool expected_connected = scenario == Scenario::kBridge || extension;
     initFixture(directory);
     auto& database = FPDM.getDatabase();
     database.set_micron_dbu(1000);
@@ -37,7 +50,7 @@ bool testIOCoreDetour(const std::string& directory)
     options.enabled = true;
     options.nets = {"VDD_A"};
     options.pin_layers = {"M10"};
-    options.fail_on_unresolved = true;
+    options.fail_on_unresolved = scenario != Scenario::kBlockedAdvisory;
 
     CellMaster pad;
     pad.set_name("power_pad");
@@ -55,10 +68,11 @@ bool testIOCoreDetour(const std::string& directory)
     Instance instance;
     instance.set_name("pad");
     instance.set_master_name(pad.get_name());
-    instance.set_coord(0, 40000);
+    const int32_t pad_y = outside ? 85000 : 40000;
+    instance.set_coord(0, pad_y);
     instance.set_width(10000);
     instance.set_height(10000);
-    instance.set_bounding_rect(0, 40000, 10000, 50000);
+    instance.set_bounding_rect(0, pad_y, 10000, pad_y + 10000);
     instance.set_orient(PlacementOrientation::kN);
     instance.set_placed(true);
     instance.set_io_cell_net_name("VDD_A");
@@ -67,46 +81,51 @@ bool testIOCoreDetour(const std::string& directory)
     database.get_instance_list().push_back(instance);
 
     addConnect("M10", "M2");
-    addLine("VDD_A", "M10", PGSegmentType::kStripe, 30000, offset ? 55000 : 20000, 30000, 80000, 1000);
-    addLine("VDD_A", "M2", PGSegmentType::kStripe, 20000, 60000, 80000, 60000, 1000);
+    if (extension) {
+      addLine("VDD_A", "M10", PGSegmentType::kStripe, 30000, 45000, 80000, 45000, 1000);
+      addLine("VDD_A", "M2", PGSegmentType::kStripe, 60000, 20000, 60000, 80000, 1000);
+    } else {
+      addLine("VDD_A", "M10", PGSegmentType::kStripe, 30000, offset ? 55000 : 20000, 30000, 80000, 1000);
+      addLine("VDD_A", "M2", PGSegmentType::kStripe, 20000, 60000, 80000, 60000, 1000);
+    }
     // The pad's rail is inside the core's Y range, but the opposite supply
     // blocks every same-layer straight bridge to its own stripe.
     const int32_t ground_x = blocked ? 25000 : 50000;
     addLine("VSS_B", "M10", PGSegmentType::kStripe, ground_x, 20000, ground_x, 80000, 1000);
     addLine("VSS_B", "M2", PGSegmentType::kStripe, 20000, 30000, 80000, 30000, 1000);
     if (blocked) {
-      // An earlier opposite-supply IO connection occupies the normal detour
-      // corridor. The layer-change escape must occur before that conductor.
+      // Existing foreign IO metal must not be crossed or bypassed by a jog.
       addLine("VSS_B", "M10", PGSegmentType::kIoWire, 18000, 40000, 18000, 60000, 1000);
       addLine("VSS_B", "M10", PGSegmentType::kIoWire, 18000, 60000, ground_x, 60000, 1000);
     }
     FPI.resetPGViaAdjustment();
-    FPPG.generate();
+    bool failed = false;
+    try {
+      FPPG.generate();
+    } catch (const std::runtime_error& error) {
+      failed = true;
+      const std::string expected_error = options.fail_on_unresolved ? "IO core PG incomplete" : "Cannot write power.ploc: no connected IO power cell";
+      passed = check(std::string(error.what()).find(expected_error) != std::string::npos, "Unconnected IO power must preserve the connectivity and PLOC gates")
+               && passed;
+    }
+    passed
+        = check(failed == !expected_connected, "Strict connectivity fails first; without it, zero connected supply pads still prevents PLOC output") && passed;
 
     std::ifstream report(directory + "/io_core_connect.rpt");
     const std::string text{std::istreambuf_iterator<char>(report), std::istreambuf_iterator<char>()};
-    passed = check(text.find("Connected ports: 1\nUnresolved ports: 0\n") != std::string::npos,
-                   "In-range power pad must connect even when a foreign stripe blocks its straight path") && passed;
-    bool changed_layer = false;
+    const std::string expected = expected_connected ? "Connected ports: 1\nUnresolved ports: 0\n" : "Connected ports: 0\nUnresolved ports: 1\n";
+    passed = check(text.find(expected) != std::string::npos, "IO report must distinguish straight connections from unresolved ports") && passed;
+    passed = check(text.find("policy=straight") != std::string::npos, "IO report must state the active routing policy") && passed;
+    int32_t wire_count = 0;
     for (const auto& segment : database.get_pg_segment_list()) {
-      if (segment.get_type() == PGSegmentType::kIoWire && segment.get_layer_name() != "M10") {
-        changed_layer = true;
-      }
-      if (blocked && segment.get_type() == PGSegmentType::kIoWire && segment.get_layer_name() == "M10") {
-        if (segment.get_net_name() != "VDD_A") continue;
-        passed = check(segment.get_ur_x() <= ground_x - 500 || segment.get_ll_x() >= ground_x + 500
-                           || segment.get_ur_y() <= 20000 || segment.get_ll_y() >= 80000,
-                       "IO fallback must not cross the foreign supply on the same layer") && passed;
-        passed = check(segment.get_ur_x() <= 17500 || segment.get_ll_x() >= 18500
-                           || segment.get_ur_y() <= 40000 || segment.get_ll_y() >= 60000,
-                       "Layer-change escape must avoid an existing IO detour corridor") && passed;
-      }
+      if (segment.get_type() != PGSegmentType::kIoWire || segment.get_net_name() != "VDD_A")
+        continue;
+      ++wire_count;
+      passed = check(segment.get_layer_name() == "M10" && segment.is_horizontal() && segment.get_start_y() >= 43000 && segment.get_start_y() <= 47000,
+                     "Every accepted left-pad access must stay on its same-layer horizontal line")
+               && passed;
     }
-    passed = check(changed_layer == blocked, "Only the obstructed pad needs a checked layer-change detour") && passed;
-    if (offset) {
-      passed = check(text.find("Manhattan bridge connections: 0\n") == std::string::npos,
-                     "A left-side pad must reach a tangentially offset stripe with a valid Manhattan bridge") && passed;
-    }
+    passed = check((wire_count > 0) == expected_connected, "Only a legal straight connection may add IO access wires") && passed;
   }
   FPInterface::destroyInst();
   dmInst->set_idb_def_service(previous_def);

@@ -30,8 +30,8 @@ namespace ifp {
 
 struct PGIOCoreConnectConfig
 {
-  // Prefer same-layer direct/straight connections. Out-of-core rails and
-  // blocked straight paths may use Manhattan or checked layer-change detours.
+  // Only same-layer collinear direct extensions and straight bridges are
+  // enabled. Blocked or misaligned rails remain unresolved; no bend fallback.
   bool enabled = false;
   // Empty means the resolved core POWER/GROUND nets.
   std::vector<std::string> nets;

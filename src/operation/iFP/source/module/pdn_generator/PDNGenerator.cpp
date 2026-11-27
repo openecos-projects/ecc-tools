@@ -3569,12 +3569,10 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     return std::max(separation, configured_bridge_spacing);
   };
 
-  // Prefer straight connections within the core range. Out-of-range rails
-  // need Manhattan access immediately; blocked in-range rails must also be
-  // allowed to try bends and detours after their straight candidates fail.
-  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge,
-                               RouteMode::kManhattanDirectExtension, RouteMode::kManhattanBridge,
-                               RouteMode::kDetourEndOn, RouteMode::kDetourLayerChange}) {
+  // Restrict IO-core access to straight lines. Bend and layer-change detour
+  // candidates stay disabled until their corner/via geometry passes DRC.
+  // A blocked straight path must remain unresolved, not trigger a fallback.
+  for (const RouteMode mode : {RouteMode::kDirectExtension, RouteMode::kStraightBridge}) {
     const bool direct = is_direct(mode);
     const bool detour = is_detour(mode);
     for (auto& task : tasks) {
@@ -4064,11 +4062,9 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
         failures.push_back({terminal, "NO_LEGAL_PATH_" + layer});
         complete = false;
       }
-      std::string detail = FPUTIL.getString(terminal, " policy=", task.requires_manhattan ? "manhattan" : "straight",
-                                            " layer=", layer, " rails=", rails.size(), " routes=", stats.count(),
-                                            " stripes=", stats.stripes.size(), " direct=", stats.direct, " bridge=", stats.bridge,
-                                            " bend=", stats.bend, " detour=", stats.detour,
-                                            " candidates=", stats.candidates);
+      std::string detail = FPUTIL.getString(terminal, " policy=straight outside_core_range=", task.requires_manhattan, " layer=", layer,
+                                            " rails=", rails.size(), " routes=", stats.count(), " stripes=", stats.stripes.size(), " direct=", stats.direct,
+                                            " bridge=", stats.bridge, " bend=", stats.bend, " detour=", stats.detour, " candidates=", stats.candidates);
       for (const auto& [reason, count] : stats.rejected) detail += FPUTIL.getString(" ", reason, "=", count);
       layer_details.push_back(std::move(detail));
     }
@@ -4086,21 +4082,19 @@ void PDNGenerator::buildIOCoreConnect(PGModel& pg_model)
     if (task.requires_manhattan) manhattan_instances.insert(task.instance->get_name());
   }
 
-  FPLOG.info(Loc::current(), "IO core PG: ", connected_ports, " connected ports, ", unresolved.size(),
-             " unresolved ports, ", ports_with_any_contact, " ports with any contact (direct=", direct_connections,
-             ", bridge=", bridge_connections, ", bend=", bend_connections, ", detour=", detour_connections,
-             ", layer_change=", layer_change_connections, ", manhattan_cells=", manhattan_instances.size(), ").");
+  FPLOG.info(Loc::current(), "IO core PG: ", connected_ports, " connected ports, ", unresolved.size(), " unresolved ports, ", ports_with_any_contact,
+             " ports with any contact (direct=", direct_connections, ", bridge=", bridge_connections, ", bend=", bend_connections,
+             ", detour=", detour_connections, ", layer_change=", layer_change_connections, ", out_of_core_cells=", manhattan_instances.size(), ").");
   if (!config.pg_temp_directory_path.empty()) {
     std::ofstream report(config.pg_temp_directory_path + "/io_core_connect.rpt");
-    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size()
-           << "\nPorts with any contact: " << ports_with_any_contact << "\nDirect connections: "
-           << direct_connections << "\nBridge connections: " << bridge_connections << "\n"
+    report << "Connected ports: " << connected_ports << "\nUnresolved ports: " << unresolved.size() << "\nPorts with any contact: " << ports_with_any_contact
+           << "\nDirect connections: " << direct_connections << "\nBridge connections: " << bridge_connections << "\n"
            << "Manhattan connections: " << bend_connections << "\n"
            << "Detour connections: " << detour_connections << "\n"
            << "Detour layer-change connections: " << layer_change_connections << "\n"
            << "Manhattan direct-extension connections: " << manhattan_direct_connections << "\n"
            << "Manhattan bridge connections: " << manhattan_bridge_connections << "\n"
-           << "Manhattan policy IO cells: " << manhattan_instances.size() << "\n"
+           << "Out-of-core IO cells: " << manhattan_instances.size() << "\n"
            << "Pin cross-section failures: " << pin_cross_section_failures << "\n"
            << "Stripe cross-section failures: " << stripe_cross_section_failures << "\n"
            << "IO inner-boundary failures: " << io_inner_boundary_failures << "\n"
