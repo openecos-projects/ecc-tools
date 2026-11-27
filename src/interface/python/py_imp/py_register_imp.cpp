@@ -31,6 +31,7 @@ void register_imp(pybind11::module& m)
       .def("getCongestionMap", &PyPlaceDB::getCongestionMap, py::arg("method") = "max", py::arg("stage") = "egr3D",
            py::arg("resolve_congestion") = "low")
       .def("write_macro_placement_back", &PyPlaceDB::writeMacroPlacementBack, py::arg("node_x"), py::arg("node_y"))
+      .def("sync_placement_from_idb", &PyPlaceDB::syncPlacementFromIdb)
       .def("apply_sizing", &PyPlaceDB::applySizing, py::arg("cell_ids"), py::arg("target_master_names"))
       .def("apply_buffer_actions", &PyPlaceDB::applyBufferActions, py::arg("actions"), py::arg("action_digest"))
       .def_readwrite("num_nodes", &PyPlaceDB::num_nodes)
@@ -46,6 +47,8 @@ void register_imp(pybind11::module& m)
       .def_readwrite("node_orient", &PyPlaceDB::node_orient)
       .def_readwrite("node_size_x", &PyPlaceDB::node_size_x)
       .def_readwrite("node_size_y", &PyPlaceDB::node_size_y)
+      .def_property_readonly("node_master_names", &PyPlaceDB::getNodeMasterNames)
+      .def("get_node_master_names", &PyPlaceDB::getNodeMasterNames)
       .def_property_readonly("node_is_hard_macro", &PyPlaceDB::getNodeIsHardMacro)
       .def_property_readonly("macro_writeback_candidate", &PyPlaceDB::getMacroWritebackCandidate)
       .def_readwrite("node2orig_node_map", &PyPlaceDB::node2orig_node_map)
@@ -122,6 +125,8 @@ void register_imp(pybind11::module& m)
       .def_readwrite("inrtrans", &PyPlaceDB::inrtrans)
       .def_readwrite("inftrans", &PyPlaceDB::inftrans)
       .def_readwrite("outcaps", &PyPlaceDB::outcaps)
+      .def_readwrite("out_rcaps", &PyPlaceDB::out_rcaps)
+      .def_readwrite("out_fcaps", &PyPlaceDB::out_fcaps)
       .def_readwrite("endpoints_rRAT", &PyPlaceDB::endpoints_rRAT)
       .def_readwrite("endpoints_fRAT", &PyPlaceDB::endpoints_fRAT)
       .def_readwrite("backend_endpoint_rAAT", &PyPlaceDB::backend_endpoint_rAAT)
@@ -248,7 +253,7 @@ void register_imp(pybind11::module& m)
       .def_readwrite("unit_vertical_capacities", &PyPlaceDB::unit_vertical_capacities)
       .def_readwrite("min_wire_widths", &PyPlaceDB::min_wire_widths)
       .def_readwrite("min_wire_spacings", &PyPlaceDB::min_wire_spacings)
-      .def_readonly("native_state_dirty", &PyPlaceDB::native_state_dirty)
+      .def_readwrite("native_state_dirty", &PyPlaceDB::native_state_dirty)
       .def_readonly("native_mutation_epoch", &PyPlaceDB::native_mutation_epoch)
       .def_readwrite("initial_horizontal_demand_map", &PyPlaceDB::initial_horizontal_demand_map)
       .def_readwrite("initial_vertical_demand_map", &PyPlaceDB::initial_vertical_demand_map)
@@ -257,12 +262,14 @@ void register_imp(pybind11::module& m)
   m.def(
       "pydb",
       [](idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-         bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only) {
+         bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only, bool include_clock_nets,
+         bool timing_metadata_only) {
         return PyPlaceDB(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage,
-                         include_m2_pg_rail_density, timing_model_only);
+                         include_m2_pg_rail_density, timing_model_only || timing_metadata_only, include_clock_nets);
       },
       py::arg("db"), py::arg("numRoutingGridsX"), py::arg("numRoutingGridsY"), py::arg("with_routability"), py::arg("with_sta"),
       py::arg("include_m2_pg_rail_blockage") = false, py::arg("include_m2_pg_rail_density") = true, py::arg("timing_model_only") = false,
+      py::arg("include_clock_nets") = false, py::arg("timing_metadata_only") = false,
       "Convert PlaceDB to PyPlaceDB");
 }
 

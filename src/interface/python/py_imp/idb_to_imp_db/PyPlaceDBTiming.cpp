@@ -95,7 +95,10 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     idb::IdbLayout* layout = db->get_idb_layout();
     const auto& routing_layers = layout->get_layers()->get_routing_layers();
     const double micron_dbu = layout->get_units()->get_micron_dbu();
-    const std::string& signal_rc_layer = db->get_config().get_routing_layer_1st();
+    std::string signal_rc_layer = db->get_config().get_routing_layer_1st();
+    if (signal_rc_layer.empty() && routing_layers.size() >= 2) {
+      signal_rc_layer = routing_layers[1]->get_name();
+    }
     for (idb::IdbLayer* layer : routing_layers) {
       if (!signal_rc_layer.empty() && layer->get_name() != signal_rc_layer)
         continue;
@@ -183,7 +186,9 @@ void PyPlaceDB::init_timing(const TimingData& snapshot, idm::DataManager* db)
     end_points.append(id);
     const auto pin_it = timing_pins.find(name);
     const TimingPinData& pin = pin_it == timing_pins.end() ? empty_pin : *pin_it->second;
-    outcaps.append(0.0);
+    outcaps.append(pin.is_port ? pin.capacitance_pf : 0.0);
+    out_rcaps.append(pin.is_port ? pin.rise_capacitance_pf : 0.0);
+    out_fcaps.append(pin.is_port ? pin.fall_capacitance_pf : 0.0);
     appendQualification(endpoints_max_valid, endpoints_max_reason, pin.max_qualification);
     // Python subtracts setup at the current data slew. Restore the capture
     // deadline here; retain the native checked RAT in backend_endpoint_* below.

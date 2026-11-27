@@ -81,7 +81,7 @@ bool getConnectedPadCoordinate(IdbPin* io_pin, int32_t& x, int32_t& y)
 }
 
 void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only)
+                    bool include_m2_pg_rail_blockage, bool include_m2_pg_rail_density, bool timing_model_only, bool include_clock_nets)
 {
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. Db address is ", db);
   ECCLOG.info(ecc::Loc::current(), "PyPlaceDB::set start. idb_design address is ", db->get_idb_design());
@@ -124,19 +124,22 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   std::vector<gtl::rectangle_data<coordinate_type>> fixed_halo_boxes;
   // record original node to new node mapping
   int inst_num = db_deisgn->get_instance_list()->get_num();
-  std::map<std::string, index_type> mNode2PyNondeID;
-  std::map<std::string, index_type> mNode2idbID;
+  std::unordered_map<std::string, index_type> mNode2PyNondeID;
+  std::unordered_map<std::string, index_type> mNode2idbID;
+  mNode2PyNondeID.reserve(static_cast<std::size_t>(inst_num) * 2 + 64);
+  mNode2idbID.reserve(static_cast<std::size_t>(inst_num) * 2 + 64);
   std::vector<IdbInstance*> inst_resort_list = db_deisgn->get_instance_list()->get_instance_list();
   std::stable_sort(inst_resort_list.begin(), inst_resort_list.end(),
                    [](IdbInstance* a, IdbInstance* b) { return isPlacementFixed(a) < isPlacementFixed(b); });
   for (IdbInstance* node : inst_resort_list) {
     mNode2idbID[node->get_name()] = node->get_id();
   }
-  std::map<std::string, int> mNet2ID;
+  std::unordered_map<std::string, int> mNet2ID;
+  mNet2ID.reserve(db_deisgn->get_net_list()->get_net_list().size() * 2 + 64);
   int net_id = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
     // is special net
-    if (isInvailidNet(net, with_sta)) {
+    if (isInvailidNet(net, with_sta || include_clock_nets)) {
       continue;
     }
 
@@ -145,7 +148,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   std::unordered_map<std::string, int> mPin2ID;
   int pin_id = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net, with_sta)) {
+    if (isInvailidNet(net, with_sta || include_clock_nets)) {
       continue;
     }
 
@@ -274,109 +277,190 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
     }
   }
 
-  PolygonSet blockage_ps_list;
-  // def blockage list
-  for (auto blockage : db->get_idb_design()->get_blockage_list()->get_blockage_list()) {
-    if (!blockage->is_palcement_blockage()) {
-      continue;
-    }
-    PolygonSet ps;
-    for (auto rect : blockage->get_rect_list()) {
-      // convert to absolute box
-      Box box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
-      ps.insert(gtl::rectangle_data<coordinate_type>(box.xl, box.yl, box.xh, box.yh));
-    }
-    blockage_ps_list += ps;
-  }
-  PolygonSet rail_ps;
-  PolygonSet rail_density_ps;
-  if (include_m2_pg_rail_blockage || include_m2_pg_rail_density) {
-    auto routing_layers = db->get_idb_layout()->get_layers()->get_routing_layers();
-    auto* special_net_list = db_deisgn->get_special_net_list();
-    if (routing_layers.size() > 1 && special_net_list != nullptr) {
-      auto* second_routing_layer = routing_layers.at(1);
-      auto* second_idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(second_routing_layer);
-      for (auto* special_net : special_net_list->get_net_list()) {
-        if (special_net == nullptr || (!special_net->is_vdd() && !special_net->is_vss())) {
-          continue;
-        }
-        for (auto* wire : special_net->get_wire_list()->get_wire_list()) {
-          for (auto* segment : wire->get_segment_list()) {
-            if (!segment->is_line() || segment->get_layer() != second_idb_routing_layer) {
-              continue;
-            }
-            auto* rect = segment->get_bounding_box();
-            if (rect == nullptr || rect->get_high_x() <= rect->get_low_x() || rect->get_high_y() <= rect->get_low_y()) {
-              continue;
-            }
-            Box box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
-            rail_ps += gtl::rectangle_data<coordinate_type>(box.xl, box.yl, box.xh, box.yh);
-            pybind11::list py_box;
-            py_box.append(box.xl);
-            py_box.append(box.yl);
-            py_box.append(box.xh);
-            py_box.append(box.yh);
-            m2_pg_rail_boxes.append(py_box);
-            ++m2_pg_rail_blockage_rects;
-          }
-        }
-      }
-    }
-    if (include_m2_pg_rail_blockage) {
-      blockage_ps_list += rail_ps;
-    } else if (include_m2_pg_rail_density) {
-      rail_density_ps += rail_ps;
-    }
-  }
-
   auto core = db->get_idb_layout()->get_core();
   IdbRect* core_rect = core->get_bounding_box();
   auto core_box = gtl::rectangle_data<coordinate_type>(core_rect->get_low_x(), core_rect->get_low_y(), core_rect->get_high_x(),
                                                        core_rect->get_high_y());
-  PolygonSet row_ps;
-  for (IdbRow* idb_row : db->get_idb_layout()->get_rows()->get_row_list()) {
-    IdbRect* row_rect = idb_row->get_bounding_box();
-    row_ps.insert(
-        gtl::rectangle_data<coordinate_type>(row_rect->get_low_x(), row_rect->get_low_y(), row_rect->get_high_x(), row_rect->get_high_y()));
-  }
-  row_ps &= core_box;
-  PolygonSet no_row_ps;
-  no_row_ps.insert(core_box);
-  no_row_ps -= row_ps;
   row_height = db->get_idb_layout()->get_rows()->get_row_height();
+  const std::size_t row_count = db->get_idb_layout()->get_rows()->get_row_list().size();
+  const std::size_t blockage_count = db->get_idb_design()->get_blockage_list()->get_blockage_list().size();
 
-  PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
-  PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
-  rail_density_ps -= fixed_body_ps;
-  rail_density_ps -= fixed_halo_ps;
-  rail_density_ps -= blockage_ps_list;
-  std::vector<gtl::rectangle_data<coordinate_type>> rail_density_rects;
-  rail_density_ps.get_rectangles(rail_density_rects);
-  for (auto const& rect : rail_density_rects) {
-    Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
-    if (box.width() <= 0 || box.height() <= 0) {
-      continue;
-    }
-    pybind11::list py_box;
-    py_box.append(box.xl);
-    py_box.append(box.yl);
-    py_box.append(box.xh);
-    py_box.append(box.yh);
-    m2_pg_rail_density_boxes.append(py_box);
-  }
+  const std::string design_name_str = db_deisgn != nullptr ? db_deisgn->get_design_name() : "";
 
-  // Union all hard obstacles before decomposition.  Areas inside the core
-  // without placement rows are unavailable even when the DEF has no explicit
-  // HALO or placement blockage.  Subtract fixed bodies because they are
-  // already represented by their real instance terminals.
-  PolygonSet obstacle_ps = blockage_ps_list;
-  obstacle_ps += fixed_halo_ps;
-  obstacle_ps += no_row_ps;
-  obstacle_ps -= fixed_body_ps;
-  int ext_blockage_num = 0;
+  struct StaticObstacleCache
+  {
+    bool valid = false;
+    idm::DataManager* db = nullptr;
+    IdbDesign* design = nullptr;
+    IdbLayout* layout = nullptr;
+    std::string design_name;
+    bool include_m2_pg_rail_blockage = false;
+    bool include_m2_pg_rail_density = false;
+    gtl::rectangle_data<coordinate_type> core_box;
+    std::size_t row_count = 0;
+    std::size_t blockage_count = 0;
+    std::vector<gtl::rectangle_data<coordinate_type>> fixed_body_boxes;
+    std::vector<gtl::rectangle_data<coordinate_type>> fixed_halo_boxes;
+    int m2_pg_rail_blockage_rects = 0;
+    std::vector<Box> m2_pg_rail_raw_boxes;
+    std::vector<Box> m2_pg_rail_density_raw_boxes;
+    std::vector<gtl::rectangle_data<coordinate_type>> vRect;
+    double total_fixed_node_area = 0.0;
+    double total_space_area = 0.0;
+  };
+  static StaticObstacleCache obstacle_cache;
+  const bool cache_hit = obstacle_cache.valid
+                         && obstacle_cache.db == db
+                         && obstacle_cache.design == db_deisgn
+                         && obstacle_cache.layout == db->get_idb_layout()
+                         && obstacle_cache.design_name == design_name_str
+                         && obstacle_cache.include_m2_pg_rail_blockage == include_m2_pg_rail_blockage
+                         && obstacle_cache.include_m2_pg_rail_density == include_m2_pg_rail_density
+                         && obstacle_cache.core_box == core_box
+                         && obstacle_cache.row_count == row_count
+                         && obstacle_cache.blockage_count == blockage_count
+                         && obstacle_cache.fixed_body_boxes == fixed_body_boxes
+                         && obstacle_cache.fixed_halo_boxes == fixed_halo_boxes;
 
   std::vector<gtl::rectangle_data<coordinate_type>> vRect;
-  obstacle_ps.get_rectangles(vRect);
+  PolygonSet no_row_ps;
+  if (cache_hit) {
+    m2_pg_rail_blockage_rects = obstacle_cache.m2_pg_rail_blockage_rects;
+    for (auto const& box : obstacle_cache.m2_pg_rail_raw_boxes) {
+      pybind11::list py_box;
+      py_box.append(box.xl);
+      py_box.append(box.yl);
+      py_box.append(box.xh);
+      py_box.append(box.yh);
+      m2_pg_rail_boxes.append(py_box);
+    }
+    for (auto const& box : obstacle_cache.m2_pg_rail_density_raw_boxes) {
+      pybind11::list py_box;
+      py_box.append(box.xl);
+      py_box.append(box.yl);
+      py_box.append(box.xh);
+      py_box.append(box.yh);
+      m2_pg_rail_density_boxes.append(py_box);
+    }
+    vRect = obstacle_cache.vRect;
+  } else {
+    std::vector<Box> rail_raw_boxes;
+    std::vector<Box> rail_density_raw_boxes;
+    PolygonSet blockage_ps_list;
+    // def blockage list
+    for (auto blockage : db->get_idb_design()->get_blockage_list()->get_blockage_list()) {
+      if (!blockage->is_palcement_blockage()) {
+        continue;
+      }
+      PolygonSet ps;
+      for (auto rect : blockage->get_rect_list()) {
+        // convert to absolute box
+        Box box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+        ps.insert(gtl::rectangle_data<coordinate_type>(box.xl, box.yl, box.xh, box.yh));
+      }
+      blockage_ps_list += ps;
+    }
+    PolygonSet rail_ps;
+    PolygonSet rail_density_ps;
+    if (include_m2_pg_rail_blockage || include_m2_pg_rail_density) {
+      auto routing_layers = db->get_idb_layout()->get_layers()->get_routing_layers();
+      auto* special_net_list = db_deisgn->get_special_net_list();
+      if (routing_layers.size() > 1 && special_net_list != nullptr) {
+        auto* second_routing_layer = routing_layers.at(1);
+        auto* second_idb_routing_layer = dynamic_cast<idb::IdbLayerRouting*>(second_routing_layer);
+        for (auto* special_net : special_net_list->get_net_list()) {
+          if (special_net == nullptr || (!special_net->is_vdd() && !special_net->is_vss())) {
+            continue;
+          }
+          for (auto* wire : special_net->get_wire_list()->get_wire_list()) {
+            for (auto* segment : wire->get_segment_list()) {
+              if (!segment->is_line() || segment->get_layer() != second_idb_routing_layer) {
+                continue;
+              }
+              auto* rect = segment->get_bounding_box();
+              if (rect == nullptr || rect->get_high_x() <= rect->get_low_x() || rect->get_high_y() <= rect->get_low_y()) {
+                continue;
+              }
+              Box box(rect->get_low_x(), rect->get_low_y(), rect->get_high_x(), rect->get_high_y());
+              rail_ps += gtl::rectangle_data<coordinate_type>(box.xl, box.yl, box.xh, box.yh);
+              rail_raw_boxes.push_back(box);
+              pybind11::list py_box;
+              py_box.append(box.xl);
+              py_box.append(box.yl);
+              py_box.append(box.xh);
+              py_box.append(box.yh);
+              m2_pg_rail_boxes.append(py_box);
+              ++m2_pg_rail_blockage_rects;
+            }
+          }
+        }
+      }
+      if (include_m2_pg_rail_blockage) {
+        blockage_ps_list += rail_ps;
+      } else if (include_m2_pg_rail_density) {
+        rail_density_ps += rail_ps;
+      }
+    }
+
+    PolygonSet row_ps;
+    for (IdbRow* idb_row : db->get_idb_layout()->get_rows()->get_row_list()) {
+      IdbRect* row_rect = idb_row->get_bounding_box();
+      row_ps.insert(
+          gtl::rectangle_data<coordinate_type>(row_rect->get_low_x(), row_rect->get_low_y(), row_rect->get_high_x(), row_rect->get_high_y()));
+    }
+    row_ps &= core_box;
+    no_row_ps.insert(core_box);
+    no_row_ps -= row_ps;
+
+    PolygonSet fixed_body_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+    PolygonSet fixed_halo_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+    rail_density_ps -= fixed_body_ps;
+    rail_density_ps -= fixed_halo_ps;
+    rail_density_ps -= blockage_ps_list;
+    std::vector<gtl::rectangle_data<coordinate_type>> rail_density_rects;
+    rail_density_ps.get_rectangles(rail_density_rects);
+    for (auto const& rect : rail_density_rects) {
+      Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
+      if (box.width() <= 0 || box.height() <= 0) {
+        continue;
+      }
+      rail_density_raw_boxes.push_back(box);
+      pybind11::list py_box;
+      py_box.append(box.xl);
+      py_box.append(box.yl);
+      py_box.append(box.xh);
+      py_box.append(box.yh);
+      m2_pg_rail_density_boxes.append(py_box);
+    }
+
+    // Union all hard obstacles before decomposition.  Areas inside the core
+    // without placement rows are unavailable even when the DEF has no explicit
+    // HALO or placement blockage.  Subtract fixed bodies because they are
+    // already represented by their real instance terminals.
+    PolygonSet obstacle_ps = blockage_ps_list;
+    obstacle_ps += fixed_halo_ps;
+    obstacle_ps += no_row_ps;
+    obstacle_ps -= fixed_body_ps;
+    obstacle_ps.get_rectangles(vRect);
+
+    obstacle_cache.db = db;
+    obstacle_cache.design = db_deisgn;
+    obstacle_cache.layout = db->get_idb_layout();
+    obstacle_cache.design_name = design_name_str;
+    obstacle_cache.include_m2_pg_rail_blockage = include_m2_pg_rail_blockage;
+    obstacle_cache.include_m2_pg_rail_density = include_m2_pg_rail_density;
+    obstacle_cache.core_box = core_box;
+    obstacle_cache.row_count = row_count;
+    obstacle_cache.blockage_count = blockage_count;
+    obstacle_cache.fixed_body_boxes = fixed_body_boxes;
+    obstacle_cache.fixed_halo_boxes = fixed_halo_boxes;
+    obstacle_cache.m2_pg_rail_blockage_rects = m2_pg_rail_blockage_rects;
+    obstacle_cache.m2_pg_rail_raw_boxes = std::move(rail_raw_boxes);
+    obstacle_cache.m2_pg_rail_density_raw_boxes = std::move(rail_density_raw_boxes);
+    obstacle_cache.vRect = vRect;
+  }
+  int ext_blockage_num = 0;
+
   for (auto const& rect : vRect) {
     Box box(gtl::xl(rect), gtl::yl(rect), gtl::xh(rect), gtl::yh(rect));
     int id = node_names.size();
@@ -423,25 +507,33 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   ECCLOG.info(ecc::Loc::current(), "num_terminals ", num_terminals, ", num_place_blockages ", ext_blockage_num, ", num_terminal_NIs ",
               num_terminal_NIs, ".");
   num_nodes = inst_num + ext_blockage_num + num_terminal_NIs;  // db.nodes().size() + num_terminals - db.numFixed() - db.numPlaceBlockages()
-  // Compute the exact fixed/obstacle area inside the core from the same union
-  // represented by the terminal rectangles above.
-  PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
-  // critical to make sure only overlap with the die area is computed
-  ps &= core_box;
-  double total_fixed_geometry_area = gtl::area(ps);
-  total_fixed_node_area = total_fixed_geometry_area;
-  total_space_area = core_rect->get_area() - total_fixed_geometry_area;
+  if (cache_hit) {
+    total_fixed_node_area = obstacle_cache.total_fixed_node_area;
+    total_space_area = obstacle_cache.total_space_area;
+  } else {
+    // Compute the exact fixed/obstacle area inside the core from the same union
+    // represented by the terminal rectangles above.
+    PolygonSet ps(gtl::HORIZONTAL, fixed_boxes.begin(), fixed_boxes.end());
+    // critical to make sure only overlap with the die area is computed
+    ps &= core_box;
+    double total_fixed_geometry_area = gtl::area(ps);
+    total_fixed_node_area = total_fixed_geometry_area;
+    total_space_area = core_rect->get_area() - total_fixed_geometry_area;
+    obstacle_cache.total_fixed_node_area = total_fixed_node_area;
+    obstacle_cache.total_space_area = total_space_area;
+    obstacle_cache.valid = true;
 
-  PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
-  body_core_ps &= core_box;
-  PolygonSet halo_core_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
-  halo_core_ps &= core_box;
-  PolygonSet residual_obstacle_core_ps(gtl::HORIZONTAL, vRect.begin(), vRect.end());
-  residual_obstacle_core_ps &= core_box;
-  ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps), ", halo_union_area ",
-              gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
-              gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
-              total_fixed_terminal_area, ", synthetic_rectangles ", ext_blockage_num, ".");
+    PolygonSet body_core_ps(gtl::HORIZONTAL, fixed_body_boxes.begin(), fixed_body_boxes.end());
+    body_core_ps &= core_box;
+    PolygonSet halo_core_ps(gtl::HORIZONTAL, fixed_halo_boxes.begin(), fixed_halo_boxes.end());
+    halo_core_ps &= core_box;
+    PolygonSet residual_obstacle_core_ps(gtl::HORIZONTAL, vRect.begin(), vRect.end());
+    residual_obstacle_core_ps &= core_box;
+    ECCLOG.info(ecc::Loc::current(), "PyPlaceDB fixed geometry: body_union_area ", gtl::area(body_core_ps), ", halo_union_area ",
+                gtl::area(halo_core_ps), ", no_row_area ", gtl::area(no_row_ps), ", residual_obstacle_area ",
+                gtl::area(residual_obstacle_core_ps), ", terminal_union_area ", total_fixed_geometry_area, ", terminal_area_sum ",
+                total_fixed_terminal_area, ", synthetic_rectangles ", ext_blockage_num, ".");
+  }
   mark_phase("geometry_and_obstacles");
   int count = 0;
   for (int i = 0; i < mNode2PyNondeID.size() - num_terminal_NIs - ext_blockage_num; ++i) {
@@ -487,7 +579,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
 
   num_movable_pins = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net, with_sta)) {
+    if (isInvailidNet(net, with_sta || include_clock_nets)) {
       continue;
     }
     for (IdbPin* pin : net->get_instance_pin_list()->get_pin_list()) {
@@ -536,7 +628,7 @@ void PyPlaceDB::set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGr
   mark_phase("pin_geometry");
   count = 0;
   for (IdbNet* net : db_deisgn->get_net_list()->get_net_list()) {
-    if (isInvailidNet(net, with_sta)) {
+    if (isInvailidNet(net, with_sta || include_clock_nets)) {
       continue;
     }
     // Net const& net = db.net(i);

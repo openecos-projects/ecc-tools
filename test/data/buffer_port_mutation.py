@@ -45,4 +45,7 @@ def assert_output_port_buffering(place_db, action_template, action_digest):
         )
     if ecc_py.canonicalize_net_names() != 0:
         raise AssertionError("buffer commit left net names requiring canonicalization")
+    # Keep the selected port identity for the removal regression.  The native
+    # transaction must preserve this output-port net when the buffer is undone.
+    committed["output_port_name"] = name
     return committed

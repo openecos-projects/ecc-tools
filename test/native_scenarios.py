@@ -545,9 +545,19 @@ def _buffer_action_digest(actions: list[dict[str, Any]]) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
+def buffer_removal_qualification(manifest: dict[str, Any]) -> dict[str, Path]:
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("buffer removal qualification must not execute native STA/RCX")
+
+    for name in ("init_sta", "run_sta", "run_rcx"):
+        setattr(ecc_py, name, forbidden)
+    return buffer_mutation(manifest, verify_timing=False)
+
+
+def buffer_mutation(manifest: dict[str, Any], *, verify_timing: bool = True) -> dict[str, Path]:
     _setup(manifest)
     _read_design(manifest)
+    _require(ecc_py.lib_init(manifest["pdk"]["default_libs"]), "lib_init")
     place_db = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, False)  # noqa: FBT003
     selected = None
     clock_nets = {str(name) for name in place_db.clock_net_names}
@@ -649,6 +659,131 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
 
     port_commit = assert_output_port_buffering(chain_db, action, _buffer_action_digest)
 
+    # Remove the buffer inserted on an output-port net.  OpenROAD keeps the
+    # output net, because it owns the port, and merges the input net into it.
+    # This is the physical rollback case exercised by the long PPU campaign.
+    port_db = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, False)  # noqa: FBT003
+    port_net_names = [str(name) for name in port_db.net_names]
+    port_pin_nets = {
+        str(name): port_net_names[int(port_db.pin2net_map[index])]
+        for index, name in enumerate(port_db.pin_names)
+    }
+    port_name = str(port_commit["output_port_name"])
+    port_buffer = str(port_commit["committed_buffer_instance_names"][0])
+    port_survivor_net = str(port_commit["committed_downstream_net_names"][0])
+    if port_pin_nets.get(port_name) != port_survivor_net:
+        raise AssertionError(
+            f"output port is not on the committed downstream net: "
+            f"port={port_name} nets={port_pin_nets.get(port_name)} "
+            f"downstream={port_survivor_net}"
+        )
+    port_input_net = port_pin_nets[port_buffer + ":A"]
+    port_boundary_pins = {
+        pin
+        for pin, net in port_pin_nets.items()
+        if net in {port_input_net, port_survivor_net}
+        and pin not in {port_buffer + ":A", port_buffer + ":Y"}
+    }
+    inverter = next(
+        str(name)
+        for name, master in zip(port_db.node_names, port_db.node_master_names, strict=True)
+        if str(master).startswith("INV")
+    )
+    invalid_removals = [
+        {"action_kind": "buffer_remove", "instance_name": port_buffer},
+        {"action_kind": "buffer_remove", "instance_name": inverter},
+    ]
+    before_removal_names = list(port_db.node_names)
+    before_removal_nets = list(port_db.net_names)
+    before_removal_connections = list(port_db.pin2net_map)
+    inverter_rejection = dict(
+        port_db.apply_buffer_actions(invalid_removals, _buffer_action_digest(invalid_removals))
+    )
+    if (
+        inverter_rejection["ok"]
+        or inverter_rejection["accepted_count"] != 0
+        or inverter_rejection["rejected_count"] != 1
+        or "noninverting Liberty buffer" not in str(inverter_rejection["rejected_actions"])
+    ):
+        raise AssertionError(
+            f"inverter removal was not rejected before mutation: {inverter_rejection}"
+        )
+    unchanged = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, False)  # noqa: FBT003
+    if (list(unchanged.node_names), list(unchanged.net_names), list(unchanged.pin2net_map)) != (
+        before_removal_names, before_removal_nets, before_removal_connections
+    ):
+        raise AssertionError("rejected inverter removal changed the native database")
+    if ecc_py.is_timing_ready():
+        raise AssertionError("buffer removal qualification must not run ECC STA")
+    removal_actions = [
+        {
+            "action_kind": "buffer_remove",
+            "instance_name": port_buffer,
+        }
+    ]
+    missing_removal = [
+        {
+            "action_kind": "buffer_remove",
+            "instance_name": "missing_buffer_instance",
+        }
+    ]
+    missing = dict(
+        port_db.apply_buffer_actions(
+            missing_removal, _buffer_action_digest(missing_removal)
+        )
+    )
+    if missing["ok"] or missing["rejected_count"] != 1:
+        raise AssertionError(f"unknown buffer removal was not rejected: {missing}")
+    mixed_actions = [removal_actions[0], dict(action, action_id=99)]
+    mixed = dict(
+        port_db.apply_buffer_actions(
+            mixed_actions, _buffer_action_digest(mixed_actions)
+        )
+    )
+    if mixed["ok"] or "mixed buffer_insert and buffer_remove" not in str(
+        mixed.get("message", "")
+    ):
+        raise AssertionError(f"mixed buffer transaction was not rejected: {mixed}")
+    removal = dict(
+        port_db.apply_buffer_actions(
+            removal_actions, _buffer_action_digest(removal_actions)
+        )
+    )
+    if not removal["ok"] or removal["removed_count"] != 1:
+        raise AssertionError(f"native buffer removal did not commit: {removal}")
+    removal_db = ecc_py.pydb(ecc_py.get_dmInst(), 4, 4, False, False)  # noqa: FBT003
+    removal_net_names = [str(name) for name in removal_db.net_names]
+    removal_pin_nets = {
+        str(name): removal_net_names[int(removal_db.pin2net_map[index])]
+        for index, name in enumerate(removal_db.pin_names)
+    }
+    if port_buffer in {str(name) for name in removal_db.node_names}:
+        raise AssertionError("removed buffer instance is still present")
+    if port_input_net in removal_net_names:
+        raise AssertionError("removed buffer input net is still present")
+    if port_survivor_net not in removal_net_names:
+        raise AssertionError("output-port survivor net was removed")
+    actual_survivor_pins = {
+        pin for pin, net in removal_pin_nets.items() if net == port_survivor_net
+    }
+    if actual_survivor_pins != port_boundary_pins:
+        raise AssertionError(
+            f"buffer removal did not preserve OpenROAD output-port survivor: "
+            f"expected={sorted(port_boundary_pins)} actual={sorted(actual_survivor_pins)}"
+        )
+
+    if not verify_timing:
+        summary = _output(manifest, "buffer_removal_qualification.json")
+        summary.write_text(
+            json.dumps(
+                {"inverter_rejection": inverter_rejection, "removal": removal,
+                 "native_sta_run": False, "native_rcx_run": False},
+                indent=2,
+            ) + "\n",
+            encoding="utf-8",
+        )
+        return {"summary": summary}
+
     fresh_spef = _run_rcx(manifest)
     _load_sta_inputs(manifest, spef_path=fresh_spef)
     _require(
@@ -680,9 +815,13 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
             {
                 "invalid": dict(invalid),
                 "rollback": dict(rollback),
+                "inverter_rejection": inverter_rejection,
                 "committed": dict(committed),
                 "segment_chain": dict(chain),
                 "output_port_commit": port_commit,
+                "removal": removal,
+                "missing_removal": missing,
+                "mixed_removal": mixed,
                 "timing_schema_version": int(timing_db.timing_schema_version),
                 "timing_pin_count": timing_pin_count,
                 "source_net": net_name,
@@ -690,6 +829,10 @@ def buffer_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
                 "load_pins": load_names,
                 "buffer_instance": committed_buffer,
                 "downstream_net": downstream_net,
+                "removal_buffer_instance": port_buffer,
+                "removal_downstream_net": port_survivor_net,
+                "removal_output_port": port_name,
+                "removal_input_net": port_input_net,
             },
             indent=2,
             default=list,
@@ -941,6 +1084,7 @@ SCENARIOS = {
     "sizing_mutation": sizing_mutation,
     "full_refresh_mutation": full_refresh_mutation,
     "buffer_mutation": buffer_mutation,
+    "buffer_removal_qualification": buffer_removal_qualification,
     "rcx": rcx,
     "routing": routing,
     "sta": sta,
