@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <limits>
 #include <map>
 #include <set>
 #include <string_view>
@@ -28,6 +29,8 @@
 
 namespace ista {
 namespace {
+
+constexpr double kUnconstrainedRequiredPs = 2.0e8;
 
 // Keep the launch domain in the identity. Exception tags are not guaranteed
 // to be globally unique across clock domains, so (source type, tag) alone can
@@ -530,14 +533,29 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
     const auto& arc = snapshot.timing_check_arcs[index];
     endpoint_arcs.try_emplace({arc.sink_pin, arc.source_pin, arc.check_type, arc.library_arc_id}, static_cast<int32_t>(index));
   }
+  struct ScalarEndpointProjection
+  {
+    std::array<double, 2> max_arrival_ps = {-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+    std::array<double, 2> min_intercept_ps = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    std::array<double, 2> max_intercept_ps = {-std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()};
+    std::array<double, 2> min_intercept_slack_ps = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    std::array<double, 2> max_seed_offset_ps = {0.0, 0.0};
+    std::array<double, 2> min_budget_ps = {std::numeric_limits<double>::infinity(), std::numeric_limits<double>::infinity()};
+    std::array<bool, 2> has_valid_check = {false, false};
+  };
+  std::unordered_map<std::string, ScalarEndpointProjection> scalar_endpoints;
   std::set<std::string> endpoints(snapshot.end_points.begin(), snapshot.end_points.end());
   for (std::size_t state_id = 0; state_id < view.states.size(); ++state_id) {
     auto& state = view.states[state_id];
     if (!endpoints.contains(state.pin))
       continue;
+    auto& scalar_proj = scalar_endpoints[state.pin];
     for (int edge = 0; edge < 2; ++edge) {
       if (!state.valid[edge])
         continue;
+      if (std::isfinite(state.reference[edge])) {
+        scalar_proj.max_arrival_ps[edge] = std::max(scalar_proj.max_arrival_ps[edge], state.reference[edge]);
+      }
       const TimingPathState& path = *paths[state_id][edge];
       const auto endpoint = checker.checkPath(path, state.pin, AnalysisType::kMax);
       if (!endpoint.has_value())
@@ -605,8 +623,30 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
         }
         row.reference_required_ps = endpoint->required() * snapshot.time_unit_ps;
         row.intercept_ps = (endpoint->required() - row.check_coefficient * check.check_time) * snapshot.time_unit_ps;
-        if (!std::isfinite(row.intercept_ps))
+        if (!std::isfinite(row.intercept_ps)) {
           view.unsupported.push_back("non-finite required rule at " + state.pin);
+        } else {
+          double seed_offset_ps = 0.0;
+          const auto start_it = pin_ids.find(path.get_start_point());
+          if (start_it != pin_ids.end()) {
+            const auto& start_pin = snapshot.pins.at(start_it->second);
+            if (start_pin.is_port) {
+              const double start_aat_ps = std::max(start_pin.max_rise_aat_ps, start_pin.max_fall_aat_ps);
+              if (std::isfinite(start_aat_ps) && start_aat_ps > 0.0) {
+                seed_offset_ps = start_aat_ps;
+              }
+            }
+          }
+          scalar_proj.has_valid_check[edge] = true;
+          scalar_proj.min_intercept_ps[edge] = std::min(scalar_proj.min_intercept_ps[edge], row.intercept_ps);
+          scalar_proj.max_intercept_ps[edge] = std::max(scalar_proj.max_intercept_ps[edge], row.intercept_ps);
+          scalar_proj.max_seed_offset_ps[edge] = std::max(scalar_proj.max_seed_offset_ps[edge], seed_offset_ps);
+          scalar_proj.min_budget_ps[edge] = std::min(scalar_proj.min_budget_ps[edge], row.intercept_ps - seed_offset_ps);
+          if (!structural_model && std::isfinite(state.reference[edge])) {
+            scalar_proj.min_intercept_slack_ps[edge]
+                = std::min(scalar_proj.min_intercept_slack_ps[edge], row.intercept_ps - state.reference[edge]);
+          }
+        }
         if (gate_window) {
           auto& qualification = snapshot.pins.at(pin_ids.at(state.pin)).max_qualification;
           qualification.valid[edge] = true;
@@ -615,6 +655,65 @@ void compileSparse(TimingData& snapshot, bool force, bool structural_model, Anal
       }
       view.checks.push_back(row);
     }
+  }
+  if (view.unsupported.empty()) {
+    for (const std::string& endpoint_name : snapshot.end_points) {
+      const auto pin_it = pin_ids.find(endpoint_name);
+      if (pin_it == pin_ids.end())
+        continue;
+      auto& pin = snapshot.pins.at(pin_it->second);
+      const auto proj_it = scalar_endpoints.find(endpoint_name);
+      const double check_adj_ps = pin.setup_check_time_ps;
+      for (int edge = 0; edge < 2; ++edge) {
+        const bool valid_edge = proj_it != scalar_endpoints.end() && proj_it->second.has_valid_check[edge];
+        if (!valid_edge) {
+          pin.max_qualification.valid[edge] = false;
+          if (pin.max_qualification.reason[edge] == TimingMaxQualificationReason::kValid
+              || pin.max_qualification.reason[edge] == TimingMaxQualificationReason::kUnsupportedConstraint) {
+            pin.max_qualification.reason[edge] = TimingMaxQualificationReason::kInactiveCheck;
+          }
+          if (edge == 0)
+            pin.max_rise_rat_ps = kUnconstrainedRequiredPs;
+          else
+            pin.max_fall_rat_ps = kUnconstrainedRequiredPs;
+          continue;
+        }
+        pin.max_qualification.valid[edge] = true;
+        pin.max_qualification.reason[edge] = TimingMaxQualificationReason::kValid;
+        const auto& proj = proj_it->second;
+        double target_intercept_ps = proj.min_intercept_ps[edge];
+        if (proj.max_intercept_ps[edge] - proj.min_intercept_ps[edge] > 1e-6) {
+          if (!structural_model && std::isfinite(proj.max_arrival_ps[edge])
+              && std::isfinite(proj.min_intercept_slack_ps[edge])) {
+            target_intercept_ps = proj.max_arrival_ps[edge] + proj.min_intercept_slack_ps[edge];
+          } else if (proj.max_seed_offset_ps[edge] > 0.0 && std::isfinite(proj.min_budget_ps[edge])) {
+            target_intercept_ps = proj.max_seed_offset_ps[edge] + proj.min_budget_ps[edge];
+          }
+        }
+        const double adjusted_rat_ps = target_intercept_ps - check_adj_ps;
+        if (edge == 0)
+          pin.max_rise_rat_ps = adjusted_rat_ps;
+        else
+          pin.max_fall_rat_ps = adjusted_rat_ps;
+      }
+    }
+    auto refresh_arc_qualification = [&](std::vector<TimingEndpointArcData>& arcs) {
+      for (auto& arc : arcs) {
+        const auto pin_it = pin_ids.find(arc.sink_pin);
+        if (pin_it == pin_ids.end())
+          continue;
+        const auto& endpoint_qual = snapshot.pins.at(pin_it->second).max_qualification;
+        for (int edge = 0; edge < 2; ++edge) {
+          if (!endpoint_qual.valid[edge]
+              || arc.max_qualification.reason[edge] == TimingMaxQualificationReason::kUnsupportedConstraint) {
+            arc.max_qualification.valid[edge] = endpoint_qual.valid[edge];
+            arc.max_qualification.reason[edge] = endpoint_qual.reason[edge];
+          }
+        }
+      }
+    };
+    refresh_arc_qualification(snapshot.constraint_arcs);
+    refresh_arc_qualification(snapshot.timing_check_arcs);
   }
   std::sort(view.unsupported.begin(), view.unsupported.end());
   view.unsupported.erase(std::unique(view.unsupported.begin(), view.unsupported.end()), view.unsupported.end());
