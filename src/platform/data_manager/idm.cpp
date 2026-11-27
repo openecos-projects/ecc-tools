@@ -30,9 +30,12 @@
 #include "utility/logger/Logger.hpp"
 #include "idm.h"
 
+#include <algorithm>
 #include <cassert>
 #include <stdexcept>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 namespace idm {
 
 namespace {
@@ -171,6 +174,20 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
     return;
   }
   auto const& row_list = this->get_idb_layout()->get_rows()->get_row_list();
+  std::vector<std::pair<int32_t, IdbRow*>> sorted_rows;
+  sorted_rows.reserve(row_list.size());
+  IdbRow* last_row = nullptr;
+  int32_t last_y = 0;
+  for (auto* row : row_list) {
+    int32_t row_y = row->get_original_coordinate()->get_y();
+    if (last_row == nullptr || row_y > last_y) {
+      last_row = row;
+      last_y = row_y;
+    }
+    sorted_rows.emplace_back(row_y, row);
+  }
+  std::stable_sort(sorted_rows.begin(), sorted_rows.end(),
+                   [](auto const& lhs, auto const& rhs) { return lhs.first < rhs.first; });
   for (auto name : this->get_idb_design()->m_instID2Name) {
     // std::string name;
     if (i >= len) {
@@ -192,29 +209,14 @@ void DataManager::write_placement_back(const float* x, const float* y, int len)
       continue;
     }
     if (!cell_master->is_block()) {
-      if (row_list.empty()) {
+      if (sorted_rows.empty()) {
         i++;
         continue;
       }
       auto target_y = static_cast<int32_t>(yy);
-      IdbRow* matched_row = nullptr;
-      int32_t matched_y = 0;
-      IdbRow* last_row = nullptr;
-      int32_t last_y = 0;
-      for (auto* row : row_list) {
-        int32_t row_y = row->get_original_coordinate()->get_y();
-        if (last_row == nullptr || row_y > last_y) {
-          last_row = row;
-          last_y = row_y;
-        }
-        if (row_y >= target_y && (matched_row == nullptr || row_y < matched_y)) {
-          matched_row = row;
-          matched_y = row_y;
-        }
-      }
-      if (matched_row == nullptr) {
-        matched_row = last_row;
-      }
+      auto it = std::lower_bound(sorted_rows.begin(), sorted_rows.end(), target_y,
+                                 [](auto const& entry, int32_t y_val) { return entry.first < y_val; });
+      IdbRow* matched_row = (it != sorted_rows.end()) ? it->second : last_row;
       if (matched_row == nullptr) {
         i++;
         continue;
