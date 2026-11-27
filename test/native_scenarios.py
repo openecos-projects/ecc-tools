@@ -483,6 +483,7 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
         ecc_py.destroy_sta()
         raise AssertionError("fixture needs two sizing candidates for refresh")
 
+    before_size_x = int(first_pydb.node_size_x[candidate_ids[0]])
     first = first_pydb.apply_sizing([candidate_ids[0]], [manifest["profile"]["buffer_large"]])
     if not first["ok"] or first["accepted_count"] != 1:
         ecc_py.destroy_sta()
@@ -497,7 +498,10 @@ def full_refresh_mutation(manifest: dict[str, Any]) -> dict[str, Path]:
         ecc_py.destroy_sta()
         raise AssertionError("full refresh did not return a new valid timing PyPlaceDB")
     refreshed_id = list(second_pydb.node_names).index(str(first_pydb.node_names[candidate_ids[0]]))
-    if int(second_pydb.node_size_x[refreshed_id]) == int(first_pydb.node_size_x[candidate_ids[0]]):
+    refreshed_size_x = int(second_pydb.node_size_x[refreshed_id])
+    if refreshed_size_x == before_size_x or refreshed_size_x != int(
+        first_pydb.node_size_x[candidate_ids[0]]
+    ):
         ecc_py.destroy_sta()
         raise AssertionError("refreshed PyPlaceDB lost the first sizing mutation")
 
