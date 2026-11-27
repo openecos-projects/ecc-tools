@@ -67,6 +67,9 @@ void CapExtractor::extract()
   const char* table = std::getenv("IRCX_PATTERN_TABLE");
   if (table && *table)
     RCXLOG.error(Loc::current(), "only PatternGrid capacitance calculation is supported; remove IRCX_PATTERN_TABLE");
+  const char* interlayer_table = std::getenv("IRCX_XLAYER_TABLE");
+  if (interlayer_table && *interlayer_table)
+    RCXLOG.error(Loc::current(), "only PatternGrid capacitance calculation is supported; remove IRCX_XLAYER_TABLE");
 
   _grid.reset();
   _grid_override.reset();

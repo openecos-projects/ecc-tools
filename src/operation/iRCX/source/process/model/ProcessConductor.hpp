@@ -25,6 +25,7 @@
 #include "ProcessEvaluationIssue.hpp"
 #include "ProcessTable1D.hpp"
 #include "ProcessTable2D.hpp"
+#include "ProcessThicknessModel.hpp"
 
 namespace ircx {
 
@@ -43,6 +44,10 @@ class ProcessConductor
   std::vector<ProcessEvaluationIssue>& get_evaluation_issues() { return _evaluation_issues; }
   const std::vector<ProcessEvaluationIssue>& get_evaluation_issues() const { return _evaluation_issues; }
   double get_thickness() const { return _thickness; }
+  double get_side_tangent() const { return _side_tangent; }
+  bool get_has_top_etch() const { return _has_top_etch; }
+  const std::optional<ProcessThicknessPolynomial>& get_thickness_polynomial() const { return _thickness_polynomial; }
+  std::optional<ProcessThicknessPolynomial>& get_thickness_polynomial() { return _thickness_polynomial; }
   double get_sheet_resistance() const { return _sheet_resistance; }
   double get_resistivity() const { return _resistivity; }
   bool get_has_nominal_tmpr() const { return _has_nominal_tmpr; }
@@ -74,6 +79,8 @@ class ProcessConductor
   void set_layer_name(const std::string& layer_name) { _layer_name = layer_name; }
   void set_layer_type(const std::string& layer_type) { _layer_type = layer_type; }
   void set_thickness(double thickness) { _thickness = thickness; }
+  void set_side_tangent(double tangent) { _side_tangent = tangent; }
+  void set_has_top_etch(bool value) { _has_top_etch = value; }
   void set_sheet_resistance(double sheet_resistance) { _sheet_resistance = sheet_resistance; }
   void set_resistivity(double resistivity) { _resistivity = resistivity; }
   void set_nominal_tmpr(double nominal_tmpr)
@@ -107,6 +114,9 @@ class ProcessConductor
   std::string _layer_type;
   std::vector<ProcessEvaluationIssue> _evaluation_issues;
   double _thickness = -1.0;
+  double _side_tangent = 0.0;
+  bool _has_top_etch = false;
+  std::optional<ProcessThicknessPolynomial> _thickness_polynomial;
   double _sheet_resistance = -1.0;
   double _resistivity = -1.0;
   bool _has_nominal_tmpr = false;

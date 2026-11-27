@@ -187,7 +187,7 @@ Status validateDeferredModel(const Field& field, const ProcessUnits& units)
   if (field.key == "BOTTOM_THICKNESS_VS_SI_WIDTH")
     return numericRows(field, units, {D::kLength, D::kLength}, true);
   if (field.key == "DENSITY_BOX_WEIGHTING_FACTOR")
-    return numericRows(field, units, {D::kScalar, D::kScalar});
+    return numericRows(field, units, {D::kLength, D::kScalar});
   if (field.key == "WIDTH-SPACE")
     return numericRows(field, units, {D::kLength, D::kLength});
   return fail(field, "unknown_field", "unsupported deferred model " + field.key);

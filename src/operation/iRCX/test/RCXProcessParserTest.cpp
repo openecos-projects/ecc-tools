@@ -303,7 +303,7 @@ int main(int argc, char** argv)
          rejected("VIA contact {AREA=0 RPV=.001}", "invalid_value");
          rejected("VIA contact {AREA=-1 RPV=.001}", "invalid_value");
        }},
-      {"known physical declarations load with evaluation diagnostics",
+      {"polynomial declarations retain coefficients and geometry without a blanket rejection",
        [] {
          const auto result = ircx::parseProcess(R"(CONDUCTOR M1 {THICKNESS=.2 RPSQ=.12 SIDE_TANGENT=.1
            POLYNOMIAL_BASED_THICKNESS_VARIATION {
@@ -315,7 +315,9 @@ int main(int argc, char** argv)
          std::size_t limitations = 0;
          for (const auto& diagnostic : result.diagnostics)
            limitations += diagnostic.code == "unevaluated_model" && diagnostic.severity == ircx::ProcessSeverity::kWarning;
-         require(limitations == 2, "missing physical model diagnostics");
+         require(limitations == 0, "implemented geometry was marked unevaluated");
+         require(result.technology->conductors[0].get_thickness_polynomial().has_value(), "normalized polynomial missing");
+         near(result.technology->conductors[0].get_side_tangent(), .1);
          const auto& properties = result.technology->properties;
          require(properties.size() == 1 && properties[0].key == "CONDUCTOR", "source declaration lost");
          const auto& polynomial = properties[0].children.back();
@@ -324,6 +326,60 @@ int main(int argc, char** argv)
                  "repeated coefficient records lost");
          near(polynomial.children[3].values.back().value, .1);
          near(polynomial.children[4].values.back().value, .2);
+       }},
+      {"global density basis is resolved after every conductor declaration",
+       [] {
+         const std::string body = "CONDUCTOR M1 {THICKNESS=.2 RPSQ=.12 POLYNOMIAL_BASED_THICKNESS_VARIATION {"
+                                  "DENSITY_POLYNOMIAL_ORDERS {1} WIDTH_POLYNOMIAL_ORDERS {0} POLYNOMIAL_COEFFICIENTS {.1}}}";
+         for (const std::string& input : {"USE_SI_DENSITY=YES " + body, body + " USE_SI_DENSITY=YES"}) {
+           const auto model = parse(input);
+           const auto& polynomial = *model.conductors[0].get_thickness_polynomial();
+           require(polynomial.density_basis == ircx::GeometryBasis::kFabricated && polynomial.width_basis == ircx::GeometryBasis::kDrawn,
+                   "global density switch also changed width or depended on declaration order");
+         }
+         for (const std::string prefix : {"SI_DENSITY_POLYNOMIAL_ORDERS {1} WIDTH_POLYNOMIAL_ORDERS {0}",
+                                          "DENSITY_POLYNOMIAL_ORDERS {1} SI_WIDTH_POLYNOMIAL_ORDERS {0}"}) {
+           const auto local = "CONDUCTOR M1 {THICKNESS=.2 RPSQ=.12 POLYNOMIAL_BASED_THICKNESS_VARIATION {" + prefix
+                            + " POLYNOMIAL_COEFFICIENTS {.1}}}";
+           parse(local);
+           parse(local + " USE_SI_DENSITY=NO");
+           rejected(local + " USE_SI_DENSITY=YES", "conflicting_geometry_basis");
+         }
+       }},
+      {"polynomial constraints reject invalid bounds orders and competing thickness models",
+       [] {
+         const std::string base = "CONDUCTOR M1 {THICKNESS=.2 RPSQ=.12 POLYNOMIAL_BASED_THICKNESS_VARIATION {"
+                                  "DENSITY_POLYNOMIAL_ORDERS {1} WIDTH_POLYNOMIAL_ORDERS {0} POLYNOMIAL_COEFFICIENTS {.1} ";
+         for (const std::string bound : {"DENSITY_BOUNDS_VS_WIDTH {(.1,-.1,.9)}", "DENSITY_BOUNDS_VS_WIDTH {(.1,0,1.1)}",
+                                         "THICKNESS_BOUNDS {-.1 .3}", "THICKNESS_BOUNDS {.2 .3}", "THICKNESS_BOUNDS {.1 .2}"})
+           rejected(base + bound + "}}");
+         for (const std::string field : {"THICKNESS_VS_DENSITY {(.1,.2)}",
+                                         "THICKNESS_VS_WIDTH_AND_SPACING {WIDTHS {.1} VALUES {.1}}"})
+           rejected(base + "} " + field + "}", "conflicting_thickness");
+         rejected("CONDUCTOR M1 {THICKNESS=.2 RPSQ=.12 POLYNOMIAL_BASED_THICKNESS_VARIATION {"
+                  "DENSITY_POLYNOMIAL_ORDERS {1e20} WIDTH_POLYNOMIAL_ORDERS {0} POLYNOMIAL_COEFFICIENTS {.1}}}");
+       }},
+      {"polynomial density accepts one physical window with unit weight",
+       [] {
+         const std::string polynomial = R"(POLYNOMIAL_BASED_THICKNESS_VARIATION {
+           DENSITY_POLYNOMIAL_ORDERS {1} WIDTH_POLYNOMIAL_ORDERS {0} POLYNOMIAL_COEFFICIENTS {1}
+           DENSITY_BOUNDS_VS_WIDTH {(.1,0,1)}})";
+         for (const std::string& fields : {"DENSITY_BOX_WEIGHTING_FACTOR {(20,1)} " + polynomial,
+                                          polynomial + " DENSITY_BOX_WEIGHTING_FACTOR {(20,1)}"}) {
+           const auto model = parse("HALF_NODE_SCALE_FACTOR=.9 CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12 " + fields + "}");
+           const auto& conductor = model.conductors[0];
+           near(conductor.get_thickness_polynomial()->density_window, 20);
+           require(conductor.get_evaluation_issues().empty(), "supported density window is still deferred");
+         }
+         const auto nominal = parse("CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12 " + polynomial + "}");
+         near(nominal.conductors[0].get_thickness_polynomial()->density_window, 50);
+         const auto native = parse(R"(units {length 1nm} metal M1 {Thickness 100 Resistance .12
+           DENSITY_BOX_WEIGHTING_FACTOR {{20000 1}}
+           POLYNOMIAL_BASED_THICKNESS_VARIATION {DENSITY_POLYNOMIAL_ORDERS {0} WIDTH_POLYNOMIAL_ORDERS {0}
+             WIDTH_RANGES {100} POLYNOMIAL_COEFFICIENTS {{0}} POLYNOMIAL_COEFFICIENTS {{0}}}})");
+         near(native.conductors[0].get_thickness_polynomial()->density_window, 20);
+         for (const std::string rows : {"(20,.5)", "(20,1) (30,1)", "(0,1)", "(-1,1)", "(501,1)"})
+           rejected("CONDUCTOR M1 {THICKNESS=.1 RPSQ=.12 " + polynomial + " DENSITY_BOX_WEIGHTING_FACTOR {" + rows + "}}");
        }},
       {"loaded documents own their original source and property values",
        [] {

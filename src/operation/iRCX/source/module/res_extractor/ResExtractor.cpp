@@ -22,12 +22,18 @@
 #include "ProcessBinding.hpp"
 #include "ProcessConductor.hpp"
 #include "ProcessEffectType.hpp"
-#include "ProcessEvaluator.hpp"
 #include "ProcessVia.hpp"
 #include "TopoEdge.hpp"
 #include "Utility.hpp"
 
 namespace ircx {
+namespace {
+double temperatureFactor(double temperature, double nominal, double first, double second)
+{
+  const double delta = temperature - nominal;
+  return 1.0 + first * delta + second * delta * delta;
+}
+}  // namespace
 
 // public
 
@@ -135,8 +141,7 @@ std::string ResExtractor::extractNetResistance(int32_t corner_idx, int32_t net_i
   return {};
 }
 
-ProcessResult<double> ResExtractor::extractWireResistance(CornerData& corner_data, const ProcessConductor& conductor, TopoEdge& edge,
-                                                          std::span<EdgeEtchInterval> edge_interval_list)
+ProcessResult<double> ResExtractor::extractWireResistance(CornerData& corner_data, const ProcessConductor& conductor, TopoEdge& edge, std::span<EdgeEtchInterval> edge_interval_list)
 {
   Database& database = RCXDM.getDatabase();
   TopoNode& start_node = database.get_topo_pool().get_node(edge.get_start_node_idx());
@@ -155,20 +160,63 @@ ProcessResult<double> ResExtractor::extractWireResistance(CornerData& corner_dat
   segment_end *= scale;
   double resistance = 0.0;
   for (const EdgeEtchInterval& edge_interval : edge_interval_list) {
-    const double width = edge.get_width() * micron_per_dbu * scale;
-    const double lower_spacing = edge_interval.get_lower_spacing() < 0 ? -1 : edge_interval.get_lower_spacing() * scale;
-    const double upper_spacing = edge_interval.get_upper_spacing() < 0 ? -1 : edge_interval.get_upper_spacing() * scale;
-    if (edge_interval.get_resistance_segments().empty())
-      return std::string("missing finalized resistance geometry");
-    for (const auto& segment : edge_interval.get_resistance_segments()) {
-      const double start = std::max(segment.start, segment_start);
-      const double end = std::min(segment.end, segment_end);
-      if (end <= start) continue;
-      const auto value = evaluateWireResistanceFromGeometry(conductor, {width, lower_spacing, upper_spacing}, segment.geometry,
-          end - start, corner_data.get_tmpr(), corner_data.get_global_tmpr());
-      if (!value) return value.error;
-      resistance += *value;
+    double overlap_start = std::max(edge_interval.get_start_coord() * scale, segment_start);
+    double overlap_end = std::min(edge_interval.get_end_coord() * scale, segment_end);
+    if (overlap_end <= overlap_start) {
+      continue;
     }
+
+    double length = overlap_end - overlap_start;
+    // Reconstruct resistance geometry even at scale 1: shared intervals may
+    // already contain capacitive-only etch and must not be modified here.
+    double width = edge.get_width() * micron_per_dbu * scale;
+    const double lower_spacing
+        = edge_interval.get_lower_spacing() < 0.0 ? edge_interval.get_lower_spacing() : edge_interval.get_lower_spacing() * scale;
+    const double upper_spacing
+        = edge_interval.get_upper_spacing() < 0.0 ? edge_interval.get_upper_spacing() : edge_interval.get_upper_spacing() * scale;
+    for (const auto& etch : conductor.get_etch_table_list()) {
+      if (etch.get_effect_type() == ProcessEffectType::kCapacitance) {
+        continue;
+      }
+      const double lower_etch = etch.get_table().query(width, lower_spacing).value_or(0.0);
+      const double upper_etch = etch.get_table().query(width, upper_spacing).value_or(0.0);
+      width -= lower_etch + upper_etch;
+      if (!std::isfinite(width) || width <= 0.0) {
+        return "invalid resistance wire width after etch table on " + conductor.get_layer_name();
+      }
+    }
+    // ITF scalar etch is per sidewall and follows the width/spacing tables.
+    // Negative etch expands the conductor; CAPACITIVE_ONLY_ETCH does not enter R.
+    width -= 2.0 * (conductor.get_etch() + conductor.get_resistive_only_etch());
+    if (!std::isfinite(width) || width <= 0.0) {
+      return "invalid resistance wire width after ETCH/RESISTIVE_ONLY_ETCH on " + conductor.get_layer_name();
+    }
+    double thickness = edge_interval.get_thickness();
+    if (thickness <= 0.0) {
+      continue;
+    }
+
+    std::optional<double> resistivity = conductor.get_resistivity_by_width_thickness_table().query(thickness, width);
+    double resistivity_value = resistivity.has_value() ? resistivity.value() : conductor.get_resistivity();
+    double sheet_resistance = 0.0;
+    if (resistivity_value <= 0.0) {
+      std::optional<double> sheet_resistance_by_width = conductor.get_sheet_resistance_by_width_table().query(width);
+      sheet_resistance = sheet_resistance_by_width.has_value() ? sheet_resistance_by_width.value() : conductor.get_sheet_resistance();
+    }
+
+    double base_resistance = 0.0;
+    if (resistivity_value > 0.0) {
+      base_resistance = resistivity_value * length / (width * thickness);
+    }
+    if (sheet_resistance > 0.0) {
+      base_resistance += sheet_resistance * length / width;
+    }
+
+    double tmpr_coefficient1 = 0.0;
+    double tmpr_coefficient2 = 0.0;
+    conductor.query_tmpr_coefficient(width, tmpr_coefficient1, tmpr_coefficient2);
+    double nominal_tmpr = conductor.get_has_nominal_tmpr() ? conductor.get_nominal_tmpr() : corner_data.get_global_tmpr();
+    resistance += base_resistance * temperatureFactor(corner_data.get_tmpr(), nominal_tmpr, tmpr_coefficient1, tmpr_coefficient2);
   }
   return resistance;
 }
@@ -182,7 +230,31 @@ ProcessResult<double> ResExtractor::extractViaResistance(CornerData& corner_data
   double y_span = (RCXUTIL.maxY(via_shape) - RCXUTIL.minY(via_shape)) * micron_per_dbu;
   double length = std::max(x_span, y_span) * corner_data.get_half_node_scale_factor();
   double width = std::min(x_span, y_span) * corner_data.get_half_node_scale_factor();
-  return evaluateViaResistance(via, width, length, corner_data.get_tmpr(), corner_data.get_global_tmpr());
+  double length_etch = 0.0, width_etch = 0.0;
+  for (const auto& table : via.get_etch_table_list()) {
+    if (table.get_effect_type() == ProcessEffectType::kCapacitance) continue;
+    length_etch += table.get_length_table().query(width, length).value_or(0.0);
+    width_etch += table.get_width_table().query(width, length).value_or(0.0);
+  }
+  length = std::max(0.0, length - 2.0 * length_etch);
+  width = std::max(0.0, width - 2.0 * width_etch);
+  const double area = length * width;
+  if (!std::isfinite(area) || area <= 0.0)
+    return "invalid resistance cut area for via " + via.get_layer_name();
+  double base = 0.0;
+  if (via.get_resistance() > 0.0) {
+    if (!std::isfinite(via.get_area()) || via.get_area() <= 0.0)
+      return "RPV requires a positive finite AREA for via " + via.get_layer_name();
+    base = via.get_resistance() * (via.get_area() / area);
+    if (!std::isfinite(base) || base <= 0.0)
+      return "invalid area-scaled resistance for via " + via.get_layer_name();
+  } else {
+    base = via.get_resistance_by_area_table().query(area).value_or(0.0);
+  }
+  double first = 0.0, second = 0.0;
+  via.query_tmpr_coefficient(area, first, second);
+  const double nominal = via.get_has_nominal_tmpr() ? via.get_nominal_tmpr() : corner_data.get_global_tmpr();
+  return base * temperatureFactor(corner_data.get_tmpr(), nominal, first, second);
 }
 
 const ProcessVia* ResExtractor::getProcessVia(CornerData& corner_data, int32_t design_layer_idx)

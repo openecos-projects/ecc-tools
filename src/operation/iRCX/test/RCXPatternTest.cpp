@@ -38,15 +38,22 @@ int main()
   assert(!invalid_coordinate && !grid_error.empty());
   auto valid_grid = grid.queryChecked("M1", "SUBSTRATE", "", 1, -1, -1, grid_error);
   assert(valid_grid && grid_error.empty() && valid_grid->ground == isolated.ground);
-  std::istringstream bad_header("P M1 SUBSTRATE - 1 extra\n");
-  bool header_rejected = false;
-  try {
-    pattern::PatternGrid invalid;
-    invalid.read(bad_header);
-  } catch (const std::runtime_error&) {
-    header_rejected = true;
+  for (const char* text : {"P M1 SUBSTRATE - 1 extra\n",
+                           "IRCX_PATTERN_GRID_V2\nP M2 M1 M3 1\n"
+                           "-1 -1 1 0 0 2 3\n-1 1 1 0 4 2 3\n1 -1 1 4 0 2 3\n1 1 1 4 4 2 3\n",
+                           "P M1 SUBSTRATE - 1\n-1 -1 1 0 0 0\n",
+                           "P M1 SUBSTRATE - 1\n-1 -1 1 0 0 0 1 2\n",
+                           "P M1 SUBSTRATE - 1\n-1 -1 1 0 0 2 0\n"}) {
+    std::istringstream bad_header(text);
+    bool header_rejected = false;
+    try {
+      pattern::PatternGrid invalid;
+      invalid.read(bad_header);
+    } catch (const std::runtime_error&) {
+      header_rejected = true;
+    }
+    assert(header_rejected);
   }
-  assert(header_rejected);
   CrossLayerOverlap near, far;
   near.set_start_coord(0);
   near.set_end_coord(100);
@@ -146,4 +153,21 @@ int main()
   zero.add(true, 0, 10, 20);
   zero.add(false, 0, 10, 0);
   assert(zero.value() == 10);
+  // Optional directional fields divide the aggregate ground capacitance.
+  std::istringstream directional(" \tP M2 M1 M3 1 \r\n"
+                                "-1 -1 8 0 0 3 5\n-1 1 8 0 2 3 5\n"
+                                "1 -1 8 2 0 3 5\n1 1 8 2 2 3 5\n"
+                                "P M2 M1 M3 3\n-1 -1 16 0 0 6 10\n-1 1 16 0 4 6 10\n"
+                                "1 -1 16 4 0 6 10\n1 1 16 4 4 6 10\n");
+  grid.read(directional);
+  const auto sided = grid.query("M2", "M1", "M3", 1, -1, 1);
+  assert(sided.ground == 8 && sided.ground_low == 3 && sided.ground_high == 5);
+  assert(sided.left == 0 && sided.right == 2);
+  const auto interpolated = grid.query("M2", "M1", "M3", 2, -1, -1);
+  assert(interpolated.ground == 12 && interpolated.ground_low == 4.5 && interpolated.ground_high == 7.5);
+  assert(interpolated.left == 0 && interpolated.right == 0);
+  std::istringstream aggregate("P M1 SUBSTRATE - 1\n-1 -1 8 0 0\n-1 1 5 0 3\n1 -1 5 3 0\n1 1 2 3 3\n");
+  grid.read(aggregate);
+  const auto reloaded = grid.query("M1", "SUBSTRATE", "", 1, -1, -1);
+  assert(reloaded.ground == 8 && reloaded.ground_low == 4 && reloaded.ground_high == 4);
 }

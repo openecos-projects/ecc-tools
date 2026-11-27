@@ -98,7 +98,13 @@ ProcessResult<EffectiveWireGeometry> evaluateWireGeometry(const ProcessConductor
   const double shrink = (result->width - final->width) / 2;
   if ((query.lower_spacing >= 0 && lower + shrink < -1e-12) || (query.upper_spacing >= 0 && upper + shrink < -1e-12))
     return "overlapping wires after scalar etch on " + conductor.get_layer_name();
-  return final;
+  const auto geometry = finalizeWireGeometry(conductor, query, *final, domain);
+  if (!geometry) return geometry.error;
+  const double side_expansion = std::abs(geometry->side_tangent) * geometry->thickness / 2;
+  if ((query.lower_spacing >= 0 && lower + shrink - side_expansion < -1e-12)
+      || (query.upper_spacing >= 0 && upper + shrink - side_expansion < -1e-12))
+    return "final sidewalls overlap fixed neighbors on " + conductor.get_layer_name();
+  return geometry;
 }
 namespace {
 const EffectiveWireSegment* segmentAt(const std::vector<EffectiveWireSegment>& segments, double coordinate)
@@ -136,8 +142,10 @@ ProcessResult<WireGeometryQuery> profileQuery(std::span<const WireGeometryInput>
   }
   return query;
 }
+
+
 }
-ProcessResult<WireGeometryProfiles> evaluateWireGeometryProfiles(std::span<const WireGeometryInput> wires, ProcessEffectType domain)
+ProcessResult<WireGeometryProfiles> evaluateWireEtchProfiles(std::span<const WireGeometryInput> wires, ProcessEffectType domain)
 {
   if (domain != ProcessEffectType::kResistance && domain != ProcessEffectType::kCapacitance)
     return std::string("geometry query requires one effect domain");
@@ -217,6 +225,21 @@ ProcessResult<WireGeometryProfiles> evaluateWireGeometryProfiles(std::span<const
     }
     profiles = std::move(next);
   }
+  return profiles;
+}
+ProcessResult<WireGeometryProfiles> evaluateWireGeometryProfiles(std::span<const WireGeometryInput> wires, ProcessEffectType domain)
+{
+  auto profiles = evaluateWireEtchProfiles(wires, domain);
+  if (!profiles) return profiles.error;
+  for (std::size_t i = 0; i < wires.size(); ++i) {
+    for (auto& segment : (*profiles)[i]) {
+      const auto geometry = finalizeWireGeometry(*wires[i].conductor, {wires[i].width}, segment.geometry, domain);
+      if (!geometry) return geometry.error;
+      segment.geometry = *geometry;
+    }
+  }
+  const auto valid = validateWireGeometryProfiles(wires, *profiles, domain);
+  if (!valid) return valid.error;
   return profiles;
 }
 ProcessResult<double> evaluateWireResistance(const ProcessConductor& conductor, const WireGeometryQuery& query, double length, double temperature,

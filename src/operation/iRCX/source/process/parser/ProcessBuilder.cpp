@@ -206,7 +206,6 @@ Result<ProcessTechnology> buildTechnology(const Document& document, SyntaxKind k
           || !isOneOf(upper(field.references.front()), {"YES", "NO"}))
         return fail(field, "invalid_value", "USE_SI_DENSITY requires YES or NO");
       model.use_si_density = upper(field.references.front()) == "YES";
-      ignored(field, diagnostics);
     } else if (isOneOf(field.key, {"GLOBAL_TEMPERATURE", "HALF_NODE_SCALE_FACTOR"})) {
       if (!globals.insert(field.key).second)
         return fail(field, "duplicate_field", "duplicate " + field.key);
@@ -231,6 +230,19 @@ Result<ProcessTechnology> buildTechnology(const Document& document, SyntaxKind k
   }
   if (model.conductors.empty() && model.vias.empty())
     return Failure{"empty_process", {}, {}, "document contains no conductor or via resistance model"};
+  std::size_t conductor_index = 0;
+  for (const auto& field : document.fields) {
+    if (!isOneOf(field.key, {"CONDUCTOR", "METAL"})) continue;
+    auto& conductor = model.conductors[conductor_index++];
+    const auto resolved = resolveThicknessPolynomial(conductor, field, model.use_si_density.value_or(false), *units);
+    if (!resolved) return resolved.error;
+    // Defaults refer to source etch declarations. Resolve them before splitting
+    // a native table into the independent R/C runtime operations.
+    if (kind == SyntaxKind::kTech) {
+      const auto normalized = normalizeConductorEtch(conductor, field, *units);
+      if (!normalized) return normalized.error;
+    }
+  }
   model.properties = document.fields;
   return model;
 }
