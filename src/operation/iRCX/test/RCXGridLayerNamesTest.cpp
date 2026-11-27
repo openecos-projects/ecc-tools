@@ -101,16 +101,9 @@ int main(int argc, char** argv)
   int result = EXIT_SUCCESS;
   try {
     checkLayerNames(geometry);
-    if (!geometry.empty()) {
-      std::cerr << "nominal grid accepted variable process geometry: " << geometry << '\n';
-      result = EXIT_FAILURE;
-    }
   } catch (const std::exception& error) {
-    if (geometry.empty() || std::string(error.what()).find("Capacitance tables do not represent variable thickness or trapezoidal geometry")
-                                == std::string::npos) {
-      std::cerr << error.what() << '\n';
-      result = EXIT_FAILURE;
-    }
+    std::cerr << error.what() << '\n';
+    result = EXIT_FAILURE;
   }
   CapExtractor::destroyInst();
   DataManager::destroyInst();

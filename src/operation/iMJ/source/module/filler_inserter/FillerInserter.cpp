@@ -222,7 +222,9 @@ void FillerInserter::initFillerMasterList(FIModel& fi_model, idb::IdbLayout* idb
 
 bool FillerInserter::isFillerMaster(idb::IdbCellMaster* idb_cell_master)
 {
-  if (idb_cell_master == nullptr || !idb_cell_master->is_core() || idb_cell_master->get_width() == 0 || idb_cell_master->get_height() == 0) {
+  // iDB's core classification includes ENDCAPs, including IO-ring corners with only PG pins.
+  if (idb_cell_master == nullptr || !idb_cell_master->is_core() || idb_cell_master->is_endcap() || idb_cell_master->get_width() == 0
+      || idb_cell_master->get_height() == 0) {
     return false;
   }
   std::vector<idb::IdbTerm*> term_list = idb_cell_master->get_term_list();

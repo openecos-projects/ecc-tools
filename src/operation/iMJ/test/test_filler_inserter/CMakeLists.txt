@@ -5,6 +5,7 @@ add_executable(test_imj_filler_inserter
 target_link_libraries(test_imj_filler_inserter
     PRIVATE
     imj_filler_inserter
+    imj_interface
 )
 
 add_test(NAME test_imj_filler_inserter COMMAND test_imj_filler_inserter)

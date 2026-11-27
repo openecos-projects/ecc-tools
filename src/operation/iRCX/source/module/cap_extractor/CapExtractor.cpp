@@ -55,16 +55,7 @@ void CapExtractor::extract()
   Monitor monitor;
   RCXLOG.info(Loc::current(), "Starting...");
 
-  // Current table versions encode nominal rectangular cross sections. Reject
-  // shape-dependent processes until a library declares matching geometry axes.
   auto& database = RCXDM.getDatabase();
-  for (auto& corner : database.get_corner_data_list()) {
-    for (const auto& [layer, name] : database.get_layer_table().get_design_idx_to_name_map()) {
-      const auto* conductor = getProcessConductor(corner, layer);
-      if (conductor && (conductor->get_side_tangent() != 0 || conductor->get_thickness_polynomial()))
-        RCXLOG.error(Loc::current(), "Capacitance tables do not represent variable thickness or trapezoidal geometry on ", name);
-    }
-  }
 
   // These former switches cannot select an alternate calculation anymore.
   const char* mode = std::getenv("IRCX_MULTI_MODE");

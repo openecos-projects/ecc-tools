@@ -168,7 +168,6 @@ class ResistanceFixture
         expectNear(new_intervals[i].get_end_coord(), old_intervals[i].get_end_coord());
         expectNear(new_intervals[i].get_lower_spacing(), old_intervals[i].get_lower_spacing());
         expectNear(new_intervals[i].get_upper_spacing(), old_intervals[i].get_upper_spacing());
-        expectNear(new_intervals[i].get_capacitance_segments().front().geometry.width, old_intervals[i].get_capacitance_segments().front().geometry.width);
       }
     }
   }
@@ -220,6 +219,57 @@ void checkVia(const std::string& properties, double expected, int32_t cut_x = 10
 }
 
 using Test = std::pair<std::string, std::function<void()>>;
+
+std::vector<Test> intervalProcessTests()
+{
+  return {
+      {"etch tables retain the original neighbor spacing", [] {
+         ResistanceFixture fixture;
+         fixture.loadProcess(R"(CONDUCTOR metal1 {THICKNESS=.1 RPSQ=.12
+           ETCH_VS_WIDTH_AND_SPACING {WIDTHS {.2} VALUES {.01}}
+           ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.1 .12} VALUES {0 .01}}})");
+         fixture.addGeometry(false, 100, 200, false, false, true);
+         fixture.extractAndExpect(.6666666666666667);
+       }},
+      {"missing neighbors use the lower spacing endpoint", [] {
+         checkWire(R"(RPSQ=.12 ETCH_VS_WIDTH_AND_SPACING {SPACINGS {.1 .3} VALUES {.01 .03}})",
+                   .6666666666666667);
+       }},
+      {"parsed density and sidewall models leave nominal extraction thickness", [] {
+         ResistanceFixture fixture;
+         fixture.loadProcess(R"(USE_SI_DENSITY=YES CONDUCTOR metal1 {THICKNESS=.1 RPSQ=.12 SIDE_TANGENT=.2
+           POLYNOMIAL_BASED_THICKNESS_VARIATION {
+             DENSITY_POLYNOMIAL_ORDERS {1} WIDTH_POLYNOMIAL_ORDERS {0}
+             POLYNOMIAL_COEFFICIENTS {1} DENSITY_BOUNDS_VS_WIDTH {(.2,0,1)}}})");
+         fixture.addGeometry();
+         fixture.extractAndExpect(.6);
+       }},
+      {"shared table geometry does not apply scalar etch", [] {
+         ResistanceFixture fixture;
+         fixture.loadProcess(R"(CONDUCTOR metal1 {THICKNESS=.1 RPSQ=.12 ETCH=.005 RESISTIVE_ONLY_ETCH=.005
+           ETCH_VS_WIDTH_AND_SPACING RESISTIVE_ONLY {WIDTHS {.2} VALUES {.01}}
+           ETCH_VS_WIDTH_AND_SPACING CAPACITIVE_ONLY {WIDTHS {.2} VALUES {.02}}})");
+         fixture.addGeometry();
+         const auto& interval = RCXDM.getDatabase().get_corner_net_etch_profile_pool().get_item({0,0}).get_edge_interval_list(0)[0];
+         expectNear(interval.get_width(), .14);
+         expectNear(interval.get_thickness(), .1);
+         fixture.extractAndExpect(.75);
+       }},
+      {"scalar sheet resistance remains the interval fallback", [] {
+         ResistanceFixture fixture;
+         fixture.loadInput(R"(metal metal1 {Thickness .1 Resistance 99
+           RPSQ_VS_WIDTH_AND_SPACING {WIDTHS {.1 .3} VALUES {{.08} {.16}}}})");
+         fixture.addGeometry();
+         fixture.extractAndExpect(495);
+       }},
+      {"native via scalar resistance scales with cut area", [] {
+         ResistanceFixture fixture;
+         fixture.loadInput("via via1 {Area .01 Resistance 4}");
+         fixture.addGeometry(true, 100, 200);
+         fixture.extractAndExpect(2);
+       }},
+  };
+}
 
 std::vector<Test> processInputTests()
 {
@@ -435,13 +485,13 @@ std::vector<Test> processInputTests()
          fixture.addGeometry();
          fixture.extractAndExpect(0.75);
        }},
-      {"Tech resistance width-spacing table selected",
+      {"Tech resistance scalar fallback retained",
        [] {
          ResistanceFixture fixture;
          fixture.loadInput(R"(metal metal1 { Thickness .1 Resistance 99
            RPSQ_VS_WIDTH_AND_SPACING { WIDTHS {.1 .3} VALUES {{.08} {.16}} } })");
          fixture.addGeometry();
-         fixture.extractAndExpect(0.6);
+         fixture.extractAndExpect(495);
        }},
       {"Tech reference cut",
        [] {
@@ -456,16 +506,16 @@ std::vector<Test> processInputTests()
 std::vector<Test> wireTests()
 {
   return {
-      {"later etch stages use both neighbors updated walls", [] {
+      {"later etch stages retain drawn gaps", [] {
          ResistanceFixture fixture;
          fixture.loadProcess(R"(CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12
            ETCH_VS_WIDTH_AND_SPACING { WIDTHS {.2} VALUES {.01} }
            ETCH_VS_WIDTH_AND_SPACING { SPACINGS {.1 .12} VALUES {0 .01} }
          })");
          fixture.addGeometry(false, 100, 200, false, false, true);
-         fixture.extractAndExpect(.75);
+         fixture.extractAndExpect(.6666666666666667);
        }},
-      {"special wires contribute their updated facing walls", [] {
+      {"special wires contribute fixed drawn gaps", [] {
          ResistanceFixture fixture;
          fixture.defer_geometry = true;
          fixture.loadProcess(R"(CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12
@@ -489,11 +539,11 @@ std::vector<Test> wireTests()
          special_interval.set_lower_spacing(300);
          database.get_special_edge_env_list() = {{special_interval}};
          RCXVP.process();
-         fixture.extractAndExpect(.75);
+         fixture.extractAndExpect(.6666666666666667);
          RCXVP.process();
-         fixture.extractAndExpect(.75);
+         fixture.extractAndExpect(.6666666666666667);
        }},
-      {"resistance integrates neighbor-induced pieces without repeating etch", [] {
+      {"neighbor interval boundaries do not split the master process interval", [] {
          ResistanceFixture fixture;
          fixture.defer_geometry = true;
          fixture.loadProcess(R"(CONDUCTOR metal1 {THICKNESS=.1 RPSQ=.12
@@ -526,10 +576,11 @@ std::vector<Test> wireTests()
          database.get_special_edge_env_list() = {{interval(0, 1000, master, nullptr)}, {interval(500, 1000, nullptr, neighbor)}};
          RCXVP.process();
          RCXRE.extract();
-         expectNear(database.get_rc_data().get_corner_net_resistance_list({0, 0}).at(0), .8901098901098901);
+         expectNear(database.get_rc_data().get_corner_net_resistance_list({0, 0}).at(0), .8571428571428571);
          const auto intervals = database.get_corner_net_etch_profile_pool().get_item({0, 0}).get_edge_interval_list(0);
-         if (intervals.size() != 1 || intervals[0].get_resistance_segments().size() != 2)
+         if (intervals.size() != 1)
            throw std::runtime_error("neighbor boundaries changed environment indexes");
+         expectNear(intervals[0].get_width(), .14);
        }},
       {"capacitance etch preserves drawn and resistance geometry", [] {
          ResistanceFixture fixture;
@@ -537,11 +588,9 @@ std::vector<Test> wireTests()
          fixture.addGeometry();
          const auto& interval = RCXDM.getDatabase().get_corner_net_etch_profile_pool().get_item({0, 0}).get_edge_interval_list(0)[0];
          expectNear(interval.get_width(), .2);
-         expectNear(interval.get_resistance_segments().front().geometry.width, .2);
-         expectNear(interval.get_capacitance_segments().front().geometry.width, .16);
          fixture.extractAndExpect(.6);
        }},
-      {"odd database widths preserve rectangle sidewall positions", [] {
+      {"interval geometry uses database centers and half widths", [] {
          ResistanceFixture fixture;
          fixture.defer_geometry = true;
          fixture.loadProcess("CONDUCTOR metal1 { THICKNESS=.1 RPSQ=.12 }");
@@ -549,11 +598,12 @@ std::vector<Test> wireTests()
          auto& database = RCXDM.getDatabase();
          database.get_topo_pool().get_net_edge_list(0)[0].set_shape(GTLRectInt(0, -50, 1000, 50));
          database.get_topo_pool().get_net_edge_list(1)[0].set_shape(GTLRectInt(0, 50, 1000, 151));
+         database.get_net_env_list()[0].get_edge_interval_list(0)[0].set_upper_spacing(100);
+         database.get_net_env_list()[1].get_edge_interval_list(0)[0].set_lower_spacing(100);
          RCXVP.process();
          const auto& upper = database.get_corner_net_etch_profile_pool().get_item({0, 1}).get_edge_interval_list(0)[0];
-         expectNear(upper.get_center(), .1005);
+         expectNear(upper.get_center(), .1);
          expectNear(upper.get_lower_spacing(), 0);
-         expectNear(upper.get_resistance_segments().front().lower_spacing, 0);
        }},
       {"no scalar etch", [] { checkWire("RPSQ=0.12", 0.6); }},
       {"resistive shrink", [] { checkWire("RPSQ=0.12 RESISTIVE_ONLY_ETCH=0.02", 0.75); }},
@@ -700,7 +750,7 @@ int main(int argc, char** argv)
         throw std::runtime_error("CLI failure did not log and exit through the common logger");
       return EXIT_SUCCESS;
     }
-    if (group == "spatial_density") {
+    if (group == "nominal_density") {
       for (double scale : {1.0, 0.9}) {
         for (bool vertical : {false, true}) {
           ResistanceFixture fixture;
@@ -718,13 +768,14 @@ int main(int argc, char** argv)
           layout.get_net_list()[0].get_patch_list().push_back(metal);
           fixture.addGeometry(false,100,200,vertical,true);
           RCXVP.process();
-          const double expected = scale == 1 ? (std::atan(1.0)-std::atan(0.98))/0.02 : 1/(1+0.81*0.81);
-          fixture.extractAndExpect(expected);
+          fixture.extractAndExpect(1);
         }
       }
       return EXIT_SUCCESS;
     }
-    if (group == "process_input") {
+    if (group == "interval_process") {
+      tests = intervalProcessTests();
+    } else if (group == "process_input") {
       tests = processInputTests();
     } else if (group == "wire_etch") {
       tests = wireTests();
