@@ -32,17 +32,6 @@ namespace ieval {
 
 CongestionEval* CongestionEval::_congestion_eval = nullptr;
 
-namespace {
-void writeEGRLayoutCsv(const std::string& rt_dir_path, const std::string& map_dir, const std::vector<std::vector<double>>& matrix)
-{
-  if (matrix.empty() || matrix.front().empty()) {
-    return;
-  }
-  ieval::writeEGRLayoutCsv(map_dir, rt_dir_path + "/early_router/gcell.info", static_cast<int32_t>(matrix.front().size()),
-                          static_cast<int32_t>(matrix.size()));
-}
-}  // namespace
-
 CongestionEval::CongestionEval()
 {
 }
@@ -263,8 +252,7 @@ string CongestionEval::evalEGR(string rt_dir_path, string egr_type, string outpu
     out_file << "\n";
   }
   out_file.close();
-  writeEGRLayoutCsv(rt_dir_path, map_dir, sum_matrix);
-  writeMapDisplay(output_path, sum_matrix, false);
+  writeEGRMapDisplay(output_path, rt_dir_path + "/early_router/gcell.info", sum_matrix);
 
   return output_path;
 }

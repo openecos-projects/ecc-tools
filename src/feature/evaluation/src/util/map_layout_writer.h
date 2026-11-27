@@ -15,6 +15,8 @@ namespace ieval {
 
 void writeMapDisplay(const std::string& csv_path, const std::vector<std::vector<double>>& matrix, bool reverse_rows);
 
+void writeEGRMapDisplay(const std::string& csv_path, const std::string& gcell_info_path, const std::vector<std::vector<double>>& matrix);
+
 struct MapLayoutCell
 {
   int32_t pixel_row;

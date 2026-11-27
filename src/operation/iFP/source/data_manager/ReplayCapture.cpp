@@ -100,7 +100,9 @@ void captureReplay(const std::string& phase, const std::string& subflow, const s
       put("pg:" + key + ":" + std::to_string(counts[key]++), "pdn", rect, segment.get_layer_name());
     }
     const char* step = std::getenv("ECC_REPLAY_STEP");
-    const std::string stage = step && std::string(step) == "postFloorplan" && subflow == "init floorplan" ? "create tracks" : subflow;
+    const std::string step_name = step ? step : "";
+    const bool post_floorplan = step_name == "post_floorplan" || step_name == "postFloorplan";
+    const std::string stage = post_floorplan && subflow == "init floorplan" ? "create tracks" : subflow;
     Json frame = {{"sequence", sequence++}, {"elapsed_ns", elapsed}, {"phase", phase},
                   {"subflow", stage}, {"state_domain", domain}, {"objects", objects},
                   {"metrics", {{"dbu_per_micron", db.get_micron_dbu()}, {"objects", objects.size()}}}};

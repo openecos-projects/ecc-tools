@@ -94,6 +94,16 @@ void writeMapDisplay(const std::string& csv_path, const std::vector<std::vector<
   output.finish();
 }
 
+void writeEGRMapDisplay(const std::string& csv_path, const std::string& gcell_info_path, const std::vector<std::vector<double>>& matrix)
+{
+  if (matrix.empty() || matrix.front().empty())
+    return;
+  const auto map_dir = std::filesystem::path(csv_path).parent_path().string();
+  if (writeEGRLayoutCsv(map_dir, gcell_info_path, static_cast<int32_t>(matrix.front().size()), static_cast<int32_t>(matrix.size()))) {
+    writeMapDisplay(csv_path, matrix, false);
+  }
+}
+
 bool writeMapLayoutCsv(const std::string& map_dir, int32_t grid_cols, int32_t grid_rows, int32_t grid_size, int32_t lx, int32_t ly,
                        int32_t ux, int32_t uy)
 {

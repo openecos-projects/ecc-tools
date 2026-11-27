@@ -120,6 +120,13 @@ int main()
   expectEqual(egr_lines[2], "0,0,0,1,100,210,110,220", "high-Y gcell should map to first pixel row");
   expectEqual(egr_lines[6], "0,2,2,1,120,210,130,220", "rightmost high-Y gcell mismatch");
 
+  // An overflow CSV may exist without a current gcell grid. A leftover
+  // layout from the previous pass must not be used to publish a display.
+  const auto overflow_csv = gcell_dir / "new_overflow.csv";
+  ieval::writeEGRMapDisplay(overflow_csv.string(), (gcell_dir / "missing.info").string(), {{2.0}});
+  if (std::filesystem::exists(gcell_dir / "new_overflow.gdisplay")) {
+    return 1;
+  }
   std::filesystem::remove_all(out_dir);
   return 0;
 }
