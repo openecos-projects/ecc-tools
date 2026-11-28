@@ -104,6 +104,15 @@ double mapValue(const std::map<AnalysisType, std::map<TransType, double>>& value
   return trans_it == analysis_it->second.end() ? fallback : trans_it->second;
 }
 
+template <typename Library>
+double slewRange(const Library& library, TransType edge)
+{
+  auto normalize = [](double threshold) { return threshold > 1. ? threshold * .01 : threshold; };
+  const double lower = edge == TransType::kRise ? library.get_slew_lower_threshold_pct_rise() : library.get_slew_lower_threshold_pct_fall();
+  const double upper = edge == TransType::kRise ? library.get_slew_upper_threshold_pct_rise() : library.get_slew_upper_threshold_pct_fall();
+  return (normalize(upper) - normalize(lower)) / library.get_slew_derate_from_library();
+}
+
 // A Liberty timing-cell arc may contain several conditional variants.  The
 // native graph keeps the arc set as one object, while the sparse runtime needs
 // the same active variant selection that CellDelayCalculator uses.  Known
@@ -297,6 +306,38 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   }
 
   snapshot.lib_cells = LibertyDataExporter::exportCells(library, time_unit, cap_unit);
+  for (auto& exported_cell : snapshot.lib_cells) {
+    const auto cell_it = library.get_cell_map().find(exported_cell.name);
+    const LibertyCell* lib_cell = cell_it == library.get_cell_map().end() ? nullptr : &cell_it->second;
+    const std::string lib_name = lib_cell == nullptr ? std::string{} : lib_cell->get_library_name();
+    for (auto& exported_port : exported_cell.ports) {
+      const std::string lib_pin = lib_name.empty() ? std::string{} : (lib_name + "/" + exported_cell.name + "/" + exported_port.name);
+      for (const TransType edge : {TransType::kRise, TransType::kFall}) {
+        auto sdc_slew = database.sdc().electricalLimits().limit(
+            ElectricalRule::kTransition, "", false, lib_pin, "", false, edge);
+        if (sdc_slew && lib_cell != nullptr) {
+          const double main_range = slewRange(library, edge);
+          const double pin_range = slewRange(*lib_cell, edge);
+          if (std::isfinite(main_range) && main_range > 0.0 && std::isfinite(pin_range) && pin_range > 0.0) {
+            *sdc_slew *= pin_range / main_range;
+          }
+        }
+        if (sdc_slew && std::isfinite(*sdc_slew) && *sdc_slew > 0.0) {
+          const double sdc_slew_ps = *sdc_slew * 1000.0;
+          if (exported_port.max_slew_ps <= 0.0 || sdc_slew_ps < exported_port.max_slew_ps) {
+            exported_port.max_slew_ps = sdc_slew_ps;
+          }
+        }
+      }
+      auto sdc_cap = database.sdc().electricalLimits().limit(
+          ElectricalRule::kCapacitance, "", false, lib_pin, "", false, TransType::kNone);
+      if (sdc_cap && std::isfinite(*sdc_cap) && *sdc_cap > 0.0) {
+        if (exported_port.max_capacitance_pf <= 0.0 || *sdc_cap < exported_port.max_capacitance_pf) {
+          exported_port.max_capacitance_pf = *sdc_cap;
+        }
+      }
+    }
+  }
   std::map<std::string, int32_t> cell_ids;
   for (std::size_t cell_id = 0; cell_id < snapshot.lib_cells.size(); ++cell_id) {
     cell_ids.emplace(snapshot.lib_cells[cell_id].name, static_cast<int32_t>(cell_id));
@@ -307,6 +348,19 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   // PyPlaceDB endpoint outcaps use the same normalized pF convention.
   for (auto& exported_pin : snapshot.pins) {
     if (exported_pin.instance_name.empty()) {
+      if (exported_pin.is_port
+          && (exported_pin.direction == static_cast<int32_t>(PinDirection::kOutput)
+              || exported_pin.direction == static_cast<int32_t>(PinDirection::kInout))) {
+        const auto& port_constraints = database.sdc().get_port_constraint_map();
+        if (const auto constraint = port_constraints.find(exported_pin.name);
+            constraint != port_constraints.end() && constraint->second.get_has_load()) {
+          exported_pin.rise_capacitance_pf
+              = constraint->second.get_load(AnalysisType::kMax, TransType::kRise) * snapshot.capacitance_unit_pf;
+          exported_pin.fall_capacitance_pf
+              = constraint->second.get_load(AnalysisType::kMax, TransType::kFall) * snapshot.capacitance_unit_pf;
+          exported_pin.capacitance_pf = std::max(exported_pin.rise_capacitance_pf, exported_pin.fall_capacitance_pf);
+        }
+      }
       continue;
     }
     const auto pin_it = database.network().pins().find(exported_pin.name);
@@ -360,6 +414,9 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   snapshot.end_points = database.graph().endpoints();
 
   for (Arc& arc : database.graph().arcs()) {
+    if (arc.get_is_disable_arc() || arc.get_is_loop_disable()) {
+      continue;
+    }
     const auto source_it = pin_ids.find(arc.get_source_pin());
     const auto sink_it = pin_ids.find(arc.get_sink_pin());
     if (source_it == pin_ids.end() || sink_it == pin_ids.end()) {
@@ -421,28 +478,42 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
 
   // iSTA launches sequential data from CK, while DreamPlace initializes Q
   // through level-0 clock-to-Q arcs and treats Q as the launch startpoint.
-  std::unordered_map<std::string, std::string> clock_outputs;
+  // Multi-output sequential cells (e.g. multi-bit SRAMs or Q/QN flip-flops)
+  // have multiple clock-to-Q output pins per CK pin; expand all connected
+  // outputs into start_points so level-0 net propagation seeds every output.
+  std::unordered_map<std::string, std::vector<std::string>> clock_outputs;
   for (const auto& arc : snapshot.graph_arcs) {
     if (!arc.is_clock_arc || arc.library_arc_id < 0)
       continue;
     const auto sink = database.network().pins().find(arc.sink_pin);
     if (sink == database.network().pins().end())
       continue;
-    const auto current = clock_outputs.find(arc.source_pin);
-    if (current == clock_outputs.end()) {
-      clock_outputs.emplace(arc.source_pin, arc.sink_pin);
-      continue;
-    }
-    const auto current_pin = database.network().pins().find(current->second);
-    if ((current_pin == database.network().pins().end() || current_pin->second.get_net_name().empty()) && !sink->second.get_net_name().empty()) {
-      current->second = arc.sink_pin;
+    auto& outputs = clock_outputs[arc.source_pin];
+    if (!sink->second.get_net_name().empty()) {
+      outputs.erase(
+          std::remove_if(outputs.begin(), outputs.end(), [&](const std::string& existing) {
+            const auto existing_pin = database.network().pins().find(existing);
+            return existing_pin == database.network().pins().end() || existing_pin->second.get_net_name().empty();
+          }),
+          outputs.end());
+      if (std::find(outputs.begin(), outputs.end(), arc.sink_pin) == outputs.end()) {
+        outputs.push_back(arc.sink_pin);
+      }
+    } else if (outputs.empty()) {
+      outputs.push_back(arc.sink_pin);
     }
   }
-  for (std::string& name : snapshot.start_points) {
+  std::vector<std::string> expanded_start_points;
+  expanded_start_points.reserve(snapshot.start_points.size());
+  for (const std::string& name : snapshot.start_points) {
     const auto it = clock_outputs.find(name);
-    if (it != clock_outputs.end())
-      name = it->second;
+    if (it != clock_outputs.end()) {
+      expanded_start_points.insert(expanded_start_points.end(), it->second.begin(), it->second.end());
+    } else {
+      expanded_start_points.push_back(name);
+    }
   }
+  snapshot.start_points = std::move(expanded_start_points);
 
   for (auto& [net_name, net] : database.network().nets()) {
     if (net.get_driver_pin_list().empty()) {
@@ -522,6 +593,7 @@ TimingData TimingDataExporter::exportData(Database& database, const Config& conf
   }
 
   std::sort(snapshot.start_points.begin(), snapshot.start_points.end());
+  snapshot.start_points.erase(std::unique(snapshot.start_points.begin(), snapshot.start_points.end()), snapshot.start_points.end());
   std::sort(snapshot.end_points.begin(), snapshot.end_points.end());
   std::sort(snapshot.clock_pins.begin(), snapshot.clock_pins.end());
   std::sort(snapshot.ff_output_pins.begin(), snapshot.ff_output_pins.end());

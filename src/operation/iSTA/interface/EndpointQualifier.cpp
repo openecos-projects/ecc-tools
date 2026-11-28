@@ -41,6 +41,8 @@ bool hasCaptureClock(Database& database, const std::string& pin_name, TransType 
   for (const auto& [name, state] : point->second.get_clock_state_map()) {
     if (state.is_source_path_only || !clocks.contains(name))
       continue;
+    if (state.is_structural)
+      return true;
     const auto analysis = state.arrival_map.find(AnalysisType::kMin);
     if (analysis == state.arrival_map.end())
       continue;

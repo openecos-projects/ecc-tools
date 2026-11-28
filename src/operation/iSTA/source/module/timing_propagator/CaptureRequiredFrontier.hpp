@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <list>
 #include <map>
@@ -130,10 +132,20 @@ class CaptureRequiredFrontier
   }
 
  private:
+  static std::uint64_t bitCastDouble(double val)
+  {
+#if defined(__cpp_lib_bit_cast) && __cpp_lib_bit_cast >= 201806L
+    return std::bit_cast<std::uint64_t>(val);
+#else
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &val, sizeof(bits));
+    return bits;
+#endif
+  }
   static Identity identity(const CaptureRequired& value)
   {
     return {value.check->capture_pin, value.check->capture_clock, value.check->capture_pin_transition, value.check->capture_transition,
-            value.check->has_required_adjustment, std::bit_cast<std::uint64_t>(value.check->required_adjustment)};
+            value.check->has_required_adjustment, bitCastDouble(value.check->required_adjustment)};
   }
   void erase(Values::iterator value)
   {

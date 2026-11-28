@@ -22,6 +22,7 @@ INPUTS = {
     "pyplacedb_timing": ("route_in.def.gz", "route_in.v.gz"),
     "sizing_mutation": ("route_in.def.gz", "route_in.v.gz"),
     "buffer_mutation": ("route_in.def.gz", "route_in.v.gz"),
+    "buffer_removal_qualification": ("route_in.def.gz", "route_in.v.gz"),
     "full_refresh_mutation": ("route_in.def.gz", "route_in.v.gz"),
     "rcx": ("harden_in.def.gz",),
     "routing": ("route_in.def.gz",),

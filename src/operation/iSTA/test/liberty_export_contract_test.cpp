@@ -302,6 +302,22 @@ void checkDiagnosticOrder()
                                           "no sequential clock pins exported"},
           "diagnostic deduplication lost first-occurrence order or distinct messages");
 }
+void checkSdcElectricalLimitExport()
+{
+  Database database;
+  Config config;
+  auto& cell = database.liberty().get_cell_map()["BUF"];
+  cell.set_cell_name("BUF");
+  auto& port = cell.get_port_map()["Y"];
+  port.set_max_transition(0.8);
+  port.set_max_capacitance(0.5);
+  database.sdc().electricalLimits().set({ElectricalRule::kTransition, LimitObject::kDesign, "top", false, TransType::kNone, 0.4});
+  database.sdc().electricalLimits().set({ElectricalRule::kCapacitance, LimitObject::kDesign, "top", false, TransType::kNone, 0.2});
+  const auto result = TimingDataExporter::exportData(database, config);
+  const auto& exported_port = result.lib_cells.at(0).ports.at(0);
+  require(exported_port.max_slew_ps == 400.0, "design max_transition did not restrict exported max_slew_ps");
+  require(exported_port.max_capacitance_pf == 0.2, "design max_capacitance did not restrict exported max_capacitance_pf");
+}
 }  // namespace
 
 int main()
@@ -314,4 +330,5 @@ int main()
   checkLibertyCellFamilies();
   checkTriStateEnableSplitsFamilies();
   checkDiagnosticOrder();
+  checkSdcElectricalLimitExport();
 }

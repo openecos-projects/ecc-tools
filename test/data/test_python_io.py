@@ -114,6 +114,16 @@ def test_native_full_refresh_and_second_mutation(test_roots):
     assert payload["endpoints"] > 0
 
 
+def test_native_buffer_removal_qualification_without_sta(test_roots):
+    result = run_scenario(test_roots, "buffer_removal_qualification", timeout=180)
+    payload = json.loads(result.output_path("summary").read_text(encoding="utf-8"))
+    assert {key: payload[key] for key in ("native_sta_run", "native_rcx_run")} == {
+        "native_sta_run": False, "native_rcx_run": False
+    }
+    assert payload["inverter_rejection"]["accepted_count"] == 0
+    assert payload["removal"]["removed_count"] == 1
+
+
 def test_native_buffer_topology_round_trip_and_digest_rejection(test_roots):
     result = run_scenario(test_roots, "buffer_mutation", timeout=180)
     payload = json.loads(result.output_path("summary").read_text(encoding="utf-8"))
@@ -125,6 +135,10 @@ def test_native_buffer_topology_round_trip_and_digest_rejection(test_roots):
     assert payload["committed"]["accepted_count"] == 1
     assert payload["committed"]["topology_mutated"] is True
     assert payload["committed"]["requires_refresh"] is True
+    assert payload["removal"]["ok"] is True
+    assert payload["removal"]["removed_count"] == 1
+    assert payload["removal"]["topology_mutated"] is True
+    assert payload["removal"]["requires_refresh"] is True
     assert_nonempty_file(result.output_path("def"))
     assert_nonempty_file(result.output_path("verilog"))
     run_scenario(test_roots, "def_verify", timeout=120, input_overrides={"def": result.output_path("def")})

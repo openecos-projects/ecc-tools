@@ -146,6 +146,8 @@ struct PyPlaceDB
   pybind11::list inrtrans;
   pybind11::list inftrans;
   pybind11::list outcaps;
+  pybind11::list out_rcaps;
+  pybind11::list out_fcaps;
   pybind11::list endpoints_rRAT;
   pybind11::list endpoints_fRAT;
   pybind11::list backend_endpoint_rAAT;
@@ -297,21 +299,26 @@ struct PyPlaceDB
   int num_movable_pins;
 
   PyPlaceDB(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true, bool timing_model_only = false)
+            bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true, bool timing_model_only = false,
+            bool include_clock_nets = false)
   {
     set(db, numRoutingGridsX, numRoutingGridsY, with_routability, with_sta, include_m2_pg_rail_blockage, include_m2_pg_rail_density,
-        timing_model_only);
+        timing_model_only, include_clock_nets);
   }
 
+  pybind11::list getNodeMasterNames() const;
   const std::vector<bool>& getNodeIsHardMacro() const { return _node_is_hard_macro; }
   const std::vector<bool>& getMacroWritebackCandidate() const { return _macro_writeback_candidate; }
   std::size_t writeMacroPlacementBack(const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_x,
                                       const pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>& movable_y);
+  void syncPlacementFromIdb();
   pybind11::dict applySizing(const std::vector<int>& cell_ids, const std::vector<std::string>& target_master_names);
+  pybind11::dict applyBufferRemovals(const pybind11::list& actions);
   pybind11::dict applyBufferActions(const pybind11::list& actions, const std::string& action_digest);
 
   void set(idm::DataManager* db, int numRoutingGridsX, int numRoutingGridsY, bool with_routability, bool with_sta,
-           bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true, bool timing_model_only = false);
+           bool include_m2_pg_rail_blockage = false, bool include_m2_pg_rail_density = true, bool timing_model_only = false,
+           bool include_clock_nets = false);
   void init_timing(const ista::TimingData& snapshot, idm::DataManager* db);
   void init_min_timing(const ista::TimingData& snapshot);
   void init_sparse_timing(const ista::TimingData& snapshot);
