@@ -32,20 +32,6 @@
 
 namespace ilvs {
 
-namespace {
-
-bool is_io_supply_terminal(const std::string& terminal_name)
-{
-  const std::string::size_type slash = terminal_name.rfind('/');
-  if (slash == std::string::npos) {
-    return false;
-  }
-  const std::string pin_name = terminal_name.substr(slash + 1);
-  return pin_name == "VDDIO" || pin_name == "VSSIO";
-}
-
-}  // namespace
-
 // public
 
 void PDNChecker::initInst()
@@ -287,8 +273,13 @@ void PDNChecker::checkSupplyConnectivity(PCModel& pc_model, const ConnectType co
   }
   std::unordered_set<std::string> waived_io_nets;
   const std::map<std::string, int32_t>& terminal_component_map = physical_graph.get_pg_terminal_component_map();
+  const auto& io_supply_terminals = physical_graph.get_io_supply_terminal_set();
   for (const auto& [net_name, terminal_name_list] : net_terminal_map) {
-    if (net_supply_component_map.empty() || std::none_of(terminal_name_list.begin(), terminal_name_list.end(), is_io_supply_terminal)) {
+    // Independent IO rails need a complete ring, not a connection to the core
+    // supply reference. Classify every terminal from LEF, never from its name.
+    if (net_supply_component_map.empty()
+        || !std::all_of(terminal_name_list.begin(), terminal_name_list.end(),
+                        [&](const std::string& terminal) { return io_supply_terminals.contains(terminal); })) {
       continue;
     }
     std::set<int32_t> component_id_set;

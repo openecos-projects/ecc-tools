@@ -20,6 +20,13 @@
 
 namespace iemir {
 
+struct SupplyCurrent
+{
+  std::string ground_pin;
+  double voltage = 0.0;
+  double current = 0.0;
+};
+
 class InstancePower
 {
  public:
@@ -36,6 +43,7 @@ class InstancePower
   bool get_has_average_current() { return _has_average_current; }
   double get_average_current() { return _average_current; }
   std::map<std::string, double>& get_average_current_by_pin_name_map() { return _average_current_by_pin_name_map; }
+  std::map<std::string, SupplyCurrent>& get_supply_currents() { return _supply_currents; }
   // setter
   void set_instance_id(uint64_t instance_id) { _instance_id = instance_id; }
   void set_power_group_type(uint32_t power_group_type) { _power_group_type = power_group_type; }
@@ -60,6 +68,7 @@ class InstancePower
   bool _has_average_current = false;
   double _average_current = 0.0;
   std::map<std::string, double> _average_current_by_pin_name_map;
+  std::map<std::string, SupplyCurrent> _supply_currents;
 };
 
 }  // namespace iemir

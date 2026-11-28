@@ -17,6 +17,7 @@
 #include "GraphBuilder.hpp"
 
 #include "DataManager.hpp"
+#include "DeviceLayerPins.hpp"
 #include "EMTech.hpp"
 #include "Logger.hpp"
 #include "Monitor.hpp"
@@ -431,6 +432,7 @@ void GraphBuilder::buildPinNodeList(PowerGraph& power_graph, PowerNet& power_net
     EMIRLOG.info(Loc::current(), "Skipped ", skipped_pin_num, " unconnected power pins in net ", power_net.get_net_name(), ", connected ",
                  connected_pin_num, " pins");
   }
+  connectDeviceLayerPins(power_graph, power_net);
 }
 
 void GraphBuilder::buildConfiguredSourceNodeList(PowerGraph& power_graph, PowerNet& power_net, GBModel& gb_model, std::ofstream& source_report)

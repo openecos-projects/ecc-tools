@@ -1,5 +1,6 @@
 add_executable(test_ifp_pdn_generator
     test_pdn_generator.cpp
+    test_io_core.cpp
 )
 
 target_link_libraries(test_ifp_pdn_generator

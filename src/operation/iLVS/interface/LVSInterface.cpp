@@ -25,6 +25,7 @@
 #include "IdbLayout.h"
 #include "IdbNet.h"
 #include "IdbPins.h"
+#include "IdbSite.h"
 #include "IdbSpecialNet.h"
 #include "IdbVias.h"
 #include "LVSHeader.hpp"
@@ -583,6 +584,13 @@ void LVSInterface::wrapRoutingDataPin(const std::string& net_name, const int32_t
       physical_graph.get_power_instance_pin_net_map()[terminal_name] = net_name;
     } else if (is_ground_net) {
       physical_graph.get_ground_instance_pin_net_map()[terminal_name] = net_name;
+    }
+    if ((is_power_net || is_ground_net) && pin->get_instance() != nullptr) {
+      auto* master = pin->get_instance()->get_cell_master();
+      if (master != nullptr
+          && (master->is_io_cell() || (master->is_endcap() && master->get_site() != nullptr && master->get_site()->is_pad_site()))) {
+        physical_graph.get_io_supply_terminal_set().insert(terminal_name);
+      }
     }
   }
 

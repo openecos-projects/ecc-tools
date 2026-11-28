@@ -10,6 +10,18 @@
 #include "Utility.hpp"
 namespace ista {
 namespace {
+SdfDelay scalarCellArcDelay(TimingCellArc& arc)
+{
+  SdfDelay delay;
+  for (auto mode : {AnalysisType::kMin, AnalysisType::kMax}) {
+    if (!arc.supportsAnalysis(mode))
+      continue;
+    for (auto transition : {TransType::kRise, TransType::kFall})
+      delay.update(mode, transition, mode == AnalysisType::kMin ? arc.get_delay_min() : arc.get_delay_max());
+  }
+  return delay;
+}
+
 std::vector<TransType> inputTransitions(TimingArc& timing_arc)
 {
   const auto trigger = timing_arc.get_trigger_trans_type();
@@ -66,13 +78,8 @@ SdfCellArcDelayMap SdfValueExtractor::graphCellArcDelays(Arc& arc)
 SdfCellArcDelayMap SdfValueExtractor::cellArcDelays(TimingCellArc& cell_arc)
 {
   SdfCellArcDelayMap values;
-  if (cell_arc.get_timing_arc_list().empty()) {
-    auto& delay = values[{}];
-    delay.update(AnalysisType::kMin, TransType::kRise, cell_arc.get_delay_min());
-    delay.update(AnalysisType::kMax, TransType::kRise, cell_arc.get_delay_max());
-    delay.update(AnalysisType::kMin, TransType::kFall, cell_arc.get_delay_min());
-    delay.update(AnalysisType::kMax, TransType::kFall, cell_arc.get_delay_max());
-  }
+  if (cell_arc.get_timing_arc_list().empty())
+    values[{}] = scalarCellArcDelay(cell_arc);
   for (TimingArc& timing_arc : cell_arc.get_timing_arc_list()) {
     for (TransType transition : inputTransitions(timing_arc)) {
       auto delay = cellArcDelay(cell_arc, timing_arc, transition);
@@ -261,6 +268,8 @@ SdfDelay SdfValueExtractor::cellArcDelay(TimingCellArc& timing_cell_arc, TimingA
   static_cast<void>(input_trans_type);
   SdfDelay sdf_delay;
   for (AnalysisType analysis_type : {AnalysisType::kMin, AnalysisType::kMax}) {
+    if (!timing_cell_arc.supportsAnalysis(analysis_type))
+      continue;
     for (TransType trans_type : {TransType::kRise, TransType::kFall}) {
       if (timing_arc.get_delay_table_map().count(trans_type) == 0) {
         continue;
@@ -269,12 +278,8 @@ SdfDelay SdfValueExtractor::cellArcDelay(TimingCellArc& timing_cell_arc, TimingA
       sdf_delay.update(analysis_type, trans_type, delay);
     }
   }
-  if (!hasDelay(sdf_delay)) {
-    sdf_delay.update(AnalysisType::kMin, TransType::kRise, timing_cell_arc.get_delay_min());
-    sdf_delay.update(AnalysisType::kMax, TransType::kRise, timing_cell_arc.get_delay_max());
-    sdf_delay.update(AnalysisType::kMin, TransType::kFall, timing_cell_arc.get_delay_min());
-    sdf_delay.update(AnalysisType::kMax, TransType::kFall, timing_cell_arc.get_delay_max());
-  }
+  if (!hasDelay(sdf_delay))
+    sdf_delay = scalarCellArcDelay(timing_cell_arc);
   return sdf_delay;
 }
 

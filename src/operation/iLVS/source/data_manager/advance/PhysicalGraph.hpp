@@ -43,6 +43,7 @@ class PhysicalGraph
   std::unordered_map<std::string, std::string>& get_power_instance_pin_net_map() { return _power_instance_pin_net_map; }
   std::unordered_map<std::string, std::string>& get_ground_instance_pin_net_map() { return _ground_instance_pin_net_map; }
   std::map<std::string, std::string>& get_non_routing_supply_pin_net_map() { return _non_routing_supply_pin_net_map; }
+  std::set<std::string>& get_io_supply_terminal_set() { return _io_supply_terminal_set; }
   std::unordered_map<int32_t, std::vector<int32_t>>& get_component_net_id_map() { return _component_net_id_map; }
   std::unordered_map<int32_t, std::vector<PhysicalShapeRef>>& get_component_shape_ref_map() { return _component_shape_ref_map; }
   std::vector<int32_t>& get_short_component_id_list() { return _short_component_id_list; }
@@ -56,6 +57,7 @@ class PhysicalGraph
   const std::set<std::string>& get_ground_net_name_set() const { return _ground_net_name_set; }
   const std::unordered_map<std::string, std::string>& get_power_instance_pin_net_map() const { return _power_instance_pin_net_map; }
   const std::unordered_map<std::string, std::string>& get_ground_instance_pin_net_map() const { return _ground_instance_pin_net_map; }
+  const std::set<std::string>& get_io_supply_terminal_set() const { return _io_supply_terminal_set; }
   const std::unordered_map<int32_t, std::vector<int32_t>>& get_component_net_id_map() const { return _component_net_id_map; }
   const std::unordered_map<int32_t, std::vector<PhysicalShapeRef>>& get_component_shape_ref_map() const { return _component_shape_ref_map; }
   const std::vector<int32_t>& get_short_component_id_list() const { return _short_component_id_list; }
@@ -189,6 +191,7 @@ class PhysicalGraph
     _power_instance_pin_net_map.clear();
     _ground_instance_pin_net_map.clear();
     _non_routing_supply_pin_net_map.clear();
+    _io_supply_terminal_set.clear();
   }
 
  private:
@@ -204,6 +207,7 @@ class PhysicalGraph
   std::unordered_map<std::string, std::string> _power_instance_pin_net_map;
   std::unordered_map<std::string, std::string> _ground_instance_pin_net_map;
   std::map<std::string, std::string> _non_routing_supply_pin_net_map;
+  std::set<std::string> _io_supply_terminal_set;
   std::unordered_map<std::string, int32_t> _net_id_map;
   std::vector<std::string> _net_name_list;
   std::unordered_map<int32_t, std::vector<int32_t>> _component_net_id_map;

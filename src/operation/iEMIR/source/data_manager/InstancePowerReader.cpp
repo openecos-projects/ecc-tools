@@ -33,6 +33,9 @@ std::vector<std::string> splitTab(const std::string& line)
   while (std::getline(stream, token, '\t')) {
     result.push_back(token);
   }
+  if (!line.empty() && line.back() == '\t') {
+    result.emplace_back();
+  }
   return result;
 }
 
@@ -60,25 +63,32 @@ bool closeEnough(double lhs, double rhs)
 
 namespace iemir {
 
-std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& file_path)
+std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& file_path, const std::map<std::string, std::string>& supply_ground_pins)
 {
+  for (const auto& [power, ground] : supply_ground_pins) {
+    if (power.empty() || ground.empty() || power == ground) {
+      throw std::runtime_error("supply_ground_pins requires distinct, nonempty power/ground pin names");
+    }
+  }
   std::ifstream input(file_path);
   if (!input.is_open()) {
     throw std::runtime_error("Cannot open Instance power file: " + file_path);
   }
 
   std::vector<InstancePowerRecord> records;
-  std::unordered_set<std::string> instance_names;
+  std::map<std::string, std::set<std::string>> instance_pins;
   std::string line;
   std::size_t line_number = 0;
   bool saw_header = false;
+  bool per_supply = false;
   while (std::getline(input, line)) {
     line_number++;
     if (!line.empty() && line.back() == '\r') {
       line.pop_back();
     }
-    if (!saw_header && line == kHeader) {
+    if (!saw_header && (line == kHeader || line == std::string(kHeader) + "\tpower_pin\tground_pin")) {
       saw_header = true;
+      per_supply = line != kHeader;
       continue;
     }
     std::string stripped = trim(line);
@@ -90,16 +100,30 @@ std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& fi
     }
 
     std::vector<std::string> fields = splitTab(line);
-    if (fields.size() != 7) {
-      throw std::runtime_error("Expected 7 tab-separated fields at line " + std::to_string(line_number));
+    if (fields.size() != (per_supply ? 9U : 7U)) {
+      throw std::runtime_error("Invalid instance-power field count at line " + std::to_string(line_number));
     }
     InstancePowerRecord record;
     record.instance_name = trim(fields[0]);
     if (record.instance_name.empty()) {
       throw std::runtime_error("Empty instance name at line " + std::to_string(line_number));
     }
-    if (!instance_names.insert(record.instance_name).second) {
-      throw std::runtime_error("Duplicate instance name at line " + std::to_string(line_number) + ": " + record.instance_name);
+    if (per_supply) {
+      record.power_pin = trim(fields[7]);
+      record.ground_pin = trim(fields[8]);
+      if (!record.power_pin.empty() && record.ground_pin.empty()) {
+        auto ground = supply_ground_pins.find(record.power_pin);
+        if (ground != supply_ground_pins.end()) {
+          record.ground_pin = ground->second;
+        }
+      }
+      if ((record.power_pin.empty() && !record.ground_pin.empty()) || (!record.power_pin.empty() && record.power_pin == record.ground_pin)) {
+        throw std::runtime_error("Invalid power/ground pin pair at line " + std::to_string(line_number));
+      }
+    }
+    auto& pins = instance_pins[record.instance_name];
+    if ((!pins.empty() && (record.power_pin.empty() || pins.contains(""))) || !pins.insert(record.power_pin).second) {
+      throw std::runtime_error("Duplicate or mixed generic/per-supply power for instance " + record.instance_name);
     }
     record.voltage = parseNonnegative(fields[1], "voltage_v", line_number);
     record.internal_power = parseNonnegative(fields[2], "internal_power_w", line_number);
@@ -116,6 +140,10 @@ std::vector<InstancePowerRecord> InstancePowerReader::read(const std::string& fi
     }
     if (!closeEnough(record.voltage * record.average_current, record.total_power)) {
       throw std::runtime_error("voltage_v * average_current_a does not match total_power_w at line " + std::to_string(line_number));
+    }
+    if (!record.power_pin.empty() && record.ground_pin.empty() && record.average_current != 0.0) {
+      throw std::runtime_error("Missing return ground for " + record.instance_name + "/" + record.power_pin
+                               + "; provide supply_ground_pins explicitly (Liberty has no unambiguous related_ground_pin)");
     }
     records.push_back(std::move(record));
   }

@@ -24,6 +24,7 @@
 #include "Monitor.hpp"
 #include "PowerEdge.hpp"
 #include "PowerNode.hpp"
+#include "SupplyCurrent.hpp"
 #include "Utility.hpp"
 
 namespace iemir {
@@ -62,6 +63,8 @@ void IRAnalyzer::analyze()
 {
   Monitor monitor;
   EMIRLOG.info(Loc::current(), "Starting...");
+  reportSupplyCoverage(EMIRDM.getDatabase(), EMIRUTIL.getString(EMIRDM.getConfig().ia_temp_directory_path, "supply_coverage.tsv"),
+                       EMIRDM.getConfig().allow_unmapped_pg_pins);
 
   std::string diagnostics_path = EMIRUTIL.getString(EMIRDM.getConfig().ia_temp_directory_path, "solver_diagnostics.csv");
   std::ofstream diagnostics_file(diagnostics_path);
@@ -111,30 +114,7 @@ IAModel IRAnalyzer::initIAModel(PowerGraph& power_graph)
 
 void IRAnalyzer::buildSourceVoltage(PowerGraph& power_graph, IAModel& ia_model)
 {
-  if (power_graph.get_net_type() == PowerNetType::kGround) {
-    ia_model.set_source_voltage(0.0);
-    power_graph.set_source_voltage(0.0);
-    return;
-  }
-  double source_voltage = 0.0;
-  Database& database = EMIRDM.getDatabase();
-  for (std::pair<const uint64_t, std::vector<std::size_t>>& instance_node_pair : power_graph.get_instance_node_id_list_map()) {
-    if (database.get_instance_power_map().count(instance_node_pair.first) == 0) {
-      continue;
-    }
-    InstancePower& instance_power = database.get_instance_power_map()[instance_node_pair.first];
-    if (instance_power.get_voltage() <= EMIR_ERROR) {
-      continue;
-    }
-    if (source_voltage <= EMIR_ERROR) {
-      source_voltage = instance_power.get_voltage();
-    } else if (std::abs(source_voltage - instance_power.get_voltage()) > EMIR_ERROR) {
-      EMIRLOG.error(Loc::current(), "The power graph contains inconsistent source voltages!");
-    }
-  }
-  if (source_voltage <= EMIR_ERROR) {
-    EMIRLOG.error(Loc::current(), "The power graph source voltage is unavailable!");
-  }
+  const double source_voltage = graphSourceVoltage(power_graph, EMIRDM.getDatabase().get_instance_power_map());
   ia_model.set_source_voltage(source_voltage);
   power_graph.set_source_voltage(source_voltage);
 }
@@ -167,6 +147,10 @@ void IRAnalyzer::buildNodeCurrentMap(PowerGraph& power_graph, IAModel& ia_model)
 
 void IRAnalyzer::buildInstanceNodeCurrent(PowerGraph& power_graph, uint64_t instance_id, InstancePower& instance_power, IAModel& ia_model)
 {
+  if (!instance_power.get_supply_currents().empty()) {
+    buildSupplyCurrent(power_graph, instance_id, instance_power, ia_model);
+    return;
+  }
   double total_power = instance_power.get_total_power();
   if (!instance_power.get_has_average_current() && instance_power.get_voltage() <= EMIR_ERROR) {
     EMIRLOG.error(Loc::current(), "The instance power voltage is invalid!");

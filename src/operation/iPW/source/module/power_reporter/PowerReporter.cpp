@@ -272,67 +272,6 @@ void PowerReporter::outputPowerAttribute(std::ofstream* power_report_file)
   (*power_report_file) << "\ni - Including register clock pin internal power\n";
 }
 
-void PowerReporter::outputInstancePower()
-{
-  std::ofstream* instance_power_file
-      = PWUTIL.getOutputFileStream(PWUTIL.getString(PWDM.getConfig().pr_temp_directory_path, "instance_power.tsv"));
-  (*instance_power_file) << "# iEMIR_INSTANCE_POWER_V1\n";
-  (*instance_power_file) << "instance_name\tvoltage_v\tinternal_power_w\tswitching_power_w\tleakage_power_w\t"
-                            "total_power_w\taverage_current_a\n";
-  (*instance_power_file) << std::setprecision(17);
-  if (PWDM.getDatabase().get_peak_power_summary().get_is_enabled()) {
-    outputPeakInstancePower(instance_power_file);
-    PWUTIL.closeFileStream(instance_power_file);
-    return;
-  }
-  Database& database = PWDM.getDatabase();
-  std::vector<InstancePower>& instance_power_list = database.get_instance_power_list();
-  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    InstancePower& instance_power = instance_power_list[instance_pair.second.get_instance_id()];
-    PowerValue& power_value = instance_power.get_power_value();
-    outputInstancePowerRow(instance_power_file, instance_pair.first, instance_power.get_voltage(), power_value);
-  }
-  PWUTIL.closeFileStream(instance_power_file);
-}
-
-// 峰值流程导出每个单元的峰值功耗（各单元取自己的峰窗口），而不是最后一个窗口的值。
-void PowerReporter::outputPeakInstancePower(std::ofstream* instance_power_file)
-{
-  Database& database = PWDM.getDatabase();
-  PeakPowerSummary& peak_power_summary = database.get_peak_power_summary();
-  std::vector<InstancePower>& instance_power_list = database.get_instance_power_list();
-  for (std::pair<const std::string, Instance>& instance_pair : database.get_instance_map()) {
-    const uint32_t instance_id = static_cast<uint32_t>(instance_pair.second.get_instance_id());
-    PeakPowerValue* peak_value = peak_power_summary.findInstancePeakValue(instance_id);
-    if (peak_value == nullptr) {
-      continue;
-    }
-    double voltage = instance_id < instance_power_list.size() ? instance_power_list[instance_id].get_voltage() : 0.0;
-    outputInstancePowerRow(instance_power_file, instance_pair.first, voltage, peak_value->get_power_value());
-  }
-}
-
-void PowerReporter::outputInstancePowerRow(
-    std::ofstream* instance_power_file,
-    const std::string& instance_name,
-    const double voltage,
-    PowerValue& power_value
-)
-{
-  // Some ICS55 internal power tables hold negative entries, so an instance whose arc
-  // energies nearly cancel can accumulate a tiny negative internal component. The instance
-  // power contract requires every component to be >= 0, so the residue is reported as
-  // zero, and total_power_w / average_current_a follow from the reported components.
-  const double internal_power = std::max(0.0, power_value.get_internal_power());
-  const double switching_power = power_value.get_switching_power();
-  const double leakage_power = power_value.get_leakage_power();
-  const double total_power = internal_power + switching_power + leakage_power;
-  const double average_current = voltage > 0.0 ? total_power / voltage : 0.0;
-  (*instance_power_file) << instance_name << '\t' << voltage << '\t' << internal_power << '\t';
-  (*instance_power_file) << switching_power << '\t' << leakage_power << '\t';
-  (*instance_power_file) << total_power << '\t' << average_current << '\n';
-}
-
 void PowerReporter::outputCellPowerReport(
     const std::string& directory_path,
     std::vector<std::pair<std::string, InstancePower*>>& cell_power_list,

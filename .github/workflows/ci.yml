@@ -40,6 +40,29 @@ jobs:
           cmake --build build --target test_imj_design_tools test_imj_antenna_checker test_imj_antenna_reporting test_imj_antenna_repair test_imj_filler_inserter --parallel 2
           ctest --test-dir build -R '^test_imj_(design_tools|antenna_checker|antenna_reporting|antenna_repair|filler_inserter)$' --output-on-failure --no-tests=error
 
+      - name: Run floorplan and LVS regressions
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          cmake --build build --target \
+            test_ifp_pdn_generator test_ifp_phy_placer test_ifp_config \
+            test_lvs_data_manager test_lvs_flow test_lvs_interface test_lvs_physical_graph --parallel 2
+          ctest --test-dir build -R '^(test_ifp_(pdn_generator|phy_placer|config)|test_lvs_(data_manager|flow|interface|physical_graph))$' --output-on-failure --no-tests=error
+
+      - name: Run paired macro timing model regressions
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          cmake --build build --target test_ista_min_library test_ista_missing_liberty test_ista_three_state test_ista_liberty_export_contract --parallel 2
+          ctest --test-dir build -R '^ista_(min_library|missing_liberty|three_state|liberty_export_contract)$' --output-on-failure --no-tests=error
+
+      - name: Run per-supply power and EMIR regressions
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+        run: |
+          cmake --build build --target test_ipw_supply_power iemir_supply_current_test iemir_ir_em_test liberty_statement_terminator_test --parallel 2
+          ctest --test-dir build -R '^(ipw_supply_power|iemir_supply_current_test|iemir_ir_em_test|liberty_statement_terminator_test)$' --output-on-failure --no-tests=error
+
       - name: Upload repaired wheel
         uses: actions/upload-artifact@v4
         with:

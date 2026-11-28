@@ -36,6 +36,8 @@ class TimingCellPort
   bool get_is_input() const { return _is_input; }
   bool get_is_output() const { return _is_output; }
   bool get_is_clock() const { return _is_clock; }
+  const std::string& get_related_power_pin() const { return _related_power_pin; }
+  void set_related_power_pin(const std::string& pin) { _related_power_pin = pin; }
   // setter
   void set_three_state_expression(const LogicExpression& expression) { _three_state_expression = expression; }
   void set_capacitance(const double capacitance) { _capacitance = capacitance; }
@@ -50,6 +52,7 @@ class TimingCellPort
 
  private:
   double _capacitance = 0.0;
+  std::string _related_power_pin;
   std::map<AnalysisType, std::map<TransType, double>> _trans_capacitance_map;
   LogicExpression _function_expression;
   LogicExpression _three_state_expression;

@@ -20,12 +20,14 @@ struct InstancePowerRecord
   double leakage_power = 0.0;
   double total_power = 0.0;
   double average_current = 0.0;
+  std::string power_pin;
+  std::string ground_pin;
 };
 
 class InstancePowerReader
 {
  public:
-  static std::vector<InstancePowerRecord> read(const std::string& file_path);
+  static std::vector<InstancePowerRecord> read(const std::string& file_path, const std::map<std::string, std::string>& supply_ground_pins = {});
 };
 
 }  // namespace iemir

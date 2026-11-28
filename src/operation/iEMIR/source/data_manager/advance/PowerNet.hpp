@@ -35,6 +35,8 @@ class PowerNet
   std::vector<PowerWireSegment>& get_wire_segment_list() { return _wire_segment_list; }
   std::vector<PowerVia>& get_via_list() { return _via_list; }
   std::vector<PowerPin>& get_pin_list() { return _pin_list; }
+  // DEF membership is retained even for LEF device-layer pins without metal.
+  std::map<std::pair<uint64_t, std::string>, bool>& get_pin_has_geometry() { return _pin_has_geometry; }
   bool get_has_explicit_parasitics() { return _has_explicit_parasitics; }
   // setter
   void set_net_name(const std::string& net_name) { _net_name = net_name; }
@@ -48,6 +50,7 @@ class PowerNet
   std::vector<PowerWireSegment> _wire_segment_list;
   std::vector<PowerVia> _via_list;
   std::vector<PowerPin> _pin_list;
+  std::map<std::pair<uint64_t, std::string>, bool> _pin_has_geometry;
   bool _has_explicit_parasitics = false;
 };
 

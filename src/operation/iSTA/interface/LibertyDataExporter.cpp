@@ -7,6 +7,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -299,6 +300,8 @@ std::vector<LibertyCellData> LibertyDataExporter::exportCells(LibertyLibrary& li
       exported.ports.push_back(std::move(exported_port));
     }
     for (TimingCellArc& cell_arc : cell.get_cell_arc_list()) {
+      if (cell_arc.analysisType() != AnalysisType::kNone)
+        throw std::runtime_error("Optimization snapshots do not yet support paired min/max Liberty models; use native STA analysis");
       for (TimingArc& arc : cell_arc.get_timing_arc_list()) {
         LibertyArcData exported_arc;
         exported_arc.source_port = cell_arc.get_source_port();

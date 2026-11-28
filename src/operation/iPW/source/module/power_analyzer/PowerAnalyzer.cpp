@@ -14,6 +14,7 @@
 // See the Mulan PSL v2 for more details.
 // ***************************************************************************************
 #include "PowerAnalyzer.hpp"
+#include "SupplyPower.hpp"
 
 #include <limits>
 
@@ -190,6 +191,11 @@ InstancePower PowerAnalyzer::analyzeInstancePower(Instance& instance, PAInstance
     instance_power.set_voltage(getInstanceVoltage(instance));
   }
   instance_power.set_power_value(getInstancePowerValue(instance, pa_instance_model));
+  if (static_context != nullptr && static_context->timing_cell != nullptr) {
+    for (const auto& [name, supply] : static_context->timing_cell->get_power_supplies()) {
+      instance_power.get_supply_power()[name] = {supply, pa_instance_model.get_supply_power_values()[name]};
+    }
+  }
   return instance_power;
 }
 
@@ -220,6 +226,11 @@ void PowerAnalyzer::analyzeInternalPower(
     const PAArcStaticContext& arc_static_context = static_context->arc_context_list[arc_index];
     double internal_power = getTimingPowerArcPower(instance, timing_power_arc, arc_static_context, pa_instance_model);
     power_value.add_internal_power(internal_power);
+    if (internal_power != 0.0) {
+      const auto rail
+          = resolvePowerSupply(timing_cell, timing_power_arc.get_related_pg_port(), timing_power_arc.get_sink_port());
+      pa_instance_model.get_supply_power_values()[rail].add_internal_power(internal_power);
+    }
     // An output arc related to CK still belongs to the output pin. Only
     // internal energy attached to a clock input is moved to clock_network.
     if (arc_static_context.is_active_clock_pin) {
@@ -574,7 +585,6 @@ void PowerAnalyzer::analyzeSwitchingPower(
   if (static_context == nullptr || static_context->timing_cell == nullptr) {
     return;
   }
-  double voltage = static_context->voltage;
   const std::vector<Database::InstancePortPinIndex>* port_pin_index_list = static_context->port_pin_index_list;
   if (port_pin_index_list == nullptr) {
     return;
@@ -595,6 +605,9 @@ void PowerAnalyzer::analyzeSwitchingPower(
     if (pin_static_context.pin->get_is_driver_disabled()) {
       continue;
     }
+    auto& cell = *static_context->timing_cell;
+    const auto rail = resolvePowerSupply(cell, "", port_name);
+    const double voltage = supplyVoltage(cell, rail);
     PowerActivity activity = getOutputPortActivity(instance, port_name, pa_instance_model);
     auto output_load_iter = static_context->port_output_load_map.find(port_name);
     double output_load = 0.0;
@@ -615,6 +628,7 @@ void PowerAnalyzer::analyzeSwitchingPower(
     double switching_power
         = 0.5 * output_load * voltage * voltage * activity.get_transition_density() * enable_probability * 1E-3;
     power_value.add_switching_power(switching_power);
+    pa_instance_model.get_supply_power_values()[rail].add_switching_power(switching_power);
     recordNetPower(pin_index, voltage, output_load, activity, switching_power);
   }
 }
@@ -655,6 +669,11 @@ void PowerAnalyzer::analyzeLeakagePower(Instance& instance, PowerValue& power_va
   TimingCell& timing_cell = *static_context->timing_cell;
   if (timing_cell.get_leakage_power_list().empty()) {
     power_value.add_leakage_power(timing_cell.get_cell_leakage_power());
+    if (timing_cell.get_cell_leakage_power() != 0.0) {
+      pa_instance_model.get_supply_power_values()[resolvePowerSupply(timing_cell, "")].add_leakage_power(
+          timing_cell.get_cell_leakage_power()
+      );
+    }
     return;
   }
   // Conditions on different supply rails describe the same logic states.
@@ -677,7 +696,11 @@ void PowerAnalyzer::analyzeLeakagePower(Instance& instance, PowerValue& power_va
     double fallback = leakage_summary.get_has_unconditional()
                           ? leakage_summary.get_unconditional_leakage_power()
                           : (rail_leakage.size() == 1 ? timing_cell.get_cell_leakage_power() : 0.0);
-    power_value.add_leakage_power(leakage_summary.get_leakage_power(fallback));
+    const double leakage = leakage_summary.get_leakage_power(fallback);
+    power_value.add_leakage_power(leakage);
+    if (leakage != 0.0) {
+      pa_instance_model.get_supply_power_values()[resolvePowerSupply(timing_cell, rail)].add_leakage_power(leakage);
+    }
   }
 }
 

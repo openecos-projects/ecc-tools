@@ -23,7 +23,6 @@
  */
 
 #pragma once
-
 #include <array>
 #include <atomic>
 #include <map>
@@ -37,6 +36,7 @@
 
 #include "Config.hh"
 #include "LibParserCpp.hh"
+#include "LibSupply.hh"
 #include "Type.hh"
 #include "utility/logger/Logger.hpp"
 
@@ -571,6 +571,11 @@ class LibPort : public LibObject
 
   void inheritBusAttributes(const LibPort& bus);
 
+  const std::string& get_related_power_pin() const { return _related_power_pin; }
+  const std::string& get_related_ground_pin() const { return _related_ground_pin; }
+  void set_related_power_pin(std::string pin) { _related_power_pin = std::move(pin); }
+  void set_related_ground_pin(std::string pin) { _related_ground_pin = std::move(pin); }
+
   const char* get_port_name() { return _port_name.c_str(); }
   void set_ower_cell(LibCell* ower_cell) { _ower_cell = ower_cell; }
   LibCell* get_ower_cell() { return _ower_cell; }
@@ -664,6 +669,8 @@ class LibPort : public LibObject
 
  private:
   std::string _port_name;
+  std::string _related_power_pin;
+  std::string _related_ground_pin;
   LibCell* _ower_cell;  //!< The cell owner the port.
   LibertyPortType _port_type = LibertyPortType::kDefault;
   bool _is_clock_pin = false;           //!< The flag of clock pin.
@@ -1148,6 +1155,8 @@ class LibCell : public LibObject
   LibCell& operator=(LibCell&& rhs) noexcept;
 
   const char* get_cell_name() const { return _cell_name.c_str(); }
+  std::map<std::string, LibSupplyPin>& get_supply_pins() { return _supply_pins; }
+  const std::map<std::string, LibSupplyPin>& get_supply_pins() const { return _supply_pins; }
   auto& get_cell_arcs() { return _cell_arcs; }
   auto& get_cell_power_arcs() { return _cell_power_arcs; }
   const std::vector<LibSequential>& get_sequentials() const { return _sequentials; }
@@ -1232,6 +1241,7 @@ class LibCell : public LibObject
 
  private:
   std::string _cell_name;                         //!< The liberty cell name.
+  std::map<std::string, LibSupplyPin> _supply_pins;
   double _cell_area;                              //!< The liberty cell area.
   double _cell_leakage_power = 0.0;               //!< The cell leakage power of the cell.
   bool _has_cell_leakage_power = false;           //!< Distinguishes an explicit zero from a missing attribute.
@@ -1481,6 +1491,8 @@ class LibLibrary : public LibObject
         _default_operating_conditions(std::move(other._default_operating_conditions)),
         _default_wire_load(std::move(other._default_wire_load)),
         _nom_process(other._nom_process),
+        _nom_voltage(other._nom_voltage),
+        _voltage_map(std::move(other._voltage_map)),
         _nom_temperature(other._nom_temperature)
   {
   }
@@ -1504,6 +1516,8 @@ class LibLibrary : public LibObject
     _default_operating_conditions = std::move(rhs._default_operating_conditions);
     _default_wire_load = std::move(rhs._default_wire_load);
     _nom_process = rhs._nom_process;
+    _nom_voltage = rhs._nom_voltage;
+    _voltage_map = std::move(rhs._voltage_map);
     _nom_temperature = rhs._nom_temperature;
 
     return *this;
@@ -1653,6 +1667,7 @@ class LibLibrary : public LibObject
 
   void set_nom_voltage(double nom_voltage) { _nom_voltage = nom_voltage; }
   double get_nom_voltage() { return _nom_voltage; }
+  std::map<std::string, double>& get_voltage_map() { return _voltage_map; }
 
   void set_nom_process(double nom_process) { _nom_process = nom_process; }
   const std::optional<double>& get_nom_process() const { return _nom_process; }
@@ -1758,6 +1773,7 @@ class LibLibrary : public LibObject
 
   std::optional<double> _nom_process;
   double _nom_voltage = 0.0;  //!< The library nominal voltage
+  std::map<std::string, double> _voltage_map;
   std::optional<double> _nom_temperature;
 
   /// @brief slew threshold

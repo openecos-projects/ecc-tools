@@ -18,6 +18,7 @@
 #include "DefData.hpp"
 #include "IdbDesign.h"
 #include "IdbLayout.h"
+#include "IdbSite.h"
 #include "LVSHeader.hpp"
 #include "LVSInterface.hpp"
 #include "NetlistData.hpp"
@@ -150,6 +151,30 @@ int main()
   assert(vss_net->get_instance_pin_list()->get_pin_list().empty());
   assert(vdd_pin->get_special_net() == nullptr);
   assert(vss_pin->get_special_net() == nullptr);
+
+  // Supply-role metadata follows LEF classes, not net/pin/instance spelling.
+  auto* pad_site = layout.get_sites()->add_site_list("pad_site");
+  pad_site->set_type_pad();
+  auto* core_site = layout.get_sites()->add_site_list("core_site");
+  core_site->set_type_core();
+  for (const std::string name : {"pad", "pad_filler", "io_corner", "core_endcap"}) {
+    auto* master = layout.get_cell_master_list()->set_cell_master(name);
+    master->set_type(name == "pad"          ? idb::CellMasterType::kPad
+                     : name == "pad_filler" ? idb::CellMasterType::kPadSpacer
+                                            : idb::CellMasterType::kEndcapBottomLeft);
+    master->set_site(name == "core_endcap" ? core_site : pad_site);
+    auto* pad = design.get_instance_list()->add_instance(name);
+    pad->set_cell_master(master);
+    auto* pin = pad->addPin("VDD");
+    pin->set_term()->set_name("VDD");
+  }
+  auto classified = LVSI.wrapDefData(&design);
+  const std::set<std::string> expected_io = {"pad/VDD", "pad_filler/VDD", "io_corner/VDD"};
+  assert(classified.get_physical_graph().get_io_supply_terminal_set() == expected_io);
+  classified.get_physical_graph().resetDerivedData();
+  assert(classified.get_physical_graph().get_io_supply_terminal_set() == expected_io);
+  classified.get_physical_graph().reset();
+  assert(classified.get_physical_graph().get_io_supply_terminal_set().empty());
 
   ilvs::LVSInterface::destroyInst();
   return 0;
